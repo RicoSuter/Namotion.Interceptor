@@ -11,6 +11,10 @@ namespace Namotion.Interceptor.Tracking;
 /// </summary>
 public static class SubjectPropertyTypeExtensions
 {
+    // The four caches feed each other: factories transitively invoke siblings to enforce
+    // mutual exclusivity. ConcurrentDictionary.GetOrAdd may run a factory multiple times
+    // concurrently for the same key; the classifiers are pure functions of Type so racing
+    // factory invocations converge to the same answer.
     private static readonly ConcurrentDictionary<Type, bool> CanContainSubjectsCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectReferenceTypeCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionTypeCache = new();
@@ -53,7 +57,9 @@ public static class SubjectPropertyTypeExtensions
     }
 
     /// <summary>
-    /// Returns true if the given type is a single subject reference (interface, object, or IInterceptorSubject).
+    /// Returns true if the given type is a single subject reference: an <see cref="IInterceptorSubject"/>,
+    /// <see cref="object"/>, or a plain interface that could carry a subject. Generic interfaces over
+    /// non-subject content (e.g. <c>IList&lt;int&gt;</c>) and enumerable subjects are excluded.
     /// Mutually exclusive with <see cref="IsSubjectCollectionType"/> and <see cref="IsSubjectDictionaryType"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -100,18 +106,19 @@ public static class SubjectPropertyTypeExtensions
     {
         return IsSubjectReferenceTypeCache.GetOrAdd(type, static t =>
         {
-            // A type that explicitly implements IInterceptorSubject is a reference
-            // even if it also implements container interfaces; the explicit subject
-            // declaration trumps any incidental enumerable nature.
+            // Rule 1: IInterceptorSubject always wins. The library treats any type that
+            // explicitly declares itself a subject as a single reference; its child
+            // subjects come from its declared [InterceptorSubject] partial properties,
+            // not from any container interface it happens to implement.
             if (typeof(IInterceptorSubject).IsAssignableFrom(t))
             {
-                return !t.IsSubjectDictionaryType() && !t.IsSubjectCollectionType();
+                return true;
             }
 
-            // For plain interfaces and `object`, defer to the element-style check so
-            // generic interfaces over non-subject content (e.g. IList<int>,
-            // IEnumerable<int>) are correctly rejected as references at the property
-            // level too, mirroring how they would be rejected as element types.
+            // Rule 2 (for non-subjects): plain interfaces and `object` can hold a subject
+            // via polymorphism. Generic interfaces over non-subject content (e.g.
+            // IList<int>) are rejected so downstream code does not try to assign subjects
+            // to properties that can never structurally hold them.
             return IsElementSubjectReference(t) &&
                    !t.IsSubjectDictionaryType() &&
                    !t.IsSubjectCollectionType();
@@ -122,6 +129,10 @@ public static class SubjectPropertyTypeExtensions
     {
         return IsSubjectCollectionTypeCache.GetOrAdd(type, static t =>
         {
+            // Rule 1: IInterceptorSubject wins over any container shape (see IsSubjectReferenceType).
+            if (typeof(IInterceptorSubject).IsAssignableFrom(t))
+                return false;
+
             if (t.IsSubjectDictionaryType())
                 return false;
 
@@ -143,6 +154,10 @@ public static class SubjectPropertyTypeExtensions
     {
         return IsSubjectDictionaryTypeCache.GetOrAdd(type, static t =>
         {
+            // Rule 1: IInterceptorSubject wins over any container shape (see IsSubjectReferenceType).
+            if (typeof(IInterceptorSubject).IsAssignableFrom(t))
+                return false;
+
             if (!typeof(IEnumerable).IsAssignableFrom(t))
                 return false;
 

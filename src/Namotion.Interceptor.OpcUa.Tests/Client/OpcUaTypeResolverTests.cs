@@ -194,12 +194,13 @@ public class OpcUaTypeResolverTests
     }
 
     [Fact]
-    public async Task WhenReadResponseIsShort_ThenPadsWithBadStatusAndPreservesAlignment()
+    public async Task WhenSessionExtensionPadsShortRead_ThenResolverPreservesAlignment()
     {
         // Arrange: two variables (= 4 ReadValueIds), but the server returns only the
-        // first 2 slots. Without padding, var1's results would be silently re-aligned to
-        // cover var2's missing slots; with padding, var1 stays correctly resolved and
-        // var2 surfaces as a bad-status read.
+        // first 2 slots. The padding lives in OpcUaSessionExtensions.ReadBatchAsync;
+        // this test verifies that the resolver consumes the padded result correctly so
+        // var1 stays resolved and var2 surfaces as a bad-status read rather than being
+        // silently re-aligned to cover var2's missing slots.
         var node1Id = new NodeId(7001, 2);
         var node2Id = new NodeId(7002, 2);
 

@@ -112,12 +112,19 @@ public class OpcUaClientConfiguration
     // so these guard against bugs and malicious servers rather than normal load.
 
     /// <summary>
-    /// Gets or sets the safety bound on BrowseNext paging for a single browse request
-    /// (default: 100). Guards against misbehaving servers that return a fresh continuation
-    /// point forever and never terminate paging. The effective per-node reference limit
-    /// is roughly <c>MaxBrowseContinuations * MaximumReferencesPerNode</c>; raise this if
-    /// you legitimately need more references than that product allows.
+    /// Gets or sets the safety bound on BrowseNext paging rounds per batched browse
+    /// request (default: 100). Guards against misbehaving servers that return a fresh
+    /// continuation point forever and never terminate paging.
     /// </summary>
+    /// <remarks>
+    /// This is a per-batch round count, not a per-NodeId page count: with a multi-node
+    /// batch the loop aborts when the slowest-paging NodeId is still going after this
+    /// many rounds, even if no individual NodeId reached its share. For a single-NodeId
+    /// batch the effective per-node reference cap is
+    /// <c>MaxBrowseContinuations * MaximumReferencesPerNode</c>; for larger batches the
+    /// effective cap is lower since all paged NodeIds share the round budget. Raise this
+    /// if loads involve deeply paged nodes across many siblings.
+    /// </remarks>
     public int MaxBrowseContinuations { get; set; } = 100;
 
     /// <summary>

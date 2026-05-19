@@ -107,24 +107,10 @@ public class OpcUaTypeResolver
             nodesToRead.Add(new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank });
         }
 
+        // ReadNodesAsync pads short responses and clamps long ones, so
+        // `allResults.Count == resolvedVariables.Count * 2` and `allResults[i]` is
+        // positionally aligned with `nodesToRead[i]`.
         var allResults = await session.ReadNodesAsync(nodesToRead, TimestampsToReturn.Neither, _logger, cancellationToken).ConfigureAwait(false);
-
-        var expectedCount = resolvedVariables.Count * 2;
-        if (allResults.Count != expectedCount)
-        {
-            // Symmetric guard: short responses lose the pair-alignment our index math
-            // depends on; over-long responses imply the server is misbehaving in a way
-            // we don't want to silently consume either.
-            _logger.LogWarning(
-                "ReadAsync returned {AllResultsCount} results but expected {ExpectedCount} for {ResolvedVariablesCount} variables. All types will resolve to null.",
-                allResults.Count, expectedCount, resolvedVariables.Count);
-
-            foreach (var (nodeId, _) in resolvedVariables)
-            {
-                result[nodeId] = null;
-            }
-            return result;
-        }
 
         for (var i = 0; i < resolvedVariables.Count; i++)
         {

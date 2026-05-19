@@ -211,11 +211,12 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             });
         }
 
+        // ReadNodesAsync pads short responses to the requested length, so positional
+        // alignment between allResults[i] and ownedProperties[i] is guaranteed.
         var allResults = await session.ReadNodesAsync(readValues, TimestampsToReturn.Source, _logger, cancellationToken).ConfigureAwait(false);
 
-        var resultCount = Math.Min(allResults.Count, itemCount);
-        var result = new Dictionary<RegisteredSubjectProperty, DataValue>(resultCount);
-        for (var i = 0; i < resultCount; i++)
+        var result = new Dictionary<RegisteredSubjectProperty, DataValue>(itemCount);
+        for (var i = 0; i < itemCount; i++)
         {
             if (StatusCode.IsGood(allResults[i].StatusCode))
             {

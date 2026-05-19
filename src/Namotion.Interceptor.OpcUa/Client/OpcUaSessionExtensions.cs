@@ -44,17 +44,18 @@ internal static class OpcUaSessionExtensions
             return result;
         }
 
-        // The result dictionary keys also serve as the dedup set: a duplicate NodeId
-        // in the input is skipped instead of being sent to the server twice.
+        // Dedup the input. NodeIds that successfully browse get an entry in `result`;
+        // NodeIds whose `BrowseResult.StatusCode` was bad are deliberately left out so
+        // callers can distinguish "browsed successfully (possibly empty)" from "no
+        // result this round" and avoid caching transient failures as permanent emptiness.
+        var seen = new HashSet<NodeId>(nodeIds.Count);
         var uniqueNodeIds = new List<NodeId>(nodeIds.Count);
         foreach (var nodeId in nodeIds)
         {
-            if (result.ContainsKey(nodeId))
+            if (seen.Add(nodeId))
             {
-                continue;
+                uniqueNodeIds.Add(nodeId);
             }
-            result[nodeId] = new ReferenceDescriptionCollection();
-            uniqueNodeIds.Add(nodeId);
         }
 
         var batchSize = GetMaxNodesPerBrowse(session);
@@ -176,9 +177,17 @@ internal static class OpcUaSessionExtensions
         {
             var browseResult = response.Results[i];
             var nodeId = nodeIds[offset + i];
-            if (StatusCode.IsGood(browseResult.StatusCode) && browseResult.References is { Count: > 0 })
+            if (!StatusCode.IsGood(browseResult.StatusCode))
             {
-                result[nodeId].AddRange(browseResult.References);
+                logger.LogWarning(
+                    "BrowseAsync returned bad status for {NodeId} ({StatusCode}); skipping (will be retried if this NodeId is revisited).",
+                    nodeId, browseResult.StatusCode);
+                continue;
+            }
+            var bucket = GetOrCreateBucket(result, nodeId);
+            if (browseResult.References is { Count: > 0 })
+            {
+                bucket.AddRange(browseResult.References);
             }
             if (browseResult.ContinuationPoint is { Length: > 0 })
             {
@@ -187,6 +196,17 @@ internal static class OpcUaSessionExtensions
         }
 
         await ProcessContinuationPointsAsync(session, continuationPoints, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static ReferenceDescriptionCollection GetOrCreateBucket(
+        Dictionary<NodeId, ReferenceDescriptionCollection> result, NodeId nodeId)
+    {
+        if (!result.TryGetValue(nodeId, out var bucket))
+        {
+            bucket = new ReferenceDescriptionCollection();
+            result[nodeId] = bucket;
+        }
+        return bucket;
     }
 
     private static async Task ProcessContinuationPointsAsync(
@@ -321,9 +341,16 @@ internal static class OpcUaSessionExtensions
         {
             var browseResult = nextResponse.Results[i];
             var nodeId = current[offset + i].NodeId;
-            if (StatusCode.IsGood(browseResult.StatusCode) && browseResult.References is { Count: > 0 })
+            if (!StatusCode.IsGood(browseResult.StatusCode))
             {
-                result[nodeId].AddRange(browseResult.References);
+                logger.LogWarning(
+                    "BrowseNextAsync returned bad status for {NodeId} ({StatusCode}); the partial result so far is retained.",
+                    nodeId, browseResult.StatusCode);
+                continue;
+            }
+            if (browseResult.References is { Count: > 0 })
+            {
+                GetOrCreateBucket(result, nodeId).AddRange(browseResult.References);
             }
             if (browseResult.ContinuationPoint is { Length: > 0 })
             {

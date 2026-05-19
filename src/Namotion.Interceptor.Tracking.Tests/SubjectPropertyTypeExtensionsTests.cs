@@ -1,60 +1,75 @@
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests;
 
 public class SubjectPropertyTypeExtensionsTests
 {
-    [Fact]
-    public void WhenPlainSubjectType_ThenIsReferenceTypeOnly()
+    [Theory]
+    // --- Single subject references ---
+    [InlineData(typeof(IInterceptorSubject),                                true,  false, false)]
+    [InlineData(typeof(object),                                             true,  false, false)]
+    [InlineData(typeof(Person),                                             true,  false, false)]
+    [InlineData(typeof(IComparable),                                        true,  false, false)]
+    [InlineData(typeof(IFormattable),                                       true,  false, false)]
+    // IInterceptorSubject always wins, even when the class also implements a container interface.
+    [InlineData(typeof(HybridSubjectGenericDictionary),                     true,  false, false)]
+    [InlineData(typeof(HybridSubjectNonGenericDictionary),                  true,  false, false)]
+    [InlineData(typeof(HybridSubjectGenericList),                           true,  false, false)]
+    // Self-referential subject containers also stay references (covered in dedicated regression facts below).
+
+    // --- Subject collections ---
+    [InlineData(typeof(object[]),                                           false, true,  false)]
+    [InlineData(typeof(List<object>),                                       false, true,  false)]
+    [InlineData(typeof(List<IInterceptorSubject>),                          false, true,  false)]
+    [InlineData(typeof(Person[]),                                           false, true,  false)]
+    [InlineData(typeof(List<Person>),                                       false, true,  false)]
+    [InlineData(typeof(IEnumerable<Person>),                                false, true,  false)]
+    [InlineData(typeof(ImmutableArray<Person>),                             false, true,  false)]
+    [InlineData(typeof(ImmutableArray<object>),                             false, true,  false)]
+    [InlineData(typeof(ImmutableArray<IComparable>),                        false, true,  false)]
+    [InlineData(typeof(ArrayList),                                          false, true,  false)]
+
+    // --- Subject dictionaries ---
+    [InlineData(typeof(Dictionary<string, Person>),                         false, false, true)]
+    [InlineData(typeof(IDictionary<string, Person>),                        false, false, true)]
+    [InlineData(typeof(IEnumerable<KeyValuePair<string, Person>>),          false, false, true)]
+    [InlineData(typeof(Hashtable),                                          false, false, true)]
+
+    // --- Not subject-carrying ---
+    [InlineData(typeof(int),                                                false, false, false)]
+    [InlineData(typeof(decimal),                                            false, false, false)]
+    [InlineData(typeof(string),                                             false, false, false)]
+    [InlineData(typeof(IList<int>),                                         false, false, false)]
+    [InlineData(typeof(IEnumerable<int>),                                   false, false, false)]
+    [InlineData(typeof(IDictionary<string, int>),                          false, false, false)]
+    [InlineData(typeof(ImmutableArray<int>),                                false, false, false)]
+    // Element-of-container-of-non-subjects: outer is not a subject collection.
+    [InlineData(typeof(List<IEnumerable<Person>>),                          false, false, false)]
+    [InlineData(typeof(List<IList<int>>),                                   false, false, false)]
+    // List<concrete non-subject class> is statically rejected. A subclass could theoretically
+    // add IInterceptorSubject, but the library uses declared types for classification by design
+    // (use List<object> or List<ISomeBase> if polymorphic subject content is intended).
+    [InlineData(typeof(List<NonSubjectPlainClass>),                         false, false, false)]
+    public void WhenType_ThenClassifiedAccordingToTable(Type type, bool isReference, bool isCollection, bool isDictionary)
     {
-        // Arrange
-        var type = typeof(Person);
-
         // Act
-        var isReference = type.IsSubjectReferenceType();
-        var isCollection = type.IsSubjectCollectionType();
-        var isDictionary = type.IsSubjectDictionaryType();
+        var actualReference = type.IsSubjectReferenceType();
+        var actualCollection = type.IsSubjectCollectionType();
+        var actualDictionary = type.IsSubjectDictionaryType();
+        var canContain = type.CanContainSubjects();
 
-        // Assert
-        Assert.True(isReference);
-        Assert.False(isCollection);
-        Assert.False(isDictionary);
-    }
+        // Assert: exact classification.
+        Assert.Equal(isReference, actualReference);
+        Assert.Equal(isCollection, actualCollection);
+        Assert.Equal(isDictionary, actualDictionary);
 
-    [Fact]
-    public void WhenListOfSubjects_ThenIsCollectionTypeOnly()
-    {
-        // Arrange
-        var type = typeof(List<Person>);
-
-        // Act
-        var isReference = type.IsSubjectReferenceType();
-        var isCollection = type.IsSubjectCollectionType();
-        var isDictionary = type.IsSubjectDictionaryType();
-
-        // Assert
-        Assert.False(isReference);
-        Assert.True(isCollection);
-        Assert.False(isDictionary);
-    }
-
-    [Fact]
-    public void WhenDictionaryOfSubjects_ThenIsDictionaryTypeOnly()
-    {
-        // Arrange
-        var type = typeof(Dictionary<string, Person>);
-
-        // Act
-        var isReference = type.IsSubjectReferenceType();
-        var isCollection = type.IsSubjectCollectionType();
-        var isDictionary = type.IsSubjectDictionaryType();
-
-        // Assert
-        Assert.False(isReference);
-        Assert.False(isCollection);
-        Assert.True(isDictionary);
+        // Assert: mutual exclusivity (at most one true) and CanContainSubjects is the OR.
+        var trueCount = (actualReference ? 1 : 0) + (actualCollection ? 1 : 0) + (actualDictionary ? 1 : 0);
+        Assert.True(trueCount <= 1, $"{type.Name}: more than one classifier returned true (ref={actualReference}, col={actualCollection}, dict={actualDictionary}).");
+        Assert.Equal(actualReference || actualCollection || actualDictionary, canContain);
     }
 
     [Fact]
@@ -71,9 +86,8 @@ public class SubjectPropertyTypeExtensionsTests
         var isCollection = type.IsSubjectCollectionType();
         var isDictionary = type.IsSubjectDictionaryType();
 
-        // The element-mutual-exclusivity check rejects T-as-element because T is itself
-        // a container of candidates, so the outer collection check fails. With no
-        // dictionary or collection classification, the type lands on Reference.
+        // IInterceptorSubject wins, so this lands on Reference regardless of the
+        // enumerable shape.
         Assert.True(isReference);
         Assert.False(isCollection);
         Assert.False(isDictionary);
@@ -93,132 +107,15 @@ public class SubjectPropertyTypeExtensionsTests
         var isCollection = type.IsSubjectCollectionType();
         var isDictionary = type.IsSubjectDictionaryType();
 
-        // The value-mutual-exclusivity check rejects T-as-value (T is itself a dict-of-
-        // candidates), so the outer dictionary check fails. With no collection or
-        // dictionary classification, the type lands on Reference.
+        // IInterceptorSubject wins, so this lands on Reference regardless of the
+        // dictionary-shaped enumerable.
         Assert.True(isReference);
         Assert.False(isCollection);
         Assert.False(isDictionary);
     }
 
-    [Fact]
-    public void WhenListElementIsItselfACollectionOfSubjects_ThenOuterIsNotClassifiedAsCollection()
+    private sealed class NonSubjectPlainClass
     {
-        // Arrange: a list whose element type is itself a collection of subjects
-        // (e.g. List<IEnumerable<Person>>) is NOT classified as a subject collection.
-        // Container-of-container is not how the loader represents collections of subjects,
-        // so the outer property should not match.
-        var type = typeof(List<IEnumerable<Person>>);
-
-        // Act
-        var isReference = type.IsSubjectReferenceType();
-        var isCollection = type.IsSubjectCollectionType();
-        var isDictionary = type.IsSubjectDictionaryType();
-
-        // Assert
-        Assert.False(isReference);
-        Assert.False(isCollection);
-        Assert.False(isDictionary);
-    }
-
-    [Fact]
-    public void WhenPropertyTypeIsBareIEnumerableOfSubjects_ThenClassifiedAsCollection()
-    {
-        // Arrange: declaring a property as IEnumerable<Person> (rather than List<Person>
-        // or Person[]) should still classify as a collection. GetInterfaces() does not
-        // return the type itself, so the classifier explicitly includes the bare
-        // IEnumerable<> in its enumerable view to make this case work.
-        var type = typeof(IEnumerable<Person>);
-
-        // Act
-        var isReference = type.IsSubjectReferenceType();
-        var isCollection = type.IsSubjectCollectionType();
-        var isDictionary = type.IsSubjectDictionaryType();
-
-        // Assert
-        Assert.True(isCollection);
-        Assert.False(isReference);
-        Assert.False(isDictionary);
-    }
-
-    [Fact]
-    public void WhenPropertyTypeIsBareIEnumerableOfKeyValuePairOfSubjects_ThenClassifiedAsDictionary()
-    {
-        // Arrange: same idea as the collection case but for dictionaries. Declaring a
-        // property as IEnumerable<KeyValuePair<string, Person>> (rather than
-        // Dictionary<string, Person> or IDictionary<string, Person>) should still classify
-        // as a dictionary.
-        var type = typeof(IEnumerable<KeyValuePair<string, Person>>);
-
-        // Act
-        var isReference = type.IsSubjectReferenceType();
-        var isCollection = type.IsSubjectCollectionType();
-        var isDictionary = type.IsSubjectDictionaryType();
-
-        // Assert
-        Assert.True(isDictionary);
-        Assert.False(isCollection);
-        Assert.False(isReference);
-    }
-
-    [Fact]
-    public void WhenPropertyTypeIsGenericInterfaceOverNonSubjects_ThenNotClassifiedAsReference()
-    {
-        // Arrange: generic interfaces whose type arguments cannot structurally hold a
-        // subject (IList<int>, IEnumerable<int>, IDictionary<string, int>) must not be
-        // classified as subject references at the property level. Mirrors how they are
-        // rejected as element types; otherwise downstream subject-tracking code would
-        // try to assign subjects to properties that can never hold them.
-        var listOfInts = typeof(IList<int>);
-        var enumerableOfInts = typeof(IEnumerable<int>);
-        var dictionaryOfInts = typeof(IDictionary<string, int>);
-
-        // Act & Assert
-        Assert.False(listOfInts.IsSubjectReferenceType());
-        Assert.False(listOfInts.IsSubjectCollectionType());
-        Assert.False(listOfInts.IsSubjectDictionaryType());
-
-        Assert.False(enumerableOfInts.IsSubjectReferenceType());
-        Assert.False(enumerableOfInts.IsSubjectCollectionType());
-        Assert.False(enumerableOfInts.IsSubjectDictionaryType());
-
-        Assert.False(dictionaryOfInts.IsSubjectReferenceType());
-        Assert.False(dictionaryOfInts.IsSubjectCollectionType());
-        Assert.False(dictionaryOfInts.IsSubjectDictionaryType());
-    }
-
-    [Fact]
-    public void WhenPropertyTypeIsNonEnumerableInterface_ThenStillClassifiedAsReference()
-    {
-        // Arrange: regression guard. Plain interfaces that are not enumerable (and not
-        // IInterceptorSubject themselves) must still classify as subject references,
-        // since they could legitimately hold a subject implementing them via polymorphism.
-        var comparable = typeof(IComparable);
-        var formattable = typeof(IFormattable);
-
-        // Act & Assert
-        Assert.True(comparable.IsSubjectReferenceType());
-        Assert.True(formattable.IsSubjectReferenceType());
-    }
-
-    [Fact]
-    public void WhenListElementIsAGenericContainerOfNonSubjects_ThenOuterIsNotClassifiedAsCollection()
-    {
-        // Arrange: List<IList<int>> previously misclassified as a collection because
-        // IList<int> qualified as an interface candidate and the element check fell
-        // through to "single reference". The element holds non-subjects, so the outer
-        // must not be treated as a collection-of-subjects.
-        var type = typeof(List<IList<int>>);
-
-        // Act
-        var isReference = type.IsSubjectReferenceType();
-        var isCollection = type.IsSubjectCollectionType();
-        var isDictionary = type.IsSubjectDictionaryType();
-
-        // Assert
-        Assert.False(isReference);
-        Assert.False(isCollection);
-        Assert.False(isDictionary);
     }
 
     private sealed class SelfReferentialSubjectCollection : IInterceptorSubject, IEnumerable<SelfReferentialSubjectCollection>
@@ -242,6 +139,85 @@ public class SubjectPropertyTypeExtensionsTests
         public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();
 
         public IEnumerator<KeyValuePair<string, SelfReferentialSubjectDictionary>> GetEnumerator() => throw new NotSupportedException();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    // Hybrid: class declares itself a subject AND implements a generic dictionary of subjects.
+    // Per IInterceptorSubject-wins rule, this must classify as Reference, not Dictionary.
+    private sealed class HybridSubjectGenericDictionary : IInterceptorSubject, IDictionary<string, Person>
+    {
+        public object SyncRoot => throw new NotSupportedException();
+        public IInterceptorSubjectContext Context => throw new NotSupportedException();
+        public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();
+
+        public Person this[string key] { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public ICollection<string> Keys => throw new NotSupportedException();
+        public ICollection<Person> Values => throw new NotSupportedException();
+        public int Count => throw new NotSupportedException();
+        public bool IsReadOnly => throw new NotSupportedException();
+        public void Add(string key, Person value) => throw new NotSupportedException();
+        public void Add(KeyValuePair<string, Person> item) => throw new NotSupportedException();
+        public void Clear() => throw new NotSupportedException();
+        public bool Contains(KeyValuePair<string, Person> item) => throw new NotSupportedException();
+        public bool ContainsKey(string key) => throw new NotSupportedException();
+        public void CopyTo(KeyValuePair<string, Person>[] array, int arrayIndex) => throw new NotSupportedException();
+        public IEnumerator<KeyValuePair<string, Person>> GetEnumerator() => throw new NotSupportedException();
+        public bool Remove(string key) => throw new NotSupportedException();
+        public bool Remove(KeyValuePair<string, Person> item) => throw new NotSupportedException();
+        public bool TryGetValue(string key, out Person value) => throw new NotSupportedException();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    // Hybrid: subject + legacy non-generic IDictionary. Per IInterceptorSubject-wins rule,
+    // must classify as Reference, not Dictionary via the non-generic fallback.
+    private sealed class HybridSubjectNonGenericDictionary : IInterceptorSubject, IDictionary
+    {
+        public object SyncRoot => throw new NotSupportedException();
+        public IInterceptorSubjectContext Context => throw new NotSupportedException();
+        public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();
+
+        public object? this[object key] { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public bool IsFixedSize => throw new NotSupportedException();
+        public bool IsReadOnly => throw new NotSupportedException();
+        public ICollection Keys => throw new NotSupportedException();
+        public ICollection Values => throw new NotSupportedException();
+        public int Count => throw new NotSupportedException();
+        public bool IsSynchronized => throw new NotSupportedException();
+        public void Add(object key, object? value) => throw new NotSupportedException();
+        public void Clear() => throw new NotSupportedException();
+        public bool Contains(object key) => throw new NotSupportedException();
+        public void CopyTo(Array array, int index) => throw new NotSupportedException();
+        public IDictionaryEnumerator GetEnumerator() => throw new NotSupportedException();
+        public void Remove(object key) => throw new NotSupportedException();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    // Hybrid: subject + generic list of subjects. Per IInterceptorSubject-wins rule,
+    // must classify as Reference, not Collection.
+    private sealed class HybridSubjectGenericList : IInterceptorSubject, IList<Person>
+    {
+        public object SyncRoot => throw new NotSupportedException();
+        public IInterceptorSubjectContext Context => throw new NotSupportedException();
+        public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();
+
+        public Person this[int index] { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public int Count => throw new NotSupportedException();
+        public bool IsReadOnly => throw new NotSupportedException();
+        public void Add(Person item) => throw new NotSupportedException();
+        public void Clear() => throw new NotSupportedException();
+        public bool Contains(Person item) => throw new NotSupportedException();
+        public void CopyTo(Person[] array, int arrayIndex) => throw new NotSupportedException();
+        public IEnumerator<Person> GetEnumerator() => throw new NotSupportedException();
+        public int IndexOf(Person item) => throw new NotSupportedException();
+        public void Insert(int index, Person item) => throw new NotSupportedException();
+        public bool Remove(Person item) => throw new NotSupportedException();
+        public void RemoveAt(int index) => throw new NotSupportedException();
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

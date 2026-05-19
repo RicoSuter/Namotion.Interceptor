@@ -209,7 +209,8 @@ public class OpcUaSubjectLoaderTests
     private (OpcUaSubjectLoader Loader, SourceOwnershipManager PropertyTracker) CreateLoader(
         Func<ReferenceDescription, CancellationToken, Task<bool>>? shouldAddDynamicProperties = null,
         Func<ReferenceDescription, CancellationToken, Task<bool>>? shouldAddDynamicAttributes = null,
-        OpcUaTypeResolver? typeResolver = null)
+        OpcUaTypeResolver? typeResolver = null,
+        int? maxAttributeTraversals = null)
     {
         var config = new OpcUaClientConfiguration
         {
@@ -219,7 +220,8 @@ public class OpcUaSubjectLoaderTests
             SubjectFactory = _baseConfiguration.SubjectFactory,
             ShouldAddDynamicProperty = shouldAddDynamicProperties ?? _baseConfiguration.ShouldAddDynamicProperty,
             ShouldAddDynamicAttribute = shouldAddDynamicAttributes,
-            DefaultNamespaceUri = _baseConfiguration.DefaultNamespaceUri
+            DefaultNamespaceUri = _baseConfiguration.DefaultNamespaceUri,
+            MaxAttributeTraversals = maxAttributeTraversals ?? _baseConfiguration.MaxAttributeTraversals
         };
 
         var context = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
@@ -660,6 +662,60 @@ public class OpcUaSubjectLoaderTests
         var serverStatus = registeredSubject.Properties.Single(p => p.Name == "ServerStatus");
         var stateAttribute = serverStatus.TryGetAttribute("State");
         Assert.NotNull(stateAttribute);
+    }
+
+    [Fact]
+    public async Task WhenAttributeChainExceedsMaxTraversals_ThenLoaderStopsAtConfiguredDepth()
+    {
+        // Arrange: a 4-level deep chain of variable-typed sub-attributes
+        //   Root -> Level1 -> Level2 -> Level3 -> Level4
+        // Each level is discovered via the dynamic-attribute path. With
+        // MaxAttributeTraversals = 2, the loader processes exactly two rounds
+        // of attribute traversal: round 1 adds Level2 to Level1, round 2 adds
+        // Level3 to Level2. Round 3 (which would add Level4 to Level3) is
+        // aborted by the safety bound.
+        var level1Id = new NodeId(7001, 2);
+        var level2Id = new NodeId(7002, 2);
+        var level3Id = new NodeId(7003, 2);
+        var level4Id = new NodeId(7004, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [new NodeId(1, 0)] = [CreateTestReferenceDescription("Level1", new ExpandedNodeId(level1Id))],
+            [level1Id] = [CreateTestReferenceDescription("Level2", new ExpandedNodeId(level2Id))],
+            [level2Id] = [CreateTestReferenceDescription("Level3", new ExpandedNodeId(level3Id))],
+            [level3Id] = [CreateTestReferenceDescription("Level4", new ExpandedNodeId(level4Id))]
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [level1Id] = (DataTypeIds.Int32, -1),
+            [level2Id] = (DataTypeIds.Int32, -1),
+            [level3Id] = (DataTypeIds.Int32, -1),
+            [level4Id] = (DataTypeIds.Int32, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
+            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true),
+            maxAttributeTraversals: 2);
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: Level1 -> Level2 -> Level3 chain exists, Level4 was aborted by the cap.
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var level1 = registeredSubject.Properties.Single(p => p.Name == "Level1");
+        var level2 = level1.TryGetAttribute("Level2");
+        Assert.NotNull(level2);
+        var level3 = level2!.TryGetAttribute("Level3");
+        Assert.NotNull(level3);
+        Assert.Null(level3!.TryGetAttribute("Level4"));
     }
 
     [Fact]
@@ -1485,8 +1541,14 @@ public class OpcUaSubjectLoaderTests
                 It.IsAny<bool>(),
                 It.IsAny<ByteStringCollection>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
+            .ReturnsAsync((RequestHeader _, bool releaseContinuationPoints, ByteStringCollection _, CancellationToken _) =>
             {
+                if (releaseContinuationPoints)
+                {
+                    // Release calls must not be counted as paging rounds and must not
+                    // contribute references (the production code discards their results).
+                    return new BrowseNextResponse { Results = [new BrowseResult()], DiagnosticInfos = [] };
+                }
                 var n = Interlocked.Increment(ref browseNextCallCount);
                 return new BrowseNextResponse
                 {
@@ -1511,10 +1573,11 @@ public class OpcUaSubjectLoaderTests
             CancellationToken.None);
 
         // Assert: 1 initial reference + 100 page references collected before the safety
-        // bound aborts the loop. The trailing continuation point release adds one extra
-        // BrowseNextAsync call (101 total) but its references are discarded.
+        // bound aborts the loop. The trailing release call uses a separate mock branch
+        // (releaseContinuationPoints == true) that returns no references and is excluded
+        // from browseNextCallCount.
         Assert.Equal(101, result[rootId].Count);
-        Assert.True(browseNextCallCount >= 100, $"Expected at least 100 BrowseNextAsync calls before abort, got {browseNextCallCount}.");
+        Assert.Equal(100, browseNextCallCount);
     }
 
     [Fact]
@@ -1552,8 +1615,12 @@ public class OpcUaSubjectLoaderTests
                 It.IsAny<bool>(),
                 It.IsAny<ByteStringCollection>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
+            .ReturnsAsync((RequestHeader _, bool releaseContinuationPoints, ByteStringCollection _, CancellationToken _) =>
             {
+                if (releaseContinuationPoints)
+                {
+                    return new BrowseNextResponse { Results = [new BrowseResult()], DiagnosticInfos = [] };
+                }
                 var n = Interlocked.Increment(ref browseNextCallCount);
                 return new BrowseNextResponse
                 {
@@ -1580,8 +1647,9 @@ public class OpcUaSubjectLoaderTests
             CancellationToken.None);
 
         // Assert: 1 initial reference + customLimit page references collected before abort.
+        // browseNextCallCount excludes the release call (see mock branch above).
         Assert.Equal(1 + customLimit, result[rootId].Count);
-        Assert.True(browseNextCallCount >= customLimit, $"Expected at least {customLimit} BrowseNextAsync calls before abort, got {browseNextCallCount}.");
+        Assert.Equal(customLimit, browseNextCallCount);
     }
 
     [Fact]
