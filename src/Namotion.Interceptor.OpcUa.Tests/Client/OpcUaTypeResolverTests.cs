@@ -87,6 +87,27 @@ public class OpcUaTypeResolverTests
     }
 
     [Fact]
+    public void WhenObjectChildHasEmptyBrackets_ThenClassifiesAsSubject()
+    {
+        // Arrange: a `Name[]` browse name carries no key or index information; without
+        // this branch the empty content would fall through to the dictionary classification.
+        var children = new ReferenceDescriptionCollection
+        {
+            new ReferenceDescription
+            {
+                BrowseName = new QualifiedName("Item[]"),
+                NodeClass = NodeClass.Object
+            }
+        };
+
+        // Act
+        var result = _resolver.ResolveObjectNodeType(children);
+
+        // Assert
+        Assert.Equal(typeof(DynamicSubject), result);
+    }
+
+    [Fact]
     public async Task WhenResolvingMultipleVariables_ThenBatchReadsAndMapsTypes()
     {
         // Arrange
@@ -170,6 +191,51 @@ public class OpcUaTypeResolverTests
         mockTypeTable.Verify(
             t => t.FindSuperTypeAsync(customDataTypeId, It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task WhenReadResponseIsShort_ThenPadsWithBadStatusAndPreservesAlignment()
+    {
+        // Arrange: two variables (= 4 ReadValueIds), but the server returns only the
+        // first 2 slots. Without padding, var1's results would be silently re-aligned to
+        // cover var2's missing slots; with padding, var1 stays correctly resolved and
+        // var2 surfaces as a bad-status read.
+        var node1Id = new NodeId(7001, 2);
+        var node2Id = new NodeId(7002, 2);
+
+        var variables = new List<ReferenceDescription>
+        {
+            new() { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(node1Id), NodeClass = NodeClass.Variable },
+            new() { BrowseName = new QualifiedName("Count"), NodeId = new ExpandedNodeId(node2Id), NodeClass = NodeClass.Variable },
+        };
+
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReadResponse
+            {
+                Results =
+                [
+                    new DataValue { Value = DataTypeIds.Float, StatusCode = StatusCodes.Good },
+                    new DataValue { Value = -1, StatusCode = StatusCodes.Good }
+                    // server omits the 2 trailing slots for node2
+                ],
+                DiagnosticInfos = []
+            });
+
+        // Act
+        var result = await _resolver.ResolveVariableTypesAsync(mockSession.Object, variables, CancellationToken.None);
+
+        // Assert: node1's positions [0,1] are still aligned with its DataType+ValueRank
+        // read; the padded slots [2,3] become bad-status reads for node2, leaving it null.
+        Assert.Equal(2, result.Count);
+        Assert.Equal(typeof(float), result[node1Id]);
+        Assert.Null(result[node2Id]);
     }
 
     [Fact]

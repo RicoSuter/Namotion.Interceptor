@@ -28,6 +28,19 @@ public class OpcUaTypeResolver
         ];
     }
 
+    /// <summary>
+    /// Heuristically classifies an OPC UA Object node as an array, a string-keyed dictionary,
+    /// or a single subject reference, based on the BrowseName of its first Object child.
+    /// </summary>
+    /// <remarks>
+    /// Only the first Object child is inspected: a parent whose children mix
+    /// <c>Items[0]</c>-style and <c>Items[Key]</c>-style names will be classified by whichever
+    /// child the server lists first. The convention is:
+    /// <c>Name[number]</c> → <see cref="DynamicSubject"/>[];
+    /// <c>Name[token]</c> with a non-empty non-numeric token → <see cref="IReadOnlyDictionary{TKey,TValue}"/>;
+    /// otherwise (no brackets, empty <c>[]</c>, or non-Object first child) → single
+    /// <see cref="DynamicSubject"/> reference.
+    /// </remarks>
     public virtual Type ResolveObjectNodeType(IReadOnlyList<ReferenceDescription> children)
     {
         if (children.Count > 0 && children[0].NodeClass == NodeClass.Object)
@@ -39,6 +52,11 @@ public class OpcUaTypeResolver
                 if (bracketStart >= 0 && name.EndsWith("]"))
                 {
                     var content = name.AsSpan(bracketStart + 1, name.Length - bracketStart - 2);
+                    if (content.Length == 0)
+                    {
+                        // Empty brackets carry no key/index information; treat as a single reference.
+                        return typeof(DynamicSubject);
+                    }
                     if (int.TryParse(content, out _))
                     {
                         return typeof(DynamicSubject[]);
@@ -85,7 +103,7 @@ public class OpcUaTypeResolver
             nodesToRead.Add(new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank });
         }
 
-        var allResults = await session.ReadNodesAsync(nodesToRead, _logger, cancellationToken).ConfigureAwait(false);
+        var allResults = await session.ReadNodesAsync(nodesToRead, TimestampsToReturn.Neither, _logger, cancellationToken).ConfigureAwait(false);
 
         var expectedCount = resolvedVariables.Count * 2;
         if (allResults.Count != expectedCount)

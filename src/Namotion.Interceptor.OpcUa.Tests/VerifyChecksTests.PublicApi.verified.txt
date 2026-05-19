@@ -96,6 +96,8 @@ namespace Namotion.Interceptor.OpcUa.Client
         public bool EnablePollingFallback { get; set; }
         public bool EnableReadAfterWrite { get; set; }
         public System.TimeSpan KeepAliveInterval { get; set; }
+        public int MaxAttributeTraversals { get; set; }
+        public int MaxBrowseContinuations { get; set; }
         public System.TimeSpan MaxReconnectDuration { get; set; }
         public int MaximumItemsPerSubscription { get; set; }
         public uint MaximumReferencesPerNode { get; set; }

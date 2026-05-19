@@ -14,8 +14,6 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjectClientSource, IFaultInjectable, IAsyncDisposable
 {
-    private const int DefaultChunkSize = 512;
-
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
@@ -203,39 +201,25 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
 
         var itemCount = ownedProperties.Count;
-        var batchSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
-        batchSize = batchSize is 0 ? int.MaxValue : batchSize;
-
-        var result = new Dictionary<RegisteredSubjectProperty, DataValue>(itemCount);
-        for (var offset = 0; offset < itemCount; offset += batchSize)
+        var readValues = new ReadValueIdCollection(itemCount);
+        for (var i = 0; i < itemCount; i++)
         {
-            var take = Math.Min(batchSize, itemCount - offset);
-            var readValues = new ReadValueIdCollection(take);
-
-            for (var i = 0; i < take; i++)
+            readValues.Add(new ReadValueId
             {
-                readValues.Add(new ReadValueId
-                {
-                    NodeId = ownedProperties[offset + i].NodeId,
-                    AttributeId = Opc.Ua.Attributes.Value
-                });
-            }
+                NodeId = ownedProperties[i].NodeId,
+                AttributeId = Opc.Ua.Attributes.Value
+            });
+        }
 
-            var readResponse = await session.ReadAsync(
-                requestHeader: null,
-                maxAge: 0,
-                timestampsToReturn: TimestampsToReturn.Source,
-                readValues,
-                cancellationToken).ConfigureAwait(false);
+        var allResults = await session.ReadNodesAsync(readValues, TimestampsToReturn.Source, _logger, cancellationToken).ConfigureAwait(false);
 
-            var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
-            for (var i = 0; i < resultCount; i++)
+        var resultCount = Math.Min(allResults.Count, itemCount);
+        var result = new Dictionary<RegisteredSubjectProperty, DataValue>(resultCount);
+        for (var i = 0; i < resultCount; i++)
+        {
+            if (StatusCode.IsGood(allResults[i].StatusCode))
             {
-                if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
-                {
-                    var dataValue = readResponse.Results[i];
-                    result[ownedProperties[offset + i].Property] = dataValue;
-                }
+                result[ownedProperties[i].Property] = allResults[i];
             }
         }
 
@@ -666,20 +650,14 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         NodeId nodeId,
         CancellationToken cancellationToken)
     {
-        const uint nodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
-
-        var (_, _, nodeProperties, _) = await session.BrowseAsync(
-            requestHeader: null,
-            view: null,
+        var results = await session.BrowseNodesAsync(
             [nodeId],
-            maxResultsToReturn: 0u,
-            BrowseDirection.Forward,
-            ReferenceTypeIds.HierarchicalReferences,
-            includeSubtypes: true,
-            nodeClassMask,
+            _configuration.MaximumReferencesPerNode,
+            _configuration.MaxBrowseContinuations,
+            _logger,
             cancellationToken).ConfigureAwait(false);
 
-        return nodeProperties[0];
+        return results.TryGetValue(nodeId, out var refs) ? refs : new ReferenceDescriptionCollection();
     }
 
     private void Reset()

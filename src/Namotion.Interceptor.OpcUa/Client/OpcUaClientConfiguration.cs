@@ -107,6 +107,25 @@ public class OpcUaClientConfiguration
     /// </summary>
     public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(10);
 
+    // Safety bounds against runaway iteration during subject loading. Both default to 100;
+    // real OPC UA address spaces are shallow and well-behaved servers terminate quickly,
+    // so these guard against bugs and malicious servers rather than normal load.
+
+    /// <summary>
+    /// Gets or sets the safety bound on BrowseNext paging for a single browse request
+    /// (default: 100). Guards against misbehaving servers that return a fresh continuation
+    /// point forever and never terminate paging.
+    /// </summary>
+    public int MaxBrowseContinuations { get; set; } = 100;
+
+    /// <summary>
+    /// Gets or sets the safety bound on attribute-traversal levels when loading the subject
+    /// tree (default: 100). Secondary defense against pathological dynamic-attribute cycles
+    /// under permissive <see cref="ShouldAddDynamicAttribute"/> predicates; the primary
+    /// defense is per-pair deduplication inside the loader.
+    /// </summary>
+    public int MaxAttributeTraversals { get; set; } = 100;
+
     /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute.
     /// When null (default), uses the OPC UA library default (-1 = server decides).

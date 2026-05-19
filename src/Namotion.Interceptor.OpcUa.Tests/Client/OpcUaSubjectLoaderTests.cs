@@ -1506,6 +1506,7 @@ public class OpcUaSubjectLoaderTests
         var result = await mockSession.Object.BrowseNodesAsync(
             new[] { rootId },
             maximumReferencesPerNode: 1000,
+            maxContinuationRounds: 100,
             NullLogger<OpcUaSubjectClientSource>.Instance,
             CancellationToken.None);
 
@@ -1514,6 +1515,73 @@ public class OpcUaSubjectLoaderTests
         // BrowseNextAsync call (101 total) but its references are discarded.
         Assert.Equal(101, result[rootId].Count);
         Assert.True(browseNextCallCount >= 100, $"Expected at least 100 BrowseNextAsync calls before abort, got {browseNextCallCount}.");
+    }
+
+    [Fact]
+    public async Task WhenMaxContinuationRoundsIsCustom_ThenLoopStopsAtConfiguredRound()
+    {
+        // Arrange: same misbehaving server as above, but driven through a custom round
+        // limit instead of the default 100. Confirms the parameter is honored end-to-end.
+        var rootId = new NodeId(1, 0);
+        var browseNextCallCount = 0;
+
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseResponse
+            {
+                Results =
+                [
+                    new BrowseResult
+                    {
+                        References = [CreateTestReferenceDescription("Initial", new ExpandedNodeId(new NodeId(2001, 2)))],
+                        ContinuationPoint = new byte[] { 0xFF }
+                    }
+                ],
+                DiagnosticInfos = []
+            });
+
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<bool>(),
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                var n = Interlocked.Increment(ref browseNextCallCount);
+                return new BrowseNextResponse
+                {
+                    Results =
+                    [
+                        new BrowseResult
+                        {
+                            References = [CreateTestReferenceDescription($"Page{n}", new ExpandedNodeId(new NodeId((uint)(3000 + n), 2)))],
+                            ContinuationPoint = new byte[] { (byte)(n & 0xFF), (byte)((n >> 8) & 0xFF) }
+                        }
+                    ],
+                    DiagnosticInfos = []
+                };
+            });
+
+        const int customLimit = 7;
+
+        // Act
+        var result = await mockSession.Object.BrowseNodesAsync(
+            new[] { rootId },
+            maximumReferencesPerNode: 1000,
+            maxContinuationRounds: customLimit,
+            NullLogger<OpcUaSubjectClientSource>.Instance,
+            CancellationToken.None);
+
+        // Assert: 1 initial reference + customLimit page references collected before abort.
+        Assert.Equal(1 + customLimit, result[rootId].Count);
+        Assert.True(browseNextCallCount >= customLimit, $"Expected at least {customLimit} BrowseNextAsync calls before abort, got {browseNextCallCount}.");
     }
 
     [Fact]

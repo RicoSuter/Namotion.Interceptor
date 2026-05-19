@@ -7,29 +7,34 @@ namespace Namotion.Interceptor.OpcUa.Client;
 internal static class OpcUaSessionExtensions
 {
     private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
-    private const int MaxContinuationRounds = 100;
 
-    private static int GetMaxNodesPerBrowse(ISession session)
+    // Soft cap applied when a server reports 0/null for its per-call operation limit.
+    // 0/null nominally means "unbounded", but in practice it usually indicates an old
+    // or misconfigured server — exactly the population most likely to choke on large
+    // requests. Split-and-retry recovers either way, so the only cost of going higher
+    // is the wasted RTT on the first oversized request. 256 is conservative for legacy
+    // servers and well below any modern server's advertised limit.
+    private const int DefaultBatchLimit = 256;
+
+    private static int ToBatchLimit(uint? limit) => limit is > 0 ? (int)limit : DefaultBatchLimit;
+
+    private static int GetMaxNodesPerBrowse(ISession session) => ToBatchLimit(session.OperationLimits?.MaxNodesPerBrowse);
+
+    private static int GetMaxNodesPerRead(ISession session) => ToBatchLimit(session.OperationLimits?.MaxNodesPerRead);
+
+    private static bool IsBatchTooLarge(ServiceResultException exception) => exception.StatusCode switch
     {
-        var limit = session.OperationLimits?.MaxNodesPerBrowse ?? 0;
-        return limit > 0 ? (int)limit : int.MaxValue;
-    }
-
-    private static int GetMaxNodesPerRead(ISession session)
-    {
-        var limit = session.OperationLimits?.MaxNodesPerRead ?? 0;
-        return limit > 0 ? (int)limit : int.MaxValue;
-    }
-
-    private static bool IsBatchTooLarge(ServiceResultException exception) =>
-        exception.StatusCode == StatusCodes.BadTooManyOperations ||
-        exception.StatusCode == StatusCodes.BadEncodingLimitsExceeded ||
-        exception.StatusCode == StatusCodes.BadResponseTooLarge;
+        StatusCodes.BadTooManyOperations => true,
+        StatusCodes.BadEncodingLimitsExceeded => true,
+        StatusCodes.BadResponseTooLarge => true,
+        _ => false,
+    };
 
     public static async Task<Dictionary<NodeId, ReferenceDescriptionCollection>> BrowseNodesAsync(
         this ISession session,
         IReadOnlyCollection<NodeId> nodeIds,
         uint maximumReferencesPerNode,
+        int maxContinuationRounds,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -57,7 +62,7 @@ internal static class OpcUaSessionExtensions
         for (var offset = 0; offset < uniqueNodeIds.Count; offset += batchSize)
         {
             var end = Math.Min(offset + batchSize, uniqueNodeIds.Count);
-            await BrowseBatchAsync(session, uniqueNodeIds, offset, end, maximumReferencesPerNode, result, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseBatchAsync(session, uniqueNodeIds, offset, end, maximumReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
         }
 
         return result;
@@ -66,6 +71,7 @@ internal static class OpcUaSessionExtensions
     public static async Task<DataValueCollection> ReadNodesAsync(
         this ISession session,
         ReadValueIdCollection nodesToRead,
+        TimestampsToReturn timestampsToReturn,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -76,7 +82,7 @@ internal static class OpcUaSessionExtensions
         }
 
         var maxBatchSize = GetMaxNodesPerRead(session);
-        await ReadBatchAsync(session, nodesToRead, 0, nodesToRead.Count, maxBatchSize, allResults, logger, cancellationToken).ConfigureAwait(false);
+        await ReadBatchAsync(session, nodesToRead, 0, nodesToRead.Count, maxBatchSize, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
         return allResults;
     }
 
@@ -116,6 +122,7 @@ internal static class OpcUaSessionExtensions
         int offset,
         int end,
         uint maximumReferencesPerNode,
+        int maxContinuationRounds,
         Dictionary<NodeId, ReferenceDescriptionCollection> result,
         ILogger logger,
         CancellationToken cancellationToken)
@@ -151,8 +158,8 @@ internal static class OpcUaSessionExtensions
                 count, ex.StatusCode);
 
             var mid = offset + count / 2;
-            await BrowseBatchAsync(session, nodeIds, offset, mid, maximumReferencesPerNode, result, logger, cancellationToken).ConfigureAwait(false);
-            await BrowseBatchAsync(session, nodeIds, mid, end, maximumReferencesPerNode, result, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseBatchAsync(session, nodeIds, offset, mid, maximumReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseBatchAsync(session, nodeIds, mid, end, maximumReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -171,58 +178,64 @@ internal static class OpcUaSessionExtensions
             }
         }
 
-        await ProcessContinuationPointsAsync(session, continuationPoints, result, logger, cancellationToken).ConfigureAwait(false);
+        await ProcessContinuationPointsAsync(session, continuationPoints, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task ProcessContinuationPointsAsync(
         ISession session,
-        List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
+        List<(NodeId NodeId, byte[] ContinuationPoint)> initialPoints,
+        int maxContinuationRounds,
         Dictionary<NodeId, ReferenceDescriptionCollection> result,
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        // `pending` serves as both input and output: each round consumes entries [0, consumeCount)
-        // and BrowseNext appends new continuation points past the end; the consumed snapshot is
-        // dropped after the round.
-        var pending = continuationPoints;
+        var current = initialPoints;
+        var next = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
         var round = 0;
         var batchSize = GetMaxNodesPerBrowse(session);
         try
         {
-            while (pending.Count > 0)
+            while (current.Count > 0)
             {
-                if (++round > MaxContinuationRounds)
+                if (++round > maxContinuationRounds)
                 {
                     logger.LogWarning(
                         "Aborting BrowseNext after {MaxRounds} rounds with {Remaining} continuation points still pending. Possible server bug.",
-                        MaxContinuationRounds, pending.Count);
+                        maxContinuationRounds, current.Count);
                     break;
                 }
 
-                var consumeCount = pending.Count;
-                for (var offset = 0; offset < consumeCount; offset += batchSize)
+                for (var offset = 0; offset < current.Count; offset += batchSize)
                 {
-                    var end = Math.Min(offset + batchSize, consumeCount);
-                    await BrowseNextBatchAsync(session, pending, offset, end, result, pending, logger, cancellationToken).ConfigureAwait(false);
+                    var end = Math.Min(offset + batchSize, current.Count);
+                    await BrowseNextBatchAsync(session, current, offset, end, result, next, logger, cancellationToken).ConfigureAwait(false);
                 }
-                pending.RemoveRange(0, consumeCount);
+
+                // Swap: current becomes the freshly populated next list; old current is cleared
+                // for reuse as the next round's append target. No aliasing across reads/writes.
+                (current, next) = (next, current);
+                next.Clear();
             }
         }
         catch
         {
-            // `pending` may include entries the server has already invalidated via earlier
+            // `current` may include entries the server has already invalidated via earlier
             // successful BrowseNext calls in the failing round; releasing them returns
             // BadContinuationPointInvalid, which ReleaseContinuationPointsAsync swallows.
-            await ReleaseContinuationPointsAsync(session, pending, logger).ConfigureAwait(false);
+            await ReleaseContinuationPointsAsync(session, current, logger).ConfigureAwait(false);
+            await ReleaseContinuationPointsAsync(session, next, logger).ConfigureAwait(false);
             throw;
         }
 
-        if (pending.Count > 0)
+        if (current.Count > 0)
         {
-            await ReleaseContinuationPointsAsync(session, pending, logger).ConfigureAwait(false);
+            await ReleaseContinuationPointsAsync(session, current, logger).ConfigureAwait(false);
         }
     }
 
+    // Releases use CancellationToken.None on purpose: under outer cancellation we still
+    // want to clean up continuation points on the server so they don't sit until the
+    // server's LRU evicts them.
     private static async Task ReleaseContinuationPointsAsync(
         ISession session,
         List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
@@ -253,15 +266,13 @@ internal static class OpcUaSessionExtensions
         }
     }
 
-    // `continuationPoints` and `newContinuationPoints` MAY alias; only append to
-    // `newContinuationPoints`, never mutate indices in `[offset, end)`.
     private static async Task BrowseNextBatchAsync(
         ISession session,
-        List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
+        List<(NodeId NodeId, byte[] ContinuationPoint)> current,
         int offset,
         int end,
         Dictionary<NodeId, ReferenceDescriptionCollection> result,
-        List<(NodeId NodeId, byte[] ContinuationPoint)> newContinuationPoints,
+        List<(NodeId NodeId, byte[] ContinuationPoint)> next,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -269,7 +280,7 @@ internal static class OpcUaSessionExtensions
         var cpCollection = new ByteStringCollection(count);
         for (var i = offset; i < end; i++)
         {
-            cpCollection.Add(continuationPoints[i].ContinuationPoint);
+            cpCollection.Add(current[i].ContinuationPoint);
         }
 
         BrowseNextResponse nextResponse;
@@ -285,22 +296,22 @@ internal static class OpcUaSessionExtensions
                 count, ex.StatusCode);
 
             var mid = offset + count / 2;
-            await BrowseNextBatchAsync(session, continuationPoints, offset, mid, result, newContinuationPoints, logger, cancellationToken).ConfigureAwait(false);
-            await BrowseNextBatchAsync(session, continuationPoints, mid, end, result, newContinuationPoints, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseNextBatchAsync(session, current, offset, mid, result, next, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseNextBatchAsync(session, current, mid, end, result, next, logger, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         for (var i = 0; i < nextResponse.Results.Count; i++)
         {
             var browseResult = nextResponse.Results[i];
-            var nodeId = continuationPoints[offset + i].NodeId;
+            var nodeId = current[offset + i].NodeId;
             if (StatusCode.IsGood(browseResult.StatusCode) && browseResult.References is { Count: > 0 })
             {
                 result[nodeId].AddRange(browseResult.References);
             }
             if (browseResult.ContinuationPoint is { Length: > 0 })
             {
-                newContinuationPoints.Add((nodeId, browseResult.ContinuationPoint));
+                next.Add((nodeId, browseResult.ContinuationPoint));
             }
         }
     }
@@ -311,6 +322,7 @@ internal static class OpcUaSessionExtensions
         int offset,
         int end,
         int maxBatchSize,
+        TimestampsToReturn timestampsToReturn,
         DataValueCollection allResults,
         ILogger logger,
         CancellationToken cancellationToken)
@@ -328,7 +340,7 @@ internal static class OpcUaSessionExtensions
             ReadResponse response;
             try
             {
-                response = await session.ReadAsync(null, 0, TimestampsToReturn.Neither, chunk, cancellationToken).ConfigureAwait(false);
+                response = await session.ReadAsync(null, 0, timestampsToReturn, chunk, cancellationToken).ConfigureAwait(false);
             }
             catch (ServiceResultException ex) when (count > 1 && IsBatchTooLarge(ex))
             {
@@ -337,11 +349,34 @@ internal static class OpcUaSessionExtensions
                     count, ex.StatusCode);
 
                 var halvedBatch = Math.Max(1, count / 2);
-                await ReadBatchAsync(session, nodesToRead, batchStart, batchEnd, halvedBatch, allResults, logger, cancellationToken).ConfigureAwait(false);
+                await ReadBatchAsync(session, nodesToRead, batchStart, batchEnd, halvedBatch, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
-            allResults.AddRange(response.Results);
+            // Pad short or trim long responses so the caller can rely on
+            // `allResults[i]` aligning with `nodesToRead[i]`. The OPC UA spec
+            // mandates one result per request; a mismatch indicates a server bug.
+            var actual = response.Results.Count;
+            if (actual == count)
+            {
+                allResults.AddRange(response.Results);
+            }
+            else
+            {
+                logger.LogWarning(
+                    "ReadAsync returned {Actual} results but {Expected} were requested. Padding to preserve positional alignment.",
+                    actual, count);
+
+                var take = Math.Min(actual, count);
+                for (var i = 0; i < take; i++)
+                {
+                    allResults.Add(response.Results[i]);
+                }
+                for (var i = take; i < count; i++)
+                {
+                    allResults.Add(new DataValue { StatusCode = StatusCodes.BadUnexpectedError });
+                }
+            }
         }
     }
 }
