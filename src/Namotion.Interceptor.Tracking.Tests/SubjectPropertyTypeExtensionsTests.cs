@@ -31,12 +31,16 @@ public class SubjectPropertyTypeExtensionsTests
     [InlineData(typeof(ImmutableArray<object>),                             false, true,  false)]
     [InlineData(typeof(ImmutableArray<IComparable>),                        false, true,  false)]
     [InlineData(typeof(ArrayList),                                          false, true,  false)]
+    [InlineData(typeof(IReadOnlyCollection<Person>),                         false, true,  false)]
+    [InlineData(typeof(IReadOnlyList<Person>),                               false, true,  false)]
+    [InlineData(typeof(ICollection<Person>),                                 false, true,  false)]
 
     // --- Subject dictionaries ---
     [InlineData(typeof(Dictionary<string, Person>),                         false, false, true)]
     [InlineData(typeof(IDictionary<string, Person>),                        false, false, true)]
     [InlineData(typeof(IEnumerable<KeyValuePair<string, Person>>),          false, false, true)]
     [InlineData(typeof(Hashtable),                                          false, false, true)]
+    [InlineData(typeof(IReadOnlyDictionary<string, Person>),                false, false, true)]
 
     // --- Not subject-carrying ---
     [InlineData(typeof(int),                                                false, false, false)]

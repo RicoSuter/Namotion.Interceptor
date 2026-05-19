@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Text.Json;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -19,7 +18,7 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var workingItems = (property.GetValue() as IEnumerable<IInterceptorSubject>)?.ToList() ?? [];
+        var workingItems = SubjectValueConverter.ToSubjectMutableList(property.GetValue());
         var structureChanged = false;
 
         // Apply structural operations in two phases:
@@ -137,17 +136,16 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var existingDictionary = property.GetValue() as IDictionary;
         var targetKeyType = property.Type.GenericTypeArguments[0];
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
         var structureChanged = false;
 
-        if (existingDictionary is not null)
+        var existingValue = property.GetValue();
+        if (existingValue is not null)
         {
-            foreach (DictionaryEntry entry in existingDictionary)
+            foreach (var (key, subject) in SubjectValueConverter.ToDictionaryEntries(existingValue))
             {
-                if (entry.Value is IInterceptorSubject item)
-                    workingDictionary[entry.Key] = item;
+                workingDictionary[key] = subject;
             }
         }
 

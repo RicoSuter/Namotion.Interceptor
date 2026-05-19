@@ -1,10 +1,10 @@
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Text;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services;
@@ -231,10 +231,11 @@ public class SubjectPathResolver : ILifecycleHandler
                 if (inlinePathsPropertyName != null)
                 {
                     var childrenProperty = registered?.TryGetProperty(inlinePathsPropertyName);
-                    if (childrenProperty?.GetValue() is IDictionary childrenDictionary &&
-                        childrenDictionary.Contains(segment))
+                    var childrenValue = childrenProperty?.GetValue();
+                    if (childrenValue is not null)
                     {
-                        if (childrenDictionary[segment] is IInterceptorSubject childSubject)
+                        var childSubject = SubjectValueVisitor.FindSubjectAt(childrenValue, isDictionaryType: true, segment);
+                        if (childSubject is not null)
                         {
                             current = childSubject;
                             continue;
@@ -271,32 +272,13 @@ public class SubjectPathResolver : ILifecycleHandler
 
             IInterceptorSubject? found = null;
 
-            if (value is IDictionary dict)
+            if (property.IsSubjectDictionary)
             {
-                foreach (DictionaryEntry entry in dict)
-                {
-                    if (entry.Key?.ToString() == index && entry.Value is IInterceptorSubject s)
-                    {
-                        found = s;
-                        break;
-                    }
-                }
+                found = SubjectValueVisitor.FindSubjectAt(value, isDictionaryType: true, index);
             }
-            else if (value is IEnumerable enumerable)
+            else if (property.IsSubjectCollection && int.TryParse(index, out var idx))
             {
-                if (int.TryParse(index, out var idx))
-                {
-                    var j = 0;
-                    foreach (var item in enumerable)
-                    {
-                        if (j == idx && item is IInterceptorSubject s)
-                        {
-                            found = s;
-                            break;
-                        }
-                        j++;
-                    }
-                }
+                found = SubjectValueVisitor.FindSubjectAt(value, isDictionaryType: false, idx);
             }
 
             if (found == null)

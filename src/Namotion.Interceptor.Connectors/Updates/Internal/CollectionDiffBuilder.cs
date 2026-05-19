@@ -1,5 +1,3 @@
-using System.Collections;
-
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
@@ -148,14 +146,14 @@ internal sealed class CollectionDiffBuilder
     /// <summary>
     /// Builds dictionary change operations.
     /// </summary>
-    /// <param name="oldDictionary">The old dictionary.</param>
-    /// <param name="newDictionary">The new dictionary.</param>
+    /// <param name="oldEntries">The old dictionary entries.</param>
+    /// <param name="newEntries">The new dictionary entries.</param>
     /// <param name="operations">Output: structural operations (Insert/Remove), or null if none.</param>
     /// <param name="newItemsToProcess">Output: items that are new and need full processing, or null if none.</param>
     /// <param name="removedKeys">Output: keys that were removed, or null if none.</param>
     public void GetDictionaryChanges(
-        IDictionary? oldDictionary,
-        IDictionary newDictionary,
+        IReadOnlyList<(object key, IInterceptorSubject subject)>? oldEntries,
+        IReadOnlyList<(object key, IInterceptorSubject subject)> newEntries,
         out List<SubjectCollectionOperation>? operations,
         out List<(object key, IInterceptorSubject item)>? newItemsToProcess,
         out HashSet<object>? removedKeys)
@@ -165,48 +163,41 @@ internal sealed class CollectionDiffBuilder
         removedKeys = null;
 
         _oldKeys.Clear();
-        if (oldDictionary is not null)
+        Dictionary<object, IInterceptorSubject>? oldLookup = null;
+        if (oldEntries is not null)
         {
-            foreach (var key in oldDictionary.Keys)
+            oldLookup = new Dictionary<object, IInterceptorSubject>(oldEntries.Count);
+            foreach (var (key, subject) in oldEntries)
+            {
                 _oldKeys.Add(key);
+                oldLookup[key] = subject;
+            }
         }
 
-        // Track removed keys - start with all old keys, remove ones that still exist with same value
         HashSet<object>? keysToRemove = _oldKeys.Count > 0 ? [.._oldKeys] : null;
 
-        foreach (DictionaryEntry entry in newDictionary)
+        foreach (var (key, newItem) in newEntries)
         {
-            var key = entry.Key;
-            if (entry.Value is not IInterceptorSubject newItem)
-                continue;
-
             if (_oldKeys.Contains(key))
             {
-                // Key exists in both - check if VALUE changed (different object reference)
-                var oldValue = oldDictionary![key];
+                var oldValue = oldLookup![key];
                 if (ReferenceEquals(oldValue, newItem))
                 {
-                    // Same object - key is not removed, not a new item
                     keysToRemove?.Remove(key);
                 }
                 else
                 {
-                    // Different object at same key - treat as Remove + Insert
-                    // Key stays in keysToRemove (will generate Remove)
-                    // Add to newItemsToProcess (will generate Insert)
                     newItemsToProcess ??= [];
                     newItemsToProcess.Add((key, newItem));
                 }
             }
             else
             {
-                // New key
                 newItemsToProcess ??= [];
                 newItemsToProcess.Add((key, newItem));
             }
         }
 
-        // Only return removedKeys if there are actually keys to remove
         if (keysToRemove is { Count: > 0 })
         {
             removedKeys = keysToRemove;

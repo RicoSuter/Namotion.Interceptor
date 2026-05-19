@@ -1,4 +1,3 @@
-using System.Collections;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -72,28 +71,11 @@ public static class SubjectPathResolverExtensions
         if (value == null)
             return null;
 
-        if (value is IDictionary dictionary)
-        {
-            foreach (DictionaryEntry entry in dictionary)
-            {
-                var key = entry.Key?.ToString();
-                if (key == indexStr && entry.Value is IInterceptorSubject subject)
-                    return subject;
-            }
-        }
-        else if (value is IEnumerable enumerable and not string)
-        {
-            if (int.TryParse(indexStr, out var index))
-            {
-                var i = 0;
-                foreach (var item in enumerable)
-                {
-                    if (i == index && item is IInterceptorSubject subject)
-                        return subject;
-                    i++;
-                }
-            }
-        }
+        if (property.IsSubjectDictionary)
+            return SubjectValueVisitor.FindSubjectAt(value, isDictionaryType: true, indexStr);
+
+        if (property.IsSubjectCollection && int.TryParse(indexStr, out var index))
+            return SubjectValueVisitor.FindSubjectAt(value, isDictionaryType: false, index);
 
         return null;
     }

@@ -105,10 +105,10 @@ public static class SubjectRegistryJsonExtensions
             {
                 obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
             }
-            else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
+            else if (value is IEnumerable enumerable and not string && enumerable.OfType<IInterceptorSubject>().Any())
             {
                 var children = new JsonArray();
-                foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
+                foreach (var arrayProxyItem in enumerable.OfType<IInterceptorSubject>())
                 {
                     children.Add(arrayProxyItem.ToJsonObject(jsonSerializerOptions));
                 }
@@ -135,10 +135,10 @@ public static class SubjectRegistryJsonExtensions
                 {
                     obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
                 }
-                else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
+                else if (value is IEnumerable enumerable and not string && enumerable.OfType<IInterceptorSubject>().Any())
                 {
                     var children = new JsonArray();
-                    foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
+                    foreach (var arrayProxyItem in enumerable.OfType<IInterceptorSubject>())
                     {
                         children.Add(arrayProxyItem.ToJsonObject(jsonSerializerOptions));
                     }
@@ -207,7 +207,7 @@ public static class SubjectRegistryJsonExtensions
 
                     if (subject.Properties.TryGetValue(nextSegment, out var property))
                     {
-                        var collection = property.GetValue?.Invoke(subject) as ICollection;
+                        var collection = property.GetValue?.Invoke(subject) as IEnumerable;
                         var child = collection?.OfType<IInterceptorSubject>().ElementAt(index);
                         if (child is not null)
                         {

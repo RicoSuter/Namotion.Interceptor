@@ -1,4 +1,3 @@
-using System.Collections;
 using Namotion.Interceptor.Registry.Performance;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -16,15 +15,15 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildCollectionComplete(
         SubjectPropertyUpdate update,
-        IEnumerable<IInterceptorSubject>? collection,
+        object? collectionValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
-        if (collection is null)
+        if (collectionValue is null)
             return;
 
-        var items = collection as IReadOnlyList<IInterceptorSubject> ?? collection.ToList();
+        var items = SubjectValueConverter.ToSubjectList(collectionValue);
         update.Count = items.Count;
         update.Items = new List<SubjectPropertyItemUpdate>(items.Count);
 
@@ -47,17 +46,17 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildCollectionDiff(
         SubjectPropertyUpdate update,
-        IEnumerable<IInterceptorSubject>? oldCollection,
-        IEnumerable<IInterceptorSubject>? newCollection,
+        object? oldCollectionValue,
+        object? newCollectionValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
-        if (newCollection is null)
+        if (newCollectionValue is null)
             return;
 
-        var oldItems = oldCollection as IReadOnlyList<IInterceptorSubject> ?? oldCollection?.ToList() ?? [];
-        var newItems = newCollection as IReadOnlyList<IInterceptorSubject> ?? newCollection.ToList();
+        var oldItems = oldCollectionValue is not null ? SubjectValueConverter.ToSubjectList(oldCollectionValue) : (IReadOnlyList<IInterceptorSubject>)[];
+        var newItems = SubjectValueConverter.ToSubjectList(newCollectionValue);
         update.Count = newItems.Count;
 
         var changeBuilder = ChangeBuilderPool.Rent();
@@ -134,30 +133,28 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildDictionaryComplete(
         SubjectPropertyUpdate update,
-        IDictionary? dictionary,
+        object? dictionaryValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
-        if (dictionary is null)
+        if (dictionaryValue is null)
             return;
 
-        update.Count = dictionary.Count;
-        update.Items = new List<SubjectPropertyItemUpdate>(dictionary.Count);
+        var entries = SubjectValueConverter.ToDictionaryEntries(dictionaryValue);
+        update.Count = entries.Count;
+        update.Items = new List<SubjectPropertyItemUpdate>(entries.Count);
 
-        foreach (DictionaryEntry entry in dictionary)
+        foreach (var (key, subject) in entries)
         {
-            if (entry.Value is IInterceptorSubject item)
-            {
-                var itemId = builder.GetOrCreateId(item);
-                SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
+            var itemId = builder.GetOrCreateId(subject);
+            SubjectUpdateFactory.ProcessSubjectComplete(subject, builder);
 
-                update.Items.Add(new SubjectPropertyItemUpdate
-                {
-                    Index = entry.Key,
-                    Id = itemId
-                });
-            }
+            update.Items.Add(new SubjectPropertyItemUpdate
+            {
+                Index = key,
+                Id = itemId
+            });
         }
     }
 
@@ -166,15 +163,17 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildDictionaryDiff(
         SubjectPropertyUpdate update,
-        IDictionary? oldDict,
-        IDictionary? newDict,
+        object? oldDictValue,
+        object? newDictValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
-        if (newDict is null)
+        if (newDictValue is null)
             return;
 
+        var oldDict = oldDictValue is not null ? SubjectValueConverter.ToDictionaryEntries(oldDictValue) : null;
+        var newDict = SubjectValueConverter.ToDictionaryEntries(newDictValue);
         update.Count = newDict.Count;
 
         var changeBuilder = ChangeBuilderPool.Rent();
@@ -219,7 +218,6 @@ internal static class SubjectItemsUpdateFactory
             }
 
             // Check for property updates on existing items
-            // Build HashSet for O(1) lookup instead of O(n) Any() per iteration
             HashSet<object>? newKeysSet = null;
             if (newItemsToProcess is not null)
             {
@@ -229,13 +227,8 @@ internal static class SubjectItemsUpdateFactory
             }
 
             List<SubjectPropertyItemUpdate>? updates = null;
-            foreach (DictionaryEntry entry in newDict)
+            foreach (var (key, item) in newDict)
             {
-                var key = entry.Key;
-                if (entry.Value is not IInterceptorSubject item)
-                    continue;
-
-                // Skip if this is a new item (already handled above)
                 if (newKeysSet?.Contains(key) == true)
                     continue;
 

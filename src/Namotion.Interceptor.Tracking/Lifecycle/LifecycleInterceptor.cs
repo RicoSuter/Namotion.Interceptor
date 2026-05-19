@@ -226,7 +226,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
                     {
                         children ??= GetList();
-                        FindSubjectsInProperty(subjectProperty, lastProcessed, null, children, null);
+                        FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
                     }
 
                     _lastProcessedValues.Remove(subjectProperty);
@@ -313,8 +313,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
             }
 
-            if (lastProcessed is not (null or IInterceptorSubject or ICollection or IDictionary) &&
-                newValue is not (null or IInterceptorSubject or ICollection or IDictionary))
+            if ((lastProcessed is not (null or IInterceptorSubject or IEnumerable) || lastProcessed is string) &&
+                (newValue is not (null or IInterceptorSubject or IEnumerable) || newValue is string))
             {
                 return;
             }
@@ -326,8 +326,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             try
             {
-                FindSubjectsInProperty(context.Property, lastProcessed, null, oldCollectedSubjects, oldTouchedSubjects);
-                FindSubjectsInProperty(context.Property, newValue, null, newCollectedSubjects, newTouchedSubjects);
+                FindSubjectsInProperty(context.Property, lastProcessed, oldCollectedSubjects, oldTouchedSubjects);
+                FindSubjectsInProperty(context.Property, newValue, newCollectedSubjects, newTouchedSubjects);
 
                 // Detach in reverse order so that collection children are removed from the end first.
                 // RemoveChild searches backwards to match this order for O(1) per removal.
@@ -370,7 +370,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 // Refresh child index metadata for retained subjects whose
                 // positions may have shifted in the new collection.
-                if (newValue is ICollection && oldTouchedSubjects.Overlaps(newTouchedSubjects))
+                if (newValue is IEnumerable && oldTouchedSubjects.Overlaps(newTouchedSubjects))
                 {
                     var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
                     for (var i = 0; i < handlers.Length; i++)
@@ -427,51 +427,41 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             if (propertyValue is not null)
             {
-                FindSubjectsInProperty(propertyReference, propertyValue, null, collectedSubjects, touchedSubjects);
+                FindSubjectsInProperty(propertyReference, propertyValue, collectedSubjects, touchedSubjects);
             }
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void FindSubjectsInProperty(PropertyReference property,
-        object? value, object? index,
+    private static void FindSubjectsInProperty(PropertyReference property,
+        object? value,
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects)
     {
-        switch (value)
+        if (value is null)
+            return;
+
+        var visitor = new LifecycleSubjectVisitor
         {
-            case IInterceptorSubject subject:
-                touchedSubjects?.Add(subject);
-                collectedSubjects.Add((subject, property, index));
-                break;
+            Subjects = collectedSubjects,
+            Touched = touchedSubjects,
+            Property = property
+        };
 
-            case IDictionary dictionary:
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    if (entry.Value is IInterceptorSubject subjectItem)
-                    {
-                        touchedSubjects?.Add(subjectItem);
-                        collectedSubjects.Add((subjectItem, property, entry.Key));
-                    }
-                }
-                break;
+        SubjectValueVisitor.VisitSubjects(value, property.Metadata.Type.IsSubjectDictionaryType(), ref visitor);
+    }
 
-            // TODO: Support more enumerations with high performance here (immutable arrays, lists, ...)
-            // case string collection: break;
-            // case IEnumerable collection:
+    private struct LifecycleSubjectVisitor : ISubjectValueVisitor
+    {
+        public List<(IInterceptorSubject subject, PropertyReference property, object? index)> Subjects;
+        public HashSet<IInterceptorSubject>? Touched;
+        public PropertyReference Property;
 
-            case ICollection collection:
-                var i = 0;
-                foreach (var item in collection)
-                {
-                    if (item is IInterceptorSubject subject)
-                    {
-                        touchedSubjects?.Add(subject);
-                        collectedSubjects.Add((subject, property, i));
-                    }
-                    i++;
-                }
-                break;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void OnSubject(IInterceptorSubject subject, object? indexOrKey)
+        {
+            Touched?.Add(subject);
+            Subjects.Add((subject, Property, indexOrKey));
         }
     }
 
