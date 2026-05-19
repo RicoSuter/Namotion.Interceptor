@@ -17,8 +17,8 @@ public interface ISubjectValueVisitor
 /// <summary>
 /// Shared tiered dispatch for discovering subjects inside property values.
 /// Fast paths (<see cref="IDictionary"/>, <see cref="ICollection"/>, <see cref="IList"/>)
-/// are checked first; <see cref="IEnumerable"/> with cached KVP extraction is the fallback
-/// for read-only types.
+/// are checked first for collections; dictionary dispatch uses <see cref="IDictionary"/>
+/// fast path with <see cref="IEnumerable"/> KVP extraction as the fallback for read-only types.
 /// </summary>
 public static class SubjectValueVisitor
 {
@@ -92,18 +92,6 @@ public static class SubjectValueVisitor
 
             case string:
                 break;
-
-            case ICollection collection:
-            {
-                var i = 0;
-                foreach (var item in collection)
-                {
-                    if (item is IInterceptorSubject subjectItem)
-                        visitor.OnSubject(subjectItem, i);
-                    i++;
-                }
-                break;
-            }
 
             case IEnumerable enumerable:
                 foreach (var item in enumerable)
