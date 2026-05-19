@@ -390,6 +390,10 @@ internal class OpcUaSubjectLoader
 
         var nodesToBrowse = new List<(NodeId NodeId, RegisteredSubject ChildSubject, RegisteredSubjectProperty? ValueProperty)>();
         var nodeIds = new HashSet<NodeId>(variableNodes.Count);
+        // Dedup by childSubject: when two parent properties reference the same Variable
+        // subject (graph-shaped address space, not tree), the second pass would re-claim
+        // the same value + sub-attribute references and log a spurious ownership error.
+        var processedChildSubjects = new HashSet<RegisteredSubject>(variableNodes.Count);
 
         foreach (var (property, nodeId) in variableNodes)
         {
@@ -400,6 +404,11 @@ internal class OpcUaSubjectLoader
                 _logger.LogWarning(
                     "Skipping OPC UA Variable-typed subject reference '{Subject}.{Property}' (NodeId: {NodeId}): no child subject was pre-constructed. The parent type must instantiate this property in its constructor.",
                     property.Subject.GetType().Name, property.Name, nodeId);
+                continue;
+            }
+
+            if (!processedChildSubjects.Add(childSubject))
+            {
                 continue;
             }
 
@@ -467,7 +476,7 @@ internal class OpcUaSubjectLoader
 
         foreach (var (property, nodeId) in pendingCollections)
         {
-            var rawChildren = browseResults.TryGetValue(nodeId, out var r) ? r : new ReferenceDescriptionCollection();
+            var rawChildren = browseResults.TryGetValue(nodeId, out var r) ? r : [];
             var childNodes = context.Session.DistinctByResolvedNodeId(rawChildren, _logger);
 
             var children = await ResolveChildSubjectsAsync(property, childNodes, isDictionary: false, context).ConfigureAwait(false);
@@ -479,7 +488,7 @@ internal class OpcUaSubjectLoader
 
         foreach (var (property, nodeId) in pendingDictionaries)
         {
-            var rawChildren = browseResults.TryGetValue(nodeId, out var r) ? r : new ReferenceDescriptionCollection();
+            var rawChildren = browseResults.TryGetValue(nodeId, out var r) ? r : [];
             var childNodes = context.Session.DistinctByResolvedNodeId(rawChildren, _logger);
 
             var children = await ResolveChildSubjectsAsync(property, childNodes, isDictionary: true, context).ConfigureAwait(false);
@@ -487,7 +496,7 @@ internal class OpcUaSubjectLoader
             var entries = new Dictionary<object, IInterceptorSubject>(children.Count);
             foreach (var (node, subject) in children)
             {
-                entries[node.BrowseName.Name] = subject;
+                entries[ExtractDictionaryKey(node.BrowseName.Name)] = subject;
             }
 
             var dictionary = DefaultSubjectFactory.Instance.CreateSubjectDictionary(property.Type, entries);
@@ -531,7 +540,7 @@ internal class OpcUaSubjectLoader
 
             if (isDictionary)
             {
-                var key = childNode.BrowseName.Name;
+                var key = ExtractDictionaryKey(childNode.BrowseName.Name);
                 existingByKey.TryGetValue(key, out childSubject);
                 factoryIndex = key;
             }
@@ -768,6 +777,24 @@ internal class OpcUaSubjectLoader
             MonitorValueNode(entry.ChildNodeId, dynamicAttribute, context.MonitoredItems);
             nextRound.Add((dynamicAttribute, entry.ChildNodeId));
         }
+    }
+
+    // Mirrors OpcUaTypeResolver.ResolveObjectNodeType: dictionary classification is
+    // triggered by `Name[key]` browse names, so the dictionary's user-facing key is the
+    // bracket content (`key`), not the literal browse name (`Name[key]`). Falls back to
+    // the full browse name when no usable bracket suffix is present.
+    private static string ExtractDictionaryKey(string browseName)
+    {
+        var bracketStart = browseName.LastIndexOf('[');
+        if (bracketStart >= 0 && browseName.EndsWith("]"))
+        {
+            var contentLength = browseName.Length - bracketStart - 2;
+            if (contentLength > 0)
+            {
+                return browseName.Substring(bracketStart + 1, contentLength);
+            }
+        }
+        return browseName;
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)

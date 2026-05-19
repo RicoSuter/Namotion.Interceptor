@@ -1433,8 +1433,8 @@ public class OpcUaSubjectLoaderTests
         var dictionary = devicesProperty.GetValue() as IReadOnlyDictionary<string, DynamicSubject>;
         Assert.NotNull(dictionary);
         Assert.Equal(2, dictionary!.Count);
-        Assert.True(dictionary.ContainsKey("Device[SensorA]"));
-        Assert.True(dictionary.ContainsKey("Device[SensorB]"));
+        Assert.True(dictionary.ContainsKey("SensorA"));
+        Assert.True(dictionary.ContainsKey("SensorB"));
 
         // Assert: each entry has a Value property
         foreach (var entry in dictionary.Values)

@@ -164,7 +164,15 @@ internal static class OpcUaSessionExtensions
         }
 
         var continuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
-        for (var i = 0; i < response.Results.Count; i++)
+        var actual = response.Results.Count;
+        if (actual != count)
+        {
+            logger.LogWarning(
+                "BrowseAsync returned {Actual} results but {Expected} were requested. Clamping to preserve positional alignment.",
+                actual, count);
+        }
+        var process = Math.Min(actual, count);
+        for (var i = 0; i < process; i++)
         {
             var browseResult = response.Results[i];
             var nodeId = nodeIds[offset + i];
@@ -301,7 +309,15 @@ internal static class OpcUaSessionExtensions
             return;
         }
 
-        for (var i = 0; i < nextResponse.Results.Count; i++)
+        var actual = nextResponse.Results.Count;
+        if (actual != count)
+        {
+            logger.LogWarning(
+                "BrowseNextAsync returned {Actual} results but {Expected} were requested. Clamping to preserve positional alignment.",
+                actual, count);
+        }
+        var process = Math.Min(actual, count);
+        for (var i = 0; i < process; i++)
         {
             var browseResult = nextResponse.Results[i];
             var nodeId = current[offset + i].NodeId;
@@ -348,6 +364,10 @@ internal static class OpcUaSessionExtensions
                     "ReadAsync rejected batch of {Count} items ({StatusCode}). Splitting into smaller batches.",
                     count, ex.StatusCode);
 
+                // The halving may split a caller's logical pair (e.g. DataType+ValueRank)
+                // across two batches. That's safe: each sub-batch is independently padded
+                // to its requested length, so the flat allResults stays aligned with
+                // nodesToRead and downstream pair-decoding works unchanged.
                 var halvedBatch = Math.Max(1, count / 2);
                 await ReadBatchAsync(session, nodesToRead, batchStart, batchEnd, halvedBatch, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
                 continue;

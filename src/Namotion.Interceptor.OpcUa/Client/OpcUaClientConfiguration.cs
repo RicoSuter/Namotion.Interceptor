@@ -114,7 +114,9 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the safety bound on BrowseNext paging for a single browse request
     /// (default: 100). Guards against misbehaving servers that return a fresh continuation
-    /// point forever and never terminate paging.
+    /// point forever and never terminate paging. The effective per-node reference limit
+    /// is roughly <c>MaxBrowseContinuations * MaximumReferencesPerNode</c>; raise this if
+    /// you legitimately need more references than that product allows.
     /// </summary>
     public int MaxBrowseContinuations { get; set; } = 100;
 
