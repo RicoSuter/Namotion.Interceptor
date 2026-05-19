@@ -163,24 +163,24 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildDictionaryDiff(
         SubjectPropertyUpdate update,
-        object? oldDictValue,
-        object? newDictValue,
+        object? oldDictionaryValue,
+        object? newDictionaryValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
-        if (newDictValue is null)
+        if (newDictionaryValue is null)
             return;
 
-        var oldDict = oldDictValue is not null ? SubjectValueConvert.ToSubjectDictionaryEntries(oldDictValue) : null;
-        var newDict = SubjectValueConvert.ToSubjectDictionaryEntries(newDictValue);
-        update.Count = newDict.Count;
+        var oldDictionary = oldDictionaryValue is not null ? SubjectValueConvert.ToSubjectDictionaryEntries(oldDictionaryValue) : null;
+        var newDictionary = SubjectValueConvert.ToSubjectDictionaryEntries(newDictionaryValue);
+        update.Count = newDictionary.Count;
 
         var changeBuilder = ChangeBuilderPool.Rent();
         try
         {
             changeBuilder.GetDictionaryChanges(
-                oldDict, newDict,
+                oldDictionary, newDictionary,
                 out var operations,
                 out var newItemsToProcess,
                 out var removedKeys);
@@ -227,7 +227,7 @@ internal static class SubjectItemsUpdateFactory
             }
 
             List<SubjectPropertyItemUpdate>? updates = null;
-            foreach (var (key, item) in newDict)
+            foreach (var (key, item) in newDictionary)
             {
                 if (newKeysSet?.Contains(key) == true)
                     continue;
