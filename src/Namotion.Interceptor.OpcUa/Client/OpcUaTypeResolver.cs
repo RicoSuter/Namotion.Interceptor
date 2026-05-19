@@ -87,6 +87,23 @@ public class OpcUaTypeResolver
 
         var allResults = await session.ReadNodesAsync(nodesToRead, _logger, cancellationToken).ConfigureAwait(false);
 
+        var expectedCount = resolvedVariables.Count * 2;
+        if (allResults.Count != expectedCount)
+        {
+            // Symmetric guard: short responses lose the pair-alignment our index math
+            // depends on; over-long responses imply the server is misbehaving in a way
+            // we don't want to silently consume either.
+            _logger.LogWarning(
+                "ReadAsync returned {AllResultsCount} results but expected {ExpectedCount} for {ResolvedVariablesCount} variables. All types will resolve to null.",
+                allResults.Count, expectedCount, resolvedVariables.Count);
+
+            foreach (var (nodeId, _) in resolvedVariables)
+            {
+                result[nodeId] = null;
+            }
+            return result;
+        }
+
         for (var i = 0; i < resolvedVariables.Count; i++)
         {
             var (nodeId, reference) = resolvedVariables[i];
@@ -96,28 +113,19 @@ public class OpcUaTypeResolver
             Type? type = null;
             try
             {
-                if (valueRankIndex >= allResults.Count)
+                if (!StatusCode.IsGood(allResults[dataTypeIndex].StatusCode))
                 {
-                    _logger.LogWarning("ReadAsync returned {AllResultsCount} results but " +
-                                       "expected at least {ValueRankIndex} for {ResolvedVariablesCount} variables.", 
-                        allResults.Count, valueRankIndex + 1, resolvedVariables.Count);
-                }
-                else if (!StatusCode.IsGood(allResults[dataTypeIndex].StatusCode))
-                {
-                    _logger.LogWarning("Failed to read DataType for node {BrowseName} ({StatusCode}).", 
+                    _logger.LogWarning("Failed to read DataType for node {BrowseName} ({StatusCode}).",
                         reference.BrowseName.Name, allResults[dataTypeIndex].StatusCode);
                 }
-                else
+                else if (allResults[dataTypeIndex].Value is NodeId dataTypeId)
                 {
-                    if (allResults[dataTypeIndex].Value is NodeId dataTypeId)
+                    var builtIn = await TypeInfo.GetBuiltInTypeAsync(dataTypeId, session.TypeTree, cancellationToken).ConfigureAwait(false);
+                    var elementType = TryMapBuiltInType(builtIn);
+                    if (elementType is not null)
                     {
-                        var builtIn = await TypeInfo.GetBuiltInTypeAsync(dataTypeId, session.TypeTree, cancellationToken).ConfigureAwait(false);
-                        var elementType = TryMapBuiltInType(builtIn);
-                        if (elementType is not null)
-                        {
-                            var valueRank = allResults[valueRankIndex].Value is int vr ? vr : -1;
-                            type = valueRank >= 0 ? elementType.MakeArrayType() : elementType;
-                        }
+                        var valueRank = allResults[valueRankIndex].Value is int vr ? vr : -1;
+                        type = valueRank >= 0 ? elementType.MakeArrayType() : elementType;
                     }
                 }
             }

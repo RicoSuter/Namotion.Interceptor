@@ -19,7 +19,7 @@ public static class SubjectPropertyTypeExtensions
     /// <summary>
     /// Checks whether a property can contain subjects, using both a JIT-constant fast path
     /// via <typeparamref name="TProperty"/> and a runtime fallback via the declared
-    /// <paramref name="type"/>. <typeparamref name="TProperty"/> is a hint — it may be
+    /// <paramref name="type"/>. <typeparamref name="TProperty"/> is a hint: it may be
     /// <c>object</c> when values are boxed through non-generic paths (this applies to
     /// <c>TProperty</c> throughout the interceptor interfaces, not just here).
     /// </summary>
@@ -99,11 +99,23 @@ public static class SubjectPropertyTypeExtensions
     private static bool IsSubjectReferenceTypeSlow(Type type)
     {
         return IsSubjectReferenceTypeCache.GetOrAdd(type, static t =>
-            !t.IsSubjectDictionaryType() &&
-            !t.IsSubjectCollectionType() &&
-            (t.IsInterface ||
-             t == typeof(object) ||
-             typeof(IInterceptorSubject).IsAssignableFrom(t)));
+        {
+            // A type that explicitly implements IInterceptorSubject is a reference
+            // even if it also implements container interfaces; the explicit subject
+            // declaration trumps any incidental enumerable nature.
+            if (typeof(IInterceptorSubject).IsAssignableFrom(t))
+            {
+                return !t.IsSubjectDictionaryType() && !t.IsSubjectCollectionType();
+            }
+
+            // For plain interfaces and `object`, defer to the element-style check so
+            // generic interfaces over non-subject content (e.g. IList<int>,
+            // IEnumerable<int>) are correctly rejected as references at the property
+            // level too, mirroring how they would be rejected as element types.
+            return IsElementSubjectReference(t) &&
+                   !t.IsSubjectDictionaryType() &&
+                   !t.IsSubjectCollectionType();
+        });
     }
 
     private static bool IsSubjectCollectionTypeSlow(Type type)
@@ -116,13 +128,13 @@ public static class SubjectPropertyTypeExtensions
             if (!typeof(IEnumerable).IsAssignableFrom(t))
                 return false;
 
-            var genericEnumerables = GetGenericEnumerableInterfaces(t);
+            var genericEnumerables = GetEnumerablesIncludingSelf(t);
 
-            // If generic type info is available, use it for precise check
+            // If generic type info is available, use it for precise check.
             if (genericEnumerables.Length > 0)
-                return genericEnumerables.Any(static i => i.GenericTypeArguments[0].IsSubjectReferenceType());
+                return genericEnumerables.Any(static i => IsElementSubjectReference(i.GenericTypeArguments[0]));
 
-            // No generic type info (e.g. ArrayList) — fall back to non-generic check
+            // No generic type info (e.g. ArrayList): fall back to non-generic check.
             return typeof(ICollection).IsAssignableFrom(t);
         });
     }
@@ -134,25 +146,75 @@ public static class SubjectPropertyTypeExtensions
             if (!typeof(IEnumerable).IsAssignableFrom(t))
                 return false;
 
-            var genericEnumerables = GetGenericEnumerableInterfaces(t);
+            var genericEnumerables = GetEnumerablesIncludingSelf(t);
 
-            // If generic type info is available, use it for precise check
+            // If generic type info is available, use it for precise check.
             if (genericEnumerables.Length > 0)
             {
                 return genericEnumerables.Any(static i =>
                     i.GenericTypeArguments[0] is { IsGenericType: true } kvType &&
                     kvType.GetGenericTypeDefinition() == typeof(KeyValuePair<,>) &&
-                    kvType.GenericTypeArguments[1].IsSubjectReferenceType());
+                    IsElementSubjectReference(kvType.GenericTypeArguments[1]));
             }
 
-            // No generic type info (e.g. Hashtable) — fall back to non-generic check
+            // No generic type info (e.g. Hashtable): fall back to non-generic check.
             return typeof(IDictionary).IsAssignableFrom(t);
         });
+    }
+
+    // Non-recursive subject-reference predicate used as the leaf check.
+    private static bool IsSubjectReferenceCandidate(Type t) =>
+        t.IsInterface ||
+        t == typeof(object) ||
+        typeof(IInterceptorSubject).IsAssignableFrom(t);
+
+    // Non-recursive leaf check so self-referential types do not blow the stack.
+    private static bool IsElementSubjectReference(Type element)
+    {
+        if (!IsSubjectReferenceCandidate(element))
+            return false;
+
+        if (!typeof(IEnumerable).IsAssignableFrom(element))
+            return true;
+
+        foreach (var i in GetEnumerablesIncludingSelf(element))
+        {
+            var nestedArg = i.GenericTypeArguments[0];
+            if (nestedArg is { IsGenericType: true } kv &&
+                kv.GetGenericTypeDefinition() == typeof(KeyValuePair<,>) &&
+                IsSubjectReferenceCandidate(kv.GenericTypeArguments[1]))
+            {
+                return false;
+            }
+            if (IsSubjectReferenceCandidate(nestedArg))
+            {
+                return false;
+            }
+        }
+
+        // Enumerable with no candidate content (e.g. IList<int>): a container, not a reference.
+        return false;
     }
 
     private static Type[] GetGenericEnumerableInterfaces(Type type)
     {
         return Array.FindAll(type.GetInterfaces(),
             static i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+    }
+
+    // GetInterfaces() never returns the type itself; for a bare IEnumerable<X> we
+    // include `type` explicitly so element probing covers that case.
+    private static Type[] GetEnumerablesIncludingSelf(Type type)
+    {
+        var fromInterfaces = GetGenericEnumerableInterfaces(type);
+        if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(IEnumerable<>))
+        {
+            return fromInterfaces;
+        }
+
+        var enriched = new Type[fromInterfaces.Length + 1];
+        Array.Copy(fromInterfaces, enriched, fromInterfaces.Length);
+        enriched[fromInterfaces.Length] = type;
+        return enriched;
     }
 }

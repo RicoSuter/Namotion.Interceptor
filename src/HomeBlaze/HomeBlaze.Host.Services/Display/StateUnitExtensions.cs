@@ -139,7 +139,7 @@ public static class StateUnitExtensions
             return FormatDecimalValue(displayValue, bestEntry.Suffix);
         }
 
-        // No family found — use static suffix with space handling
+        // No family found: use static suffix with space handling
         var unitInfo = GetUnitInfo(unit);
         if (unitInfo != null)
         {
@@ -203,9 +203,9 @@ public static class StateUnitExtensions
     private static string FormatTimeSpan(TimeSpan ts)
     {
         return ts.TotalSeconds < 5
-            ? $"{ts.TotalMilliseconds:0.##} ms"
+            ? $"{ts.TotalMilliseconds.ToString("0.##", CultureInfo.InvariantCulture)} ms"
             : ts.TotalHours >= 1
-                ? $"{ts.TotalHours:0.#} h"
-                : ts.ToString(@"hh\:mm\:ss");
+                ? $"{ts.TotalHours.ToString("0.#", CultureInfo.InvariantCulture)} h"
+                : ts.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
     }
 }

@@ -28,7 +28,7 @@ internal static class OpcUaSessionExtensions
 
     public static async Task<Dictionary<NodeId, ReferenceDescriptionCollection>> BrowseNodesAsync(
         this ISession session,
-        IReadOnlyList<NodeId> nodeIds,
+        IReadOnlyCollection<NodeId> nodeIds,
         uint maximumReferencesPerNode,
         ILogger logger,
         CancellationToken cancellationToken)
@@ -39,17 +39,25 @@ internal static class OpcUaSessionExtensions
             return result;
         }
 
+        // The result dictionary keys also serve as the dedup set: a duplicate NodeId
+        // in the input is skipped instead of being sent to the server twice.
+        var uniqueNodeIds = new List<NodeId>(nodeIds.Count);
         foreach (var nodeId in nodeIds)
         {
+            if (result.ContainsKey(nodeId))
+            {
+                continue;
+            }
             result[nodeId] = new ReferenceDescriptionCollection();
+            uniqueNodeIds.Add(nodeId);
         }
 
         var batchSize = GetMaxNodesPerBrowse(session);
 
-        for (var offset = 0; offset < nodeIds.Count; offset += batchSize)
+        for (var offset = 0; offset < uniqueNodeIds.Count; offset += batchSize)
         {
-            var end = Math.Min(offset + batchSize, nodeIds.Count);
-            await BrowseBatchAsync(session, nodeIds, offset, end, maximumReferencesPerNode, result, logger, cancellationToken).ConfigureAwait(false);
+            var end = Math.Min(offset + batchSize, uniqueNodeIds.Count);
+            await BrowseBatchAsync(session, uniqueNodeIds, offset, end, maximumReferencesPerNode, result, logger, cancellationToken).ConfigureAwait(false);
         }
 
         return result;
@@ -173,40 +181,42 @@ internal static class OpcUaSessionExtensions
         ILogger logger,
         CancellationToken cancellationToken)
     {
+        // `pending` serves as both input and output: each round consumes entries [0, consumeCount)
+        // and BrowseNext appends new continuation points past the end; the consumed snapshot is
+        // dropped after the round.
+        var pending = continuationPoints;
         var round = 0;
         var batchSize = GetMaxNodesPerBrowse(session);
-        List<(NodeId NodeId, byte[] ContinuationPoint)> newContinuationPoints = [];
         try
         {
-            while (continuationPoints.Count > 0)
+            while (pending.Count > 0)
             {
                 if (++round > MaxContinuationRounds)
                 {
                     logger.LogWarning(
                         "Aborting BrowseNext after {MaxRounds} rounds with {Remaining} continuation points still pending. Possible server bug.",
-                        MaxContinuationRounds, continuationPoints.Count);
+                        MaxContinuationRounds, pending.Count);
                     break;
                 }
 
-                newContinuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
-                for (var offset = 0; offset < continuationPoints.Count; offset += batchSize)
+                var consumeCount = pending.Count;
+                for (var offset = 0; offset < consumeCount; offset += batchSize)
                 {
-                    var end = Math.Min(offset + batchSize, continuationPoints.Count);
-                    await BrowseNextBatchAsync(session, continuationPoints, offset, end, result, newContinuationPoints, logger, cancellationToken).ConfigureAwait(false);
+                    var end = Math.Min(offset + batchSize, consumeCount);
+                    await BrowseNextBatchAsync(session, pending, offset, end, result, pending, logger, cancellationToken).ConfigureAwait(false);
                 }
-                continuationPoints = newContinuationPoints;
+                pending.RemoveRange(0, consumeCount);
             }
         }
         catch
         {
-            await ReleaseContinuationPointsAsync(session, continuationPoints, logger).ConfigureAwait(false);
-            await ReleaseContinuationPointsAsync(session, newContinuationPoints, logger).ConfigureAwait(false);
+            await ReleaseContinuationPointsAsync(session, pending, logger).ConfigureAwait(false);
             throw;
         }
 
-        if (continuationPoints.Count > 0)
+        if (pending.Count > 0)
         {
-            await ReleaseContinuationPointsAsync(session, continuationPoints, logger).ConfigureAwait(false);
+            await ReleaseContinuationPointsAsync(session, pending, logger).ConfigureAwait(false);
         }
     }
 
@@ -240,6 +250,8 @@ internal static class OpcUaSessionExtensions
         }
     }
 
+    // `continuationPoints` and `newContinuationPoints` MAY alias; only append to
+    // `newContinuationPoints`, never mutate indices in `[offset, end)`.
     private static async Task BrowseNextBatchAsync(
         ISession session,
         List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
@@ -315,13 +327,13 @@ internal static class OpcUaSessionExtensions
             {
                 response = await session.ReadAsync(null, 0, TimestampsToReturn.Neither, chunk, cancellationToken).ConfigureAwait(false);
             }
-            catch (ServiceResultException ex) when (count > 2 && IsBatchTooLarge(ex))
+            catch (ServiceResultException ex) when (count > 1 && IsBatchTooLarge(ex))
             {
                 logger.LogWarning(
                     "ReadAsync rejected batch of {Count} items ({StatusCode}). Splitting into smaller batches.",
                     count, ex.StatusCode);
 
-                var halvedBatch = Math.Max(2, count / 2);
+                var halvedBatch = Math.Max(1, count / 2);
                 await ReadBatchAsync(session, nodesToRead, batchStart, batchEnd, halvedBatch, allResults, logger, cancellationToken).ConfigureAwait(false);
                 continue;
             }

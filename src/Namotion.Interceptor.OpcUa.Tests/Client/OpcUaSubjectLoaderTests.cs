@@ -1448,6 +1448,242 @@ public class OpcUaSubjectLoaderTests
         Assert.Equal(2, monitoredItems.Count);
     }
 
+    [Fact]
+    public async Task WhenBrowseNextSpansMultipleRoundsAndOneRoundIsRejected_ThenAllReferencesAreCollected()
+    {
+        // Arrange: two top-level variables each return a continuation point on initial
+        // browse. BrowseNext round 1 returns refs AND fresh continuation points (so a
+        // round 2 is needed). Round 2 is rejected with BadTooManyOperations when more
+        // than one continuation point is sent, forcing a split-and-retry. This exercises
+        // the multi-round path of ProcessContinuationPointsAsync together with the
+        // recursive split inside BrowseNextBatchAsync. It pins the aliased-buffer
+        // contract: the same `pending` list is read from and appended to across rounds
+        // and across recursive splits without corrupting in-flight indices.
+        var rootId = new NodeId(1, 0);
+        var var1Id = new NodeId(2001, 2);
+        var var2Id = new NodeId(2002, 2);
+        var attr1aId = new NodeId(3001, 2);
+        var attr2aId = new NodeId(3002, 2);
+        var attr1bId = new NodeId(3003, 2);
+        var attr2bId = new NodeId(3004, 2);
+
+        var cp1Round1 = new byte[] { 0x10 };
+        var cp2Round1 = new byte[] { 0x20 };
+        var cp1Round2 = new byte[] { 0x11 };
+        var cp2Round2 = new byte[] { 0x21 };
+
+        var mockSession = CreateMockSession();
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var desc in browseDescriptions)
+                {
+                    if (desc.NodeId == rootId)
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References =
+                            [
+                                CreateTestReferenceDescription("Var1", new ExpandedNodeId(var1Id)),
+                                CreateTestReferenceDescription("Var2", new ExpandedNodeId(var2Id))
+                            ]
+                        });
+                    }
+                    else if (desc.NodeId == var1Id)
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = new ReferenceDescriptionCollection(),
+                            ContinuationPoint = cp1Round1
+                        });
+                    }
+                    else if (desc.NodeId == var2Id)
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = new ReferenceDescriptionCollection(),
+                            ContinuationPoint = cp2Round1
+                        });
+                    }
+                    else
+                    {
+                        results.Add(new BrowseResult { References = new ReferenceDescriptionCollection() });
+                    }
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<bool>(),
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, bool _, ByteStringCollection continuationPoints, CancellationToken _) =>
+            {
+                // Round 2 (the cpXRound2 batch) is rejected when more than one CP is sent.
+                var isRound2 = continuationPoints.Any(cp => cp.SequenceEqual(cp1Round2) || cp.SequenceEqual(cp2Round2));
+                if (isRound2 && continuationPoints.Count > 1)
+                {
+                    throw new ServiceResultException(StatusCodes.BadTooManyOperations);
+                }
+
+                var results = new BrowseResultCollection();
+                foreach (var cp in continuationPoints)
+                {
+                    if (cp.SequenceEqual(cp1Round1))
+                    {
+                        // Round 1 result for Var1: emit one ref AND a fresh CP for round 2.
+                        results.Add(new BrowseResult
+                        {
+                            References = [CreateTestReferenceDescription("Attr1a", new ExpandedNodeId(attr1aId))],
+                            ContinuationPoint = cp1Round2
+                        });
+                    }
+                    else if (cp.SequenceEqual(cp2Round1))
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = [CreateTestReferenceDescription("Attr2a", new ExpandedNodeId(attr2aId))],
+                            ContinuationPoint = cp2Round2
+                        });
+                    }
+                    else if (cp.SequenceEqual(cp1Round2))
+                    {
+                        // Round 2 result for Var1 (single-item batch after split): one ref, no further CP.
+                        results.Add(new BrowseResult
+                        {
+                            References = [CreateTestReferenceDescription("Attr1b", new ExpandedNodeId(attr1bId))]
+                        });
+                    }
+                    else if (cp.SequenceEqual(cp2Round2))
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = [CreateTestReferenceDescription("Attr2b", new ExpandedNodeId(attr2bId))]
+                        });
+                    }
+                    else
+                    {
+                        results.Add(new BrowseResult { References = new ReferenceDescriptionCollection() });
+                    }
+                }
+                return new BrowseNextResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [var1Id] = (DataTypeIds.Float, -1),
+            [var2Id] = (DataTypeIds.Double, -1),
+            [attr1aId] = (DataTypeIds.Int32, -1),
+            [attr2aId] = (DataTypeIds.Int32, -1),
+            [attr1bId] = (DataTypeIds.Int32, -1),
+            [attr2bId] = (DataTypeIds.Int32, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
+            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", rootId);
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: every variable and every attribute across both BrowseNext rounds reached
+        // the loader despite the round-2 split-and-retry.
+        var monitoredNodeIds = monitoredItems.Select(m => m.StartNodeId).ToHashSet();
+        Assert.Contains(var1Id, monitoredNodeIds);
+        Assert.Contains(var2Id, monitoredNodeIds);
+        Assert.Contains(attr1aId, monitoredNodeIds);
+        Assert.Contains(attr2aId, monitoredNodeIds);
+        Assert.Contains(attr1bId, monitoredNodeIds);
+        Assert.Contains(attr2bId, monitoredNodeIds);
+        Assert.Equal(6, monitoredItems.Count);
+    }
+
+    [Fact]
+    public async Task WhenAttributeParentNodeIdWasVisitedInEarlierRound_ThenAttributesAreStillLoaded()
+    {
+        // Arrange: VarA (NodeId 100) and VarB (NodeId 200) are top-level dynamic Variables.
+        // VarA has a dynamic attribute "Quality" -> NodeId 999 (a leaf).
+        // VarB has a dynamic attribute "Status"  -> NodeId 100 (the SAME NodeId as VarA's parent).
+        //
+        // Phase 5 / LoadAttributeNodesForManyAsync runs in rounds:
+        //   Round 1: browses parents [100, 200], visitedNodes = {100, 200}.
+        //   Round 2: input is [(VarA.Quality, 999), (VarB.Status, 100)].
+        //            visitedNodes already contains 100, so the second entry's parent isn't
+        //            re-browsed. Without the BrowseCache fallback, VarB.Status would be
+        //            silently dropped: its own sub-attributes (the children of NodeId 100)
+        //            would never be discovered. With the fix, the cached children from
+        //            round 1's browse of NodeId 100 are reused and VarB.Status gets its
+        //            "Quality" sub-attribute added.
+        var rootId = new NodeId(1, 0);
+        var varAId = new NodeId(100, 2);
+        var varBId = new NodeId(200, 2);
+        var sharedQualityId = new NodeId(999, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] =
+            [
+                CreateTestReferenceDescription("VarA", new ExpandedNodeId(varAId)),
+                CreateTestReferenceDescription("VarB", new ExpandedNodeId(varBId))
+            ],
+            [varAId] =
+            [
+                CreateTestReferenceDescription("Quality", new ExpandedNodeId(sharedQualityId))
+            ],
+            [varBId] =
+            [
+                // VarB's "Status" attribute points to the SAME NodeId as VarA itself,
+                // creating the cross-round duplicate that the fix must handle.
+                CreateTestReferenceDescription("Status", new ExpandedNodeId(varAId))
+            ]
+            // sharedQualityId is a leaf (no children).
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [varAId] = (DataTypeIds.Int32, -1),
+            [varBId] = (DataTypeIds.Int32, -1),
+            [sharedQualityId] = (DataTypeIds.Int32, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
+            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", rootId);
+
+        // Act
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: VarA has a Quality attribute (round 1 -> round 2 along the normal path).
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var varAProperty = registeredSubject.Properties.Single(p => p.Name == "VarA");
+        Assert.NotNull(varAProperty.TryGetAttribute("Quality"));
+
+        // Assert: VarB has a Status attribute, and crucially Status has its own Quality
+        // sub-attribute (loaded via the BrowseCache fallback for the already-visited parent).
+        var varBProperty = registeredSubject.Properties.Single(p => p.Name == "VarB");
+        var statusAttribute = varBProperty.TryGetAttribute("Status");
+        Assert.NotNull(statusAttribute);
+        Assert.NotNull(statusAttribute!.TryGetAttribute("Quality"));
+    }
+
     private static ReferenceDescription CreateObjectReferenceDescription(string name, ExpandedNodeId nodeId)
     {
         return new ReferenceDescription
