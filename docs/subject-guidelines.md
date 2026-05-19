@@ -62,7 +62,7 @@ team.Roles = new Dictionary<string, Person>(team.Roles) { ["leader"] = person };
 
 **Why?** Property interceptors hook into the setter. Collection mutations bypass the setter entirely.
 
-**Supported collections**: Arrays, `List<T>`, `Dictionary<K,V>`, `ICollection<T>`, `IReadOnlyCollection<T>` - all work when replaced entirely.
+**Supported collection types**: `T[]`, `List<T>`, `ICollection<T>`, `IReadOnlyCollection<T>`, `IReadOnlyList<T>`, `IEnumerable<T>`, `ImmutableArray<T>`, `ArrayList`. **Supported dictionary types**: `Dictionary<K,V>`, `IDictionary<K,V>`, `IReadOnlyDictionary<K,V>`, `Hashtable`. All work when replaced entirely.
 
 ### Lifecycle Tracking for Nested Subjects
 
