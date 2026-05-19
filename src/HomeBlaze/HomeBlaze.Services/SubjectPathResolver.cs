@@ -234,7 +234,7 @@ public class SubjectPathResolver : ILifecycleHandler
                     var childrenValue = childrenProperty?.GetValue();
                     if (childrenValue is not null)
                     {
-                        var childSubject = SubjectValueVisitor.FindSubjectAt(childrenValue, isDictionaryType: true, segment);
+                        var childSubject = SubjectValueVisitor.FindDictionarySubjectAt(childrenValue, segment);
                         if (childSubject is not null)
                         {
                             current = childSubject;
@@ -274,11 +274,11 @@ public class SubjectPathResolver : ILifecycleHandler
 
             if (property.IsSubjectDictionary)
             {
-                found = SubjectValueVisitor.FindSubjectAt(value, isDictionaryType: true, index);
+                found = SubjectValueVisitor.FindDictionarySubjectAt(value, index);
             }
             else if (property.IsSubjectCollection && int.TryParse(index, out var idx))
             {
-                found = SubjectValueVisitor.FindSubjectAt(value, isDictionaryType: false, idx);
+                found = SubjectValueVisitor.FindCollectionSubjectAt(value, idx);
             }
 
             if (found == null)

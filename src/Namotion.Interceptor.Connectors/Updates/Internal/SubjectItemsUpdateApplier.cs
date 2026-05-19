@@ -18,7 +18,7 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var workingItems = SubjectValueConverter.ToSubjectMutableList(property.GetValue());
+        var workingItems = SubjectValueConvert.ToSubjectMutableList(property.GetValue());
         var structureChanged = false;
 
         // Apply structural operations in two phases:
@@ -143,7 +143,7 @@ internal static class SubjectItemsUpdateApplier
         var existingValue = property.GetValue();
         if (existingValue is not null)
         {
-            foreach (var (key, subject) in SubjectValueConverter.ToDictionaryEntries(existingValue))
+            foreach (var (key, subject) in SubjectValueConvert.ToDictionaryEntries(existingValue))
             {
                 workingDictionary[key] = subject;
             }

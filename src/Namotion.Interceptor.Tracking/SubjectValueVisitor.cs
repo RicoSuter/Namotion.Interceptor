@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Tracking;
 
 /// <summary>
 /// Visitor interface for zero-allocation subject iteration. Implement as a struct
-/// so the JIT monomorphizes the generic <see cref="SubjectValueVisitor.VisitSubjects{TVisitor}"/> call.
+/// so the JIT monomorphizes the generic <see cref="SubjectValueVisitor.VisitCollectionSubjects{TVisitor}"/> call.
 /// </summary>
 public interface ISubjectValueVisitor
 {
@@ -25,14 +25,55 @@ public static class SubjectValueVisitor
     private static readonly ConcurrentDictionary<Type, (Func<object, object?> getKey, Func<object, object?> getValue)?> KvpAccessorCache = new();
 
     /// <summary>
-    /// Visits all subjects found in <paramref name="value"/> using tiered dispatch.
-    /// When <paramref name="isDictionaryType"/> is true and the value does not implement
-    /// <see cref="IDictionary"/>, items are treated as <c>KeyValuePair&lt;K,V&gt;</c> and
-    /// the visitor receives the dictionary key as <c>indexOrKey</c>; otherwise the visitor
-    /// receives the zero-based integer index.
+    /// Visits all subjects found in a collection <paramref name="value"/> using tiered dispatch.
+    /// The visitor receives the zero-based integer index as <c>indexOrKey</c>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void VisitSubjects<TVisitor>(object value, bool isDictionaryType, ref TVisitor visitor)
+    public static void VisitCollectionSubjects<TVisitor>(object value, ref TVisitor visitor)
+        where TVisitor : struct, ISubjectValueVisitor
+    {
+        switch (value)
+        {
+            case IInterceptorSubject subject:
+                visitor.OnSubject(subject, null);
+                break;
+
+            case string:
+                break;
+
+            case ICollection collection:
+            {
+                var i = 0;
+                foreach (var item in collection)
+                {
+                    if (item is IInterceptorSubject subjectItem)
+                        visitor.OnSubject(subjectItem, i);
+                    i++;
+                }
+                break;
+            }
+
+            case IEnumerable enumerable:
+            {
+                var j = 0;
+                foreach (var item in enumerable)
+                {
+                    if (item is IInterceptorSubject subjectItem)
+                        visitor.OnSubject(subjectItem, j);
+                    j++;
+                }
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Visits all subjects found in a dictionary <paramref name="value"/> using tiered dispatch.
+    /// Items are treated as <c>KeyValuePair&lt;K,V&gt;</c> and the visitor receives the
+    /// dictionary key as <c>indexOrKey</c>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void VisitDictionarySubjects<TVisitor>(object value, ref TVisitor visitor)
         where TVisitor : struct, ISubjectValueVisitor
     {
         switch (value)
@@ -65,65 +106,57 @@ public static class SubjectValueVisitor
             }
 
             case IEnumerable enumerable:
-                if (isDictionaryType)
+                foreach (var item in enumerable)
                 {
-                    foreach (var item in enumerable)
-                    {
-                        if (item is null) continue;
-                        if (TryGetKvpSubjectEntry(item, out var key, out var subject))
-                            visitor.OnSubject(subject, key);
-                    }
-                }
-                else
-                {
-                    var j = 0;
-                    foreach (var item in enumerable)
-                    {
-                        if (item is IInterceptorSubject subjectItem)
-                            visitor.OnSubject(subjectItem, j);
-                        j++;
-                    }
+                    if (item is null) continue;
+                    if (TryGetKvpSubjectEntry(item, out var key, out var subject))
+                        visitor.OnSubject(subject, key);
                 }
                 break;
         }
     }
 
     /// <summary>
-    /// Finds a single subject at the given <paramref name="indexOrKey"/> inside
-    /// <paramref name="value"/>, using <see cref="IDictionary"/>/<see cref="IList"/>
-    /// fast paths with <see cref="IEnumerable"/> fallback.
+    /// Finds a single subject at the given <paramref name="index"/> inside
+    /// a collection <paramref name="value"/>, using <see cref="IList"/>
+    /// fast path with <see cref="IEnumerable"/> fallback.
     /// </summary>
-    public static IInterceptorSubject? FindSubjectAt(object value, bool isDictionaryType, object indexOrKey)
+    public static IInterceptorSubject? FindCollectionSubjectAt(object value, int index)
     {
-        if (isDictionaryType)
-        {
-            if (value is IDictionary dictionary)
-                return dictionary[indexOrKey] as IInterceptorSubject;
+        if (value is IList list)
+            return list[index] as IInterceptorSubject;
 
-            if (value is IEnumerable enumerable)
+        if (value is IEnumerable enumerable)
+        {
+            var i = 0;
+            foreach (var item in enumerable)
             {
-                foreach (var item in enumerable)
-                {
-                    if (item is null) continue;
-                    if (TryGetKvpSubjectEntry(item, out var key, out var subject) && Equals(key, indexOrKey))
-                        return subject;
-                }
+                if (i == index)
+                    return item as IInterceptorSubject;
+                i++;
             }
         }
-        else
-        {
-            if (value is IList list && indexOrKey is int intIndex)
-                return list[intIndex] as IInterceptorSubject;
 
-            if (value is IEnumerable enumerable && indexOrKey is int enumIndex)
+        return null;
+    }
+
+    /// <summary>
+    /// Finds a single subject at the given <paramref name="key"/> inside
+    /// a dictionary <paramref name="value"/>, using <see cref="IDictionary"/>
+    /// fast path with <see cref="IEnumerable"/> KVP extraction fallback.
+    /// </summary>
+    public static IInterceptorSubject? FindDictionarySubjectAt(object value, object key)
+    {
+        if (value is IDictionary dictionary)
+            return dictionary[key] as IInterceptorSubject;
+
+        if (value is IEnumerable enumerable)
+        {
+            foreach (var item in enumerable)
             {
-                var i = 0;
-                foreach (var item in enumerable)
-                {
-                    if (i == enumIndex)
-                        return item as IInterceptorSubject;
-                    i++;
-                }
+                if (item is null) continue;
+                if (TryGetKvpSubjectEntry(item, out var itemKey, out var subject) && Equals(itemKey, key))
+                    return subject;
             }
         }
 

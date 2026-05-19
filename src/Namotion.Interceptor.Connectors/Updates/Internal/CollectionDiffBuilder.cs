@@ -13,6 +13,7 @@ internal sealed class CollectionDiffBuilder
     private readonly List<IInterceptorSubject> _oldCommonOrder = [];
     private readonly List<IInterceptorSubject> _newCommonOrder = [];
     private readonly HashSet<object> _oldKeys = [];
+    private readonly Dictionary<object, IInterceptorSubject> _oldLookup = new();
 
     /// <summary>
     /// Builds collection change operations.
@@ -163,41 +164,45 @@ internal sealed class CollectionDiffBuilder
         removedKeys = null;
 
         _oldKeys.Clear();
-        Dictionary<object, IInterceptorSubject>? oldLookup = null;
+        _oldLookup.Clear();
         if (oldEntries is not null)
         {
-            oldLookup = new Dictionary<object, IInterceptorSubject>(oldEntries.Count);
             foreach (var (key, subject) in oldEntries)
             {
                 _oldKeys.Add(key);
-                oldLookup[key] = subject;
+                _oldLookup[key] = subject;
             }
         }
 
+        // Track removed keys - start with all old keys, remove ones that still exist with same value
         HashSet<object>? keysToRemove = _oldKeys.Count > 0 ? [.._oldKeys] : null;
 
         foreach (var (key, newItem) in newEntries)
         {
             if (_oldKeys.Contains(key))
             {
-                var oldValue = oldLookup![key];
+                // Key exists in both - check if VALUE changed (different object reference)
+                var oldValue = _oldLookup[key];
                 if (ReferenceEquals(oldValue, newItem))
                 {
                     keysToRemove?.Remove(key);
                 }
                 else
                 {
+                    // Different object at same key - treat as Remove + Insert
                     newItemsToProcess ??= [];
                     newItemsToProcess.Add((key, newItem));
                 }
             }
             else
             {
+                // New key
                 newItemsToProcess ??= [];
                 newItemsToProcess.Add((key, newItem));
             }
         }
 
+        // Only return removedKeys if there are actually keys to remove
         if (keysToRemove is { Count: > 0 })
         {
             removedKeys = keysToRemove;
@@ -226,5 +231,6 @@ internal sealed class CollectionDiffBuilder
         _oldCommonOrder.Clear();
         _newCommonOrder.Clear();
         _oldKeys.Clear();
+        _oldLookup.Clear();
     }
 }

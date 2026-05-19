@@ -23,7 +23,7 @@ internal static class SubjectItemsUpdateFactory
         if (collectionValue is null)
             return;
 
-        var items = SubjectValueConverter.ToSubjectList(collectionValue);
+        var items = SubjectValueConvert.ToSubjectList(collectionValue);
         update.Count = items.Count;
         update.Items = new List<SubjectPropertyItemUpdate>(items.Count);
 
@@ -55,8 +55,8 @@ internal static class SubjectItemsUpdateFactory
         if (newCollectionValue is null)
             return;
 
-        var oldItems = oldCollectionValue is not null ? SubjectValueConverter.ToSubjectList(oldCollectionValue) : (IReadOnlyList<IInterceptorSubject>)[];
-        var newItems = SubjectValueConverter.ToSubjectList(newCollectionValue);
+        var oldItems = oldCollectionValue is not null ? SubjectValueConvert.ToSubjectList(oldCollectionValue) : (IReadOnlyList<IInterceptorSubject>)[];
+        var newItems = SubjectValueConvert.ToSubjectList(newCollectionValue);
         update.Count = newItems.Count;
 
         var changeBuilder = ChangeBuilderPool.Rent();
@@ -141,7 +141,7 @@ internal static class SubjectItemsUpdateFactory
         if (dictionaryValue is null)
             return;
 
-        var entries = SubjectValueConverter.ToDictionaryEntries(dictionaryValue);
+        var entries = SubjectValueConvert.ToDictionaryEntries(dictionaryValue);
         update.Count = entries.Count;
         update.Items = new List<SubjectPropertyItemUpdate>(entries.Count);
 
@@ -172,8 +172,8 @@ internal static class SubjectItemsUpdateFactory
         if (newDictValue is null)
             return;
 
-        var oldDict = oldDictValue is not null ? SubjectValueConverter.ToDictionaryEntries(oldDictValue) : null;
-        var newDict = SubjectValueConverter.ToDictionaryEntries(newDictValue);
+        var oldDict = oldDictValue is not null ? SubjectValueConvert.ToDictionaryEntries(oldDictValue) : null;
+        var newDict = SubjectValueConvert.ToDictionaryEntries(newDictValue);
         update.Count = newDict.Count;
 
         var changeBuilder = ChangeBuilderPool.Rent();

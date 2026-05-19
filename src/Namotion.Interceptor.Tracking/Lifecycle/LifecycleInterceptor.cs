@@ -448,7 +448,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Property = property
         };
 
-        SubjectValueVisitor.VisitSubjects(value, property.Metadata.Type.IsSubjectDictionaryType(), ref visitor);
+        if (property.Metadata.Type.IsSubjectDictionaryType())
+            SubjectValueVisitor.VisitDictionarySubjects(value, ref visitor);
+        else
+            SubjectValueVisitor.VisitCollectionSubjects(value, ref visitor);
     }
 
     private struct LifecycleSubjectVisitor : ISubjectValueVisitor

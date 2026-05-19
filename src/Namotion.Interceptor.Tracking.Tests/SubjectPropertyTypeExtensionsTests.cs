@@ -31,9 +31,9 @@ public class SubjectPropertyTypeExtensionsTests
     [InlineData(typeof(ImmutableArray<object>),                             false, true,  false)]
     [InlineData(typeof(ImmutableArray<IComparable>),                        false, true,  false)]
     [InlineData(typeof(ArrayList),                                          false, true,  false)]
-    [InlineData(typeof(IReadOnlyCollection<Person>),                         false, true,  false)]
-    [InlineData(typeof(IReadOnlyList<Person>),                               false, true,  false)]
-    [InlineData(typeof(ICollection<Person>),                                 false, true,  false)]
+    [InlineData(typeof(IReadOnlyCollection<Person>),                        false, true,  false)]
+    [InlineData(typeof(IReadOnlyList<Person>),                              false, true,  false)]
+    [InlineData(typeof(ICollection<Person>),                                false, true,  false)]
 
     // --- Subject dictionaries ---
     [InlineData(typeof(Dictionary<string, Person>),                         false, false, true)]
@@ -48,7 +48,7 @@ public class SubjectPropertyTypeExtensionsTests
     [InlineData(typeof(string),                                             false, false, false)]
     [InlineData(typeof(IList<int>),                                         false, false, false)]
     [InlineData(typeof(IEnumerable<int>),                                   false, false, false)]
-    [InlineData(typeof(IDictionary<string, int>),                          false, false, false)]
+    [InlineData(typeof(IDictionary<string, int>),                           false, false, false)]
     [InlineData(typeof(ImmutableArray<int>),                                false, false, false)]
     // Element-of-container-of-non-subjects: outer is not a subject collection.
     [InlineData(typeof(List<IEnumerable<Person>>),                          false, false, false)]

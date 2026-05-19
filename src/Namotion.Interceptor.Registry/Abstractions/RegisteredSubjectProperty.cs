@@ -439,7 +439,7 @@ public class RegisteredSubjectProperty
         };
         visitor.Positions?.Clear();
 
-        SubjectValueVisitor.VisitSubjects(value, isDictionaryType: false, ref visitor);
+        SubjectValueVisitor.VisitCollectionSubjects(value, ref visitor);
 
         _reusableCollectionPositions = visitor.Positions;
         return visitor.Positions;

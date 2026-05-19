@@ -3,7 +3,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
-internal static class SubjectValueConverter
+internal static class SubjectValueConvert
 {
     internal static IReadOnlyList<IInterceptorSubject> ToSubjectList(object value)
     {
@@ -14,7 +14,7 @@ internal static class SubjectValueConverter
             return typedEnumerable.ToList();
 
         var visitor = new SubjectListVisitor();
-        SubjectValueVisitor.VisitSubjects(value, isDictionaryType: false, ref visitor);
+        SubjectValueVisitor.VisitCollectionSubjects(value, ref visitor);
         return visitor.List ?? (IReadOnlyList<IInterceptorSubject>)[];
     }
 
@@ -27,14 +27,14 @@ internal static class SubjectValueConverter
             return typedEnumerable.ToList();
 
         var visitor = new SubjectListVisitor();
-        SubjectValueVisitor.VisitSubjects(value, isDictionaryType: false, ref visitor);
+        SubjectValueVisitor.VisitCollectionSubjects(value, ref visitor);
         return visitor.List ?? [];
     }
 
     internal static IReadOnlyList<(object key, IInterceptorSubject subject)> ToDictionaryEntries(object value)
     {
         var visitor = new DictionaryEntryVisitor();
-        SubjectValueVisitor.VisitSubjects(value, isDictionaryType: true, ref visitor);
+        SubjectValueVisitor.VisitDictionarySubjects(value, ref visitor);
         return visitor.Entries ?? (IReadOnlyList<(object, IInterceptorSubject)>)[];
     }
 
