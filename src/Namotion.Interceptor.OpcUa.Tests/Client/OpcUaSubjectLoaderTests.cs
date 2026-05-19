@@ -1449,6 +1449,74 @@ public class OpcUaSubjectLoaderTests
     }
 
     [Fact]
+    public async Task WhenBrowseNextReturnsFreshContinuationPointForever_ThenStopsAfterMaxContinuationRounds()
+    {
+        // Arrange: a misbehaving server that always returns a new continuation point on
+        // BrowseNext, never terminating the paging loop. The session-extension safety bound
+        // (MaxContinuationRounds = 100) must abort cleanly, collect the references seen so
+        // far, and release the trailing continuation point.
+        var rootId = new NodeId(1, 0);
+        var browseNextCallCount = 0;
+
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseResponse
+            {
+                Results =
+                [
+                    new BrowseResult
+                    {
+                        References = [CreateTestReferenceDescription("Initial", new ExpandedNodeId(new NodeId(2001, 2)))],
+                        ContinuationPoint = new byte[] { 0xFF }
+                    }
+                ],
+                DiagnosticInfos = []
+            });
+
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<bool>(),
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                var n = Interlocked.Increment(ref browseNextCallCount);
+                return new BrowseNextResponse
+                {
+                    Results =
+                    [
+                        new BrowseResult
+                        {
+                            References = [CreateTestReferenceDescription($"Page{n}", new ExpandedNodeId(new NodeId((uint)(3000 + n), 2)))],
+                            ContinuationPoint = new byte[] { (byte)(n & 0xFF), (byte)((n >> 8) & 0xFF) }
+                        }
+                    ],
+                    DiagnosticInfos = []
+                };
+            });
+
+        // Act
+        var result = await mockSession.Object.BrowseNodesAsync(
+            new[] { rootId },
+            maximumReferencesPerNode: 1000,
+            NullLogger<OpcUaSubjectClientSource>.Instance,
+            CancellationToken.None);
+
+        // Assert: 1 initial reference + 100 page references collected before the safety
+        // bound aborts the loop. The trailing continuation point release adds one extra
+        // BrowseNextAsync call (101 total) but its references are discarded.
+        Assert.Equal(101, result[rootId].Count);
+        Assert.True(browseNextCallCount >= 100, $"Expected at least 100 BrowseNextAsync calls before abort, got {browseNextCallCount}.");
+    }
+
+    [Fact]
     public async Task WhenBrowseNextSpansMultipleRoundsAndOneRoundIsRejected_ThenAllReferencesAreCollected()
     {
         // Arrange: two top-level variables each return a continuation point on initial

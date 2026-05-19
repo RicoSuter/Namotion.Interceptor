@@ -48,8 +48,11 @@ internal class OpcUaSubjectLoader
         CancellationToken cancellationToken)
     {
         var context = new LoadContext(
-            session, [], [], 
-            new Dictionary<NodeId, IInterceptorSubject>(), cancellationToken);
+            session,
+            new List<MonitoredItem>(),
+            new HashSet<IInterceptorSubject>(),
+            new Dictionary<NodeId, IInterceptorSubject>(),
+            cancellationToken);
 
         await LoadSubjectsAsync([(node, subject)], context).ConfigureAwait(false);
         return context.MonitoredItems;
@@ -619,7 +622,14 @@ internal class OpcUaSubjectLoader
                 break;
             }
 
-            var (nodesToBrowse, browseableEntries) = FilterUnvisitedNodes(currentRound, visitedNodes);
+            var nodesToBrowse = new List<NodeId>();
+            foreach (var (_, parentNodeId) in currentRound)
+            {
+                if (visitedNodes.Add(parentNodeId))
+                {
+                    nodesToBrowse.Add(parentNodeId);
+                }
+            }
 
             var browseResults = nodesToBrowse.Count > 0
                 ? await BrowseAndCacheAsync(nodesToBrowse, context).ConfigureAwait(false)
@@ -628,7 +638,7 @@ internal class OpcUaSubjectLoader
             var dynamicAttributeNodes = new List<(RegisteredSubjectProperty OwnerProperty, NodeId ChildNodeId, ReferenceDescription ChildNode, string BrowseName)>();
             var nextRound = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
 
-            foreach (var (property, parentNodeId) in browseableEntries)
+            foreach (var (property, parentNodeId) in currentRound)
             {
                 if (!processedEntries.Add((property, parentNodeId)))
                 {
@@ -656,23 +666,6 @@ internal class OpcUaSubjectLoader
             await ResolveDynamicAttributesAsync(dynamicAttributeNodes, nextRound, context).ConfigureAwait(false);
             currentRound = nextRound;
         }
-    }
-
-    private static (List<NodeId> NodeIds, List<(RegisteredSubjectProperty Property, NodeId ParentNodeId)> Entries) FilterUnvisitedNodes(
-        List<(RegisteredSubjectProperty Property, NodeId ParentNodeId)> round,
-        HashSet<NodeId> visitedNodes)
-    {
-        var nodeIds = new List<NodeId>();
-        var entries = new List<(RegisteredSubjectProperty Property, NodeId ParentNodeId)>();
-        foreach (var (property, parentNodeId) in round)
-        {
-            if (visitedNodes.Add(parentNodeId))
-            {
-                nodeIds.Add(parentNodeId);
-            }
-            entries.Add((property, parentNodeId));
-        }
-        return (nodeIds, entries);
     }
 
     private HashSet<string> MatchKnownAttributes(

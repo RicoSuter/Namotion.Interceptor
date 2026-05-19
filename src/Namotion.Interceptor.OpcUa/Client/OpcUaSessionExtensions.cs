@@ -210,6 +210,9 @@ internal static class OpcUaSessionExtensions
         }
         catch
         {
+            // `pending` may include entries the server has already invalidated via earlier
+            // successful BrowseNext calls in the failing round; releasing them returns
+            // BadContinuationPointInvalid, which ReleaseContinuationPointsAsync swallows.
             await ReleaseContinuationPointsAsync(session, pending, logger).ConfigureAwait(false);
             throw;
         }
