@@ -5,12 +5,13 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
+using System.Text;
 using Namotion.Interceptor.Registry.Attributes;
+using Opc.Ua;
 
 namespace HomeBlaze.OpcUa;
 
@@ -44,6 +45,18 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     /// </summary>
     [Configuration]
     public partial string? RootPath { get; set; }
+
+    /// <summary>
+    /// Optional username for OPC UA server authentication. When empty, anonymous authentication is used.
+    /// </summary>
+    [Configuration]
+    public partial string? Username { get; set; }
+
+    /// <summary>
+    /// Optional password for OPC UA server authentication.
+    /// </summary>
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
 
     /// <summary>
     /// Whether the client is enabled and should auto-start on application startup.
@@ -83,6 +96,12 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     /// </summary>
     [State]
     public partial double? OutgoingChangesPerSecond { get; set; }
+
+    /// <summary>
+    /// Number of monitored items in the client. Null when not running.
+    /// </summary>
+    [State]
+    public partial double? MonitoredItemCount { get; set; }
 
     /// <summary>
     /// Dynamic root subject containing discovered OPC UA properties.
@@ -177,6 +196,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             IsConnected = diagnostics.IsConnected;
             IncomingChangesPerSecond = diagnostics.IncomingChangesPerSecond;
             OutgoingChangesPerSecond = diagnostics.OutgoingChangesPerSecond;
+            MonitoredItemCount = diagnostics.MonitoredItemCount;
         }
     }
 
@@ -205,6 +225,9 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 TypeResolver = new HomeBlazeOpcUaTypeResolver(_logger),
                 ValueConverter = new OpcUaValueConverter(),
                 SubjectFactory = new HomeBlazeOpcUaSubjectFactory(),
+                CreateUserIdentity = !string.IsNullOrEmpty(Username) && !string.IsNullOrEmpty(Password)
+                    ? _ => Task.FromResult(new UserIdentity(Username, Encoding.UTF8.GetBytes(Password)))
+                    : null,
             };
 
             _clientSource = root.CreateOpcUaClientSource(configuration, _logger);
