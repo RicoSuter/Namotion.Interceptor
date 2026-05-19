@@ -11,10 +11,8 @@ namespace Namotion.Interceptor.Tracking;
 /// </summary>
 public static class SubjectPropertyTypeExtensions
 {
-    // The four caches feed each other: factories transitively invoke siblings to enforce
-    // mutual exclusivity. ConcurrentDictionary.GetOrAdd may run a factory multiple times
-    // concurrently for the same key; the classifiers are pure functions of Type so racing
-    // factory invocations converge to the same answer.
+    // Factories transitively invoke sibling caches; concurrent GetOrAdd races are safe
+    // because the classifiers are pure functions of Type.
     private static readonly ConcurrentDictionary<Type, bool> CanContainSubjectsCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectReferenceTypeCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionTypeCache = new();
@@ -106,20 +104,12 @@ public static class SubjectPropertyTypeExtensions
     {
         return IsSubjectReferenceTypeCache.GetOrAdd(type, static t =>
         {
-            // Rule 1: IInterceptorSubject always wins. The library treats any type that
-            // explicitly declares itself a subject as a single reference; its child
-            // subjects come from its declared [InterceptorSubject] partial properties,
-            // not from any container interface it happens to implement.
             if (typeof(IInterceptorSubject).IsAssignableFrom(t))
             {
                 return true;
             }
 
-            // Rule 2 (for non-subjects): plain interfaces and `object` can hold a subject
-            // via polymorphism. Generic interfaces over non-subject content (e.g.
-            // IList<int>) are rejected so downstream code does not try to assign subjects
-            // to properties that can never structurally hold them.
-            return IsElementSubjectReference(t) &&
+            return CanDirectlyHoldSubject(t) &&
                    !t.IsSubjectDictionaryType() &&
                    !t.IsSubjectCollectionType();
         });
@@ -129,7 +119,6 @@ public static class SubjectPropertyTypeExtensions
     {
         return IsSubjectCollectionTypeCache.GetOrAdd(type, static t =>
         {
-            // Rule 1: IInterceptorSubject wins over any container shape (see IsSubjectReferenceType).
             if (typeof(IInterceptorSubject).IsAssignableFrom(t))
                 return false;
 
@@ -141,11 +130,10 @@ public static class SubjectPropertyTypeExtensions
 
             var genericEnumerables = GetEnumerablesIncludingSelf(t);
 
-            // If generic type info is available, use it for precise check.
             if (genericEnumerables.Length > 0)
-                return genericEnumerables.Any(static i => IsElementSubjectReference(i.GenericTypeArguments[0]));
+                return genericEnumerables.Any(static i => CanDirectlyHoldSubject(i.GenericTypeArguments[0]));
 
-            // No generic type info (e.g. ArrayList): fall back to non-generic check.
+            // No generic type info (e.g. ArrayList)
             return typeof(ICollection).IsAssignableFrom(t);
         });
     }
@@ -154,7 +142,6 @@ public static class SubjectPropertyTypeExtensions
     {
         return IsSubjectDictionaryTypeCache.GetOrAdd(type, static t =>
         {
-            // Rule 1: IInterceptorSubject wins over any container shape (see IsSubjectReferenceType).
             if (typeof(IInterceptorSubject).IsAssignableFrom(t))
                 return false;
 
@@ -163,53 +150,22 @@ public static class SubjectPropertyTypeExtensions
 
             var genericEnumerables = GetEnumerablesIncludingSelf(t);
 
-            // If generic type info is available, use it for precise check.
             if (genericEnumerables.Length > 0)
             {
                 return genericEnumerables.Any(static i =>
                     i.GenericTypeArguments[0] is { IsGenericType: true } kvType &&
                     kvType.GetGenericTypeDefinition() == typeof(KeyValuePair<,>) &&
-                    IsElementSubjectReference(kvType.GenericTypeArguments[1]));
+                    CanDirectlyHoldSubject(kvType.GenericTypeArguments[1]));
             }
 
-            // No generic type info (e.g. Hashtable): fall back to non-generic check.
+            // No generic type info (e.g. Hashtable)
             return typeof(IDictionary).IsAssignableFrom(t);
         });
     }
 
-    // Non-recursive subject-reference predicate used as the leaf check.
-    private static bool IsSubjectReferenceCandidate(Type t) =>
-        t.IsInterface ||
-        t == typeof(object) ||
-        typeof(IInterceptorSubject).IsAssignableFrom(t);
-
-    // Non-recursive leaf check so self-referential types do not blow the stack.
-    private static bool IsElementSubjectReference(Type element)
-    {
-        if (!IsSubjectReferenceCandidate(element))
-            return false;
-
-        if (!typeof(IEnumerable).IsAssignableFrom(element))
-            return true;
-
-        foreach (var i in GetEnumerablesIncludingSelf(element))
-        {
-            var nestedArg = i.GenericTypeArguments[0];
-            if (nestedArg is { IsGenericType: true } kv &&
-                kv.GetGenericTypeDefinition() == typeof(KeyValuePair<,>) &&
-                IsSubjectReferenceCandidate(kv.GenericTypeArguments[1]))
-            {
-                return false;
-            }
-            if (IsSubjectReferenceCandidate(nestedArg))
-            {
-                return false;
-            }
-        }
-
-        // Enumerable with no candidate content (e.g. IList<int>): a container, not a reference.
-        return false;
-    }
+    private static bool CanDirectlyHoldSubject(Type t) =>
+        (t.IsInterface || t == typeof(object) || typeof(IInterceptorSubject).IsAssignableFrom(t)) &&
+        !typeof(IEnumerable).IsAssignableFrom(t);
 
     private static Type[] GetGenericEnumerableInterfaces(Type type)
     {
@@ -217,8 +173,8 @@ public static class SubjectPropertyTypeExtensions
             static i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
     }
 
-    // GetInterfaces() never returns the type itself; for a bare IEnumerable<X> we
-    // include `type` explicitly so element probing covers that case.
+    // GetInterfaces() does not return the type itself, so for a bare IEnumerable<X>
+    // property type we include it explicitly.
     private static Type[] GetEnumerablesIncludingSelf(Type type)
     {
         var fromInterfaces = GetGenericEnumerableInterfaces(type);
