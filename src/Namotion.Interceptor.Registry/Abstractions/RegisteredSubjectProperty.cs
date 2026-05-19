@@ -124,7 +124,7 @@ public class RegisteredSubjectProperty
     }
 
     /// <summary>
-    /// Gets a value indicating whether this property references multiple subject with a collection.
+    /// Gets a value indicating whether this property references multiple subjects with a collection.
     /// </summary>
     public bool IsSubjectCollection
     {
@@ -133,7 +133,7 @@ public class RegisteredSubjectProperty
     }
 
     /// <summary>
-    /// Gets a value indicating whether this property references multiple subject with a dictionary.
+    /// Gets a value indicating whether this property references multiple subjects with a dictionary.
     /// </summary>
     public bool IsSubjectDictionary
     {
