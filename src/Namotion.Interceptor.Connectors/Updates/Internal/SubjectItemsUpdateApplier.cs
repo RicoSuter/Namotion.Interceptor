@@ -143,7 +143,7 @@ internal static class SubjectItemsUpdateApplier
         var existingValue = property.GetValue();
         if (existingValue is not null)
         {
-            foreach (var (key, subject) in SubjectValueConvert.ToDictionaryEntries(existingValue))
+            foreach (var (key, subject) in SubjectValueConvert.ToSubjectDictionaryEntries(existingValue))
             {
                 workingDictionary[key] = subject;
             }

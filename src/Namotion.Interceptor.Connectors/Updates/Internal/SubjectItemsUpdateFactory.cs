@@ -141,7 +141,7 @@ internal static class SubjectItemsUpdateFactory
         if (dictionaryValue is null)
             return;
 
-        var entries = SubjectValueConvert.ToDictionaryEntries(dictionaryValue);
+        var entries = SubjectValueConvert.ToSubjectDictionaryEntries(dictionaryValue);
         update.Count = entries.Count;
         update.Items = new List<SubjectPropertyItemUpdate>(entries.Count);
 
@@ -172,8 +172,8 @@ internal static class SubjectItemsUpdateFactory
         if (newDictValue is null)
             return;
 
-        var oldDict = oldDictValue is not null ? SubjectValueConvert.ToDictionaryEntries(oldDictValue) : null;
-        var newDict = SubjectValueConvert.ToDictionaryEntries(newDictValue);
+        var oldDict = oldDictValue is not null ? SubjectValueConvert.ToSubjectDictionaryEntries(oldDictValue) : null;
+        var newDict = SubjectValueConvert.ToSubjectDictionaryEntries(newDictValue);
         update.Count = newDict.Count;
 
         var changeBuilder = ChangeBuilderPool.Rent();

@@ -31,7 +31,7 @@ internal static class SubjectValueConvert
         return visitor.List ?? [];
     }
 
-    internal static IReadOnlyList<(object key, IInterceptorSubject subject)> ToDictionaryEntries(object value)
+    internal static IReadOnlyList<(object key, IInterceptorSubject subject)> ToSubjectDictionaryEntries(object value)
     {
         var visitor = new DictionaryEntryVisitor();
         SubjectValueVisitor.VisitDictionarySubjects(value, ref visitor);
