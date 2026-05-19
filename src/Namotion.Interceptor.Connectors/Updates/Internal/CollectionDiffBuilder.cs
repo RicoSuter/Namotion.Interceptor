@@ -12,7 +12,6 @@ internal sealed class CollectionDiffBuilder
     private readonly Dictionary<IInterceptorSubject, int> _oldCommonIndexMap = new();
     private readonly List<IInterceptorSubject> _oldCommonOrder = [];
     private readonly List<IInterceptorSubject> _newCommonOrder = [];
-    private readonly HashSet<object> _oldKeys = [];
     private readonly Dictionary<object, IInterceptorSubject> _oldLookup = new();
 
     /// <summary>
@@ -163,23 +162,21 @@ internal sealed class CollectionDiffBuilder
         newItemsToProcess = null;
         removedKeys = null;
 
-        _oldKeys.Clear();
         _oldLookup.Clear();
         if (oldEntries is not null)
         {
             foreach (var (key, subject) in oldEntries)
             {
-                _oldKeys.Add(key);
                 _oldLookup[key] = subject;
             }
         }
 
         // Track removed keys - start with all old keys, remove ones that still exist with same value
-        HashSet<object>? keysToRemove = _oldKeys.Count > 0 ? [.._oldKeys] : null;
+        HashSet<object>? keysToRemove = _oldLookup.Count > 0 ? [.._oldLookup.Keys] : null;
 
         foreach (var (key, newItem) in newEntries)
         {
-            if (_oldKeys.Contains(key))
+            if (_oldLookup.ContainsKey(key))
             {
                 // Key exists in both - check if VALUE changed (different object reference)
                 var oldValue = _oldLookup[key];
@@ -230,7 +227,6 @@ internal sealed class CollectionDiffBuilder
         _oldCommonIndexMap.Clear();
         _oldCommonOrder.Clear();
         _newCommonOrder.Clear();
-        _oldKeys.Clear();
         _oldLookup.Clear();
     }
 }
