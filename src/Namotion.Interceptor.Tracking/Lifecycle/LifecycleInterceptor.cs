@@ -438,33 +438,77 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects)
     {
-        if (value is null)
-            return;
-
-        var visitor = new LifecycleSubjectVisitor
+        // Hot paths (IDictionary, ICollection) come before string/IEnumerable so common
+        // writes don't pay extra type checks. The IEnumerable case at the end handles read-only
+        // types that implement neither ICollection nor IDictionary (e.g. FrozenSet, custom
+        // IReadOnlyList/IReadOnlyDictionary wrappers).
+        switch (value)
         {
-            Subjects = collectedSubjects,
-            Touched = touchedSubjects,
-            Property = property
-        };
+            case null:
+                return;
 
-        if (property.Metadata.Type.IsSubjectDictionaryType())
-            SubjectValueVisitor.VisitDictionarySubjects(value, ref visitor);
-        else
-            SubjectValueVisitor.VisitCollectionSubjects(value, ref visitor);
-    }
+            case IInterceptorSubject subject:
+                touchedSubjects?.Add(subject);
+                collectedSubjects.Add((subject, property, null));
+                return;
 
-    private struct LifecycleSubjectVisitor : ISubjectValueVisitor
-    {
-        public List<(IInterceptorSubject subject, PropertyReference property, object? index)> Subjects;
-        public HashSet<IInterceptorSubject>? Touched;
-        public PropertyReference Property;
+            case IDictionary dictionary:
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    if (entry.Value is IInterceptorSubject subjectItem)
+                    {
+                        touchedSubjects?.Add(subjectItem);
+                        collectedSubjects.Add((subjectItem, property, entry.Key));
+                    }
+                }
+                return;
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void OnSubject(IInterceptorSubject subject, object? indexOrKey)
-        {
-            Touched?.Add(subject);
-            Subjects.Add((subject, Property, indexOrKey));
+            case ICollection collection:
+            {
+                var i = 0;
+                foreach (var item in collection)
+                {
+                    if (item is IInterceptorSubject subjectItem)
+                    {
+                        touchedSubjects?.Add(subjectItem);
+                        collectedSubjects.Add((subjectItem, property, i));
+                    }
+                    i++;
+                }
+                return;
+            }
+
+            case string:
+                return;
+
+            case IEnumerable enumerable:
+                // Read-only types (no ICollection): dispatch on declared property shape.
+                if (property.Metadata.Type.IsSubjectDictionaryType())
+                {
+                    foreach (var item in enumerable)
+                    {
+                        if (item is null) continue;
+                        if (SubjectValueVisitor.TryGetKvpSubjectEntry(item, out var key, out var subjectItem))
+                        {
+                            touchedSubjects?.Add(subjectItem);
+                            collectedSubjects.Add((subjectItem, property, key));
+                        }
+                    }
+                }
+                else
+                {
+                    var i = 0;
+                    foreach (var item in enumerable)
+                    {
+                        if (item is IInterceptorSubject subjectItem)
+                        {
+                            touchedSubjects?.Add(subjectItem);
+                            collectedSubjects.Add((subjectItem, property, i));
+                        }
+                        i++;
+                    }
+                }
+                return;
         }
     }
 

@@ -71,10 +71,6 @@ namespace Namotion.Interceptor.Tracking.Change
 }
 namespace Namotion.Interceptor.Tracking
 {
-    public interface ISubjectValueVisitor
-    {
-        void OnSubject(Namotion.Interceptor.IInterceptorSubject subject, object? indexOrKey);
-    }
     public static class InterceptorSubjectContextExtensions
     {
         public static Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this Namotion.Interceptor.IInterceptorSubjectContext context, System.Reactive.Concurrency.IScheduler? scheduler = null) { }
@@ -114,10 +110,7 @@ namespace Namotion.Interceptor.Tracking
     {
         public static Namotion.Interceptor.IInterceptorSubject? FindCollectionSubjectAt(object value, int index) { }
         public static Namotion.Interceptor.IInterceptorSubject? FindDictionarySubjectAt(object value, object key) { }
-        public static void VisitCollectionSubjects<TVisitor>(object value, ref TVisitor visitor)
-            where TVisitor :  struct, Namotion.Interceptor.Tracking.ISubjectValueVisitor { }
-        public static void VisitDictionarySubjects<TVisitor>(object value, ref TVisitor visitor)
-            where TVisitor :  struct, Namotion.Interceptor.Tracking.ISubjectValueVisitor { }
+        public static bool TryGetKvpSubjectEntry(object item, out object? key, out Namotion.Interceptor.IInterceptorSubject subject) { }
     }
 }
 namespace Namotion.Interceptor.Tracking.Lifecycle

@@ -35,12 +35,17 @@ public class SubjectPropertyTypeExtensionsTests
     [InlineData(typeof(IReadOnlyList<Person>),                              false, true,  false)]
     [InlineData(typeof(ICollection<Person>),                                false, true,  false)]
 
-    // --- Subject dictionaries ---
+    // --- Subject dictionaries (must implement a real dict interface) ---
     [InlineData(typeof(Dictionary<string, Person>),                         false, false, true)]
     [InlineData(typeof(IDictionary<string, Person>),                        false, false, true)]
-    [InlineData(typeof(IEnumerable<KeyValuePair<string, Person>>),          false, false, true)]
     [InlineData(typeof(Hashtable),                                          false, false, true)]
     [InlineData(typeof(IReadOnlyDictionary<string, Person>),                false, false, true)]
+    // Bare IEnumerable<KVP> is NOT dict-classified: there's no dict interface to dispatch on at
+    // runtime, so the lifecycle handler would silently no-op for such values. Classifier and
+    // handler must agree.
+    [InlineData(typeof(IEnumerable<KeyValuePair<string, Person>>),          false, false, false)]
+    // Same reasoning: List<KVP> is not dict-shaped despite holding KVP elements with subject values.
+    [InlineData(typeof(List<KeyValuePair<string, Person>>),                 false, false, false)]
 
     // --- Not subject-carrying ---
     [InlineData(typeof(int),                                                false, false, false)]

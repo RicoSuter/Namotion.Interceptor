@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+using System.Collections;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -13,9 +13,7 @@ internal static class SubjectValueConvert
         if (value is IEnumerable<IInterceptorSubject> typedEnumerable)
             return typedEnumerable.ToList();
 
-        var visitor = new SubjectListVisitor();
-        SubjectValueVisitor.VisitCollectionSubjects(value, ref visitor);
-        return visitor.List ?? (IReadOnlyList<IInterceptorSubject>)[];
+        return CollectSubjects(value) ?? (IReadOnlyList<IInterceptorSubject>)[];
     }
 
     internal static List<IInterceptorSubject> ToSubjectMutableList(object? value)
@@ -26,39 +24,64 @@ internal static class SubjectValueConvert
         if (value is IEnumerable<IInterceptorSubject> typedEnumerable)
             return typedEnumerable.ToList();
 
-        var visitor = new SubjectListVisitor();
-        SubjectValueVisitor.VisitCollectionSubjects(value, ref visitor);
-        return visitor.List ?? [];
+        return CollectSubjects(value) ?? [];
     }
 
     internal static IReadOnlyList<(object key, IInterceptorSubject subject)> ToSubjectDictionaryEntries(object value)
     {
-        var visitor = new DictionaryEntryVisitor();
-        SubjectValueVisitor.VisitDictionarySubjects(value, ref visitor);
-        return visitor.Entries ?? (IReadOnlyList<(object, IInterceptorSubject)>)[];
+        List<(object key, IInterceptorSubject subject)>? entries = null;
+
+        if (value is IInterceptorSubject single)
+        {
+            entries = [(null!, single)];
+        }
+        else if (value is IDictionary dictionary)
+        {
+            foreach (DictionaryEntry entry in dictionary)
+            {
+                if (entry.Value is IInterceptorSubject subjectItem)
+                {
+                    entries ??= [];
+                    entries.Add((entry.Key, subjectItem));
+                }
+            }
+        }
+        else if (value is not string && value is IEnumerable enumerable)
+        {
+            foreach (var item in enumerable)
+            {
+                if (item is null) continue;
+                if (SubjectValueVisitor.TryGetKvpSubjectEntry(item, out var key, out var subject))
+                {
+                    entries ??= [];
+                    entries.Add((key!, subject));
+                }
+            }
+        }
+
+        return entries ?? (IReadOnlyList<(object, IInterceptorSubject)>)[];
     }
 
-    private struct SubjectListVisitor : ISubjectValueVisitor
+    private static List<IInterceptorSubject>? CollectSubjects(object value)
     {
-        public List<IInterceptorSubject>? List;
+        List<IInterceptorSubject>? list = null;
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void OnSubject(IInterceptorSubject subject, object? indexOrKey)
+        if (value is IInterceptorSubject single)
         {
-            List ??= [];
-            List.Add(subject);
+            list = [single];
         }
-    }
-
-    private struct DictionaryEntryVisitor : ISubjectValueVisitor
-    {
-        public List<(object key, IInterceptorSubject subject)>? Entries;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void OnSubject(IInterceptorSubject subject, object? indexOrKey)
+        else if (value is not string && value is IEnumerable enumerable)
         {
-            Entries ??= [];
-            Entries.Add((indexOrKey!, subject));
+            foreach (var item in enumerable)
+            {
+                if (item is IInterceptorSubject subjectItem)
+                {
+                    list ??= [];
+                    list.Add(subjectItem);
+                }
+            }
         }
+
+        return list;
     }
 }

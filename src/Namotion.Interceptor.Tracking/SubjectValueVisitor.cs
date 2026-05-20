@@ -6,103 +6,13 @@ using System.Runtime.CompilerServices;
 namespace Namotion.Interceptor.Tracking;
 
 /// <summary>
-/// Visitor interface for zero-allocation subject iteration. Implement as a struct
-/// so the JIT monomorphizes the generic <see cref="SubjectValueVisitor.VisitCollectionSubjects{TVisitor}"/> call.
-/// </summary>
-public interface ISubjectValueVisitor
-{
-    void OnSubject(IInterceptorSubject subject, object? indexOrKey);
-}
-
-/// <summary>
-/// Shared tiered dispatch for discovering subjects inside property values.
-/// Fast paths (<see cref="IDictionary"/>, <see cref="ICollection"/>, <see cref="IList"/>)
-/// are checked first for collections; dictionary dispatch uses <see cref="IDictionary"/>
-/// fast path with <see cref="IEnumerable"/> KVP extraction as the fallback for read-only types.
+/// Static helpers for locating subjects inside property values. Used by hot paths
+/// (LifecycleInterceptor, RegisteredSubjectProperty) which inline the dispatch switch
+/// themselves for best codegen, and by PathExtensions for keyed lookups.
 /// </summary>
 public static class SubjectValueVisitor
 {
     private static readonly ConcurrentDictionary<Type, (Func<object, object?> getKey, Func<object, object?> getValue)?> KvpAccessorCache = new();
-
-    /// <summary>
-    /// Visits all subjects found in a collection <paramref name="value"/> using tiered dispatch.
-    /// The visitor receives the zero-based integer index as <c>indexOrKey</c>.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void VisitCollectionSubjects<TVisitor>(object value, ref TVisitor visitor)
-        where TVisitor : struct, ISubjectValueVisitor
-    {
-        switch (value)
-        {
-            case IInterceptorSubject subject:
-                visitor.OnSubject(subject, null);
-                break;
-
-            case string:
-                break;
-
-            case ICollection collection:
-            {
-                var i = 0;
-                foreach (var item in collection)
-                {
-                    if (item is IInterceptorSubject subjectItem)
-                        visitor.OnSubject(subjectItem, i);
-                    i++;
-                }
-                break;
-            }
-
-            case IEnumerable enumerable:
-            {
-                var j = 0;
-                foreach (var item in enumerable)
-                {
-                    if (item is IInterceptorSubject subjectItem)
-                        visitor.OnSubject(subjectItem, j);
-                    j++;
-                }
-                break;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Visits all subjects found in a dictionary <paramref name="value"/> using tiered dispatch.
-    /// Items are treated as <c>KeyValuePair&lt;K,V&gt;</c> and the visitor receives the
-    /// dictionary key as <c>indexOrKey</c>.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void VisitDictionarySubjects<TVisitor>(object value, ref TVisitor visitor)
-        where TVisitor : struct, ISubjectValueVisitor
-    {
-        switch (value)
-        {
-            case IInterceptorSubject subject:
-                visitor.OnSubject(subject, null);
-                break;
-
-            case IDictionary dictionary:
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    if (entry.Value is IInterceptorSubject subjectItem)
-                        visitor.OnSubject(subjectItem, entry.Key);
-                }
-                break;
-
-            case string:
-                break;
-
-            case IEnumerable enumerable:
-                foreach (var item in enumerable)
-                {
-                    if (item is null) continue;
-                    if (TryGetKvpSubjectEntry(item, out var key, out var subject))
-                        visitor.OnSubject(subject, key);
-                }
-                break;
-        }
-    }
 
     /// <summary>
     /// Finds a single subject at the given <paramref name="index"/> inside
@@ -151,8 +61,13 @@ public static class SubjectValueVisitor
         return null;
     }
 
+    /// <summary>
+    /// Reflects <c>KeyValuePair&lt;,&gt;</c> shape for read-only dictionary fallbacks
+    /// (e.g. <see cref="System.Collections.Frozen.FrozenDictionary{TKey,TValue}"/>) where
+    /// <see cref="IDictionary"/> isn't implemented. Accessor delegates are cached per type.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool TryGetKvpSubjectEntry(object item, out object? key, out IInterceptorSubject subject)
+    public static bool TryGetKvpSubjectEntry(object item, out object? key, out IInterceptorSubject subject)
     {
         var accessors = KvpAccessorCache.GetOrAdd(item.GetType(), static t =>
         {

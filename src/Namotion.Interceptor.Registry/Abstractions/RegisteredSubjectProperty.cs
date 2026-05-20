@@ -424,6 +424,8 @@ public class RegisteredSubjectProperty
 
     /// <summary>
     /// Maps each subject in the collection to its current position.
+    /// Uses IList indexed access when available; falls back to ICollection foreach,
+    /// then IEnumerable for read-only types that implement neither.
     /// Reuses a ThreadStatic dictionary to avoid allocations.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -432,29 +434,47 @@ public class RegisteredSubjectProperty
         if (value is null)
             return null;
 
-        var visitor = new PositionVisitor
+        var collectionPositions = _reusableCollectionPositions;
+        collectionPositions?.Clear();
+
+        if (value is IList list)
         {
-            Positions = _reusableCollectionPositions,
-            CapacityHint = capacityHint
-        };
-        visitor.Positions?.Clear();
-
-        SubjectValueVisitor.VisitCollectionSubjects(value, ref visitor);
-
-        _reusableCollectionPositions = visitor.Positions;
-        return visitor.Positions;
-    }
-
-    private struct PositionVisitor : ISubjectValueVisitor
-    {
-        public Dictionary<IInterceptorSubject, int>? Positions;
-        public int CapacityHint;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void OnSubject(IInterceptorSubject subject, object? indexOrKey)
-        {
-            Positions ??= new Dictionary<IInterceptorSubject, int>(CapacityHint);
-            Positions[subject] = indexOrKey is int index ? index : 0;
+            for (var index = 0; index < list.Count; index++)
+            {
+                if (list[index] is IInterceptorSubject subject)
+                {
+                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
+                    collectionPositions[subject] = index;
+                }
+            }
         }
+        else if (value is ICollection collection)
+        {
+            var index = 0;
+            foreach (var item in collection)
+            {
+                if (item is IInterceptorSubject subject)
+                {
+                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
+                    collectionPositions[subject] = index;
+                }
+                index++;
+            }
+        }
+        else if (value is IEnumerable enumerable and not string)
+        {
+            var index = 0;
+            foreach (var item in enumerable)
+            {
+                if (item is IInterceptorSubject subject)
+                {
+                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
+                    collectionPositions[subject] = index;
+                }
+                index++;
+            }
+        }
+
+        return collectionPositions;
     }
 }

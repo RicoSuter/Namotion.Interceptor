@@ -145,8 +145,16 @@ public static class SubjectPropertyTypeExtensions
             if (typeof(IInterceptorSubject).IsAssignableFrom(t))
                 return false;
 
-            if (!typeof(IEnumerable).IsAssignableFrom(t))
+            // Require a real dictionary interface. Bare IEnumerable<KeyValuePair<,>> is not
+            // classified as dict because the runtime handler dispatches via IDictionary; without
+            // an actual dict interface a value like List<KVP<K, Subject>> would silently be
+            // treated as a plain collection (master parity). Classifier and handler must agree.
+            if (!typeof(IDictionary).IsAssignableFrom(t) &&
+                !ImplementsGenericInterfaceDefinition(t, typeof(IDictionary<,>)) &&
+                !ImplementsGenericInterfaceDefinition(t, typeof(IReadOnlyDictionary<,>)))
+            {
                 return false;
+            }
 
             var genericEnumerables = GetEnumerablesIncludingSelf(t);
 
@@ -166,6 +174,20 @@ public static class SubjectPropertyTypeExtensions
     private static bool CanDirectlyHoldSubject(Type t) =>
         (t.IsInterface || t == typeof(object) || typeof(IInterceptorSubject).IsAssignableFrom(t)) &&
         !typeof(IEnumerable).IsAssignableFrom(t);
+
+    private static bool ImplementsGenericInterfaceDefinition(Type type, Type genericInterfaceDefinition)
+    {
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == genericInterfaceDefinition)
+            return true;
+
+        foreach (var i in type.GetInterfaces())
+        {
+            if (i.IsGenericType && i.GetGenericTypeDefinition() == genericInterfaceDefinition)
+                return true;
+        }
+
+        return false;
+    }
 
     private static Type[] GetGenericEnumerableInterfaces(Type type)
     {
