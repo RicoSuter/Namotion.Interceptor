@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking;
