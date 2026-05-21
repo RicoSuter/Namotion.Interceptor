@@ -87,8 +87,6 @@ public class SubjectLookupTests
         Assert.Null(result);
     }
 
-    // --- FindSubjectInDictionary ---
-
     [Fact]
     public void WhenValueIsDictionary_ThenReturnsSubjectAtKey()
     {
@@ -264,5 +262,4 @@ public class SubjectLookupTests
         Assert.Equal("k2", key2);
         Assert.Same(person2, subject2);
     }
-
 }
