@@ -168,25 +168,27 @@ public static class SubjectPropertyTypeExtensions
                     IsCandidateElementType(kvType.GenericTypeArguments[1]));
             }
 
-            // No generic type info (e.g. Hashtable)
-            return typeof(IDictionary).IsAssignableFrom(t);
+            // No generic enumerable interface: the dict-interface check above only lets non-generic
+            // IDictionary implementations (e.g. Hashtable) reach here, so this branch is true.
+            return true;
         });
     }
 
     // Self-predicate: can a value of this exact type be assigned to a property and treated as a
     // single subject reference? Excludes IEnumerable so that container types route to the
-    // collection/dictionary classifiers instead of being treated as references.
+    // collection/dictionary classifiers instead of being treated as references. The IIS check
+    // is intentionally absent: callers (IsSubjectReferenceTypeSlow) handle IIS short-circuit
+    // before invoking this helper.
     private static bool CanDirectlyHoldSubject(Type t) =>
-        (t.IsInterface || t == typeof(object) || typeof(IInterceptorSubject).IsAssignableFrom(t)) &&
+        (t.IsInterface || t == typeof(object)) &&
         !typeof(IEnumerable).IsAssignableFrom(t);
 
     // Element-predicate: could an element of this type inside a collection/dictionary be a subject?
-    // Differs from CanDirectlyHoldSubject: an IInterceptorSubject that also implements IEnumerable
-    // (hybrid container-subject) is still a valid subject element, so the IIS check short-circuits
-    // before the IEnumerable exclusion. Used for List<Hybrid> classification.
+    // An IInterceptorSubject that also implements IEnumerable (hybrid container-subject) is still
+    // a valid subject element, so IIS short-circuits before CanDirectlyHoldSubject's IEnumerable
+    // exclusion. Used for List<Hybrid> classification.
     private static bool IsCandidateElementType(Type t) =>
-        typeof(IInterceptorSubject).IsAssignableFrom(t) ||
-        ((t.IsInterface || t == typeof(object)) && !typeof(IEnumerable).IsAssignableFrom(t));
+        typeof(IInterceptorSubject).IsAssignableFrom(t) || CanDirectlyHoldSubject(t);
 
     private static bool ImplementsGenericInterfaceDefinition(Type type, Type genericInterfaceDefinition)
     {
@@ -217,6 +219,9 @@ public static class SubjectPropertyTypeExtensions
         {
             return fromInterfaces;
         }
+
+        if (fromInterfaces.Length == 0)
+            return [type];
 
         var enriched = new Type[fromInterfaces.Length + 1];
         Array.Copy(fromInterfaces, enriched, fromInterfaces.Length);

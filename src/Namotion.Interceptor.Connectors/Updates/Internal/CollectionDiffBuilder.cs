@@ -14,6 +14,7 @@ internal sealed class CollectionDiffBuilder
     private readonly Dictionary<IInterceptorSubject, int> _oldCommonIndexMap = new();
     private readonly List<IInterceptorSubject> _oldCommonOrder = [];
     private readonly List<IInterceptorSubject> _newCommonOrder = [];
+    private readonly List<(object key, IInterceptorSubject item)> _commonDictionaryItems = [];
 
     /// <summary>
     /// Builds collection change operations.
@@ -192,6 +193,7 @@ internal sealed class CollectionDiffBuilder
                 if (ReferenceEquals(oldItem, newItem))
                 {
                     keysToRemove?.Remove(key);
+                    _commonDictionaryItems.Add((key, newItem));
                 }
                 else
                 {
@@ -227,6 +229,12 @@ internal sealed class CollectionDiffBuilder
     public IReadOnlyList<IInterceptorSubject> GetCommonItems() => _newCommonOrder;
 
     /// <summary>
+    /// Gets dictionary entries whose key and value (by reference) exist in both old and new.
+    /// Populated by <see cref="GetDictionaryChanges"/>.
+    /// </summary>
+    public IReadOnlyList<(object key, IInterceptorSubject item)> GetCommonDictionaryItems() => _commonDictionaryItems;
+
+    /// <summary>
     /// Clears the builder for reuse. Call before returning to pool.
     /// </summary>
     public void Clear()
@@ -236,5 +244,6 @@ internal sealed class CollectionDiffBuilder
         _oldCommonIndexMap.Clear();
         _oldCommonOrder.Clear();
         _newCommonOrder.Clear();
+        _commonDictionaryItems.Clear();
     }
 }

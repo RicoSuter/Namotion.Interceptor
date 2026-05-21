@@ -100,32 +100,7 @@ public static class SubjectRegistryJsonExtensions
         {
             // add static properties
             var propertyName = GetJsonPropertyName(subject, property.Value, jsonSerializerOptions);
-            var value = property.Value.GetValue?.Invoke(subject);
-            if (value is IInterceptorSubject childProxy)
-            {
-                obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
-            }
-            else if (value is IEnumerable enumerable and not string)
-            {
-                // Materialize once so the Count check and the foreach share a single pass over
-                // potentially lazy / one-shot enumerables.
-                var subjectChildren = enumerable.OfType<IInterceptorSubject>().ToList();
-                if (subjectChildren.Count > 0)
-                {
-                    var children = new JsonArray();
-                    foreach (var item in subjectChildren)
-                        children.Add(item.ToJsonObject(jsonSerializerOptions));
-                    obj[propertyName] = children;
-                }
-                else
-                {
-                    obj[propertyName] = JsonValue.Create(value);
-                }
-            }
-            else
-            {
-                obj[propertyName] = JsonValue.Create(value);
-            }
+            obj[propertyName] = ValueToJsonNode(property.Value.GetValue?.Invoke(subject), jsonSerializerOptions);
         }
 
         var registeredSubject = subject.TryGetRegisteredSubject();
@@ -134,40 +109,39 @@ public static class SubjectRegistryJsonExtensions
             // add dynamic properties
             foreach (var property in registeredSubject
                 .Properties
-                .Where(p => p.HasGetter && 
+                .Where(p => p.HasGetter &&
                             subject.Properties.ContainsKey(p.Name) == false))
             {
                 var propertyName = property.GetJsonPropertyName(jsonSerializerOptions);
-                var value = property.GetValue();
-                if (value is IInterceptorSubject childProxy)
-                {
-                    obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
-                }
-                else if (value is IEnumerable enumerable and not string)
-                {
-                    // Materialize once so the Count check and the foreach share a single pass
-                    // over potentially lazy / one-shot enumerables.
-                    var subjectChildren = enumerable.OfType<IInterceptorSubject>().ToList();
-                    if (subjectChildren.Count > 0)
-                    {
-                        var children = new JsonArray();
-                        foreach (var item in subjectChildren)
-                            children.Add(item.ToJsonObject(jsonSerializerOptions));
-                        obj[propertyName] = children;
-                    }
-                    else
-                    {
-                        obj[propertyName] = JsonValue.Create(value);
-                    }
-                }
-                else
-                {
-                    obj[propertyName] = JsonValue.Create(value);
-                }
+                obj[propertyName] = ValueToJsonNode(property.GetValue(), jsonSerializerOptions);
             }
         }
 
         return obj;
+    }
+
+    private static JsonNode? ValueToJsonNode(object? value, JsonSerializerOptions jsonSerializerOptions)
+    {
+        if (value is IInterceptorSubject childProxy)
+        {
+            return childProxy.ToJsonObject(jsonSerializerOptions);
+        }
+
+        if (value is IEnumerable enumerable and not string)
+        {
+            // Materialize once so the Count check and the foreach share a single pass over
+            // potentially lazy / one-shot enumerables.
+            var subjectChildren = enumerable.OfType<IInterceptorSubject>().ToList();
+            if (subjectChildren.Count > 0)
+            {
+                var children = new JsonArray();
+                foreach (var item in subjectChildren)
+                    children.Add(item.ToJsonObject(jsonSerializerOptions));
+                return children;
+            }
+        }
+
+        return JsonValue.Create(value);
     }
 
     private static string GetJsonPropertyName(IInterceptorSubject subject, SubjectPropertyMetadata property, JsonSerializerOptions jsonSerializerOptions)

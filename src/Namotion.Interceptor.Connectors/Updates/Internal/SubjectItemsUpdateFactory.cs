@@ -220,33 +220,22 @@ internal static class SubjectItemsUpdateFactory
                 }
             }
 
-            // Check for property updates on existing items
-            HashSet<object>? newKeysSet = null;
-            if (newItemsToProcess is not null)
-            {
-                newKeysSet = new HashSet<object>(newItemsToProcess.Count);
-                foreach (var (key, _) in newItemsToProcess)
-                    newKeysSet.Add(key);
-            }
-
+            // Generate sparse updates for entries retained by reference (common items).
+            // changeBuilder already partitioned new-vs-retained during GetDictionaryChanges,
+            // so iterate that output instead of re-walking newDictionary.
             List<SubjectPropertyItemUpdate>? updates = null;
-            foreach (DictionaryEntry entry in newDictionary)
+            foreach (var (key, item) in changeBuilder.GetCommonDictionaryItems())
             {
-                if (entry.Value is not IInterceptorSubject item) continue;
-                var key = entry.Key;
-                if (newKeysSet?.Contains(key) == true)
+                if (!builder.SubjectHasUpdates(item))
                     continue;
 
-                if (builder.SubjectHasUpdates(item))
+                var itemId = builder.GetOrCreateId(item);
+                updates ??= [];
+                updates.Add(new SubjectPropertyItemUpdate
                 {
-                    var itemId = builder.GetOrCreateId(item);
-                    updates ??= [];
-                    updates.Add(new SubjectPropertyItemUpdate
-                    {
-                        Index = key,
-                        Id = itemId
-                    });
-                }
+                    Index = key,
+                    Id = itemId
+                });
             }
 
             update.Operations = operations;
