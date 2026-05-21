@@ -43,8 +43,8 @@ internal static class SubjectValueConvert
     /// </summary>
     internal static IDictionary ToSubjectDictionary(object value)
     {
-        if (value is IDictionary dict)
-            return dict;
+        if (value is IDictionary dictionary)
+            return dictionary;
 
         if (value is not IEnumerable enumerable || value is string)
             return EmptyDictionary;
