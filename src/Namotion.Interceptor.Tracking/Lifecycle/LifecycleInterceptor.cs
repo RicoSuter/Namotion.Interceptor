@@ -284,7 +284,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <remarks>
     /// Re-entrant for different properties (lock is re-entrant, each property has its own
     /// <c>_lastProcessedValues</c> entry). Handlers must NOT write to the same property
-    /// that is currently being reconciled — this would corrupt the reconciliation baseline.
+    /// that is currently being reconciled, because this would corrupt the reconciliation baseline.
     /// </remarks>
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
@@ -351,8 +351,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 _lastProcessedValues[context.Property] = newValue;
 
-                // Parent was concurrently detached between next() and lock acquisition —
-                // undo: remove dangling _lastProcessedValues and detach orphaned children.
+                // Parent was concurrently detached between next() and lock acquisition.
+                // Undo: remove dangling _lastProcessedValues and detach orphaned children.
                 if (!_attachedSubjects.ContainsKey(context.Property.Subject))
                 {
                     _lastProcessedValues.Remove(context.Property);
@@ -440,8 +440,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         // Hot paths (IDictionary, ICollection) come before string/IEnumerable so common
         // writes don't pay extra type checks. The IEnumerable case at the end handles read-only
-        // types that implement neither ICollection nor IDictionary (e.g. FrozenSet, custom
-        // IReadOnlyList/IReadOnlyDictionary wrappers).
+        // types that implement neither ICollection nor IDictionary (e.g. custom IReadOnlyList /
+        // IReadOnlyDictionary wrappers that opt out of the non-generic container interfaces).
         switch (value)
         {
             case null:
@@ -488,7 +488,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     foreach (var item in enumerable)
                     {
                         if (item is null) continue;
-                        if (SubjectValueVisitor.TryGetKvpSubjectEntry(item, out var key, out var subjectItem))
+                        if (SubjectValueLookup.TryGetKvpSubjectEntry(item, out var key, out var subjectItem))
                         {
                             touchedSubjects?.Add(subjectItem);
                             collectedSubjects.Add((subjectItem, property, key));

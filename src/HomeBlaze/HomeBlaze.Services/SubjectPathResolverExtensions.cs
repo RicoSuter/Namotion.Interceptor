@@ -72,10 +72,10 @@ public static class SubjectPathResolverExtensions
             return null;
 
         if (property.IsSubjectDictionary)
-            return SubjectValueVisitor.FindDictionarySubjectAt(value, indexStr);
+            return SubjectValueLookup.FindDictionarySubjectAt(value, indexStr);
 
         if (property.IsSubjectCollection && int.TryParse(indexStr, out var index))
-            return SubjectValueVisitor.FindCollectionSubjectAt(value, index);
+            return SubjectValueLookup.FindCollectionSubjectAt(value, index);
 
         return null;
     }

@@ -105,14 +105,22 @@ public static class SubjectRegistryJsonExtensions
             {
                 obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
             }
-            else if (value is IEnumerable enumerable and not string && enumerable.OfType<IInterceptorSubject>().Any())
+            else if (value is IEnumerable enumerable and not string)
             {
-                var children = new JsonArray();
-                foreach (var arrayProxyItem in enumerable.OfType<IInterceptorSubject>())
+                // Materialize once so the Count check and the foreach share a single pass over
+                // potentially lazy / one-shot enumerables.
+                var subjectChildren = enumerable.OfType<IInterceptorSubject>().ToList();
+                if (subjectChildren.Count > 0)
                 {
-                    children.Add(arrayProxyItem.ToJsonObject(jsonSerializerOptions));
+                    var children = new JsonArray();
+                    foreach (var item in subjectChildren)
+                        children.Add(item.ToJsonObject(jsonSerializerOptions));
+                    obj[propertyName] = children;
                 }
-                obj[propertyName] = children;
+                else
+                {
+                    obj[propertyName] = JsonValue.Create(value);
+                }
             }
             else
             {
@@ -135,14 +143,22 @@ public static class SubjectRegistryJsonExtensions
                 {
                     obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
                 }
-                else if (value is IEnumerable enumerable and not string && enumerable.OfType<IInterceptorSubject>().Any())
+                else if (value is IEnumerable enumerable and not string)
                 {
-                    var children = new JsonArray();
-                    foreach (var arrayProxyItem in enumerable.OfType<IInterceptorSubject>())
+                    // Materialize once so the Count check and the foreach share a single pass
+                    // over potentially lazy / one-shot enumerables.
+                    var subjectChildren = enumerable.OfType<IInterceptorSubject>().ToList();
+                    if (subjectChildren.Count > 0)
                     {
-                        children.Add(arrayProxyItem.ToJsonObject(jsonSerializerOptions));
+                        var children = new JsonArray();
+                        foreach (var item in subjectChildren)
+                            children.Add(item.ToJsonObject(jsonSerializerOptions));
+                        obj[propertyName] = children;
                     }
-                    obj[propertyName] = children;
+                    else
+                    {
+                        obj[propertyName] = JsonValue.Create(value);
+                    }
                 }
                 else
                 {

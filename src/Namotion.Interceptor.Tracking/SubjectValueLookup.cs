@@ -1,15 +1,18 @@
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking;
 
 /// <summary>
-/// Static helpers for locating subjects inside property values. Used by hot paths
-/// (LifecycleInterceptor, RegisteredSubjectProperty) which inline the dispatch switch
-/// themselves for best codegen, and by PathExtensions for keyed lookups.
+/// Static helpers for looking up subjects inside opaque property values. Used by
+/// <c>PathExtensions</c> for keyed lookups and by the lifecycle/connector paths for
+/// read-only-dictionary KVP extraction. Hot paths in <c>LifecycleInterceptor</c> and
+/// <c>RegisteredSubjectProperty</c> inline the dispatch switch directly for best codegen
+/// rather than going through this class.
 /// </summary>
-public static class SubjectValueVisitor
+public static class SubjectValueLookup
 {
     private static readonly ConcurrentDictionary<Type, (Func<object, object?> getKey, Func<object, object?> getValue)?> KvpAccessorCache = new();
 
@@ -61,12 +64,18 @@ public static class SubjectValueVisitor
     }
 
     /// <summary>
-    /// Reflects <c>KeyValuePair&lt;,&gt;</c> shape for read-only dictionary fallbacks
-    /// (e.g. <see cref="System.Collections.Frozen.FrozenDictionary{TKey,TValue}"/>) where
-    /// <see cref="IDictionary"/> isn't implemented. Accessor delegates are cached per type.
+    /// Reflects <c>KeyValuePair&lt;,&gt;</c> shape for read-only dictionary fallbacks where
+    /// <see cref="IDictionary"/> isn't implemented (custom <see cref="IReadOnlyDictionary{TKey,TValue}"/>
+    /// wrappers that opt out of the non-generic dict interface). Accessor delegates are cached
+    /// per closed KVP type.
     /// </summary>
+    /// <remarks>
+    /// TODO(perf): reflection-based PropertyInfo.GetValue is the slow path. If a real workload
+    /// shows hot read-only-dict iteration, replace the lambdas with compiled expression-tree
+    /// accessors per closed <c>KeyValuePair&lt;K,V&gt;</c> type.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool TryGetKvpSubjectEntry(object item, out object? key, out IInterceptorSubject subject)
+    public static bool TryGetKvpSubjectEntry(object item, out object? key, [NotNullWhen(true)] out IInterceptorSubject? subject)
     {
         var accessors = KvpAccessorCache.GetOrAdd(item.GetType(), static t =>
         {
@@ -89,7 +98,7 @@ public static class SubjectValueVisitor
         }
 
         key = null;
-        subject = null!;
+        subject = null;
         return false;
     }
 }

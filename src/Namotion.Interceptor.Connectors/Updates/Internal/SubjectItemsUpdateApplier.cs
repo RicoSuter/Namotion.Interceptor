@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Text.Json;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -143,9 +144,10 @@ internal static class SubjectItemsUpdateApplier
         var existingValue = property.GetValue();
         if (existingValue is not null)
         {
-            foreach (var (key, subject) in SubjectValueConvert.ToSubjectDictionaryEntries(existingValue))
+            foreach (DictionaryEntry entry in SubjectValueConvert.ToSubjectDictionary(existingValue))
             {
-                workingDictionary[key] = subject;
+                if (entry.Value is IInterceptorSubject subject)
+                    workingDictionary[entry.Key] = subject;
             }
         }
 

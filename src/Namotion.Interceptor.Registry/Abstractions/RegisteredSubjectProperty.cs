@@ -348,7 +348,7 @@ public class RegisteredSubjectProperty
             var index = -1;
             if (IsSubjectCollection)
             {
-                // For collections, match by Subject only — the Index field represents
+                // For collections, match by Subject only. The Index field represents
                 // the collection position which shifts as items are removed.
                 // Search backwards because LifecycleInterceptor detaches in reverse
                 // collection order, making each lookup O(1) instead of O(n).
@@ -378,7 +378,7 @@ public class RegisteredSubjectProperty
     /// <summary>
     /// Syncs children's indices and parent entries with the live collection.
     /// Must be called while LifecycleInterceptor's _attachedSubjects lock is held,
-    /// because this method acquires _children then _knownSubjects — the inverse of
+    /// because this method acquires _children then _knownSubjects, which is the inverse of
     /// HandleLifecycleChange's lock order. The outer _attachedSubjects lock serializes
     /// both paths and prevents deadlock.
     /// </summary>
@@ -386,6 +386,10 @@ public class RegisteredSubjectProperty
     /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
     internal void RefreshCollectionIndices(object? collectionValue, ISubjectRegistry registry)
     {
+        // Only collection-typed properties need position refresh; dictionary-keyed children
+        // are looked up by key (stable identity) rather than by integer index, so reordering
+        // entries doesn't invalidate their stored Index. The IEnumerable fallback in
+        // BuildCollectionPositions is therefore collection-only by design.
         if (!IsSubjectCollection)
             return;
 
@@ -409,7 +413,7 @@ public class RegisteredSubjectProperty
                 _children[i] = child with { Index = boxedNewIndex };
 
                 // child is a readonly record struct snapshot from before the update above,
-                // so child.Index still holds the old value — correct for the oldIndex parameter.
+                // so child.Index still holds the old value, which is correct for the oldIndex parameter.
                 registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, child.Index, boxedNewIndex);
             }
 

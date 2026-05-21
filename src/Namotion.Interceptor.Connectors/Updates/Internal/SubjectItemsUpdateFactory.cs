@@ -1,3 +1,4 @@
+using System.Collections;
 using Namotion.Interceptor.Registry.Performance;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -141,18 +142,20 @@ internal static class SubjectItemsUpdateFactory
         if (dictionaryValue is null)
             return;
 
-        var entries = SubjectValueConvert.ToSubjectDictionaryEntries(dictionaryValue);
-        update.Count = entries.Count;
-        update.Items = new List<SubjectPropertyItemUpdate>(entries.Count);
+        var dictionary = SubjectValueConvert.ToSubjectDictionary(dictionaryValue);
+        update.Count = dictionary.Count;
+        update.Items = new List<SubjectPropertyItemUpdate>(dictionary.Count);
 
-        foreach (var (key, subject) in entries)
+        foreach (DictionaryEntry entry in dictionary)
         {
+            if (entry.Value is not IInterceptorSubject subject) continue;
+
             var itemId = builder.GetOrCreateId(subject);
             SubjectUpdateFactory.ProcessSubjectComplete(subject, builder);
 
             update.Items.Add(new SubjectPropertyItemUpdate
             {
-                Index = key,
+                Index = entry.Key,
                 Id = itemId
             });
         }
@@ -172,8 +175,8 @@ internal static class SubjectItemsUpdateFactory
         if (newDictionaryValue is null)
             return;
 
-        var oldDictionary = oldDictionaryValue is not null ? SubjectValueConvert.ToSubjectDictionaryEntries(oldDictionaryValue) : null;
-        var newDictionary = SubjectValueConvert.ToSubjectDictionaryEntries(newDictionaryValue);
+        var oldDictionary = oldDictionaryValue is not null ? SubjectValueConvert.ToSubjectDictionary(oldDictionaryValue) : null;
+        var newDictionary = SubjectValueConvert.ToSubjectDictionary(newDictionaryValue);
         update.Count = newDictionary.Count;
 
         var changeBuilder = ChangeBuilderPool.Rent();
@@ -227,8 +230,10 @@ internal static class SubjectItemsUpdateFactory
             }
 
             List<SubjectPropertyItemUpdate>? updates = null;
-            foreach (var (key, item) in newDictionary)
+            foreach (DictionaryEntry entry in newDictionary)
             {
+                if (entry.Value is not IInterceptorSubject item) continue;
+                var key = entry.Key;
                 if (newKeysSet?.Contains(key) == true)
                     continue;
 

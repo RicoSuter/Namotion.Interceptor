@@ -1,3 +1,5 @@
+using System.Collections;
+
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
@@ -12,7 +14,6 @@ internal sealed class CollectionDiffBuilder
     private readonly Dictionary<IInterceptorSubject, int> _oldCommonIndexMap = new();
     private readonly List<IInterceptorSubject> _oldCommonOrder = [];
     private readonly List<IInterceptorSubject> _newCommonOrder = [];
-    private readonly Dictionary<object, IInterceptorSubject> _oldLookup = new();
 
     /// <summary>
     /// Builds collection change operations.
@@ -144,16 +145,19 @@ internal sealed class CollectionDiffBuilder
     }
 
     /// <summary>
-    /// Builds dictionary change operations.
+    /// Builds dictionary change operations. Iterates <paramref name="oldDictionary"/> and
+    /// <paramref name="newDictionary"/> directly; non-subject entries are filtered inline so the
+    /// caller can pass any <see cref="IDictionary"/> (including passthrough of the user's value)
+    /// without a separate materialization step.
     /// </summary>
-    /// <param name="oldEntries">The old dictionary entries.</param>
-    /// <param name="newEntries">The new dictionary entries.</param>
+    /// <param name="oldDictionary">The old dictionary value, or null if none.</param>
+    /// <param name="newDictionary">The new dictionary value.</param>
     /// <param name="operations">Output: structural operations (Insert/Remove), or null if none.</param>
     /// <param name="newItemsToProcess">Output: items that are new and need full processing, or null if none.</param>
     /// <param name="removedKeys">Output: keys that were removed, or null if none.</param>
     public void GetDictionaryChanges(
-        IReadOnlyList<(object key, IInterceptorSubject subject)>? oldEntries,
-        IReadOnlyList<(object key, IInterceptorSubject subject)> newEntries,
+        IDictionary? oldDictionary,
+        IDictionary newDictionary,
         out List<SubjectCollectionOperation>? operations,
         out List<(object key, IInterceptorSubject item)>? newItemsToProcess,
         out HashSet<object>? removedKeys)
@@ -162,25 +166,30 @@ internal sealed class CollectionDiffBuilder
         newItemsToProcess = null;
         removedKeys = null;
 
-        _oldLookup.Clear();
-        if (oldEntries is not null)
+        // Track removed keys - start with all old subject-valued keys, remove ones that still exist
+        // with the same value below.
+        HashSet<object>? keysToRemove = null;
+        if (oldDictionary is not null)
         {
-            foreach (var (key, subject) in oldEntries)
+            foreach (DictionaryEntry entry in oldDictionary)
             {
-                _oldLookup[key] = subject;
+                if (entry.Value is IInterceptorSubject)
+                {
+                    keysToRemove ??= [];
+                    keysToRemove.Add(entry.Key);
+                }
             }
         }
 
-        // Track removed keys - start with all old keys, remove ones that still exist with same value
-        HashSet<object>? keysToRemove = _oldLookup.Count > 0 ? [.._oldLookup.Keys] : null;
-
-        foreach (var (key, newItem) in newEntries)
+        foreach (DictionaryEntry entry in newDictionary)
         {
-            if (_oldLookup.ContainsKey(key))
+            if (entry.Value is not IInterceptorSubject newItem) continue;
+            var key = entry.Key;
+
+            if (oldDictionary is not null && oldDictionary.Contains(key) &&
+                oldDictionary[key] is IInterceptorSubject oldItem)
             {
-                // Key exists in both - check if VALUE changed (different object reference)
-                var oldValue = _oldLookup[key];
-                if (ReferenceEquals(oldValue, newItem))
+                if (ReferenceEquals(oldItem, newItem))
                 {
                     keysToRemove?.Remove(key);
                 }
@@ -227,6 +236,5 @@ internal sealed class CollectionDiffBuilder
         _oldCommonIndexMap.Clear();
         _oldCommonOrder.Clear();
         _newCommonOrder.Clear();
-        _oldLookup.Clear();
     }
 }

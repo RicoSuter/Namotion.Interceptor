@@ -11,8 +11,10 @@ namespace Namotion.Interceptor.Tracking;
 /// </summary>
 public static class SubjectPropertyTypeExtensions
 {
-    // Factories transitively invoke sibling caches; concurrent GetOrAdd races are safe
-    // because the classifiers are pure functions of Type.
+    // Cross-cache reads are safe under concurrent GetOrAdd because every classifier is a pure
+    // function of Type. The dependency graph (Reference -> Collection, Dictionary; Collection ->
+    // Dictionary; Dictionary -> nothing) is acyclic, so racing factory invocations on different
+    // Types converge to the same result without deadlock or inconsistency.
     private static readonly ConcurrentDictionary<Type, bool> CanContainSubjectsCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectReferenceTypeCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionTypeCache = new();
@@ -131,7 +133,7 @@ public static class SubjectPropertyTypeExtensions
             var genericEnumerables = GetEnumerablesIncludingSelf(t);
 
             if (genericEnumerables.Length > 0)
-                return genericEnumerables.Any(static i => CanDirectlyHoldSubject(i.GenericTypeArguments[0]));
+                return genericEnumerables.Any(static i => IsCandidateElementType(i.GenericTypeArguments[0]));
 
             // No generic type info (e.g. ArrayList)
             return typeof(ICollection).IsAssignableFrom(t);
@@ -163,7 +165,7 @@ public static class SubjectPropertyTypeExtensions
                 return genericEnumerables.Any(static i =>
                     i.GenericTypeArguments[0] is { IsGenericType: true } kvType &&
                     kvType.GetGenericTypeDefinition() == typeof(KeyValuePair<,>) &&
-                    CanDirectlyHoldSubject(kvType.GenericTypeArguments[1]));
+                    IsCandidateElementType(kvType.GenericTypeArguments[1]));
             }
 
             // No generic type info (e.g. Hashtable)
@@ -171,9 +173,20 @@ public static class SubjectPropertyTypeExtensions
         });
     }
 
+    // Self-predicate: can a value of this exact type be assigned to a property and treated as a
+    // single subject reference? Excludes IEnumerable so that container types route to the
+    // collection/dictionary classifiers instead of being treated as references.
     private static bool CanDirectlyHoldSubject(Type t) =>
         (t.IsInterface || t == typeof(object) || typeof(IInterceptorSubject).IsAssignableFrom(t)) &&
         !typeof(IEnumerable).IsAssignableFrom(t);
+
+    // Element-predicate: could an element of this type inside a collection/dictionary be a subject?
+    // Differs from CanDirectlyHoldSubject: an IInterceptorSubject that also implements IEnumerable
+    // (hybrid container-subject) is still a valid subject element, so the IIS check short-circuits
+    // before the IEnumerable exclusion. Used for List<Hybrid> classification.
+    private static bool IsCandidateElementType(Type t) =>
+        typeof(IInterceptorSubject).IsAssignableFrom(t) ||
+        ((t.IsInterface || t == typeof(object)) && !typeof(IEnumerable).IsAssignableFrom(t));
 
     private static bool ImplementsGenericInterfaceDefinition(Type type, Type genericInterfaceDefinition)
     {

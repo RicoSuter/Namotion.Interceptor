@@ -34,6 +34,10 @@ public class SubjectPropertyTypeExtensionsTests
     [InlineData(typeof(IReadOnlyCollection<Person>),                        false, true,  false)]
     [InlineData(typeof(IReadOnlyList<Person>),                              false, true,  false)]
     [InlineData(typeof(ICollection<Person>),                                false, true,  false)]
+    // A hybrid (IInterceptorSubject + IEnumerable) is a valid subject reference element. A list of
+    // hybrids is therefore a subject collection; the per-element predicate prioritises IInterceptorSubject
+    // over the IEnumerable exclusion.
+    [InlineData(typeof(List<HybridSubjectGenericList>),                     false, true,  false)]
 
     // --- Subject dictionaries (must implement a real dict interface) ---
     [InlineData(typeof(Dictionary<string, Person>),                         false, false, true)]

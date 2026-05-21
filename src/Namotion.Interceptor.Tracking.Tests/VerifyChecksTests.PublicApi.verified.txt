@@ -106,11 +106,11 @@ namespace Namotion.Interceptor.Tracking
         public static bool IsSubjectDictionaryType(this System.Type type) { }
         public static bool IsSubjectReferenceType(this System.Type type) { }
     }
-    public static class SubjectValueVisitor
+    public static class SubjectValueLookup
     {
         public static Namotion.Interceptor.IInterceptorSubject? FindCollectionSubjectAt(object value, int index) { }
         public static Namotion.Interceptor.IInterceptorSubject? FindDictionarySubjectAt(object value, object key) { }
-        public static bool TryGetKvpSubjectEntry(object item, out object? key, out Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool TryGetKvpSubjectEntry(object item, out object? key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.IInterceptorSubject? subject) { }
     }
 }
 namespace Namotion.Interceptor.Tracking.Lifecycle

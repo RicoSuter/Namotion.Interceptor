@@ -189,10 +189,10 @@ public static class PathExtensions
         }
 
         if (property.IsSubjectDictionary)
-            return SubjectValueVisitor.FindDictionarySubjectAt(value, index);
+            return SubjectValueLookup.FindDictionarySubjectAt(value, index);
 
         if (property.IsSubjectCollection && index is int intIndex)
-            return SubjectValueVisitor.FindCollectionSubjectAt(value, intIndex);
+            return SubjectValueLookup.FindCollectionSubjectAt(value, intIndex);
 
         return null;
     }
