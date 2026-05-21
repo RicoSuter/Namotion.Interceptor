@@ -478,5 +478,4 @@ public class LifecycleInterceptorTests
             }
         }
     }
-
 }
