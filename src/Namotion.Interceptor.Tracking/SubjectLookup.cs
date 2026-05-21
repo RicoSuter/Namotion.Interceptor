@@ -15,6 +15,7 @@ namespace Namotion.Interceptor.Tracking;
 public static class SubjectLookup
 {
     private static readonly ConcurrentDictionary<Type, Func<object, (object? key, object? value)>?> KvpAccessorCache = new();
+    private static readonly ConcurrentDictionary<Type, Func<object, object, object?>?> ReadOnlyDictTryGetCache = new();
 
     /// <summary>
     /// Finds a single subject at the given <paramref name="index"/> inside
@@ -49,6 +50,40 @@ public static class SubjectLookup
     {
         if (value is IDictionary dictionary)
             return dictionary[key] as IInterceptorSubject;
+
+        var tryGet = ReadOnlyDictTryGetCache.GetOrAdd(value.GetType(), static t =>
+        {
+            var rodInterface = t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>)
+                ? t
+                : Array.Find(t.GetInterfaces(), static i =>
+                    i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>));
+
+            if (rodInterface is null)
+                return null;
+
+            var keyType = rodInterface.GenericTypeArguments[0];
+            var valueType = rodInterface.GenericTypeArguments[1];
+
+            var dictParam = Expression.Parameter(typeof(object), "dict");
+            var keyParam = Expression.Parameter(typeof(object), "key");
+            var typedDict = Expression.Convert(dictParam, rodInterface);
+            var typedKey = Expression.Convert(keyParam, keyType);
+
+            var outVar = Expression.Variable(valueType, "outVal");
+            var tryGetMethod = rodInterface.GetMethod(nameof(IReadOnlyDictionary<int, int>.TryGetValue))!;
+
+            var body = Expression.Block(
+                [outVar],
+                Expression.Condition(
+                    Expression.Call(typedDict, tryGetMethod, typedKey, outVar),
+                    Expression.Convert(outVar, typeof(object)),
+                    Expression.Constant(null, typeof(object))));
+
+            return Expression.Lambda<Func<object, object, object?>>(body, dictParam, keyParam).Compile();
+        });
+
+        if (tryGet is not null)
+            return tryGet(value, key) as IInterceptorSubject;
 
         if (value is IEnumerable enumerable)
         {

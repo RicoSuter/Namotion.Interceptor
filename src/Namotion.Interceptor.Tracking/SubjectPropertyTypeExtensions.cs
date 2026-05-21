@@ -204,17 +204,13 @@ public static class SubjectPropertyTypeExtensions
         return false;
     }
 
-    private static Type[] GetGenericEnumerableInterfaces(Type type)
-    {
-        return Array.FindAll(type.GetInterfaces(),
-            static i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
-    }
-
     // GetInterfaces() does not return the type itself, so for a bare IEnumerable<X>
     // property type we include it explicitly.
     private static Type[] GetEnumerablesIncludingSelf(Type type)
     {
-        var fromInterfaces = GetGenericEnumerableInterfaces(type);
+        var fromInterfaces = Array.FindAll(type.GetInterfaces(),
+            static i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+
         if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(IEnumerable<>))
         {
             return fromInterfaces;
