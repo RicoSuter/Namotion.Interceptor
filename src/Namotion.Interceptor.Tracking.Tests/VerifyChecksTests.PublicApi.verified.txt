@@ -98,6 +98,12 @@ namespace Namotion.Interceptor.Tracking
         public PropertyValueEqualityCheckHandler() { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
+    public static class SubjectLookup
+    {
+        public static Namotion.Interceptor.IInterceptorSubject? FindSubjectInCollection(object value, int index) { }
+        public static Namotion.Interceptor.IInterceptorSubject? FindSubjectInDictionary(object value, object key) { }
+        public static bool TryGetSubjectFromKeyValuePair(object keyValuePair, out object? key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.IInterceptorSubject? subject) { }
+    }
     public static class SubjectPropertyTypeExtensions
     {
         public static bool CanContainSubjects(this System.Type type) { }
@@ -105,12 +111,6 @@ namespace Namotion.Interceptor.Tracking
         public static bool IsSubjectCollectionType(this System.Type type) { }
         public static bool IsSubjectDictionaryType(this System.Type type) { }
         public static bool IsSubjectReferenceType(this System.Type type) { }
-    }
-    public static class SubjectValueLookup
-    {
-        public static Namotion.Interceptor.IInterceptorSubject? FindCollectionSubjectAt(object value, int index) { }
-        public static Namotion.Interceptor.IInterceptorSubject? FindDictionarySubjectAt(object value, object key) { }
-        public static bool TryGetKvpSubjectEntry(object item, out object? key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.IInterceptorSubject? subject) { }
     }
 }
 namespace Namotion.Interceptor.Tracking.Lifecycle
