@@ -143,7 +143,6 @@ internal static class SubjectItemsUpdateFactory
             return;
 
         var dictionary = SubjectValueConvert.ToSubjectDictionary(dictionaryValue);
-        update.Count = dictionary.Count;
         update.Items = new List<SubjectPropertyItemUpdate>(dictionary.Count);
 
         foreach (DictionaryEntry entry in dictionary)
@@ -159,6 +158,8 @@ internal static class SubjectItemsUpdateFactory
                 Id = itemId
             });
         }
+
+        update.Count = update.Items.Count;
     }
 
     /// <summary>
@@ -177,7 +178,6 @@ internal static class SubjectItemsUpdateFactory
 
         var oldDictionary = oldDictionaryValue is not null ? SubjectValueConvert.ToSubjectDictionary(oldDictionaryValue) : null;
         var newDictionary = SubjectValueConvert.ToSubjectDictionary(newDictionaryValue);
-        update.Count = newDictionary.Count;
 
         var changeBuilder = ChangeBuilderPool.Rent();
         try
@@ -187,6 +187,10 @@ internal static class SubjectItemsUpdateFactory
                 out var operations,
                 out var newItemsToProcess,
                 out var removedKeys);
+
+            // Subject-only count, matching the apply side's filtered view and Collection semantics:
+            // every subject-valued entry in newDictionary is either a new insert or a retained common item.
+            update.Count = (newItemsToProcess?.Count ?? 0) + changeBuilder.GetCommonDictionaryItems().Count;
 
             // Add Insert operations for new items
             if (newItemsToProcess is not null)
