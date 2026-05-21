@@ -101,16 +101,16 @@ public static class SubjectRegistryJsonExtensions
             // add static properties
             var propertyName = GetJsonPropertyName(subject, property.Value, jsonSerializerOptions);
             var value = property.Value.GetValue?.Invoke(subject);
-            if (value is IInterceptorSubject childProxy)
+            if (value is IInterceptorSubject childSubject)
             {
-                obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
+                obj[propertyName] = childSubject.ToJsonObject(jsonSerializerOptions);
             }
             else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
             {
                 var children = new JsonArray();
-                foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
+                foreach (var arraySubjectItem in collection.OfType<IInterceptorSubject>())
                 {
-                    children.Add(arrayProxyItem.ToJsonObject(jsonSerializerOptions));
+                    children.Add(arraySubjectItem.ToJsonObject(jsonSerializerOptions));
                 }
                 obj[propertyName] = children;
             }
@@ -131,16 +131,16 @@ public static class SubjectRegistryJsonExtensions
             {
                 var propertyName = property.GetJsonPropertyName(jsonSerializerOptions);
                 var value = property.GetValue();
-                if (value is IInterceptorSubject childProxy)
+                if (value is IInterceptorSubject childSubject)
                 {
-                    obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
+                    obj[propertyName] = childSubject.ToJsonObject(jsonSerializerOptions);
                 }
                 else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
                 {
                     var children = new JsonArray();
-                    foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
+                    foreach (var arraySubjectItem in collection.OfType<IInterceptorSubject>())
                     {
-                        children.Add(arrayProxyItem.ToJsonObject(jsonSerializerOptions));
+                        children.Add(arraySubjectItem.ToJsonObject(jsonSerializerOptions));
                     }
                     obj[propertyName] = children;
                 }
