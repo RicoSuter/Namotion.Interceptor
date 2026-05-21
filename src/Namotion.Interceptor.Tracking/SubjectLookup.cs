@@ -1,7 +1,7 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
+using System.Linq.Expressions;
 
 namespace Namotion.Interceptor.Tracking;
 
@@ -12,16 +12,16 @@ namespace Namotion.Interceptor.Tracking;
 /// <c>RegisteredSubjectProperty</c> inline the dispatch switch directly for best codegen
 /// rather than going through this class.
 /// </summary>
-public static class SubjectValueLookup
+public static class SubjectLookup
 {
-    private static readonly ConcurrentDictionary<Type, (Func<object, object?> getKey, Func<object, object?> getValue)?> KvpAccessorCache = new();
+    private static readonly ConcurrentDictionary<Type, Func<object, (object? key, object? value)>?> KvpAccessorCache = new();
 
     /// <summary>
     /// Finds a single subject at the given <paramref name="index"/> inside
     /// a collection <paramref name="value"/>, using <see cref="IList"/>
     /// fast path with <see cref="IEnumerable"/> fallback.
     /// </summary>
-    public static IInterceptorSubject? FindCollectionSubjectAt(object value, int index)
+    public static IInterceptorSubject? FindSubjectInCollection(object value, int index)
     {
         if (value is IList list)
             return list[index] as IInterceptorSubject;
@@ -45,7 +45,7 @@ public static class SubjectValueLookup
     /// a dictionary <paramref name="value"/>, using <see cref="IDictionary"/>
     /// fast path with <see cref="IEnumerable"/> KVP extraction fallback.
     /// </summary>
-    public static IInterceptorSubject? FindDictionarySubjectAt(object value, object key)
+    public static IInterceptorSubject? FindSubjectInDictionary(object value, object key)
     {
         if (value is IDictionary dictionary)
             return dictionary[key] as IInterceptorSubject;
@@ -55,7 +55,7 @@ public static class SubjectValueLookup
             foreach (var item in enumerable)
             {
                 if (item is null) continue;
-                if (TryGetKvpSubjectEntry(item, out var itemKey, out var subject) && Equals(itemKey, key))
+                if (TryGetSubjectFromKeyValuePair(item, out var itemKey, out var subject) && Equals(itemKey, key))
                     return subject;
             }
         }
@@ -66,35 +66,42 @@ public static class SubjectValueLookup
     /// <summary>
     /// Reflects <c>KeyValuePair&lt;,&gt;</c> shape for read-only dictionary fallbacks where
     /// <see cref="IDictionary"/> isn't implemented (custom <see cref="IReadOnlyDictionary{TKey,TValue}"/>
-    /// wrappers that opt out of the non-generic dict interface). Accessor delegates are cached
-    /// per closed KVP type.
+    /// wrappers that opt out of the non-generic dict interface). A single compiled expression-tree
+    /// delegate per closed KVP type extracts both Key and Value in one call (one unbox, one
+    /// indirect call) instead of two separate delegates.
     /// </summary>
-    /// <remarks>
-    /// TODO(perf): reflection-based PropertyInfo.GetValue is the slow path. If a real workload
-    /// shows hot read-only-dict iteration, replace the lambdas with compiled expression-tree
-    /// accessors per closed <c>KeyValuePair&lt;K,V&gt;</c> type.
-    /// </remarks>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool TryGetKvpSubjectEntry(object item, out object? key, [NotNullWhen(true)] out IInterceptorSubject? subject)
+    public static bool TryGetSubjectFromKeyValuePair(object keyValuePair, out object? key, [NotNullWhen(true)] out IInterceptorSubject? subject)
     {
-        var accessors = KvpAccessorCache.GetOrAdd(item.GetType(), static t =>
+        var accessor = KvpAccessorCache.GetOrAdd(keyValuePair.GetType(), static t =>
         {
             if (!t.IsGenericType || t.GetGenericTypeDefinition() != typeof(KeyValuePair<,>))
                 return null;
 
-            var keyProp = t.GetProperty(nameof(KeyValuePair<int, int>.Key))!;
-            var valueProp = t.GetProperty(nameof(KeyValuePair<int, int>.Value))!;
-            return (
-                getKey: (Func<object, object?>)(obj => keyProp.GetValue(obj)),
-                getValue: (Func<object, object?>)(obj => valueProp.GetValue(obj))
-            );
+            var param = Expression.Parameter(typeof(object), "obj");
+            var typed = Expression.Convert(param, t);
+
+            var keyExpression = Expression.Convert(
+                Expression.Property(typed, t.GetProperty(nameof(KeyValuePair<int, int>.Key))!),
+                typeof(object));
+            var valueExpression = Expression.Convert(
+                Expression.Property(typed, t.GetProperty(nameof(KeyValuePair<int, int>.Value))!),
+                typeof(object));
+
+            var tupleConstructor = typeof(ValueTuple<object?, object?>).GetConstructor([typeof(object), typeof(object)])!;
+            var body = Expression.New(tupleConstructor, keyExpression, valueExpression);
+
+            return Expression.Lambda<Func<object, (object? key, object? value)>>(body, param).Compile();
         });
 
-        if (accessors is not null && accessors.Value.getValue(item) is IInterceptorSubject s)
+        if (accessor is not null)
         {
-            key = accessors.Value.getKey(item);
-            subject = s;
-            return true;
+            var (k, v) = accessor(keyValuePair);
+            if (v is IInterceptorSubject s)
+            {
+                key = k;
+                subject = s;
+                return true;
+            }
         }
 
         key = null;

@@ -53,7 +53,7 @@ internal static class SubjectValueConvert
         foreach (var item in enumerable)
         {
             if (item is null) continue;
-            if (SubjectValueLookup.TryGetKvpSubjectEntry(item, out var key, out var subject))
+            if (SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var subject))
                 result[key!] = subject;
         }
         return result;

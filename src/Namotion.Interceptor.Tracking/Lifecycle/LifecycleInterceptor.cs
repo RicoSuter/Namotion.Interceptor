@@ -297,8 +297,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         lock (_attachedSubjects)
         {
-            if (!_lastProcessedValues.TryGetValue(context.Property, out var lastProcessed))
-                lastProcessed = null;
+            var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
 
             // Read the actual backing store value to handle concurrent writes correctly.
             // context.NewValue may differ from the backing store if another thread
@@ -488,7 +487,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     foreach (var item in enumerable)
                     {
                         if (item is null) continue;
-                        if (SubjectValueLookup.TryGetKvpSubjectEntry(item, out var key, out var subjectItem))
+                        if (SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var subjectItem))
                         {
                             touchedSubjects?.Add(subjectItem);
                             collectedSubjects.Add((subjectItem, property, key));

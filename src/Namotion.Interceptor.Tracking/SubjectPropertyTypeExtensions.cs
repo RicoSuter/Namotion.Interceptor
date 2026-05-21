@@ -150,7 +150,7 @@ public static class SubjectPropertyTypeExtensions
             // Require a real dictionary interface. Bare IEnumerable<KeyValuePair<,>> is not
             // classified as dict because the runtime handler dispatches via IDictionary; without
             // an actual dict interface a value like List<KVP<K, Subject>> would silently be
-            // treated as a plain collection (master parity). Classifier and handler must agree.
+            // treated as a plain collection. Classifier and handler must agree.
             if (!typeof(IDictionary).IsAssignableFrom(t) &&
                 !ImplementsGenericInterfaceDefinition(t, typeof(IDictionary<,>)) &&
                 !ImplementsGenericInterfaceDefinition(t, typeof(IReadOnlyDictionary<,>)))

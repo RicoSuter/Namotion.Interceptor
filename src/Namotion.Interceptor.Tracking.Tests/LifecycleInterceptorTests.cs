@@ -482,7 +482,7 @@ public class LifecycleInterceptorTests
     /// <summary>
     /// A minimal read-only dictionary wrapper that implements <see cref="IReadOnlyDictionary{TKey, TValue}"/>
     /// but NOT IDictionary. This forces the lifecycle interceptor through the
-    /// IEnumerable + KVP reflection fallback path in SubjectValueLookup.
+    /// IEnumerable + KVP reflection fallback path in SubjectLookup.
     /// </summary>
     private class ReadOnlyDictionaryWrapper<TKey, TValue> : IReadOnlyDictionary<TKey, TValue>
         where TKey : notnull
