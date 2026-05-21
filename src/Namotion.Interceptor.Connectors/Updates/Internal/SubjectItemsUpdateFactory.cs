@@ -104,7 +104,7 @@ internal static class SubjectItemsUpdateFactory
 
             // Generate sparse updates for common items with property changes
             List<SubjectPropertyItemUpdate>? updates = null;
-            foreach (var item in changeBuilder.GetCommonItems())
+            foreach (var item in changeBuilder.GetRetainedItems())
             {
                 if (builder.SubjectHasUpdates(item))
                 {
@@ -190,7 +190,7 @@ internal static class SubjectItemsUpdateFactory
 
             // Subject-only count, matching the apply side's filtered view and Collection semantics:
             // every subject-valued entry in newDictionary is either a new insert or a retained common item.
-            update.Count = (newItemsToProcess?.Count ?? 0) + changeBuilder.GetCommonDictionaryItems().Count;
+            update.Count = (newItemsToProcess?.Count ?? 0) + changeBuilder.GetRetainedDictionaryItems().Count;
 
             // Add Insert operations for new items
             if (newItemsToProcess is not null)
@@ -228,7 +228,7 @@ internal static class SubjectItemsUpdateFactory
             // changeBuilder already partitioned new-vs-retained during GetDictionaryChanges,
             // so iterate that output instead of re-walking newDictionary.
             List<SubjectPropertyItemUpdate>? updates = null;
-            foreach (var (key, item) in changeBuilder.GetCommonDictionaryItems())
+            foreach (var (key, item) in changeBuilder.GetRetainedDictionaryItems())
             {
                 if (!builder.SubjectHasUpdates(item))
                     continue;

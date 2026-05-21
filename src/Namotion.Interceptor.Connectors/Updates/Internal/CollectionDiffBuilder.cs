@@ -11,10 +11,10 @@ internal sealed class CollectionDiffBuilder
     // Reusable containers
     private readonly Dictionary<IInterceptorSubject, int> _oldIndexMap = new();
     private readonly Dictionary<IInterceptorSubject, int> _newIndexMap = new();
-    private readonly Dictionary<IInterceptorSubject, int> _oldCommonIndexMap = new();
-    private readonly List<IInterceptorSubject> _oldCommonOrder = [];
-    private readonly List<IInterceptorSubject> _newCommonOrder = [];
-    private readonly List<(object key, IInterceptorSubject item)> _commonDictionaryItems = [];
+    private readonly Dictionary<IInterceptorSubject, int> _oldRetainedIndexMap = new();
+    private readonly List<IInterceptorSubject> _oldRetainedOrder = [];
+    private readonly List<IInterceptorSubject> _newRetainedOrder = [];
+    private readonly List<(object key, IInterceptorSubject item)> _retainedDictionaryItems = [];
 
     /// <summary>
     /// Builds collection change operations.
@@ -73,25 +73,25 @@ internal sealed class CollectionDiffBuilder
         }
 
         // Build common order lists to detect reordering
-        _oldCommonOrder.Clear();
-        _newCommonOrder.Clear();
+        _oldRetainedOrder.Clear();
+        _newRetainedOrder.Clear();
         for (var i = 0; i < oldItems.Count; i++)
         {
             if (_newIndexMap.ContainsKey(oldItems[i]))
-                _oldCommonOrder.Add(oldItems[i]);
+                _oldRetainedOrder.Add(oldItems[i]);
         }
         for (var i = 0; i < newItems.Count; i++)
         {
             if (_oldIndexMap.ContainsKey(newItems[i]))
-                _newCommonOrder.Add(newItems[i]);
+                _newRetainedOrder.Add(newItems[i]);
         }
 
         // Detect reordering and compute intermediate indices for moves
-        if (_oldCommonOrder.Count > 0 && !_oldCommonOrder.SequenceEqual(_newCommonOrder))
+        if (_oldRetainedOrder.Count > 0 && !_oldRetainedOrder.SequenceEqual(_newRetainedOrder))
         {
-            _oldCommonIndexMap.Clear();
-            for (var i = 0; i < _oldCommonOrder.Count; i++)
-                _oldCommonIndexMap[_oldCommonOrder[i]] = i;
+            _oldRetainedIndexMap.Clear();
+            for (var i = 0; i < _oldRetainedOrder.Count; i++)
+                _oldRetainedIndexMap[_oldRetainedOrder[i]] = i;
 
             // Build set of removed indices to compute index shifts for moves
             HashSet<int>? removedIndices = null;
@@ -107,10 +107,10 @@ internal sealed class CollectionDiffBuilder
                 }
             }
 
-            for (var i = 0; i < _newCommonOrder.Count; i++)
+            for (var i = 0; i < _newRetainedOrder.Count; i++)
             {
-                var item = _newCommonOrder[i];
-                var oldCommonIndex = _oldCommonIndexMap[item];
+                var item = _newRetainedOrder[i];
+                var oldCommonIndex = _oldRetainedIndexMap[item];
                 if (oldCommonIndex != i)
                 {
                     var originalOldIndex = _oldIndexMap[item];
@@ -193,7 +193,7 @@ internal sealed class CollectionDiffBuilder
                 if (ReferenceEquals(oldItem, newItem))
                 {
                     keysToRemove?.Remove(key);
-                    _commonDictionaryItems.Add((key, newItem));
+                    _retainedDictionaryItems.Add((key, newItem));
                 }
                 else
                 {
@@ -224,15 +224,15 @@ internal sealed class CollectionDiffBuilder
         _newIndexMap.GetValueOrDefault(item, -1);
 
     /// <summary>
-    /// Gets items that exist in both old and new collections.
+    /// Gets items that exist in both old and new collections (retained by reference).
     /// </summary>
-    public IReadOnlyList<IInterceptorSubject> GetCommonItems() => _newCommonOrder;
+    public IReadOnlyList<IInterceptorSubject> GetRetainedItems() => _newRetainedOrder;
 
     /// <summary>
     /// Gets dictionary entries whose key and value (by reference) exist in both old and new.
     /// Populated by <see cref="GetDictionaryChanges"/>.
     /// </summary>
-    public IReadOnlyList<(object key, IInterceptorSubject item)> GetCommonDictionaryItems() => _commonDictionaryItems;
+    public IReadOnlyList<(object key, IInterceptorSubject item)> GetRetainedDictionaryItems() => _retainedDictionaryItems;
 
     /// <summary>
     /// Clears the builder for reuse. Call before returning to pool.
@@ -241,9 +241,9 @@ internal sealed class CollectionDiffBuilder
     {
         _oldIndexMap.Clear();
         _newIndexMap.Clear();
-        _oldCommonIndexMap.Clear();
-        _oldCommonOrder.Clear();
-        _newCommonOrder.Clear();
-        _commonDictionaryItems.Clear();
+        _oldRetainedIndexMap.Clear();
+        _oldRetainedOrder.Clear();
+        _newRetainedOrder.Clear();
+        _retainedDictionaryItems.Clear();
     }
 }
