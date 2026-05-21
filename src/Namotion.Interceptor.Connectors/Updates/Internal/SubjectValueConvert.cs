@@ -49,7 +49,7 @@ internal static class SubjectValueConvert
         if (value is not IEnumerable enumerable || value is string)
             return EmptyDictionary;
 
-        var result = new Dictionary<object, IInterceptorSubject>();
+        var result = new Dictionary<object, IInterceptorSubject>((value as ICollection)?.Count ?? 0);
         foreach (var item in enumerable)
         {
             if (item is null) continue;
