@@ -21,7 +21,7 @@ public class ChaosEngine : BackgroundService
 
     private volatile bool _isDisrupted;
     private readonly Lock _eventLock = new();
-    private readonly List<ChaosEventRecord> _eventHistory = [];
+    private readonly List<ChaosEvent> _eventHistory = [];
     private long _chaosEventCount;
     private DateTimeOffset _currentEventStart;
 
@@ -29,7 +29,7 @@ public class ChaosEngine : BackgroundService
 
     public long ChaosEventCount => Interlocked.Read(ref _chaosEventCount);
 
-    public IReadOnlyList<ChaosEventRecord> EventHistory
+    public IReadOnlyList<ChaosEvent> EventHistory
     {
         get
         {
@@ -139,7 +139,7 @@ public class ChaosEngine : BackgroundService
                 var recoveredAt = DateTimeOffset.UtcNow;
                 lock (_eventLock)
                 {
-                    _eventHistory.Add(new ChaosEventRecord(faultType, _currentEventStart, recoveredAt));
+                    _eventHistory.Add(new ChaosEvent(faultType, _currentEventStart, recoveredAt));
                 }
                 _logger.LogInformation("Chaos: {Target} recovered from {FaultType}", _targetName, faultType);
                 Interlocked.Increment(ref _chaosEventCount);

@@ -22,10 +22,10 @@ public class VerificationEngine : BackgroundService
     private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
     private readonly Dictionary<string, TestNode> _participants;
-    private readonly List<MutationEngineHost> _mutationEngines;
+    private readonly List<MutationEngine> _mutationEngines;
     private readonly List<ChaosEngine> _chaosEngines;
     private readonly ChaosProfileRotator _chaosProfileRotator;
-    private readonly ICycleLifecycleNotifier? _cycleLifecycle;
+    private readonly ICycleRecorder? _cycleRecorder;
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger _logger;
     private readonly FindingsLog _findingsLog;
@@ -45,9 +45,9 @@ public class VerificationEngine : BackgroundService
         ConnectorTesterConfiguration configuration,
         TestCycleCoordinator coordinator,
         Dictionary<string, TestNode> participants,
-        List<MutationEngineHost> mutationEngines,
+        List<MutationEngine> mutationEngines,
         List<ChaosEngine> chaosEngines,
-        ICycleLifecycleNotifier? cycleLifecycle,
+        ICycleRecorder? cycleRecorder,
         IHostApplicationLifetime applicationLifetime,
         ILogger logger,
         string runDirectory)
@@ -58,7 +58,7 @@ public class VerificationEngine : BackgroundService
         _mutationEngines = mutationEngines;
         _chaosEngines = chaosEngines;
         _chaosProfileRotator = new ChaosProfileRotator(configuration.ChaosProfiles, chaosEngines, logger);
-        _cycleLifecycle = cycleLifecycle;
+        _cycleRecorder = cycleRecorder;
         _applicationLifetime = applicationLifetime;
         _logger = logger;
         _cyclesCsv = CyclesCsv.Create(Path.Combine(runDirectory, "cycles.csv"));
@@ -110,7 +110,7 @@ public class VerificationEngine : BackgroundService
 
             var activeProfileName = _chaosProfileRotator.ApplyForCycle(_cycleNumber);
 
-            _cycleLifecycle?.StartCycle(_cycleNumber);
+            _cycleRecorder?.StartCycle(_cycleNumber);
 
             var cycleStopwatch = Stopwatch.StartNew();
 
@@ -146,7 +146,7 @@ public class VerificationEngine : BackgroundService
                     _cycleNumber, outcome.Elapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds,
                     subjects, properties, outcome.Snapshots.Count);
 
-                _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Pass);
+                _cycleRecorder?.FinishCycle(_cycleNumber, CycleResult.Pass);
                 continue;
             }
 
@@ -156,7 +156,7 @@ public class VerificationEngine : BackgroundService
             await _failureDiagnostics.RunAsync(_cycleNumber, outcome.Snapshots, stoppingToken);
 
             _cycleStatistics.RecordFail(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
-            _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Fail);
+            _cycleRecorder?.FinishCycle(_cycleNumber, CycleResult.Fail);
 
             _failed = true;
             _applicationLifetime.StopApplication();

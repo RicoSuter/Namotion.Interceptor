@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.ConnectorTester.Logging;
 /// Logger provider that writes to both console and per-cycle log files.
 /// The verification engine signals cycle boundaries via StartCycle/FinishCycle.
 /// </summary>
-public sealed class CycleLoggerProvider : ILoggerProvider, ICycleLifecycleNotifier
+public sealed class CycleLoggerProvider : ILoggerProvider, ICycleRecorder
 {
     private const int MaxPassingLogFiles = 50;
 

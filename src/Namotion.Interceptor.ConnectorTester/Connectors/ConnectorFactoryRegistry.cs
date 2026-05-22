@@ -4,13 +4,13 @@ using Namotion.Interceptor.ConnectorTester.Connectors.WebSocket;
 
 namespace Namotion.Interceptor.ConnectorTester.Connectors;
 
-public static class ConnectorBindingsRegistry
+public static class ConnectorFactoryRegistry
 {
-    public static IConnectorBindings Resolve(ConnectorKind kind) => kind switch
+    public static IConnectorFactory Resolve(ConnectorKind kind) => kind switch
     {
-        ConnectorKind.OpcUa     => new OpcUaConnectorBindings(),
-        ConnectorKind.Mqtt      => new MqttConnectorBindings(),
-        ConnectorKind.WebSocket => new WebSocketConnectorBindings(),
+        ConnectorKind.OpcUa     => new OpcUaConnectorFactory(),
+        ConnectorKind.Mqtt      => new MqttConnectorFactory(),
+        ConnectorKind.WebSocket => new WebSocketConnectorFactory(),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown ConnectorKind.")
     };
 }

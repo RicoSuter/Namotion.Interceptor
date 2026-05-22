@@ -10,7 +10,7 @@ using Opc.Ua;
 
 namespace Namotion.Interceptor.ConnectorTester.Connectors.OpcUa;
 
-public sealed class OpcUaConnectorBindings : IConnectorBindings
+public sealed class OpcUaConnectorFactory : IConnectorFactory
 {
     public ConnectorKind Kind => ConnectorKind.OpcUa;
     public int DefaultPort => 4840;

@@ -8,7 +8,7 @@ using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.ConnectorTester.Connectors.Mqtt;
 
-public sealed class MqttConnectorBindings : IConnectorBindings
+public sealed class MqttConnectorFactory : IConnectorFactory
 {
     public ConnectorKind Kind => ConnectorKind.Mqtt;
     public int DefaultPort => 1883;

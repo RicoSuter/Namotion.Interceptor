@@ -5,10 +5,11 @@ namespace Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 
 /// <summary>
 /// BackgroundService that drives one participant's value-mutation strategy and an
-/// optional structural-mutation loop. Composes KnownNodeGraph + IValueMutationStrategy
-/// + StructuralMutator + MutationCounters. Honors TestCycleCoordinator pauses.
+/// optional structural-mutation loop. Composes <see cref="KnownNodeGraph"/> +
+/// <see cref="IValueMutationStrategy"/> + <see cref="StructuralMutator"/> +
+/// <see cref="MutationCounters"/>. Honors <see cref="TestCycleCoordinator"/> pauses.
 /// </summary>
-public sealed class MutationEngineHost : BackgroundService
+public sealed class MutationEngine : BackgroundService
 {
     private const int RebuildEveryStructuralMutations = 10;
 
@@ -29,7 +30,7 @@ public sealed class MutationEngineHost : BackgroundService
 
     public void ResetCounters() => _counters.Reset();
 
-    public MutationEngineHost(
+    public MutationEngine(
         TestNode root,
         ParticipantConfiguration participantConfiguration,
         TestCycleCoordinator coordinator,
@@ -50,7 +51,7 @@ public sealed class MutationEngineHost : BackgroundService
         _structuralMutationRate = participantConfiguration.StructuralMutationRate;
     }
 
-    public static MutationEngineHost CreateRandom(
+    public static MutationEngine CreateRandom(
         TestNode root,
         ParticipantConfiguration participantConfiguration,
         TestCycleCoordinator coordinator,
@@ -60,10 +61,10 @@ public sealed class MutationEngineHost : BackgroundService
         var counters = new MutationCounters();
         var context = ((IInterceptorSubject)root).Context;
         var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration);
-        return new MutationEngineHost(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
+        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
     }
 
-    public static MutationEngineHost CreateBatch(
+    public static MutationEngine CreateBatch(
         TestNode root,
         ParticipantConfiguration participantConfiguration,
         TestCycleCoordinator coordinator,
@@ -75,7 +76,7 @@ public sealed class MutationEngineHost : BackgroundService
         var counters = new MutationCounters();
         var context = ((IInterceptorSubject)root).Context;
         var strategy = new BatchValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex);
-        return new MutationEngineHost(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
+        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

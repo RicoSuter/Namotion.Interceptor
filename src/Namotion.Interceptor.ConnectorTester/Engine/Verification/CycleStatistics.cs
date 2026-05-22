@@ -14,7 +14,7 @@ public sealed class CycleStatistics
     private readonly CsvFile<CycleCsvRow> _cyclesCsv;
     private readonly CsvFile<ChaosEventCsvRow> _chaosEventsCsv;
     private readonly HeapSampler _heapSampler;
-    private readonly List<MutationEngineHost> _mutationEngines;
+    private readonly List<MutationEngine> _mutationEngines;
     private readonly List<ChaosEngine> _chaosEngines;
     private readonly TimeSpan _mutatePhaseDuration;
     private readonly ILogger _logger;
@@ -23,7 +23,7 @@ public sealed class CycleStatistics
         CsvFile<CycleCsvRow> cyclesCsv,
         CsvFile<ChaosEventCsvRow> chaosEventsCsv,
         HeapSampler heapSampler,
-        List<MutationEngineHost> mutationEngines,
+        List<MutationEngine> mutationEngines,
         List<ChaosEngine> chaosEngines,
         TimeSpan mutatePhaseDuration,
         ILogger logger)

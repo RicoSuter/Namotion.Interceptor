@@ -10,7 +10,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
 
-public class MutationEngineHostTests
+public class MutationEngineTests
 {
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext
@@ -33,18 +33,18 @@ public class MutationEngineHostTests
             ValueMutationRate = 100,
             StructuralMutationRate = 0
         };
-        var host = MutationEngineHost.CreateRandom(root, configuration, coordinator, NullLogger.Instance);
+        var engine = MutationEngine.CreateRandom(root, configuration, coordinator, NullLogger.Instance);
 
         // Act
-        await host.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => host.ValueMutationCount > 0,
+        await engine.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => engine.ValueMutationCount > 0,
             timeout: TimeSpan.FromSeconds(5),
             pollInterval: TimeSpan.FromMilliseconds(20));
-        await host.StopAsync(CancellationToken.None);
+        await engine.StopAsync(CancellationToken.None);
 
         // Assert
-        Assert.True(host.ValueMutationCount > 0);
-        Assert.Equal(0, host.StructuralMutationCount);
+        Assert.True(engine.ValueMutationCount > 0);
+        Assert.Equal(0, engine.StructuralMutationCount);
     }
 
     [Fact]
@@ -55,13 +55,13 @@ public class MutationEngineHostTests
         var root = new TestNode(context);
         var coordinator = new TestCycleCoordinator();
         var configuration = new ParticipantConfiguration { Name = "test", ValueMutationRate = 50 };
-        var host = MutationEngineHost.CreateRandom(root, configuration, coordinator, NullLogger.Instance);
+        var engine = MutationEngine.CreateRandom(root, configuration, coordinator, NullLogger.Instance);
 
         // Act
-        host.ResetCounters();
+        engine.ResetCounters();
 
         // Assert
-        Assert.Equal(0, host.ValueMutationCount);
-        Assert.Equal(0, host.StructuralMutationCount);
+        Assert.Equal(0, engine.ValueMutationCount);
+        Assert.Equal(0, engine.StructuralMutationCount);
     }
 }

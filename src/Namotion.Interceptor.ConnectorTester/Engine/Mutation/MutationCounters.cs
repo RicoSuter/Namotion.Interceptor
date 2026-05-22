@@ -1,7 +1,7 @@
 namespace Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 
 /// <summary>
-/// Atomic value-mutation and structural-mutation counters for one MutationEngineHost.
+/// Atomic value-mutation and structural-mutation counters for one MutationEngine.
 /// VerificationEngine reads these per cycle to write statistics.
 /// </summary>
 public sealed class MutationCounters

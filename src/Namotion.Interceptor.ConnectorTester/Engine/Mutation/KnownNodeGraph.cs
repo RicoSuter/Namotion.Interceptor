@@ -3,7 +3,7 @@ using Namotion.Interceptor.ConnectorTester.Model;
 namespace Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 
 /// <summary>
-/// Holds the graph-traversal state for a single MutationEngineHost: the lock,
+/// Holds the graph-traversal state for a single MutationEngine: the lock,
 /// the flat list of known nodes (used by value strategies to pick a random target),
 /// and the subset eligible for structural mutation (depth up to MaxDepth).
 /// All access is under NodeLock.

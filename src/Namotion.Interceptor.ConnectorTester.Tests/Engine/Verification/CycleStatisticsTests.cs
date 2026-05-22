@@ -25,7 +25,7 @@ public class CycleStatisticsTests
             var statistics = new CycleStatistics(
                 cyclesCsv, chaosCsv,
                 new HeapSampler(),
-                mutationEngines: new List<MutationEngineHost>(),
+                mutationEngines: new List<MutationEngine>(),
                 chaosEngines: new List<ChaosEngine>(),
                 mutatePhaseDuration: TimeSpan.FromSeconds(60),
                 NullLogger.Instance);

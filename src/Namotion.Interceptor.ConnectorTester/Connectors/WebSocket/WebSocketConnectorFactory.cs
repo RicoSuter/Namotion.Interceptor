@@ -6,7 +6,7 @@ using Namotion.Interceptor.WebSocket;
 
 namespace Namotion.Interceptor.ConnectorTester.Connectors.WebSocket;
 
-public sealed class WebSocketConnectorBindings : IConnectorBindings
+public sealed class WebSocketConnectorFactory : IConnectorFactory
 {
     public ConnectorKind Kind => ConnectorKind.WebSocket;
     public int DefaultPort => 8080;

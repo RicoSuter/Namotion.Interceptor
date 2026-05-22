@@ -5,10 +5,10 @@ using Namotion.Interceptor.ConnectorTester.Model;
 namespace Namotion.Interceptor.ConnectorTester.Connectors;
 
 /// <summary>
-/// Per-connector strategy. One implementation per ConnectorKind. Owns the connector's
+/// Per-connector factory. One implementation per ConnectorKind. Owns the connector's
 /// default port and the server-side and client-side service registrations.
 /// </summary>
-public interface IConnectorBindings
+public interface IConnectorFactory
 {
     ConnectorKind Kind { get; }
     int DefaultPort { get; }

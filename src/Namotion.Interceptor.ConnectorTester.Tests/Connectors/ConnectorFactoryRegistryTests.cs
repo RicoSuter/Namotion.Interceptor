@@ -3,7 +3,7 @@ using Namotion.Interceptor.ConnectorTester.Connectors;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Connectors;
 
-public class ConnectorBindingsRegistryTests
+public class ConnectorFactoryRegistryTests
 {
     [Theory]
     [InlineData(ConnectorKind.OpcUa,     4840)]
@@ -12,10 +12,10 @@ public class ConnectorBindingsRegistryTests
     public void WhenResolved_ThenDefaultPortMatchesConnector(ConnectorKind kind, int expectedPort)
     {
         // Arrange / Act
-        var bindings = ConnectorBindingsRegistry.Resolve(kind);
+        var connectorFactory = ConnectorFactoryRegistry.Resolve(kind);
 
         // Assert
-        Assert.Equal(kind, bindings.Kind);
-        Assert.Equal(expectedPort, bindings.DefaultPort);
+        Assert.Equal(kind, connectorFactory.Kind);
+        Assert.Equal(expectedPort, connectorFactory.DefaultPort);
     }
 }

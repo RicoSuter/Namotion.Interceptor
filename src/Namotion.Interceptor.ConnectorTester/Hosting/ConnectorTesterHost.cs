@@ -54,10 +54,10 @@ public sealed class ConnectorTesterHost
         var runDirectory = Path.Combine("logs", $"{DateTime.UtcNow:yyyy-MM-ddTHH-mm-ssZ}-{builder.Environment.EnvironmentName}");
         Directory.CreateDirectory(runDirectory);
 
-        // Cycle logger provider doubles as ILoggerProvider and ICycleLifecycleNotifier.
+        // Cycle logger provider doubles as ILoggerProvider and ICycleRecorder.
         var cycleLoggerProvider = new CycleLoggerProvider(runDirectory);
         builder.Services.AddSingleton(cycleLoggerProvider);
-        builder.Services.AddSingleton<ICycleLifecycleNotifier>(cycleLoggerProvider);
+        builder.Services.AddSingleton<ICycleRecorder>(cycleLoggerProvider);
         builder.Logging.AddProvider(cycleLoggerProvider);
 
         // Shared logger factory feeds (a) engines created before DI build and (b) per-participant
@@ -93,10 +93,10 @@ public sealed class ConnectorTesterHost
         }
 
         var runModeSelection = RunModeSelector.Select(args, configuration);
-        var bindings = ConnectorBindingsRegistry.Resolve(configuration.ConnectorKind);
+        var connectorFactory = ConnectorFactoryRegistry.Resolve(configuration.ConnectorKind);
 
         var participants = new Dictionary<string, TestNode>();
-        var mutationEngines = new List<MutationEngineHost>();
+        var mutationEngines = new List<MutationEngine>();
         var chaosEngines = new List<ChaosEngine>();
         var participantBundles = new List<ParticipantHostBundle>();
 
@@ -128,11 +128,11 @@ public sealed class ConnectorTesterHost
 
             if (isServer)
             {
-                bindings.RegisterServer(participantServices, root, bindings.DefaultPort);
+                connectorFactory.RegisterServer(participantServices, root, connectorFactory.DefaultPort);
             }
             else
             {
-                bindings.RegisterClient(participantServices, root, participantConfiguration, bindings.DefaultPort);
+                connectorFactory.RegisterClient(participantServices, root, participantConfiguration, connectorFactory.DefaultPort);
             }
 
             // PerformanceProfiler lives in the participant SP so its StopAsync runs before
@@ -150,9 +150,9 @@ public sealed class ConnectorTesterHost
             // graph; its logger category already encodes the participant name explicitly.
             var mutationLogger = sharedLoggerFactory.CreateLogger($"MutationEngine/{participantConfiguration.Name}");
             var mutationEngine = configuration.NumberOfBatches > 0
-                ? MutationEngineHost.CreateBatch(root, participantConfiguration, coordinator, mutationLogger,
+                ? MutationEngine.CreateBatch(root, participantConfiguration, coordinator, mutationLogger,
                     configuration.NumberOfBatches, participantConfiguration.Index)
-                : MutationEngineHost.CreateRandom(root, participantConfiguration, coordinator, mutationLogger);
+                : MutationEngine.CreateRandom(root, participantConfiguration, coordinator, mutationLogger);
             mutationEngines.Add(mutationEngine);
             builder.Services.AddSingleton<IHostedService>(mutationEngine);
         }

@@ -13,7 +13,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Connectors;
 
-public class ConnectorBindingsRegistrationTests
+public class ConnectorFactoryRegistrationTests
 {
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext
@@ -24,8 +24,8 @@ public class ConnectorBindingsRegistrationTests
             .WithLifecycle();
 
     [Theory]
-    [MemberData(nameof(AllBindings))]
-    public void WhenRegisterServerCalled_ThenAtLeastOneSubjectConnectorRegistered(IConnectorBindings bindings)
+    [MemberData(nameof(AllFactories))]
+    public void WhenRegisterServerCalled_ThenAtLeastOneSubjectConnectorRegistered(IConnectorFactory connectorFactory)
     {
         // Arrange
         var services = new ServiceCollection();
@@ -33,7 +33,7 @@ public class ConnectorBindingsRegistrationTests
         var root = new TestNode(CreateContext());
 
         // Act
-        bindings.RegisterServer(services, root, bindings.DefaultPort);
+        connectorFactory.RegisterServer(services, root, connectorFactory.DefaultPort);
         var provider = services.BuildServiceProvider();
         var connectors = provider.GetServices<IHostedService>().OfType<ISubjectConnector>().ToList();
 
@@ -42,8 +42,8 @@ public class ConnectorBindingsRegistrationTests
     }
 
     [Theory]
-    [MemberData(nameof(AllBindings))]
-    public void WhenRegisterClientCalled_ThenAtLeastOneSubjectConnectorRegistered(IConnectorBindings bindings)
+    [MemberData(nameof(AllFactories))]
+    public void WhenRegisterClientCalled_ThenAtLeastOneSubjectConnectorRegistered(IConnectorFactory connectorFactory)
     {
         // Arrange
         var services = new ServiceCollection();
@@ -52,7 +52,7 @@ public class ConnectorBindingsRegistrationTests
         var participantConfiguration = new ParticipantConfiguration { Name = "client-test" };
 
         // Act
-        bindings.RegisterClient(services, root, participantConfiguration, bindings.DefaultPort);
+        connectorFactory.RegisterClient(services, root, participantConfiguration, connectorFactory.DefaultPort);
         var provider = services.BuildServiceProvider();
         var connectors = provider.GetServices<IHostedService>().OfType<ISubjectConnector>().ToList();
 
@@ -60,10 +60,10 @@ public class ConnectorBindingsRegistrationTests
         Assert.NotEmpty(connectors);
     }
 
-    public static IEnumerable<object[]> AllBindings()
+    public static IEnumerable<object[]> AllFactories()
     {
-        yield return [new OpcUaConnectorBindings()];
-        yield return [new MqttConnectorBindings()];
-        yield return [new WebSocketConnectorBindings()];
+        yield return [new OpcUaConnectorFactory()];
+        yield return [new MqttConnectorFactory()];
+        yield return [new WebSocketConnectorFactory()];
     }
 }
