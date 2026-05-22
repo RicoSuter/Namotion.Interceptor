@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking;
 
@@ -22,11 +23,22 @@ public static class SubjectLookup
     /// a collection <paramref name="value"/>, using <see cref="IList"/>
     /// fast path with <see cref="IEnumerable"/> fallback.
     /// </summary>
+    /// <remarks>
+    /// The IList fast path is split into its own tiny method body so the JIT can inline
+    /// it at every call site. The IEnumerable fallback is extracted into a separate
+    /// non-inlined method to keep the entry point under the inlining size budget.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IInterceptorSubject? FindSubjectInCollection(object value, int index)
     {
         if (value is IList list)
             return list[index] as IInterceptorSubject;
 
+        return FindSubjectInCollectionSlow(value, index);
+    }
+
+    private static IInterceptorSubject? FindSubjectInCollectionSlow(object value, int index)
+    {
         if (value is IEnumerable enumerable)
         {
             var i = 0;
@@ -46,11 +58,22 @@ public static class SubjectLookup
     /// a dictionary <paramref name="value"/>, using <see cref="IDictionary"/>
     /// fast path with <see cref="IEnumerable"/> KVP extraction fallback.
     /// </summary>
+    /// <remarks>
+    /// The IDictionary fast path is split into its own tiny method body so the JIT can inline
+    /// it at every call site. The expression-tree compiled delegate fallback is extracted into
+    /// a separate non-inlined method to keep the entry point under the inlining size budget.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IInterceptorSubject? FindSubjectInDictionary(object value, object key)
     {
         if (value is IDictionary dictionary)
             return dictionary[key] as IInterceptorSubject;
 
+        return FindSubjectInDictionarySlow(value, key);
+    }
+
+    private static IInterceptorSubject? FindSubjectInDictionarySlow(object value, object key)
+    {
         var tryGet = ReadOnlyDictTryGetCache.GetOrAdd(value.GetType(), static t =>
         {
             var rodInterface = t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>)
