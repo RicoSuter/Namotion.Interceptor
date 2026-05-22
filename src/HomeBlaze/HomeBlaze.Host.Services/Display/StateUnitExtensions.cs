@@ -67,7 +67,8 @@ public static class StateUnitExtensions
             // Percent and Currency use special formatting, not auto-scaling
             if (unit == StateUnit.Percent)
             {
-                return $"{(int)(Convert.ToDecimal(value) * 100m)}%";
+                var percent = Math.Round(Convert.ToDecimal(value) * 100m, 1);
+                return $"{percent.ToString("0.##", CultureInfo.InvariantCulture)}%";
             }
 
             if (unit == StateUnit.Currency)
@@ -96,6 +97,9 @@ public static class StateUnitExtensions
         return value switch
         {
             bool b => b ? "Yes" : "No",
+            double d => d.ToString("0.##", CultureInfo.InvariantCulture),
+            float f => f.ToString("0.##", CultureInfo.InvariantCulture),
+            decimal m => m.ToString("0.##", CultureInfo.InvariantCulture),
             DateTime dt => dt.ToString("g"),
             DateTimeOffset dto => $"{dto.ToLocalTime().ToString("g")} {dto.ToLocalTime():zzz}",
             Enum e => e.ToString(),
@@ -135,7 +139,7 @@ public static class StateUnitExtensions
             return FormatDecimalValue(displayValue, bestEntry.Suffix);
         }
 
-        // No family found — use static suffix with space handling
+        // No family found: use static suffix with space handling
         var unitInfo = GetUnitInfo(unit);
         if (unitInfo != null)
         {
@@ -199,9 +203,9 @@ public static class StateUnitExtensions
     private static string FormatTimeSpan(TimeSpan ts)
     {
         return ts.TotalSeconds < 5
-            ? $"{ts.TotalMilliseconds} ms"
+            ? $"{ts.TotalMilliseconds.ToString("0.##", CultureInfo.InvariantCulture)} ms"
             : ts.TotalHours >= 1
-                ? $"{ts.TotalHours:F1} h"
-                : ts.ToString(@"hh\:mm\:ss");
+                ? $"{ts.TotalHours.ToString("0.#", CultureInfo.InvariantCulture)} h"
+                : ts.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
     }
 }

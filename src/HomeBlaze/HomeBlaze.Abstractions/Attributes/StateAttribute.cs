@@ -78,12 +78,17 @@ public class StateAttribute : Attribute
         }
     }
 
-    // Tracking properties — used by PropertyAttributeInitializer merge logic
-    // NOT intended as named attribute parameters
+    // Tracking properties used by PropertyAttributeInitializer merge logic.
+    // NOT intended as named attribute parameters.
+
     public bool IsUnitSet { get; private set; }
+    
     public bool IsCumulativeSet { get; private set; }
+    
     public bool IsDiscreteSet { get; private set; }
+    
     public bool IsEstimatedSet { get; private set; }
+
     public bool IsPositionSet { get; private set; }
 
     public StateAttribute()

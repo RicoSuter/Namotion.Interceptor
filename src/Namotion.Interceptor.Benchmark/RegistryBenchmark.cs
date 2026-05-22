@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using BenchmarkDotNet.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Benchmark;
@@ -14,8 +15,9 @@ public class RegistryBenchmark
 {
     private Car _object;
     private IInterceptorSubjectContext? _context;
+    private ISubjectRegistry? _registry;
     private int _writeCounter;
-    
+
     [Params(
         // "regular",
         "interceptor"
@@ -39,6 +41,7 @@ public class RegistryBenchmark
 
                 _object = new Car(_context);
                 AddLotsOfPreviousCars();
+                _registry = _context.TryGetService<ISubjectRegistry>();
                 break;
         }
     }
@@ -153,5 +156,11 @@ public class RegistryBenchmark
     public string GenerateSubjectId()
     {
         return SubjectRegistryExtensions.GenerateSubjectId();
+    }
+
+    [Benchmark]
+    public int KnownSubjectsSnapshot()
+    {
+        return _registry!.KnownSubjects.Count;
     }
 }
