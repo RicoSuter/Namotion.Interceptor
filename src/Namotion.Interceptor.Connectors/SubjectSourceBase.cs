@@ -22,6 +22,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
+    /// <summary>
+    /// Gets the number of writes currently queued for retry.
+    /// </summary>
+    public int PendingWriteCount => WriteRetryQueue?.PendingWriteCount ?? 0;
+
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
