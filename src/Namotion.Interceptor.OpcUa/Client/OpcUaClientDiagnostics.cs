@@ -81,6 +81,11 @@ public class OpcUaClientDiagnostics
     public int? PendingReadAfterWrites => _source.SessionManager?.ReadAfterWriteManager?.PendingReadCount;
 
     /// <summary>
+    /// Gets the number of writes currently queued for retry (buffered during disconnection).
+    /// </summary>
+    public int PendingWriteCount => _source.PendingWriteCount;
+
+    /// <summary>
     /// Gets the most recent error that occurred while establishing or restoring the session,
     /// or null if no error has occurred since the last successful (re)connection.
     /// Cleared on every successful connection or reconnection.
