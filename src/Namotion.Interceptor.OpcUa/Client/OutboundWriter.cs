@@ -69,9 +69,6 @@ internal sealed class OutboundWriter
         }
     }
 
-    internal static bool IsTransientWriteError(StatusCode statusCode)
-        => OpcUaStatusCodeClassifier.IsTransient(statusCode);
-
     private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
     {
         var failureCount = 0;
@@ -101,7 +98,7 @@ internal sealed class OutboundWriter
             if (!StatusCode.IsGood(results[resultIndex]))
             {
                 failedChanges.Add(change);
-                if (IsTransientWriteError(results[resultIndex]))
+                if (OpcUaStatusCodeClassifier.IsTransient(results[resultIndex]))
                     transientCount++;
             }
             resultIndex++;
