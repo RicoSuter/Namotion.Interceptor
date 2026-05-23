@@ -197,10 +197,9 @@ public class OpcUaTypeResolverTests
     public async Task WhenSessionExtensionPadsShortRead_ThenResolverPreservesAlignment()
     {
         // Arrange: two variables (= 4 ReadValueIds), but the server returns only the
-        // first 2 slots. The padding lives in OpcUaSessionExtensions.ReadBatchAsync;
-        // this test verifies that the resolver consumes the padded result correctly so
-        // var1 stays resolved and var2 surfaces as a bad-status read rather than being
-        // silently re-aligned to cover var2's missing slots.
+        // first 2 slots. ReadBatchAsync pads the missing slots with BadUnexpectedError,
+        // which is classified as transient, so the read throws an
+        // OpcUaTransientServiceException attributed to node2 (proving alignment held).
         var node1Id = new NodeId(7001, 2);
         var node2Id = new NodeId(7002, 2);
 
@@ -229,14 +228,14 @@ public class OpcUaTypeResolverTests
                 DiagnosticInfos = []
             });
 
-        // Act
-        var result = await _resolver.ResolveVariableTypesAsync(mockSession.Object, variables, CancellationToken.None);
+        // Act & Assert: alignment is verified by the exception attributing the
+        // padded transient slot to node2's NodeId (not node1's, not a phantom).
+        var exception = await Assert.ThrowsAsync<OpcUaTransientServiceException>(() =>
+            _resolver.ResolveVariableTypesAsync(mockSession.Object, variables, CancellationToken.None));
 
-        // Assert: node1's positions [0,1] are still aligned with its DataType+ValueRank
-        // read; the padded slots [2,3] become bad-status reads for node2, leaving it null.
-        Assert.Equal(2, result.Count);
-        Assert.Equal(typeof(float), result[node1Id]);
-        Assert.Null(result[node2Id]);
+        Assert.Equal("Read", exception.Operation);
+        Assert.Equal(node2Id, exception.NodeId);
+        Assert.Equal((StatusCode)StatusCodes.BadUnexpectedError, exception.StatusCode);
     }
 
     [Fact]

@@ -93,17 +93,6 @@ internal sealed class SubscriptionHealthMonitor
     internal static bool IsRetryable(MonitoredItem item)
     {
         var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
-
-        // Design-time errors - don't retry (permanent errors)
-        if (statusCode == StatusCodes.BadNodeIdUnknown ||
-            statusCode == StatusCodes.BadAttributeIdInvalid ||
-            statusCode == StatusCodes.BadIndexRangeInvalid)
-        {
-            return false;
-        }
-
-        // Retryable transient errors (e.g., BadTooManyMonitoredItems, BadOutOfService)
-        // Retry any bad status that's not a permanent design-time error
-        return StatusCode.IsBad(statusCode);
+        return OpcUaStatusCodeClassifier.IsTransient(statusCode);
     }
 }

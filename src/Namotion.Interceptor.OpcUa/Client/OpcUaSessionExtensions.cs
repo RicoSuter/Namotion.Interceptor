@@ -10,7 +10,7 @@ internal static class OpcUaSessionExtensions
 
     // Soft cap applied when a server reports 0/null for its per-call operation limit.
     // 0/null nominally means "unbounded", but in practice it usually indicates an old
-    // or misconfigured server — exactly the population most likely to choke on large
+    // or misconfigured server: exactly the population most likely to choke on large
     // requests. Split-and-retry recovers either way, so the only cost of going higher
     // is the wasted RTT on the first oversized request. 256 is conservative for legacy
     // servers and well below any modern server's advertised limit.
@@ -179,8 +179,12 @@ internal static class OpcUaSessionExtensions
             var nodeId = nodeIds[offset + i];
             if (!StatusCode.IsGood(browseResult.StatusCode))
             {
+                if (OpcUaStatusCodeClassifier.IsTransient(browseResult.StatusCode))
+                {
+                    throw new OpcUaTransientServiceException("Browse", nodeId, browseResult.StatusCode);
+                }
                 logger.LogWarning(
-                    "BrowseAsync returned bad status for {NodeId} ({StatusCode}); skipping (will be retried if this NodeId is revisited).",
+                    "BrowseAsync returned permanent bad status for {NodeId} ({StatusCode}); skipping (this NodeId cannot be browsed).",
                     nodeId, browseResult.StatusCode);
                 continue;
             }
@@ -343,8 +347,12 @@ internal static class OpcUaSessionExtensions
             var nodeId = current[offset + i].NodeId;
             if (!StatusCode.IsGood(browseResult.StatusCode))
             {
+                if (OpcUaStatusCodeClassifier.IsTransient(browseResult.StatusCode))
+                {
+                    throw new OpcUaTransientServiceException("BrowseNext", nodeId, browseResult.StatusCode);
+                }
                 logger.LogWarning(
-                    "BrowseNextAsync returned bad status for {NodeId} ({StatusCode}); the partial result so far is retained.",
+                    "BrowseNextAsync returned permanent bad status for {NodeId} ({StatusCode}); the partial result so far is retained.",
                     nodeId, browseResult.StatusCode);
                 continue;
             }
@@ -404,6 +412,7 @@ internal static class OpcUaSessionExtensions
             // `allResults[i]` aligning with `nodesToRead[i]`. The OPC UA spec
             // mandates one result per request; a mismatch indicates a server bug.
             var actual = response.Results.Count;
+            var appendStart = allResults.Count;
             if (actual == count)
             {
                 allResults.AddRange(response.Results);
@@ -422,6 +431,20 @@ internal static class OpcUaSessionExtensions
                 for (var i = take; i < count; i++)
                 {
                     allResults.Add(new DataValue { StatusCode = StatusCodes.BadUnexpectedError });
+                }
+            }
+
+            // Transient per-slot bad statuses indicate the session is in a bad state;
+            // abort the read so the caller (typically the source manager) can retry the
+            // whole operation after reconnect. Permanent bad statuses pass through and
+            // are handled per-property by callers that already check IsGood.
+            for (var i = appendStart; i < allResults.Count; i++)
+            {
+                var status = allResults[i].StatusCode;
+                if (OpcUaStatusCodeClassifier.IsTransient(status))
+                {
+                    var nodeId = nodesToRead[batchStart + (i - appendStart)].NodeId;
+                    throw new OpcUaTransientServiceException("Read", nodeId, status);
                 }
             }
         }

@@ -214,7 +214,13 @@ internal class OpcUaSubjectLoader
         var objectBrowseResults = await context.BrowseAsync(objectNodeIds).ConfigureAwait(false);
         foreach (var nodeId in objectNodeIds)
         {
-            objectTypeMap[nodeId] = _configuration.TypeResolver.ResolveObjectNodeType(objectBrowseResults[nodeId]);
+            // Missing entry = browse returned a bad status (BrowseNodesAsync deliberately
+            // omits failed NodeIds so they aren't cached). Leave unset; TryCreateDynamicProperty
+            // logs "Could not infer type" and skips, and the next load gets to retry.
+            if (objectBrowseResults.TryGetValue(nodeId, out var children))
+            {
+                objectTypeMap[nodeId] = _configuration.TypeResolver.ResolveObjectNodeType(children);
+            }
         }
 
         return objectTypeMap;

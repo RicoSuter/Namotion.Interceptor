@@ -70,19 +70,7 @@ internal sealed class OutboundWriter
     }
 
     internal static bool IsTransientWriteError(StatusCode statusCode)
-    {
-        if (statusCode == StatusCodes.BadNodeIdUnknown ||
-            statusCode == StatusCodes.BadAttributeIdInvalid ||
-            statusCode == StatusCodes.BadTypeMismatch ||
-            statusCode == StatusCodes.BadWriteNotSupported ||
-            statusCode == StatusCodes.BadUserAccessDenied ||
-            statusCode == StatusCodes.BadNotWritable)
-        {
-            return false;
-        }
-
-        return StatusCode.IsBad(statusCode);
-    }
+        => OpcUaStatusCodeClassifier.IsTransient(statusCode);
 
     private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
     {

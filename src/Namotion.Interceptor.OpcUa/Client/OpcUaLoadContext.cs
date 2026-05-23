@@ -60,7 +60,7 @@ internal sealed class OpcUaLoadContext(
                 maxBrowseContinuations,
                 logger,
                 CancellationToken).ConfigureAwait(false);
-       
+
             foreach (var (nodeId, refs) in results)
             {
                 _browseCache[nodeId] = refs;
