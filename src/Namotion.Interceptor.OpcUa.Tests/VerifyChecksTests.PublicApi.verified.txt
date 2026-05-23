@@ -152,6 +152,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public int SubscriptionCount { get; }
         public long SuccessfulReconnections { get; }
         public long TotalReconnectionAttempts { get; }
+        public int WriteQueueCount { get; }
     }
     public sealed class OpcUaCurrentSessionChangedEventArgs : System.EventArgs
     {

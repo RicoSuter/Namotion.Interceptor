@@ -59,6 +59,13 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public partial string? Password { get; set; }
 
     /// <summary>
+    /// Default sampling interval in milliseconds for monitored items.
+    /// Null uses the server default. 0 enables exception-based monitoring (immediate reporting).
+    /// </summary>
+    [Configuration]
+    public partial int? SamplingInterval { get; set; }
+
+    /// <summary>
     /// Whether the client is enabled and should auto-start on application startup.
     /// </summary>
     [Configuration]
@@ -102,6 +109,24 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     /// </summary>
     [State]
     public partial double? MonitoredItemCount { get; set; }
+
+    /// <summary>
+    /// Number of items using polling fallback. Null when not running.
+    /// </summary>
+    [State]
+    public partial int? PollingItemCount { get; set; }
+
+    /// <summary>
+    /// Number of writes queued for retry during disconnection. Null when not running.
+    /// </summary>
+    [State]
+    public partial int? WriteQueueCount { get; set; }
+
+    /// <summary>
+    /// Total number of reconnections since start. Null when not running.
+    /// </summary>
+    [State(IsCumulative = true)]
+    public partial long? TotalReconnections { get; set; }
 
     /// <summary>
     /// Dynamic root subject containing discovered OPC UA properties.
@@ -197,6 +222,9 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             IncomingChangesPerSecond = diagnostics.IncomingChangesPerSecond;
             OutgoingChangesPerSecond = diagnostics.OutgoingChangesPerSecond;
             MonitoredItemCount = diagnostics.MonitoredItemCount;
+            PollingItemCount = diagnostics.PollingItemCount;
+            WriteQueueCount = diagnostics.WriteQueueCount;
+            TotalReconnections = diagnostics.TotalReconnectionAttempts;
         }
     }
 
@@ -222,6 +250,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             {
                 ServerUrl = ServerUrl,
                 RootPath = rootPathSegments,
+                DefaultSamplingInterval = SamplingInterval,
                 TypeResolver = new HomeBlazeOpcUaTypeResolver(_logger),
                 ValueConverter = new OpcUaValueConverter(),
                 SubjectFactory = new HomeBlazeOpcUaSubjectFactory(),
@@ -264,6 +293,10 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 Root = null;
                 Status = ServiceStatus.Stopped;
                 IsConnected = null;
+                MonitoredItemCount = null;
+                PollingItemCount = null;
+                WriteQueueCount = null;
+                TotalReconnections = null;
                 IncomingChangesPerSecond = null;
                 OutgoingChangesPerSecond = null;
             }
