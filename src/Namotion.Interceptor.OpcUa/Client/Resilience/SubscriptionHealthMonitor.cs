@@ -23,7 +23,7 @@ internal sealed class SubscriptionHealthMonitor
         {
             foreach (var subscription in subscriptions)
             {
-                var unhealthyCount = GetUnhealthyCount(subscription);
+                var unhealthyCount = GetTransientErrorCount(subscription);
                 if (unhealthyCount == 0)
                 {
                     continue;
@@ -34,7 +34,7 @@ internal sealed class SubscriptionHealthMonitor
                     // Try to heal failed monitored items by reapplying the subscription changes
                     await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
 
-                    var stillUnhealthyCount = GetUnhealthyCount(subscription);
+                    var stillUnhealthyCount = GetTransientErrorCount(subscription);
                     if (stillUnhealthyCount == 0)
                     {
                         _logger.LogInformation(
@@ -64,35 +64,17 @@ internal sealed class SubscriptionHealthMonitor
         }
     }
 
-    private static int GetUnhealthyCount(Subscription subscription)
+    private static int GetTransientErrorCount(Subscription subscription)
     {
         var count = 0;
         foreach (var item in subscription.MonitoredItems)
         {
-            if (IsUnhealthy(item) && IsRetryable(item))
+            var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
+            if (OpcUaStatusCodeClassifier.IsTransient(statusCode))
             {
                 count++;
             }
         }
         return count;
-    }
-
-    /// <summary>
-    /// Determines if a monitored item is unhealthy (not created or has bad status).
-    /// </summary>
-    internal static bool IsUnhealthy(MonitoredItem item)
-    {
-        var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
-        return !item.Created || StatusCode.IsBad(statusCode);
-    }
-
-    /// <summary>
-    /// Determines if a failed monitored item should be retried.
-    /// Returns false for permanent design-time errors, true for transient errors.
-    /// </summary>
-    internal static bool IsRetryable(MonitoredItem item)
-    {
-        var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
-        return OpcUaStatusCodeClassifier.IsTransient(statusCode);
     }
 }

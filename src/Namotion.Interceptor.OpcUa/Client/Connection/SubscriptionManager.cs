@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
-using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Tracking.Change;
@@ -253,14 +252,14 @@ internal class SubscriptionManager : IAsyncDisposable
 
         foreach (var monitoredItem in subscription.MonitoredItems)
         {
-            if (SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
+            if (!monitoredItem.Created || StatusCode.IsBad(monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good))
             {
                 failedItems ??= [];
                 failedItems.Add(monitoredItem);
 
                 _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
 
-                var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
+                var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
 
                 // Check if we should fall back to polling for this item
                 if (_configuration.EnablePollingFallback &&
@@ -366,7 +365,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
         foreach (var item in subscription.MonitoredItems)
         {
-            if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
+            if (item is { Handle: RegisteredSubjectProperty property, Status.Created: true })
             {
                 var requestedInterval = GetRequestedSamplingInterval(property);
                 var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
@@ -410,7 +409,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 var disposalTimeout = _configuration.SessionDisposalTimeout;
                 try
                 {
-                    await session.RemoveSubscriptionsAsync(subscriptions, default)
+                    await session.RemoveSubscriptionsAsync(subscriptions, CancellationToken.None)
                         .WaitAsync(disposalTimeout).ConfigureAwait(false);
                 }
                 catch (Exception ex)

@@ -51,6 +51,7 @@ public class OpcUaStatusCodeClassifierTests
     [InlineData(StatusCodes.BadSecureChannelClosed)]
     [InlineData(StatusCodes.BadDeviceFailure)]
     [InlineData(StatusCodes.BadSensorFailure)]
+    [InlineData(StatusCodes.BadTooManyMonitoredItems)]
     public void WhenStatusIsTransientBadCode_ThenIsTransientReturnsTrueAndIsPermanentReturnsFalse(uint statusCode)
     {
         // Arrange
