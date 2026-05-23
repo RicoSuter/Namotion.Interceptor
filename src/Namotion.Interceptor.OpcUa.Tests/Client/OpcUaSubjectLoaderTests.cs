@@ -1888,6 +1888,122 @@ public class OpcUaSubjectLoaderTests
         };
     }
 
+    [Fact]
+    public async Task WhenTwoSubjectsShareDynamicVariable_ThenReadIsNotDuplicated()
+    {
+        // Arrange: two parent Object nodes each have the same child Variable node.
+        // The loader should read DataType+ValueRank only once for the shared NodeId.
+        var rootId = new NodeId(1, 0);
+        var parent1Id = new NodeId(1001, 2);
+        var parent2Id = new NodeId(1002, 2);
+        var sharedVarId = new NodeId(3001, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] =
+            [
+                CreateObjectReferenceDescription("Parent1", new ExpandedNodeId(parent1Id)),
+                CreateObjectReferenceDescription("Parent2", new ExpandedNodeId(parent2Id))
+            ],
+            [parent1Id] = [CreateTestReferenceDescription("SharedVar", new ExpandedNodeId(sharedVarId))],
+            [parent2Id] = [CreateTestReferenceDescription("SharedVar", new ExpandedNodeId(sharedVarId))]
+        };
+
+        var readCallCount = 0;
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+
+        mockSession
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
+            {
+                Interlocked.Increment(ref readCallCount);
+                var results = new DataValueCollection();
+                for (var i = 0; i < nodesToRead.Count; i += 2)
+                {
+                    results.Add(new DataValue { Value = DataTypeIds.Float, StatusCode = StatusCodes.Good });
+                    results.Add(new DataValue { Value = -1, StatusCode = StatusCodes.Good });
+                }
+                return new ReadResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
+
+        // Act
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: ReadAsync should be called once (for 1 unique variable), not twice
+        Assert.Equal(1, readCallCount);
+    }
+
+    [Fact]
+    public async Task WhenObjectNodeBrowseFails_ThenDynamicPropertyIsSkipped()
+    {
+        // Arrange: root has an Object child whose browse returns a permanent bad status.
+        // The loader should skip this node and not create a property for it.
+        var rootId = new NodeId(1, 0);
+        var objectId = new NodeId(2001, 2);
+
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection descriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var desc in descriptions)
+                {
+                    if (desc.NodeId == rootId)
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = [CreateObjectReferenceDescription("BadObject", new ExpandedNodeId(objectId))]
+                        });
+                    }
+                    else if (desc.NodeId == objectId)
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            StatusCode = StatusCodes.BadNodeIdUnknown,
+                            References = []
+                        });
+                    }
+                    else
+                    {
+                        results.Add(new BrowseResult { References = [] });
+                    }
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
+
+        // Act
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: the Object node's browse failed, so type resolution returned no entry,
+        // and TryCreateDynamicProperty logged a warning and returned null.
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        Assert.DoesNotContain(registeredSubject.Properties, p => p.Name == "BadObject");
+    }
+
     private Mock<ISession> CreateMockSessionWithChildren(ReferenceDescription[] children)
     {
         var mockSession = CreateMockSession();

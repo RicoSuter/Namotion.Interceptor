@@ -84,7 +84,7 @@ internal class OpcUaSubjectLoader
 
         // Step 2: Classify children, collect dynamic nodes
         var allDynamicObjectNodeIds = new HashSet<NodeId>();
-        var allDynamicVariableNodes = new List<ReferenceDescription>();
+        var allDynamicVariableNodes = new Dictionary<NodeId, ReferenceDescription>();
         var subjectStates = new List<SubjectState>(validSubjects.Count);
 
         foreach (var (subject, registeredSubject, subjectNodeId) in validSubjects)
@@ -106,7 +106,7 @@ internal class OpcUaSubjectLoader
         var objectTypeMap = await ResolveObjectTypesAsync(allDynamicObjectNodeIds, context).ConfigureAwait(false);
 
         var variableTypeMap = allDynamicVariableNodes.Count > 0
-            ? await _configuration.TypeResolver.ResolveVariableTypesAsync(context.Session, allDynamicVariableNodes, context.CancellationToken).ConfigureAwait(false)
+            ? await _configuration.TypeResolver.ResolveVariableTypesAsync(context.Session, allDynamicVariableNodes.Values.ToList(), context.CancellationToken).ConfigureAwait(false)
             : new Dictionary<NodeId, Type?>();
 
         // Step 4: Dispatch properties and load children
@@ -153,7 +153,7 @@ internal class OpcUaSubjectLoader
             RegisteredSubject registeredSubject,
             List<(ReferenceDescription Reference, NodeId NodeId)> distinctReferences,
             HashSet<NodeId> dynamicObjectNodeIds,
-            List<ReferenceDescription> dynamicVariableNodes,
+            Dictionary<NodeId, ReferenceDescription> dynamicVariableNodes,
             ISession session,
             CancellationToken cancellationToken)
     {
@@ -173,10 +173,8 @@ internal class OpcUaSubjectLoader
                 continue;
             }
 
-            var dynamicPropertyName = nodeReference.BrowseName.Name;
-            if (registeredSubject.TryGetProperty(dynamicPropertyName) is not null)
+            if (registeredSubject.TryGetProperty(nodeReference.BrowseName.Name) is not null)
             {
-                childEntries.Add(new ChildEntry(nodeReference, resolvedNodeId, null, false));
                 continue;
             }
 
@@ -185,7 +183,6 @@ internal class OpcUaSubjectLoader
 
             if (!addAsDynamic)
             {
-                childEntries.Add(new ChildEntry(nodeReference, resolvedNodeId, null, false));
                 continue;
             }
 
@@ -196,7 +193,7 @@ internal class OpcUaSubjectLoader
             }
             else if (nodeReference.NodeClass == NodeClass.Variable)
             {
-                dynamicVariableNodes.Add(nodeReference);
+                dynamicVariableNodes.TryAdd(resolvedNodeId, nodeReference);
             }
         }
 
