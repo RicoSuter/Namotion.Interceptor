@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal sealed class OpcUaLoadContext(
     ISession session,
-    uint maximumReferencesPerNode,
+    uint maxReferencesPerNode,
     int maxBrowseContinuations,
     ILogger logger,
     CancellationToken cancellationToken)
@@ -56,7 +56,7 @@ internal sealed class OpcUaLoadContext(
         {
             var results = await Session.BrowseNodesAsync(
                 missing,
-                maximumReferencesPerNode,
+                maxReferencesPerNode,
                 maxBrowseContinuations,
                 logger,
                 CancellationToken).ConfigureAwait(false);

@@ -57,7 +57,7 @@ internal class OpcUaSubjectLoader
     {
         var context = new OpcUaLoadContext(
             session,
-            _configuration.MaximumReferencesPerNode,
+            _configuration.MaxReferencesPerNode,
             _configuration.MaxBrowseContinuations,
             _logger,
             cancellationToken);

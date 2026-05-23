@@ -33,7 +33,7 @@ internal static class OpcUaSessionExtensions
     public static async Task<Dictionary<NodeId, ReferenceDescriptionCollection>> BrowseNodesAsync(
         this ISession session,
         IReadOnlyCollection<NodeId> nodeIds,
-        uint maximumReferencesPerNode,
+        uint maxReferencesPerNode,
         int maxContinuationRounds,
         ILogger logger,
         CancellationToken cancellationToken)
@@ -63,7 +63,7 @@ internal static class OpcUaSessionExtensions
         for (var offset = 0; offset < uniqueNodeIds.Count; offset += batchSize)
         {
             var end = Math.Min(offset + batchSize, uniqueNodeIds.Count);
-            await BrowseBatchAsync(session, uniqueNodeIds, offset, end, maximumReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseBatchAsync(session, uniqueNodeIds, offset, end, maxReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
         }
 
         return result;
@@ -122,7 +122,7 @@ internal static class OpcUaSessionExtensions
         IReadOnlyList<NodeId> nodeIds,
         int offset,
         int end,
-        uint maximumReferencesPerNode,
+        uint maxReferencesPerNode,
         int maxContinuationRounds,
         Dictionary<NodeId, ReferenceDescriptionCollection> result,
         ILogger logger,
@@ -148,7 +148,7 @@ internal static class OpcUaSessionExtensions
         {
             response = await session.BrowseAsync(
                 null, null,
-                maximumReferencesPerNode,
+                maxReferencesPerNode,
                 browseDescriptions,
                 cancellationToken).ConfigureAwait(false);
         }
@@ -159,8 +159,8 @@ internal static class OpcUaSessionExtensions
                 count, ex.StatusCode);
 
             var mid = offset + count / 2;
-            await BrowseBatchAsync(session, nodeIds, offset, mid, maximumReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
-            await BrowseBatchAsync(session, nodeIds, mid, end, maximumReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseBatchAsync(session, nodeIds, offset, mid, maxReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseBatchAsync(session, nodeIds, mid, end, maxReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
             return;
         }
 

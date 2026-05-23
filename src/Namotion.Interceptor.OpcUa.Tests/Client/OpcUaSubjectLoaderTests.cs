@@ -6,7 +6,6 @@ using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
@@ -526,8 +525,8 @@ public class OpcUaSubjectLoaderTests
         Assert.NotNull(collection1Value);
         Assert.NotNull(collection2Value);
 
-        var sharedFromCollection1 = collection1Value!.Cast<IInterceptorSubject>().Single();
-        var sharedFromCollection2 = collection2Value!.Cast<IInterceptorSubject>().Single();
+        var sharedFromCollection1 = collection1Value.Cast<IInterceptorSubject>().Single();
+        var sharedFromCollection2 = collection2Value.Cast<IInterceptorSubject>().Single();
         Assert.Same(sharedFromCollection1, sharedFromCollection2);
     }
 
@@ -713,9 +712,9 @@ public class OpcUaSubjectLoaderTests
         var level1 = registeredSubject.Properties.Single(p => p.Name == "Level1");
         var level2 = level1.TryGetAttribute("Level2");
         Assert.NotNull(level2);
-        var level3 = level2!.TryGetAttribute("Level3");
+        var level3 = level2.TryGetAttribute("Level3");
         Assert.NotNull(level3);
-        Assert.Null(level3!.TryGetAttribute("Level4"));
+        Assert.Null(level3.TryGetAttribute("Level4"));
     }
 
     [Fact]
@@ -963,7 +962,7 @@ public class OpcUaSubjectLoaderTests
         Assert.Equal(typeof(DynamicSubject[]), sensorsProperty.Type);
         var collection = sensorsProperty.GetValue() as DynamicSubject[];
         Assert.NotNull(collection);
-        Assert.Equal(3, collection!.Length);
+        Assert.Equal(3, collection.Length);
 
         // Assert: each collection item has a Value property of type float
         foreach (var item in collection)
@@ -978,7 +977,7 @@ public class OpcUaSubjectLoaderTests
         Assert.Equal(typeof(DynamicSubject), settingsProperty.Type);
         var settingsSubject = settingsProperty.GetValue() as IInterceptorSubject;
         Assert.NotNull(settingsSubject);
-        var settingsRegistered = settingsSubject!.TryGetRegisteredSubject()!;
+        var settingsRegistered = settingsSubject.TryGetRegisteredSubject()!;
         var param1 = settingsRegistered.Properties.Single(p => p.Name == "Parameter1");
         Assert.Equal(typeof(int), param1.Type);
 
@@ -1057,14 +1056,14 @@ public class OpcUaSubjectLoaderTests
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         // Act
-        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
 
         // Assert: both collection items have a SharedSensor property with a Quality attribute
         var registeredSubject = subject.TryGetRegisteredSubject()!;
         var itemsProperty = registeredSubject.Properties.Single(p => p.Name == "Items");
         var items = itemsProperty.GetValue() as DynamicSubject[];
         Assert.NotNull(items);
-        Assert.Equal(2, items!.Length);
+        Assert.Equal(2, items.Length);
 
         foreach (var item in items)
         {
@@ -1175,17 +1174,17 @@ public class OpcUaSubjectLoaderTests
                     {
                         results.Add(new BrowseResult
                         {
-                            References = new ReferenceDescriptionCollection
-                            {
+                            References =
+                            [
                                 CreateTestReferenceDescription("Var1", new ExpandedNodeId(var1Id)),
                                 CreateTestReferenceDescription("Var2", new ExpandedNodeId(var2Id))
-                            },
+                            ],
                             ContinuationPoint = continuationToken
                         });
                     }
                     else
                     {
-                        results.Add(new BrowseResult { References = new ReferenceDescriptionCollection() });
+                        results.Add(new BrowseResult { References = [] });
                     }
                 }
                 return new BrowseResponse { Results = results, DiagnosticInfos = [] };
@@ -1203,10 +1202,7 @@ public class OpcUaSubjectLoaderTests
                 [
                     new BrowseResult
                     {
-                        References = new ReferenceDescriptionCollection
-                        {
-                            CreateTestReferenceDescription("Var3", new ExpandedNodeId(var3Id))
-                        }
+                        References = [CreateTestReferenceDescription("Var3", new ExpandedNodeId(var3Id))]
                     }
                 ],
                 DiagnosticInfos = []
@@ -1271,18 +1267,18 @@ public class OpcUaSubjectLoaderTests
                     {
                         results.Add(new BrowseResult
                         {
-                            References = new ReferenceDescriptionCollection
-                            {
+                            References =
+                            [
                                 CreateTestReferenceDescription("Var1", new ExpandedNodeId(var1Id)),
                                 CreateTestReferenceDescription("Var2", new ExpandedNodeId(var2Id))
-                            }
+                            ]
                         });
                     }
                     else if (desc.NodeId == var1Id)
                     {
                         results.Add(new BrowseResult
                         {
-                            References = new ReferenceDescriptionCollection(),
+                            References = [],
                             ContinuationPoint = continuationToken1
                         });
                     }
@@ -1290,13 +1286,13 @@ public class OpcUaSubjectLoaderTests
                     {
                         results.Add(new BrowseResult
                         {
-                            References = new ReferenceDescriptionCollection(),
+                            References = [],
                             ContinuationPoint = continuationToken2
                         });
                     }
                     else
                     {
-                        results.Add(new BrowseResult { References = new ReferenceDescriptionCollection() });
+                        results.Add(new BrowseResult { References = [] });
                     }
                 }
                 return new BrowseResponse { Results = results, DiagnosticInfos = [] };
@@ -1323,25 +1319,19 @@ public class OpcUaSubjectLoaderTests
                     {
                         results.Add(new BrowseResult
                         {
-                            References = new ReferenceDescriptionCollection
-                            {
-                                CreateTestReferenceDescription("Attr1", new ExpandedNodeId(attr1Id))
-                            }
+                            References = [CreateTestReferenceDescription("Attr1", new ExpandedNodeId(attr1Id))]
                         });
                     }
                     else if (cp.SequenceEqual(continuationToken2))
                     {
                         results.Add(new BrowseResult
                         {
-                            References = new ReferenceDescriptionCollection
-                            {
-                                CreateTestReferenceDescription("Attr2", new ExpandedNodeId(attr2Id))
-                            }
+                            References = [CreateTestReferenceDescription("Attr2", new ExpandedNodeId(attr2Id))]
                         });
                     }
                     else
                     {
-                        results.Add(new BrowseResult { References = new ReferenceDescriptionCollection() });
+                        results.Add(new BrowseResult { References = [] });
                     }
                 }
                 return new BrowseNextResponse { Results = results, DiagnosticInfos = [] };
@@ -1424,7 +1414,7 @@ public class OpcUaSubjectLoaderTests
 
         var collection = itemsProperty.GetValue() as DynamicSubject[];
         Assert.NotNull(collection);
-        Assert.Equal(2, collection!.Length);
+        Assert.Equal(2, collection.Length);
 
         // Assert: each item has a Value property of type float
         foreach (var item in collection)
@@ -1488,7 +1478,7 @@ public class OpcUaSubjectLoaderTests
 
         var dictionary = devicesProperty.GetValue() as IReadOnlyDictionary<string, DynamicSubject>;
         Assert.NotNull(dictionary);
-        Assert.Equal(2, dictionary!.Count);
+        Assert.Equal(2, dictionary.Count);
         Assert.True(dictionary.ContainsKey("SensorA"));
         Assert.True(dictionary.ContainsKey("SensorB"));
 
@@ -1529,7 +1519,7 @@ public class OpcUaSubjectLoaderTests
                     new BrowseResult
                     {
                         References = [CreateTestReferenceDescription("Initial", new ExpandedNodeId(new NodeId(2001, 2)))],
-                        ContinuationPoint = new byte[] { 0xFF }
+                        ContinuationPoint = [0xFF]
                     }
                 ],
                 DiagnosticInfos = []
@@ -1557,7 +1547,7 @@ public class OpcUaSubjectLoaderTests
                         new BrowseResult
                         {
                             References = [CreateTestReferenceDescription($"Page{n}", new ExpandedNodeId(new NodeId((uint)(3000 + n), 2)))],
-                            ContinuationPoint = new byte[] { (byte)(n & 0xFF), (byte)((n >> 8) & 0xFF) }
+                            ContinuationPoint = [(byte)(n & 0xFF), (byte)((n >> 8) & 0xFF)]
                         }
                     ],
                     DiagnosticInfos = []
@@ -1566,8 +1556,8 @@ public class OpcUaSubjectLoaderTests
 
         // Act
         var result = await mockSession.Object.BrowseNodesAsync(
-            new[] { rootId },
-            maximumReferencesPerNode: 1000,
+            [rootId],
+            maxReferencesPerNode: 1000,
             maxContinuationRounds: 100,
             NullLogger<OpcUaSubjectClientSource>.Instance,
             CancellationToken.None);
@@ -1603,7 +1593,7 @@ public class OpcUaSubjectLoaderTests
                     new BrowseResult
                     {
                         References = [CreateTestReferenceDescription("Initial", new ExpandedNodeId(new NodeId(2001, 2)))],
-                        ContinuationPoint = new byte[] { 0xFF }
+                        ContinuationPoint = [0xFF]
                     }
                 ],
                 DiagnosticInfos = []
@@ -1629,7 +1619,7 @@ public class OpcUaSubjectLoaderTests
                         new BrowseResult
                         {
                             References = [CreateTestReferenceDescription($"Page{n}", new ExpandedNodeId(new NodeId((uint)(3000 + n), 2)))],
-                            ContinuationPoint = new byte[] { (byte)(n & 0xFF), (byte)((n >> 8) & 0xFF) }
+                            ContinuationPoint = [(byte)(n & 0xFF), (byte)((n >> 8) & 0xFF)]
                         }
                     ],
                     DiagnosticInfos = []
@@ -1640,8 +1630,8 @@ public class OpcUaSubjectLoaderTests
 
         // Act
         var result = await mockSession.Object.BrowseNodesAsync(
-            new[] { rootId },
-            maximumReferencesPerNode: 1000,
+            [rootId],
+            maxReferencesPerNode: 1000,
             maxContinuationRounds: customLimit,
             NullLogger<OpcUaSubjectClientSource>.Instance,
             CancellationToken.None);
@@ -1705,7 +1695,7 @@ public class OpcUaSubjectLoaderTests
                     {
                         results.Add(new BrowseResult
                         {
-                            References = new ReferenceDescriptionCollection(),
+                            References = [],
                             ContinuationPoint = cp1Round1
                         });
                     }
@@ -1713,13 +1703,13 @@ public class OpcUaSubjectLoaderTests
                     {
                         results.Add(new BrowseResult
                         {
-                            References = new ReferenceDescriptionCollection(),
+                            References = [],
                             ContinuationPoint = cp2Round1
                         });
                     }
                     else
                     {
-                        results.Add(new BrowseResult { References = new ReferenceDescriptionCollection() });
+                        results.Add(new BrowseResult { References = [] });
                     }
                 }
                 return new BrowseResponse { Results = results, DiagnosticInfos = [] };
@@ -1777,7 +1767,7 @@ public class OpcUaSubjectLoaderTests
                     }
                     else
                     {
-                        results.Add(new BrowseResult { References = new ReferenceDescriptionCollection() });
+                        results.Add(new BrowseResult { References = [] });
                     }
                 }
                 return new BrowseNextResponse { Results = results, DiagnosticInfos = [] };
@@ -1885,7 +1875,7 @@ public class OpcUaSubjectLoaderTests
         var varBProperty = registeredSubject.Properties.Single(p => p.Name == "VarB");
         var statusAttribute = varBProperty.TryGetAttribute("Status");
         Assert.NotNull(statusAttribute);
-        Assert.NotNull(statusAttribute!.TryGetAttribute("Quality"));
+        Assert.NotNull(statusAttribute.TryGetAttribute("Quality"));
     }
 
     private static ReferenceDescription CreateObjectReferenceDescription(string name, ExpandedNodeId nodeId)

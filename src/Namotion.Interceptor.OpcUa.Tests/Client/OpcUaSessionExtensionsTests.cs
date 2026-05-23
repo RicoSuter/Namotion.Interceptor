@@ -36,7 +36,7 @@ public class OpcUaSessionExtensionsTests
                     new BrowseResult
                     {
                         StatusCode = StatusCodes.BadCommunicationError,
-                        References = new ReferenceDescriptionCollection()
+                        References = []
                     }
                 ],
                 DiagnosticInfos = []
@@ -45,8 +45,8 @@ public class OpcUaSessionExtensionsTests
         // Act & Assert
         var exception = await Assert.ThrowsAsync<OpcUaTransientServiceException>(() =>
             mockSession.Object.BrowseNodesAsync(
-                new[] { nodeId },
-                maximumReferencesPerNode: 1000,
+                [nodeId],
+                maxReferencesPerNode: 1000,
                 maxContinuationRounds: 100,
                 NullLogger<OpcUaSessionExtensionsTests>.Instance,
                 CancellationToken.None));
@@ -82,7 +82,7 @@ public class OpcUaSessionExtensionsTests
                         results.Add(new BrowseResult
                         {
                             StatusCode = StatusCodes.BadNodeIdUnknown,
-                            References = new ReferenceDescriptionCollection()
+                            References = []
                         });
                     }
                     else
@@ -101,8 +101,8 @@ public class OpcUaSessionExtensionsTests
 
         // Act
         var result = await mockSession.Object.BrowseNodesAsync(
-            new[] { unknownNodeId, goodNodeId },
-            maximumReferencesPerNode: 1000,
+            [unknownNodeId, goodNodeId],
+            maxReferencesPerNode: 1000,
             maxContinuationRounds: 100,
             NullLogger<OpcUaSessionExtensionsTests>.Instance,
             CancellationToken.None);
@@ -159,7 +159,7 @@ public class OpcUaSessionExtensionsTests
                     new BrowseResult
                     {
                         StatusCode = StatusCodes.BadTimeout,
-                        References = new ReferenceDescriptionCollection()
+                        References = []
                     }
                 ],
                 DiagnosticInfos = []
@@ -168,8 +168,8 @@ public class OpcUaSessionExtensionsTests
         // Act & Assert
         var exception = await Assert.ThrowsAsync<OpcUaTransientServiceException>(() =>
             mockSession.Object.BrowseNodesAsync(
-                new[] { nodeId },
-                maximumReferencesPerNode: 1000,
+                [nodeId],
+                maxReferencesPerNode: 1000,
                 maxContinuationRounds: 100,
                 NullLogger<OpcUaSessionExtensionsTests>.Instance,
                 CancellationToken.None));
@@ -251,7 +251,7 @@ public class OpcUaSessionExtensionsTests
 
         // Assert
         Assert.Single(results);
-        Assert.Equal((StatusCode)StatusCodes.BadUserAccessDenied, results[0].StatusCode);
+        Assert.Equal(StatusCodes.BadUserAccessDenied, results[0].StatusCode);
     }
 
     private static Mock<ISession> CreateMockSession()

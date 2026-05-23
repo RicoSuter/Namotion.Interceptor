@@ -40,7 +40,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets the maximum number of monitored items per subscription. Default is 1000.
     /// </summary>
-    public int MaximumItemsPerSubscription { get; set; } = 1000;
+    public int MaxItemsPerSubscription { get; set; } = 1000;
 
     /// <summary>
     /// Gets the maximum number of write operations to queue for retry when disconnected. Default is 1000.
@@ -107,10 +107,6 @@ public class OpcUaClientConfiguration
     /// </summary>
     public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(10);
 
-    // Safety bounds against runaway iteration during subject loading. Both default to 100;
-    // real OPC UA address spaces are shallow and well-behaved servers terminate quickly,
-    // so these guard against bugs and malicious servers rather than normal load.
-
     /// <summary>
     /// Gets or sets the safety bound on BrowseNext paging rounds per batched browse
     /// request (default: 100). Guards against misbehaving servers that return a fresh
@@ -121,7 +117,7 @@ public class OpcUaClientConfiguration
     /// batch the loop aborts when the slowest-paging NodeId is still going after this
     /// many rounds, even if no individual NodeId reached its share. For a single-NodeId
     /// batch the effective per-node reference cap is
-    /// <c>MaxBrowseContinuations * MaximumReferencesPerNode</c>; for larger batches the
+    /// <c>MaxBrowseContinuations * MaxReferencesPerNode</c>; for larger batches the
     /// effective cap is lower since all paged NodeIds share the round budget. Raise this
     /// if loads involve deeply paged nodes across many siblings.
     /// </remarks>
@@ -208,7 +204,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the maximum notifications per publish that the client requests (default: 0 = server default).
     /// </summary>
-    public uint SubscriptionMaximumNotificationsPerPublish { get; set; } = 0;
+    public uint SubscriptionMaxNotificationsPerPublish { get; set; } = 0;
 
     /// <summary>
     /// Gets or sets whether to process subscription messages sequentially (in order).
@@ -230,7 +226,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the maximum references per node to read per browse request. 0 uses server default.
     /// </summary>
-    public uint MaximumReferencesPerNode { get; set; } = 0;
+    public uint MaxReferencesPerNode { get; set; } = 0;
 
     /// <summary>
     /// Gets or sets whether to enable automatic polling fallback when subscriptions are not supported.
@@ -470,11 +466,11 @@ public class OpcUaClientConfiguration
                 nameof(SubscriptionHealthCheckInterval));
         }
 
-        if (MaximumItemsPerSubscription <= 0)
+        if (MaxItemsPerSubscription <= 0)
         {
             throw new ArgumentException(
-                $"MaximumItemsPerSubscription must be positive, got: {MaximumItemsPerSubscription}",
-                nameof(MaximumItemsPerSubscription));
+                $"MaxItemsPerSubscription must be positive, got: {MaxItemsPerSubscription}",
+                nameof(MaxItemsPerSubscription));
         }
 
         if (EnablePollingFallback)

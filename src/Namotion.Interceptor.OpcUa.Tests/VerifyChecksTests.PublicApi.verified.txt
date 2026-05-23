@@ -98,9 +98,9 @@ namespace Namotion.Interceptor.OpcUa.Client
         public System.TimeSpan KeepAliveInterval { get; set; }
         public int MaxAttributeTraversals { get; set; }
         public int MaxBrowseContinuations { get; set; }
+        public int MaxItemsPerSubscription { get; set; }
         public System.TimeSpan MaxReconnectDuration { get; set; }
-        public int MaximumItemsPerSubscription { get; set; }
-        public uint MaximumReferencesPerNode { get; set; }
+        public uint MaxReferencesPerNode { get; set; }
         public int MinPublishRequestCount { get; set; }
         public Namotion.Interceptor.OpcUa.Mapping.IOpcUaNodeMapper NodeMapper { get; set; }
         public System.TimeSpan OperationTimeout { get; set; }
@@ -124,7 +124,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public System.TimeSpan SubscriptionHealthCheckInterval { get; set; }
         public uint SubscriptionKeepAliveCount { get; set; }
         public uint SubscriptionLifetimeCount { get; set; }
-        public uint SubscriptionMaximumNotificationsPerPublish { get; set; }
+        public uint SubscriptionMaxNotificationsPerPublish { get; set; }
         public byte SubscriptionPriority { get; set; }
         public bool SubscriptionSequentialPublishing { get; set; }
         public Opc.Ua.ITelemetryContext TelemetryContext { get; set; }

@@ -651,7 +651,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     {
         var results = await session.BrowseNodesAsync(
             [nodeId],
-            _configuration.MaximumReferencesPerNode,
+            _configuration.MaxReferencesPerNode,
             _configuration.MaxBrowseContinuations,
             _logger,
             cancellationToken).ConfigureAwait(false);
