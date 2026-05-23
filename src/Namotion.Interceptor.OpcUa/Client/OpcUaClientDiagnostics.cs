@@ -83,7 +83,7 @@ public class OpcUaClientDiagnostics
     /// <summary>
     /// Gets the number of writes currently queued for retry (buffered during disconnection).
     /// </summary>
-    public int WriteQueueCount => _source.PendingWriteCount;
+    public int PendingWriteCount => _source.PendingWriteCount;
 
     /// <summary>
     /// Gets the most recent error that occurred while establishing or restoring the session,

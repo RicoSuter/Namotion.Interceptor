@@ -120,7 +120,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     /// Number of writes queued for retry during disconnection. Null when not running.
     /// </summary>
     [State]
-    public partial int? WriteQueueCount { get; set; }
+    public partial int? PendingWriteCount { get; set; }
 
     /// <summary>
     /// Total number of reconnections since start. Null when not running.
@@ -223,7 +223,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             OutgoingChangesPerSecond = diagnostics.OutgoingChangesPerSecond;
             MonitoredItemCount = diagnostics.MonitoredItemCount;
             PollingItemCount = diagnostics.PollingItemCount;
-            WriteQueueCount = diagnostics.WriteQueueCount;
+            PendingWriteCount = diagnostics.PendingWriteCount;
             TotalReconnections = diagnostics.TotalReconnectionAttempts;
         }
     }
@@ -295,7 +295,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 IsConnected = null;
                 MonitoredItemCount = null;
                 PollingItemCount = null;
-                WriteQueueCount = null;
+                PendingWriteCount = null;
                 TotalReconnections = null;
                 IncomingChangesPerSecond = null;
                 OutgoingChangesPerSecond = null;

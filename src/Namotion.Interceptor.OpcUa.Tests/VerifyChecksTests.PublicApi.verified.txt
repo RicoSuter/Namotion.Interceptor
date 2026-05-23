@@ -145,6 +145,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public int MonitoredItemCount { get; }
         public double OutgoingChangesPerSecond { get; }
         public int? PendingReadAfterWrites { get; }
+        public int PendingWriteCount { get; }
         public Namotion.Interceptor.OpcUa.Client.PollingDiagnostics? Polling { get; }
         public int PollingItemCount { get; }
         public Namotion.Interceptor.OpcUa.Client.ReadAfterWriteDiagnostics? ReadAfterWrite { get; }
@@ -152,7 +153,6 @@ namespace Namotion.Interceptor.OpcUa.Client
         public int SubscriptionCount { get; }
         public long SuccessfulReconnections { get; }
         public long TotalReconnectionAttempts { get; }
-        public int WriteQueueCount { get; }
     }
     public sealed class OpcUaCurrentSessionChangedEventArgs : System.EventArgs
     {
