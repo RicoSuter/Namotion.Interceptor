@@ -12,8 +12,8 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// </summary>
 internal static class OpcUaStatusCodeClassifier
 {
-    private static readonly HashSet<uint> PermanentCodes = new()
-    {
+    private static readonly HashSet<uint> PermanentCodes =
+    [
         StatusCodes.BadNodeIdUnknown,
         StatusCodes.BadNodeIdInvalid,
         StatusCodes.BadAttributeIdInvalid,
@@ -24,8 +24,8 @@ internal static class OpcUaStatusCodeClassifier
         StatusCodes.BadNotImplemented,
         StatusCodes.BadNotReadable,
         StatusCodes.BadNotWritable,
-        StatusCodes.BadWriteNotSupported,
-    };
+        StatusCodes.BadWriteNotSupported
+    ];
 
     /// <summary>
     /// True iff <paramref name="statusCode"/> is a bad status that could succeed on
@@ -45,4 +45,28 @@ internal static class OpcUaStatusCodeClassifier
     {
         return StatusCode.IsBad(statusCode) && PermanentCodes.Contains(statusCode.Code);
     }
+
+    /// <summary>
+    /// Throws <see cref="OpcUaTransientServiceException"/> if <paramref name="statusCode"/>
+    /// is a transient bad status. Permanent and non-bad statuses are ignored.
+    /// </summary>
+    public static void ThrowIfTransient(StatusCode statusCode, string operation, NodeId? nodeId)
+    {
+        if (IsTransient(statusCode))
+        {
+            throw new OpcUaTransientServiceException(operation, nodeId, statusCode);
+        }
+    }
+
+    /// <summary>
+    /// True iff the <see cref="ServiceResultException"/> indicates the server rejected
+    /// the batch size rather than the operation itself.
+    /// </summary>
+    public static bool IsBatchTooLarge(ServiceResultException exception) => exception.StatusCode switch
+    {
+        StatusCodes.BadTooManyOperations => true,
+        StatusCodes.BadEncodingLimitsExceeded => true,
+        StatusCodes.BadResponseTooLarge => true,
+        _ => false,
+    };
 }

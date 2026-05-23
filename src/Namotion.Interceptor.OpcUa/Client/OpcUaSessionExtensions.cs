@@ -8,12 +8,7 @@ internal static class OpcUaSessionExtensions
 {
     private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
 
-    // Soft cap applied when a server reports 0/null for its per-call operation limit.
-    // 0/null nominally means "unbounded", but in practice it usually indicates an old
-    // or misconfigured server: exactly the population most likely to choke on large
-    // requests. Split-and-retry recovers either way, so the only cost of going higher
-    // is the wasted RTT on the first oversized request. 256 is conservative for legacy
-    // servers and well below any modern server's advertised limit.
+    // Soft cap when a server reports 0/null for its per-call operation limit.
     private const int DefaultBatchLimit = 256;
 
     private static int ToBatchLimit(uint? limit) => limit is > 0 ? (int)limit : DefaultBatchLimit;
@@ -22,14 +17,12 @@ internal static class OpcUaSessionExtensions
 
     private static int GetMaxNodesPerRead(ISession session) => ToBatchLimit(session.OperationLimits?.MaxNodesPerRead);
 
-    private static bool IsBatchTooLarge(ServiceResultException exception) => exception.StatusCode switch
-    {
-        StatusCodes.BadTooManyOperations => true,
-        StatusCodes.BadEncodingLimitsExceeded => true,
-        StatusCodes.BadResponseTooLarge => true,
-        _ => false,
-    };
-
+    /// <summary>
+    /// Browses multiple nodes in batched calls, collecting all references including
+    /// continuation-point pages. Deduplicates input NodeIds; NodeIds whose browse
+    /// returns a permanent bad status are omitted from the result so callers can
+    /// distinguish "browsed successfully (possibly empty)" from "failed this round".
+    /// </summary>
     public static async Task<Dictionary<NodeId, ReferenceDescriptionCollection>> BrowseNodesAsync(
         this ISession session,
         IReadOnlyCollection<NodeId> nodeIds,
@@ -44,10 +37,6 @@ internal static class OpcUaSessionExtensions
             return result;
         }
 
-        // Dedup the input. NodeIds that successfully browse get an entry in `result`;
-        // NodeIds whose `BrowseResult.StatusCode` was bad are deliberately left out so
-        // callers can distinguish "browsed successfully (possibly empty)" from "no
-        // result this round" and avoid caching transient failures as permanent emptiness.
         var seen = new HashSet<NodeId>(nodeIds.Count);
         var uniqueNodeIds = new List<NodeId>(nodeIds.Count);
         foreach (var nodeId in nodeIds)
@@ -69,6 +58,13 @@ internal static class OpcUaSessionExtensions
         return result;
     }
 
+    /// <summary>
+    /// Reads multiple node attributes in batched calls with split-and-retry on
+    /// <c>BadTooManyOperations</c>. Returns a positionally aligned
+    /// <see cref="DataValueCollection"/> where <c>allResults[i]</c> corresponds to
+    /// <paramref name="nodesToRead"/>[i]. Short server responses are padded with
+    /// <c>BadUnexpectedError</c> to maintain alignment.
+    /// </summary>
     public static async Task<DataValueCollection> ReadNodesAsync(
         this ISession session,
         ReadValueIdCollection nodesToRead,
@@ -83,14 +79,20 @@ internal static class OpcUaSessionExtensions
         }
 
         var maxBatchSize = GetMaxNodesPerRead(session);
-        await ReadBatchAsync(session, nodesToRead, 0, nodesToRead.Count, maxBatchSize, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
+        for (var batchStart = 0; batchStart < nodesToRead.Count; batchStart += maxBatchSize)
+        {
+            var batchEnd = Math.Min(batchStart + maxBatchSize, nodesToRead.Count);
+            await ReadSingleBatchAsync(session, nodesToRead, batchStart, batchEnd, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
+        }
+
         return allResults;
     }
 
-    // ExpandedNodeId compares unequal when the same target is expressed with NamespaceIndex
-    // vs NamespaceUri; resolving to NodeId via the session's NamespaceTable produces a
-    // canonical key for dedup. Unresolvable namespace URIs (ToNodeId returns null) are
-    // skipped since they cannot be addressed for monitoring or further browsing.
+    /// <summary>
+    /// Deduplicates browse references by resolving each <see cref="ExpandedNodeId"/>
+    /// to a canonical <see cref="NodeId"/> via the session's namespace table.
+    /// References with unresolvable namespace URIs are skipped.
+    /// </summary>
     public static List<(ReferenceDescription Reference, NodeId NodeId)> DistinctByResolvedNodeId(
         this ISession session,
         IReadOnlyCollection<ReferenceDescription> references,
@@ -152,7 +154,7 @@ internal static class OpcUaSessionExtensions
                 browseDescriptions,
                 cancellationToken).ConfigureAwait(false);
         }
-        catch (ServiceResultException ex) when (count > 1 && IsBatchTooLarge(ex))
+        catch (ServiceResultException ex) when (count > 1 && OpcUaStatusCodeClassifier.IsBatchTooLarge(ex))
         {
             logger.LogWarning(
                 "BrowseAsync rejected batch of {Count} nodes ({StatusCode}). Splitting into smaller batches.",
@@ -179,10 +181,7 @@ internal static class OpcUaSessionExtensions
             var nodeId = nodeIds[offset + i];
             if (!StatusCode.IsGood(browseResult.StatusCode))
             {
-                if (OpcUaStatusCodeClassifier.IsTransient(browseResult.StatusCode))
-                {
-                    throw new OpcUaTransientServiceException("Browse", nodeId, browseResult.StatusCode);
-                }
+                OpcUaStatusCodeClassifier.ThrowIfTransient(browseResult.StatusCode, "Browse", nodeId);
                 logger.LogWarning(
                     "BrowseAsync returned permanent bad status for {NodeId} ({StatusCode}); skipping (this NodeId cannot be browsed).",
                     nodeId, browseResult.StatusCode);
@@ -243,17 +242,12 @@ internal static class OpcUaSessionExtensions
                     await BrowseNextBatchAsync(session, current, offset, end, result, next, logger, cancellationToken).ConfigureAwait(false);
                 }
 
-                // Swap: current becomes the freshly populated next list; old current is cleared
-                // for reuse as the next round's append target. No aliasing across reads/writes.
                 (current, next) = (next, current);
                 next.Clear();
             }
         }
         catch
         {
-            // `current` may include entries the server has already invalidated via earlier
-            // successful BrowseNext calls in the failing round; releasing them returns
-            // BadContinuationPointInvalid, which ReleaseContinuationPointsAsync swallows.
             await ReleaseContinuationPointsAsync(session, current, logger).ConfigureAwait(false);
             await ReleaseContinuationPointsAsync(session, next, logger).ConfigureAwait(false);
             throw;
@@ -265,9 +259,6 @@ internal static class OpcUaSessionExtensions
         }
     }
 
-    // Releases use CancellationToken.None on purpose: under outer cancellation we still
-    // want to clean up continuation points on the server so they don't sit until the
-    // server's LRU evicts them.
     private static async Task ReleaseContinuationPointsAsync(
         ISession session,
         List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
@@ -278,6 +269,7 @@ internal static class OpcUaSessionExtensions
             return;
         }
 
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var batchSize = GetMaxNodesPerBrowse(session);
         for (var offset = 0; offset < continuationPoints.Count; offset += batchSize)
         {
@@ -289,7 +281,7 @@ internal static class OpcUaSessionExtensions
                 {
                     collection.Add(continuationPoints[i].ContinuationPoint);
                 }
-                await session.BrowseNextAsync(null, true, collection, CancellationToken.None).ConfigureAwait(false);
+                await session.BrowseNextAsync(null, true, collection, cts.Token).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -321,7 +313,7 @@ internal static class OpcUaSessionExtensions
             nextResponse = await session.BrowseNextAsync(
                 null, false, cpCollection, cancellationToken).ConfigureAwait(false);
         }
-        catch (ServiceResultException ex) when (count > 1 && IsBatchTooLarge(ex))
+        catch (ServiceResultException ex) when (count > 1 && OpcUaStatusCodeClassifier.IsBatchTooLarge(ex))
         {
             logger.LogWarning(
                 "BrowseNextAsync rejected batch of {Count} continuation points ({StatusCode}). Splitting into smaller batches.",
@@ -340,6 +332,7 @@ internal static class OpcUaSessionExtensions
                 "BrowseNextAsync returned {Actual} results but {Expected} were requested. Clamping to preserve positional alignment.",
                 actual, count);
         }
+
         var process = Math.Min(actual, count);
         for (var i = 0; i < process; i++)
         {
@@ -347,10 +340,7 @@ internal static class OpcUaSessionExtensions
             var nodeId = current[offset + i].NodeId;
             if (!StatusCode.IsGood(browseResult.StatusCode))
             {
-                if (OpcUaStatusCodeClassifier.IsTransient(browseResult.StatusCode))
-                {
-                    throw new OpcUaTransientServiceException("BrowseNext", nodeId, browseResult.StatusCode);
-                }
+                OpcUaStatusCodeClassifier.ThrowIfTransient(browseResult.StatusCode, "BrowseNext", nodeId);
                 logger.LogWarning(
                     "BrowseNextAsync returned permanent bad status for {NodeId} ({StatusCode}); the partial result so far is retained.",
                     nodeId, browseResult.StatusCode);
@@ -367,86 +357,71 @@ internal static class OpcUaSessionExtensions
         }
     }
 
-    private static async Task ReadBatchAsync(
+    private static async Task ReadSingleBatchAsync(
         ISession session,
         ReadValueIdCollection nodesToRead,
-        int offset,
-        int end,
-        int maxBatchSize,
+        int batchStart,
+        int batchEnd,
         TimestampsToReturn timestampsToReturn,
         DataValueCollection allResults,
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        for (var batchStart = offset; batchStart < end; batchStart += maxBatchSize)
+        var count = batchEnd - batchStart;
+        var chunk = new ReadValueIdCollection(count);
+        for (var i = batchStart; i < batchEnd; i++)
         {
-            var batchEnd = Math.Min(batchStart + maxBatchSize, end);
-            var count = batchEnd - batchStart;
-            var chunk = new ReadValueIdCollection(count);
-            for (var i = batchStart; i < batchEnd; i++)
-            {
-                chunk.Add(nodesToRead[i]);
-            }
+            chunk.Add(nodesToRead[i]);
+        }
 
-            ReadResponse response;
-            try
-            {
-                response = await session.ReadAsync(null, 0, timestampsToReturn, chunk, cancellationToken).ConfigureAwait(false);
-            }
-            catch (ServiceResultException ex) when (count > 1 && IsBatchTooLarge(ex))
-            {
-                logger.LogWarning(
-                    "ReadAsync rejected batch of {Count} items ({StatusCode}). Splitting into smaller batches.",
-                    count, ex.StatusCode);
+        ReadResponse response;
+        try
+        {
+            response = await session.ReadAsync(null, 0, timestampsToReturn, chunk, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ServiceResultException ex) when (count > 1 && OpcUaStatusCodeClassifier.IsBatchTooLarge(ex))
+        {
+            logger.LogWarning(
+                "ReadAsync rejected batch of {Count} items ({StatusCode}). Splitting into smaller batches.",
+                count, ex.StatusCode);
 
-                // The halving may split a caller's logical pair (e.g. DataType+ValueRank)
-                // across two batches. That's safe: each sub-batch is independently padded
-                // to its requested length, so the flat allResults stays aligned with
-                // nodesToRead and downstream pair-decoding works unchanged.
-                var halvedBatch = Math.Max(1, count / 2);
-                await ReadBatchAsync(session, nodesToRead, batchStart, batchEnd, halvedBatch, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
-                continue;
-            }
+            // Halving may split a caller's logical pair (e.g. DataType+ValueRank) across
+            // two batches. That's safe: each sub-batch is independently padded to its
+            // requested length, so the flat allResults stays aligned with nodesToRead.
+            var mid = batchStart + count / 2;
+            await ReadSingleBatchAsync(session, nodesToRead, batchStart, mid, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
+            await ReadSingleBatchAsync(session, nodesToRead, mid, batchEnd, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
+            return;
+        }
 
-            // Pad short or trim long responses so the caller can rely on
-            // `allResults[i]` aligning with `nodesToRead[i]`. The OPC UA spec
-            // mandates one result per request; a mismatch indicates a server bug.
-            var actual = response.Results.Count;
-            var appendStart = allResults.Count;
-            if (actual == count)
-            {
-                allResults.AddRange(response.Results);
-            }
-            else
-            {
-                logger.LogWarning(
-                    "ReadAsync returned {Actual} results but {Expected} were requested. Padding to preserve positional alignment.",
-                    actual, count);
+        var appendStart = allResults.Count;
 
-                var take = Math.Min(actual, count);
-                for (var i = 0; i < take; i++)
-                {
-                    allResults.Add(response.Results[i]);
-                }
-                for (var i = take; i < count; i++)
-                {
-                    allResults.Add(new DataValue { StatusCode = StatusCodes.BadUnexpectedError });
-                }
-            }
+        var actual = response.Results.Count;
+        if (actual == count)
+        {
+            allResults.AddRange(response.Results);
+        }
+        else
+        {
+            logger.LogWarning(
+                "ReadAsync returned {Actual} results but {Expected} were requested. Padding to preserve positional alignment.",
+                actual, count);
 
-            // Transient per-slot bad statuses indicate the session is in a bad state;
-            // abort the read so the caller (typically the source manager) can retry the
-            // whole operation after reconnect. Permanent bad statuses pass through and
-            // are handled per-property by callers that already check IsGood.
-            for (var i = appendStart; i < allResults.Count; i++)
+            var take = Math.Min(actual, count);
+            for (var i = 0; i < take; i++)
             {
-                var status = allResults[i].StatusCode;
-                if (OpcUaStatusCodeClassifier.IsTransient(status))
-                {
-                    var nodeId = nodesToRead[batchStart + (i - appendStart)].NodeId;
-                    throw new OpcUaTransientServiceException("Read", nodeId, status);
-                }
+                allResults.Add(response.Results[i]);
             }
+            for (var i = take; i < count; i++)
+            {
+                allResults.Add(new DataValue { StatusCode = StatusCodes.BadUnexpectedError });
+            }
+        }
+
+        for (var i = appendStart; i < allResults.Count; i++)
+        {
+            var nodeId = nodesToRead[batchStart + (i - appendStart)].NodeId;
+            OpcUaStatusCodeClassifier.ThrowIfTransient(allResults[i].StatusCode, "Read", nodeId);
         }
     }
 }
