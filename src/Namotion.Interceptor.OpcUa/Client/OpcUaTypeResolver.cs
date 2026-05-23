@@ -29,22 +29,9 @@ public class OpcUaTypeResolver
     }
 
     /// <summary>
-    /// Heuristically classifies an OPC UA Object node as an array, a string-keyed dictionary,
-    /// or a single subject reference, based on the BrowseName of its first Object child.
+    /// Classifies an OPC UA Object node as an array, dictionary, or single subject
+    /// reference based on the BrowseName bracket pattern of its first Object child.
     /// </summary>
-    /// <remarks>
-    /// <para>The convention is:
-    /// <c>Name[number]</c> → <see cref="DynamicSubject"/>[];
-    /// <c>Name[token]</c> with a non-empty non-numeric token → <see cref="IReadOnlyDictionary{TKey,TValue}"/>;
-    /// otherwise (no brackets, empty <c>[]</c>, or non-Object first child) → single
-    /// <see cref="DynamicSubject"/> reference.</para>
-    /// <para><strong>Warning: server-order dependent.</strong> Only the first Object child
-    /// is inspected. OPC UA does not guarantee a stable browse order across servers (or
-    /// across reconnects to the same server), so a parent with mixed bracket patterns
-    /// (e.g. both <c>Items[0]</c> and <c>Items[Key]</c>) can classify as array on one
-    /// server and dictionary on another. Override this method to implement a strategy
-    /// that scans all children if you need cross-server determinism.</para>
-    /// </remarks>
     public virtual Type ResolveObjectNodeType(IReadOnlyList<ReferenceDescription> children)
     {
         if (children.Count > 0 && children[0].NodeClass == NodeClass.Object)
