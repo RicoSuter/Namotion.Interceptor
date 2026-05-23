@@ -1,8 +1,8 @@
 using System.Buffers;
-using System.Collections;
 using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Registry.Paths;
@@ -188,15 +188,11 @@ public static class PathExtensions
             return value as IInterceptorSubject;
         }
 
-        if (property.IsSubjectDictionary && value is IDictionary dictionary)
-        {
-            return dictionary[index] as IInterceptorSubject;
-        }
+        if (property.IsSubjectDictionary)
+            return SubjectLookup.FindSubjectInDictionary(value, index);
 
-        if (property.IsSubjectCollection && value is IList list && index is int intIndex)
-        {
-            return list[intIndex] as IInterceptorSubject;
-        }
+        if (property.IsSubjectCollection && index is int intIndex)
+            return SubjectLookup.FindSubjectInCollection(value, intIndex);
 
         return null;
     }

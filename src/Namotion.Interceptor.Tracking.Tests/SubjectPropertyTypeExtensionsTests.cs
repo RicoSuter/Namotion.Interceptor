@@ -31,20 +31,42 @@ public class SubjectPropertyTypeExtensionsTests
     [InlineData(typeof(ImmutableArray<object>),                             false, true,  false)]
     [InlineData(typeof(ImmutableArray<IComparable>),                        false, true,  false)]
     [InlineData(typeof(ArrayList),                                          false, true,  false)]
+    [InlineData(typeof(IReadOnlyCollection<Person>),                        false, true,  false)]
+    [InlineData(typeof(IReadOnlyList<Person>),                              false, true,  false)]
+    [InlineData(typeof(ICollection<Person>),                                false, true,  false)]
+    // A hybrid (IInterceptorSubject + IEnumerable) is a valid subject reference element. A list of
+    // hybrids is therefore a subject collection; the per-element predicate prioritises IInterceptorSubject
+    // over the IEnumerable exclusion.
+    [InlineData(typeof(List<HybridSubjectGenericList>),                     false, true,  false)]
 
-    // --- Subject dictionaries ---
+    // --- Subject dictionaries (must implement a real dict interface) ---
     [InlineData(typeof(Dictionary<string, Person>),                         false, false, true)]
     [InlineData(typeof(IDictionary<string, Person>),                        false, false, true)]
-    [InlineData(typeof(IEnumerable<KeyValuePair<string, Person>>),          false, false, true)]
     [InlineData(typeof(Hashtable),                                          false, false, true)]
+    [InlineData(typeof(IReadOnlyDictionary<string, Person>),                false, false, true)]
+    // Bare IEnumerable<KVP> is NOT dict-classified: there's no dict interface to dispatch on at
+    // runtime, so the lifecycle handler would silently no-op for such values. Classifier and
+    // handler must agree.
+    [InlineData(typeof(IEnumerable<KeyValuePair<string, Person>>),          false, false, false)]
+    // Same reasoning: List<KVP> is not dict-shaped despite holding KVP elements with subject values.
+    [InlineData(typeof(List<KeyValuePair<string, Person>>),                 false, false, false)]
+
+    // --- Subject dictionaries (additional types) ---
+    [InlineData(typeof(ConcurrentDictionary<string, Person>),               false, false, true)]
+    // IReadOnlyDictionary with non-subject values: has dict interface but int values cannot be subjects.
+    [InlineData(typeof(IReadOnlyDictionary<string, int>),                   false, false, false)]
 
     // --- Not subject-carrying ---
     [InlineData(typeof(int),                                                false, false, false)]
     [InlineData(typeof(decimal),                                            false, false, false)]
     [InlineData(typeof(string),                                             false, false, false)]
+    [InlineData(typeof(DateTime),                                           false, false, false)]
+    [InlineData(typeof(DateTimeOffset),                                     false, false, false)]
+    [InlineData(typeof(TimeSpan),                                           false, false, false)]
+    [InlineData(typeof(Guid),                                               false, false, false)]
     [InlineData(typeof(IList<int>),                                         false, false, false)]
     [InlineData(typeof(IEnumerable<int>),                                   false, false, false)]
-    [InlineData(typeof(IDictionary<string, int>),                          false, false, false)]
+    [InlineData(typeof(IDictionary<string, int>),                           false, false, false)]
     [InlineData(typeof(ImmutableArray<int>),                                false, false, false)]
     // Element-of-container-of-non-subjects: outer is not a subject collection.
     [InlineData(typeof(List<IEnumerable<Person>>),                          false, false, false)]
@@ -112,6 +134,49 @@ public class SubjectPropertyTypeExtensionsTests
         Assert.True(isReference);
         Assert.False(isCollection);
         Assert.False(isDictionary);
+    }
+
+    [Fact]
+    public void WhenGenericTPropertyIsPrimitive_ThenReturnsFalseWithoutCacheLookup()
+    {
+        // Arrange: the generic overload short-circuits on JIT-constant typeof(TProperty)
+        // checks for primitives, avoiding the ConcurrentDictionary lookup entirely.
+        var type = typeof(Person);
+
+        // Act & Assert
+        Assert.False(type.CanContainSubjects<int>());
+        Assert.False(type.CanContainSubjects<bool>());
+        Assert.False(type.CanContainSubjects<double>());
+        Assert.False(type.CanContainSubjects<long>());
+    }
+
+    [Fact]
+    public void WhenGenericTPropertyIsCommonValueType_ThenReturnsFalse()
+    {
+        // Arrange: non-primitive value types listed in the generic fast path.
+        var type = typeof(Person);
+
+        // Act & Assert
+        Assert.False(type.CanContainSubjects<decimal>());
+        Assert.False(type.CanContainSubjects<string>());
+        Assert.False(type.CanContainSubjects<DateTime>());
+        Assert.False(type.CanContainSubjects<DateTimeOffset>());
+        Assert.False(type.CanContainSubjects<TimeSpan>());
+        Assert.False(type.CanContainSubjects<Guid>());
+    }
+
+    [Fact]
+    public void WhenGenericTPropertyIsSubjectType_ThenFallsBackToRuntimeCheck()
+    {
+        // Arrange: TProperty is not a primitive/value type, so the generic fast path
+        // falls through to the runtime CanContainSubjects(Type) check.
+        var subjectType = typeof(Person);
+        var nonSubjectType = typeof(int);
+
+        // Act & Assert
+        Assert.True(subjectType.CanContainSubjects<Person>());
+        Assert.True(subjectType.CanContainSubjects<object>());
+        Assert.False(nonSubjectType.CanContainSubjects<object>());
     }
 
     private sealed class NonSubjectPlainClass
