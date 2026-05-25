@@ -55,14 +55,18 @@ internal class OpcUaSubjectLoader
         ISession session,
         CancellationToken cancellationToken)
     {
-        var context = new OpcUaLoadContext(
+        using var context = new OpcUaLoadContext(
             session,
+            subject,
+            _ownership,
+            _source,
             _configuration.MaxReferencesPerNode,
             _configuration.MaxBrowseContinuations,
             _logger,
             cancellationToken);
 
         await LoadSubjectsAsync([(node, subject)], context).ConfigureAwait(false);
+        context.Apply();
         return context.MonitoredItems;
     }
 
@@ -102,7 +106,7 @@ internal class OpcUaSubjectLoader
             subjectStates.Add(new SubjectState(subject, registeredSubject, childEntries));
         }
 
-        // Step 3: Batch resolve types (populates BrowseCache for reuse by Collections and next-level Subjects)
+        // Step 3: Batch resolve types (populates the context's browse cache for reuse by Collections and next-level Subjects)
         var objectTypeMap = await ResolveObjectTypesAsync(allDynamicObjectNodeIds, context).ConfigureAwait(false);
 
         var variableTypeMap = allDynamicVariableNodes.Count > 0
@@ -291,7 +295,7 @@ internal class OpcUaSubjectLoader
                 }
                 else
                 {
-                    MonitorValueNode(resolvedNodeId, property, context.MonitoredItems);
+                    MonitorValueNode(resolvedNodeId, property, context);
                     allAttributeVariableNodes.Add((property, resolvedNodeId));
                 }
             }
@@ -347,7 +351,7 @@ internal class OpcUaSubjectLoader
     {
         if (context.SubjectsByNodeId.TryGetValue(resolvedNodeId, out var reusedSubject))
         {
-            property.SetValueFromSource(_source, null, null, reusedSubject);
+            context.QueueOrApplySetValue(_source, property, reusedSubject);
             return null;
         }
 
@@ -358,7 +362,7 @@ internal class OpcUaSubjectLoader
 
         if (existingSubject is null)
         {
-            subjectToLoad.Context.AddFallbackContext(parentSubject.Context);
+            context.RegisterStagedSubject(subjectToLoad, parentSubject.Context);
         }
 
         context.SubjectsByNodeId.TryAdd(resolvedNodeId, subjectToLoad);
@@ -402,7 +406,7 @@ internal class OpcUaSubjectLoader
             var valueProperty = childSubject.TryGetValueProperty(_configuration.NodeMapper);
             if (valueProperty is not null)
             {
-                MonitorValueNode(nodeId, valueProperty, context.MonitoredItems);
+                MonitorValueNode(nodeId, valueProperty, context);
             }
 
             nodesToBrowse.Add((nodeId, childSubject, valueProperty));
@@ -436,7 +440,7 @@ internal class OpcUaSubjectLoader
                     var childPropertyName = childProperty.ResolvePropertyName(_configuration.NodeMapper);
                     if (childPropertyName == childNode.BrowseName.Name)
                     {
-                        MonitorValueNode(childNodeId, childProperty, context.MonitoredItems);
+                        MonitorValueNode(childNodeId, childProperty, context);
                         break;
                     }
                 }
@@ -469,7 +473,7 @@ internal class OpcUaSubjectLoader
             var children = await ResolveChildSubjectsAsync(property, childNodes, isDictionary: false, context).ConfigureAwait(false);
 
             var collection = DefaultSubjectFactory.Instance.CreateSubjectCollection(property.Type, children.Select(c => c.Subject));
-            property.SetValueFromSource(_source, null, null, collection);
+            context.QueueOrApplySetValue(_source, property, collection);
             allChildrenToLoad.AddRange(children);
         }
 
@@ -487,7 +491,7 @@ internal class OpcUaSubjectLoader
             }
 
             var dictionary = DefaultSubjectFactory.Instance.CreateSubjectDictionary(property.Type, entries);
-            property.SetValueFromSource(_source, null, null, dictionary);
+            context.QueueOrApplySetValue(_source, property, dictionary);
             allChildrenToLoad.AddRange(children);
         }
 
@@ -542,8 +546,14 @@ internal class OpcUaSubjectLoader
                 context.SubjectsByNodeId.TryGetValue(nodeId, out childSubject);
             }
 
+            var isFreshlyCreated = childSubject is null;
             childSubject ??= await _configuration.SubjectFactory.CreateCollectionSubjectAsync(
                 property, childNode, factoryIndex, context.Session, context.CancellationToken).ConfigureAwait(false);
+
+            if (isFreshlyCreated)
+            {
+                context.RegisterStagedSubject(childSubject, property.Subject.Context);
+            }
 
             context.SubjectsByNodeId.TryAdd(nodeId, childSubject);
             children.Add((childNode, childSubject));
@@ -572,7 +582,7 @@ internal class OpcUaSubjectLoader
         {
             if (pending.IsNew)
             {
-                pending.Property.SetValueFromSource(_source, null, null, pending.SubjectToLoad);
+                context.QueueOrApplySetValue(_source, pending.Property, pending.SubjectToLoad);
             }
         }
     }
@@ -594,15 +604,14 @@ internal class OpcUaSubjectLoader
         var processedEntries = new HashSet<(RegisteredSubjectProperty Property, NodeId ParentNodeId)>();
         var currentRound = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>(variableNodes);
 
-        var maxTraversals = _configuration.MaxAttributeTraversals;
         var traversal = 0;
         while (currentRound.Count > 0)
         {
-            if (++traversal > maxTraversals)
+            if (++traversal > _configuration.MaxAttributeTraversals)
             {
                 _logger.LogWarning(
                     "Aborting attribute traversal after {MaxTraversals} levels with {Remaining} entries still pending. Possible cycle in address space or attribute registration.",
-                    maxTraversals, currentRound.Count);
+                    _configuration.MaxAttributeTraversals, currentRound.Count);
                 break;
             }
 
@@ -679,7 +688,7 @@ internal class OpcUaSubjectLoader
             }
 
             processedBrowseNames.Add(attributeBrowseName);
-            MonitorValueNode(matchingNodeId, attribute, context.MonitoredItems);
+            MonitorValueNode(matchingNodeId, attribute, context);
             nextRound.Add((attribute, matchingNodeId));
         }
         return processedBrowseNames;
@@ -761,7 +770,7 @@ internal class OpcUaSubjectLoader
                 (_, o) => value = o,
                 _configuration.TypeResolver.GetDynamicPropertyAttributes(entry.ChildNode, context.Session));
 
-            MonitorValueNode(entry.ChildNodeId, dynamicAttribute, context.MonitoredItems);
+            MonitorValueNode(entry.ChildNodeId, dynamicAttribute, context);
             nextRound.Add((dynamicAttribute, entry.ChildNodeId));
         }
     }
@@ -784,9 +793,14 @@ internal class OpcUaSubjectLoader
         return browseName;
     }
 
-    private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
+    private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, OpcUaLoadContext context)
     {
-        if (!_ownership.ClaimSource(property.Reference))
+        // Pre-check skips MonitoredItem creation work for properties already owned by
+        // another source. The authoritative claim happens inside Apply via the queue,
+        // which adds the MonitoredItem to context.MonitoredItems only on successful
+        // claim. If ownership changes between this pre-check and Apply, the property
+        // still cannot get a monitored item attached without the corresponding claim.
+        if (property.Reference.TryGetSource(out var existing) && existing != _source)
         {
             _logger.LogError(
                 "Property {Subject}.{Property} already owned by another source. Skipping OPC UA monitoring.",
@@ -794,9 +808,8 @@ internal class OpcUaSubjectLoader
             return;
         }
 
-        property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
         var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
-        monitoredItems.Add(monitoredItem);
+        context.QueueClaim(property.Reference, nodeId, monitoredItem);
     }
 
 }
