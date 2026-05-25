@@ -19,16 +19,24 @@ The architecture defines history as a plugin-based subsystem with multiple store
 
 **In:**
 
-- `IHistoryStore` abstraction, query types, eligibility predicate.
+- `IHistoryStore` abstraction with capability advertising, query types, eligibility predicate.
 - `InMemoryHistoryStore` for tests, samples, and the hot buffer that fills the Timescale write-batch lag.
 - `TimescaleDbHistoryStore` for production, with Npgsql binary `COPY` writes and hypertable storage.
 - Store edit components in the Blazor UI.
 - A property history dialog reachable from any historizable `[State]` property.
-- `get_property_history` MCP tool in `HomeBlaze.Mcp`.
-- Integration tests against a real TimescaleDB container via Testcontainers.
+- `get_property_history` MCP tool in `HomeBlaze.AI`.
+- `TimeWeightedAverage` as the default numeric aggregation, with `Last`, `First`, `Average`, `Minimum`, `Maximum`, `Sum`, `Count`, `StdDev` rounding out the closed MVP set.
+- Server-side gap-handling: auto `Last` LOCF, `TimeWeightedAverage` integration includes look-back, `Count` returns 0 for empty buckets, other aggregations return null entries.
+- Unified sequential-budget cross-store merger.
+- Integration tests against TimescaleDB containers (toolkit-available and toolkit-absent fixtures).
 
 **Out (deferred post-MVP):**
 
+- Parameterized aggregations (`Percentile:p`, `CrossingsAbove:N`); decision on syntax (colon vs preset names like `Percentile95`) deferred until the first one lands.
+- Additional aggregations: `Median`, `Percentile`, `Rate`, `Delta`, `StateDuration`, `LTTB`, `Mode`.
+- Runtime cross-store config validation (UI helper text + design-doc constraint suffice for MVP).
+- Live-edge bucket merge refinement for arbitrary bucket sizes (Path B-lite combinable partial aggregates).
+- Server-side gap-fill with linear `Interpolate` for numeric signals.
 - Additional stores (file-based, Influx, Kusto, S3 archive).
 - Dashboard history tile.
 - Multi-property compare in the chart.
@@ -37,19 +45,21 @@ The architecture defines history as a plugin-based subsystem with multiple store
 - CSV/JSON export from the dialog.
 - Streaming `IAsyncEnumerable` query path.
 - Cross-instance history sync beyond what the existing WebSocket topology already provides as a side effect.
+- TimescaleDB compression policy automation (preparation only in MVP: daily chunks).
+- Property path normalisation lookup table (observability only in MVP: `EstimatedStorageBytes`).
 
 ## Package Structure
 
 | Package | Role |
 |---|---|
-| `HomeBlaze.History.Abstractions` | `IHistoryStore`, `HistoryQuery`, `HistoryPoint`, `HistorySeries`, `HistoryCoverage`, `HistoryAggregation`, `HistoryEligibility` extension methods, `HistoryQueryExtensions.QueryHistoryAsync` cross-store helper. No implementation. References `Namotion.Interceptor.Registry`. |
-| `HomeBlaze.History.Abstractions.Tests` | Unit tests for `HistoryEligibility.HasHistory` and the `QueryHistoryAsync` merge helper, using fake `IHistoryStore` implementations. |
-| `HomeBlaze.History.InMemory` | `InMemoryHistoryStore` subject. Ring buffer per property path. Priority 100. Intended for dev, tests, samples, and as the hot buffer covering the Timescale flush window. |
-| `HomeBlaze.History.InMemory.Tests` | Unit tests for the in-memory store: recording, retention, raw and bucketed queries, oversize placeholder, refused types, `Coverage` correctness. |
+| `HomeBlaze.History.Abstractions` | `IHistoryStore`, `HistoryQuery`, `HistoryPoint`, `HistorySeries`, `HistoryCoverage`, `HistoryAggregations` constants, `HistoryEligibility` extension methods, `HistoryQueryExtensions.QueryHistoryAsync` cross-store helper. No implementation. References `Namotion.Interceptor.Registry`. |
+| `HomeBlaze.History.Abstractions.Tests` | Unit tests for eligibility, the merger (raw planner, bucketed planner, sequential-budget executor), bucket alignment, look-back contract. |
+| `HomeBlaze.History.InMemory` | `InMemoryHistoryStore` subject. Ring buffer per property path. Priority 100. Hot buffer / dev / test store. |
+| `HomeBlaze.History.InMemory.Tests` | Unit tests covering recording, retention, raw and bucketed queries (including TWA look-back), oversize placeholder, refused types, `Coverage` correctness. |
 | `HomeBlaze.History.InMemory.Blazor` | Edit component for the in-memory store. |
-| `HomeBlaze.History.TimescaleDb` | `TimescaleDbHistoryStore` subject. Npgsql client, hypertable bootstrap, batched binary `COPY` writes. Priority 10. |
+| `HomeBlaze.History.TimescaleDb` | `TimescaleDbHistoryStore` subject. Npgsql client, hypertable bootstrap with daily chunks, batched binary `COPY` writes, toolkit probe, shutdown flush. Priority 10. |
 | `HomeBlaze.History.TimescaleDb.Blazor` | Edit component for the Timescale store. |
-| `HomeBlaze.History.TimescaleDb.Tests` | Integration tests using Testcontainers with the `timescale/timescaledb` image. |
+| `HomeBlaze.History.TimescaleDb.Tests` | Integration tests using two Testcontainers fixtures: `timescale/timescaledb-ha:pg16-latest` (toolkit available) and `timescale/timescaledb:latest-pg16` (toolkit absent). |
 
 Target framework: `net10.0` for everything, matching the rest of the HomeBlaze tree.
 
@@ -60,22 +70,33 @@ public interface IHistoryStore : IInterceptorSubject
 {
     int Priority { get; }
     HistoryCoverage Coverage { get; }
+    IReadOnlySet<string> SupportedAggregations { get; }
+
     Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns the most recent sample at or before <paramref name="asOf"/> for the given
+    /// property path, or null if no such sample exists. Used by TimeWeightedAverage
+    /// integration and Last LOCF gap-fill in the merger and in per-store bucketed
+    /// computations.
+    /// </summary>
+    ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
+        string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken);
 }
 
-public readonly record struct HistoryCoverage(
-    DateTimeOffset From,
-    DateTimeOffset To);
+public readonly record struct HistoryCoverage(DateTimeOffset From, DateTimeOffset To)
+{
+    public bool Contains(HistoryCoverage other) => other.From >= From && other.To <= To;
+    public bool Overlaps(HistoryCoverage other) => other.From < To && other.To > From;
+}
 
 public record HistoryQuery(
     string PropertyPath,
     DateTimeOffset From,
     DateTimeOffset To,
     TimeSpan? Bucket = null,
-    HistoryAggregation Aggregation = HistoryAggregation.Last,
+    string Aggregation = HistoryAggregations.Last,
     int MaxPoints = 10_000);
-
-public enum HistoryAggregation { Last, Average, Minimum, Maximum, Sum, Count }
 
 public record HistoryPoint(
     DateTimeOffset Timestamp,
@@ -88,13 +109,42 @@ public record HistorySeries(
     bool Truncated);
 ```
 
-### Coverage contract
+### Aggregation identifiers
 
-`Coverage` returns the range a store guarantees it can answer queries over. A query passed to `QueryAsync` is always inside this range, enforced by the merger. Returning a tighter coverage than the store physically holds is safe. Returning a wider coverage is a bug.
+Aggregations are PascalCase strings rather than a closed enum. This allows toolkit-conditional availability (`TimeWeightedAverage`), per-store specialization for future stores, and additive growth without abstraction churn.
+
+```csharp
+public static class HistoryAggregations
+{
+    public const string Last                = "Last";
+    public const string First               = "First";
+    public const string Average             = "Average";              // sample mean
+    public const string TimeWeightedAverage = "TimeWeightedAverage";  // duration-weighted (UI default for numeric)
+    public const string Minimum             = "Minimum";
+    public const string Maximum             = "Maximum";
+    public const string Sum                 = "Sum";
+    public const string Count               = "Count";
+    public const string StdDev              = "StdDev";
+
+    /// <summary>
+    /// Aggregations every store guarantees to support over any column type.
+    /// </summary>
+    public static readonly IReadOnlySet<string> Universal =
+        new HashSet<string>(StringComparer.Ordinal) { Last, Count };
+}
+```
+
+The constants prevent typos at hardcoded call sites. The MCP boundary accepts case-insensitive input and normalises to canonical PascalCase. Internal equality uses `StringComparer.Ordinal`.
+
+Parameterized aggregations (`Percentile:p`, `CrossingsAbove:N`) are deferred from MVP. When the first one lands, the syntax (colon-suffix vs preset names) is decided then.
+
+### Capability advertising
+
+`SupportedAggregations` is a property (re-evaluated on each access), not a constructor-baked field. This lets `TimescaleDbHistoryStore` reflect `ToolkitAvailable` changes after the probe completes. `Last` and `Count` are present in every store's set, gated by the `Universal` shortcut so the merger can fast-path raw queries that don't depend on aggregation at all.
 
 ### Eligibility predicate
 
-`HasHistory()` is the single source of truth for whether a property is recorded and whether the UI offers the history action. Both stores and the UI gate on it.
+`HasHistory()` is the single source of truth for whether a property is recorded and whether the UI offers the history action. Both stores and the UI gate on it. Eligibility is type-based; the `IsCumulative` and `IsDiscrete` flags on `StateAttribute` govern *display* concerns (UI aggregation dropdown filtering, future `Rate`/`Delta`/`StateDuration` enablement) but do not affect recording.
 
 ```csharp
 public static class HistoryEligibility
@@ -129,7 +179,7 @@ The allow-list is deliberately tight for MVP: numerics, bool, string, and enums.
 
 ### Column dispatch
 
-`ValueColumnFor` is the single source of truth used by both the write path (to route a value into the correct column) and the read path (to build the column-targeted SQL). Keeping write and read in agreement is the whole point of centralising it.
+`ValueColumnFor` is the single source of truth used by both the write path (to route a value into the correct column) and the read path (to build column-targeted SQL).
 
 ```csharp
 public enum ValueColumn { Long, Double, Json }
@@ -151,7 +201,40 @@ public static class HistoryColumns
 }
 ```
 
-`ValueColumnFor(typeof(ulong))` returns `Long` (the primary column for ulong properties). On the write path, the store performs an additional per-value check: if `value > long.MaxValue`, the row goes to `value_json` instead. On the read path, when `IsUlongProperty(...)` is true, the SQL builder produces a COALESCE-aware variant (see Query Path) so aggregations include rows from both columns. This is the only type that needs the dual-column read path; all others have a static column for life.
+`ValueColumnFor(typeof(ulong))` returns `Long` (primary column). On the write path, if a ulong value exceeds `long.MaxValue`, the row goes to `value_json` instead. On the read path, `IsUlongProperty(...) == true` triggers a COALESCE-aware SQL variant.
+
+### Look-back primitive
+
+Both stores expose `GetSampleAtOrBeforeAsync(propertyPath, asOf, ct)` returning the most recent sample at or before `asOf`. This single primitive serves multiple needs:
+
+| Need | When | Why look-back matters |
+|---|---|---|
+| `TimeWeightedAverage` integration (MVP) | Computing TWA over a bucket | Need the value held entering the bucket. |
+| `Last` LOCF gap-fill (MVP) | Empty buckets in bucketed `Last` queries | Carry forward the most recent value, including from before `query.From`. |
+| `Delta` / `Rate` on counters (Phase 2) | Sparse counters that haven't been written in a long time | Need `value(bucket.To) - value(bucket.From)`, both via look-back. |
+| `Last` raw queries with no in-range samples (corner case) | Coverage extends back further than the first sample in range | Optional: return the look-back value as a single point. |
+
+InMemory implements look-back via binary search to the floor of `asOf` in the property buffer. Timescale uses `SELECT * FROM property_history WHERE path = $1 AND ts <= $2 ORDER BY ts DESC LIMIT 1`, which is a single-row index lookup on `(path, ts DESC)`.
+
+Look-back returning null is honest: the system can't invent history that was never recorded. Pre-first-known-sample buckets stay null in `Last` LOCF; `Delta` over a never-recorded-before range returns null.
+
+### Bucket alignment
+
+In-memory and Timescale must produce buckets at identical timestamps for the same `(bucket size, sample timestamps)` so the sequential-budget merger never produces interleaved duplicates. Both use the epoch-anchored formula matching Postgres `time_bucket`:
+
+```csharp
+public static class BucketAlignment
+{
+    private static readonly DateTimeOffset Epoch = DateTimeOffset.UnixEpoch;
+
+    public static DateTimeOffset BucketStart(DateTimeOffset ts, TimeSpan bucket)
+    {
+        var ticksFromEpoch = (ts - Epoch).Ticks;
+        var bucketIndex = ticksFromEpoch / bucket.Ticks;
+        return Epoch.AddTicks(bucketIndex * bucket.Ticks);
+    }
+}
+```
 
 ## Recording Path
 
@@ -179,7 +262,7 @@ Record(change);
 
 ### Oversize and refused values
 
-Within the allow-list, only `string` is unbounded in length. The store writes serialized JSON into a pooled buffer with a hard cap (default 8 KB, configurable per store as `MaxJsonSize`). On overflow the store writes a small placeholder row instead:
+Within the allow-list, only `string` is unbounded in length. Each store writes serialized JSON into a pooled buffer with a hard cap (default 8 KB, configurable per store as `MaxJsonSize`). On overflow the store writes a small placeholder row:
 
 ```json
 { "$oversize": true, "size": 73218 }
@@ -191,160 +274,269 @@ Numerics, bool, and enums are bounded by their type; they never trigger the cap.
 
 ## Query Path
 
-Two paths, dispatched on whether `Bucket` is null. In both, the Timescale store inspects the property's declared type via the registry and builds a single-column query targeting `value_long`, `value_double`, or `value_json`. No COALESCE in the aggregate expression; the planner sees direct column references.
+Two query types, dispatched on whether `Bucket` is null. Both share the merger's sequential-budget executor and the contract that sub-queries return the **newest N samples (or buckets)** in their requested sub-range.
 
-The store uses `HistoryColumns.ValueColumnFor(propertyType)` (defined in the abstractions) to pick the column. For ulong properties, the read path additionally consults `IsUlongProperty` and emits the COALESCE variant described below.
+### Sub-query "newest N" contract
 
-### Raw path
+Every store's `QueryAsync` returns, for a given sub-range, at most `MaxPoints` results representing the newest samples (raw) or newest buckets (bucketed) in that sub-range. The output is sorted ascending by timestamp.
 
-Return individual samples within `[From, To]`. Example for a `long`-typed property:
-
-```sql
-select ts, value_long::double precision as number, null::jsonb as json
-from property_history
-where path = $1 and ts >= $2 and ts < $3
-order by ts asc
-limit $4 + 1;
-```
-
-For a `string`-typed property, `value_json` is selected and `number` is `NULL`. The `+1` lets the consumer detect overflow without a separate `count(*)`; if the result hits `MaxPoints + 1` rows, drop the last and set `Truncated = true`. The in-memory implementation does the same in a linear scan over the property's sorted sample list, bounded by binary search on the range endpoints.
-
-### Bucketed path
-
-One row per bucket, computed server-side via `time_bucket`. The aggregation function targets the property's column directly:
+For Timescale raw:
 
 ```sql
-select time_bucket($1::interval, ts) as bucket,
-       <agg>(<column>)               as number,
-       <last_json_expr>              as json
-from property_history
-where path = $2 and ts >= $3 and ts < $4
-group by bucket
-order by bucket asc
-limit $5 + 1;
+SELECT ts, <column> AS number, <json> AS json
+FROM (
+  SELECT ts, <column>, <json>
+  FROM property_history
+  WHERE path = $1 AND ts >= $2 AND ts < $3
+  ORDER BY ts DESC
+  LIMIT $4 + 1
+) t
+ORDER BY ts ASC;
 ```
 
-`<column>` is the result of `HistoryColumns.ValueColumnFor(propertyType)`. `<agg>` switches per `HistoryAggregation`:
+For Timescale bucketed:
 
-| Aggregation | SQL fragment |
+```sql
+SELECT bucket, number, json
+FROM (
+  SELECT time_bucket($1::interval, ts)         AS bucket,
+         <aggregate>(<column>)                 AS number,
+         <last_json_or_null>                   AS json
+  FROM property_history
+  WHERE path = $2 AND ts >= $3 AND ts < $4
+  GROUP BY bucket
+  ORDER BY bucket DESC
+  LIMIT $5 + 1
+) t
+ORDER BY bucket ASC;
+```
+
+`<column>` is the column for the property's declared type. `<aggregate>` switches per aggregation (see below). Bigint aggregates cast to `double precision` on the way out so `HistoryPoint.Number` stays a unified `double?`.
+
+The `+ 1` on the LIMIT lets the store detect overflow without a separate `count(*)`: if the result hits `MaxPoints + 1`, drop the last and set `Truncated = true` in the response.
+
+In-memory implements the same semantics via a binary-search slice over the property's sorted samples, taking the last N from the slice instead of the first N.
+
+### Aggregate fragments per aggregation
+
+| Aggregation | Timescale fragment | Notes |
+|---|---|---|
+| `Last` | `locf(last(<column>, ts))` over `time_bucket_gapfill` | Server-side LOCF for empty buckets (see below). |
+| `First` | `first(<column>, ts)` | Empty buckets stay null. |
+| `Average` | `avg(<column>)` | Sample mean. Empty buckets null. |
+| `TimeWeightedAverage` | `average(time_weight('locf', ts, <column>))` (toolkit) | Look-back semantics; empty buckets receive the held value. |
+| `Minimum` | `min(<column>)` | Empty buckets null. |
+| `Maximum` | `max(<column>)` | Empty buckets null. |
+| `Sum` | `sum(<column>)` | Empty buckets null. |
+| `Count` | `count(*)` returned as `number` | Empty buckets return 0, not null. |
+| `StdDev` | `stddev_samp(<column>)` | Empty buckets null. |
+
+### Empty-bucket / gap semantics
+
+The wire format encodes gaps as **`null` entries**, not absent entries:
+
+```json
+"points": [
+  { "ts": "2026-05-23T00:05:00Z", "value": 21.3 },
+  { "ts": "2026-05-23T00:10:00Z", "value": null },
+  { "ts": "2026-05-23T00:15:00Z", "value": 22.1 }
+]
+```
+
+Empty buckets within the query range produce one entry each with `Number` and `Json` both null (except where the aggregation provides a value). This makes the response self-describing for programmatic consumers without their having to compute expected bucket boundaries.
+
+Timescale uses `time_bucket_gapfill` (TimescaleDB core, no toolkit required) to emit the empty buckets in the result set. In-memory mirrors this in the bucketed scan, walking expected bucket boundaries and emitting a `HistoryPoint(ts, null, null)` for empty buckets.
+
+Per-aggregation behavior in empty buckets:
+
+| Aggregation | Empty bucket in response |
 |---|---|
-| `Last` | `last(<column>, ts)` |
-| `Average` | `avg(<column>)` |
-| `Minimum` | `min(<column>)` |
-| `Maximum` | `max(<column>)` |
-| `Sum` | `sum(<column>)` |
-| `Count` | `count(*)` returned as the `number` field |
+| `Last` | Server-applied LOCF: most recent value before the bucket. Pre-first-sample buckets stay null. |
+| `TimeWeightedAverage` | Held value computed via integration with look-back. Pre-first-sample buckets stay null. |
+| `Count` | `0` (a count of zero is a real fact, not a gap). |
+| All others (`First`, `Average`, `Sum`, `Min`, `Max`, `StdDev`) | `null`. The chart leaves a visual gap. |
 
-`<last_json_expr>` is `last(value_json, ts)` when aggregation is `Last` and the column is `value_json`; otherwise `NULL`. Bigint aggregates cast to `double precision` on the way out so the C# `HistoryPoint.Number` field stays a unified `double?`. Buckets with no rows are absent. Bucket cap defaults to 1000, same `+1 / Truncated` pattern.
+No new `GapFill` query parameter; the right behavior is automatic per aggregation.
+
+### Aggregation support per column
+
+| Column | `Last` | `First` | `Count` | `Average` | `TimeWeightedAverage` | `Minimum` | `Maximum` | `Sum` | `StdDev` |
+|---|---|---|---|---|---|---|---|---|---|
+| `value_long` | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| `value_double` | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| `value_json` | yes | yes | yes | no | no | no | no | no | no |
+
+Asking for a numeric aggregation on a `value_json`-stored property (decimal, string, enum) raises `HistoryAggregationNotSupportedException` from the store, surfaced as a structured MCP error and as a hidden option in the UI dropdown.
 
 ### `ulong` read path
 
 For ulong properties whose values can straddle `long.MaxValue`, the read path uses a COALESCE-aware variant so aggregates see both columns. Example for bucketed `Average`:
 
 ```sql
-select time_bucket($1::interval, ts) as bucket,
-       avg(coalesce(value_long::numeric,
-                    (value_json #>> '{}')::numeric))::double precision as number,
-       null::jsonb as json
-from property_history
-where path = $2 and ts >= $3 and ts < $4
-group by bucket
-order by bucket asc
-limit $5 + 1;
+SELECT bucket, number, NULL::jsonb AS json FROM (
+  SELECT time_bucket($1::interval, ts) AS bucket,
+         avg(coalesce(value_long::numeric,
+                      (value_json #>> '{}')::numeric))::double precision AS number
+  FROM property_history
+  WHERE path = $2 AND ts >= $3 AND ts < $4
+  GROUP BY bucket
+  ORDER BY bucket DESC
+  LIMIT $5 + 1
+) t ORDER BY bucket ASC;
 ```
 
-This branch only fires when `HistoryColumns.IsUlongProperty(propertyType)` is true. All other property types use the single-column SQL shown above with no COALESCE overhead.
-
-### Aggregation support per column
-
-| Column | `Last` | `Count` | `Average` | `Minimum` | `Maximum` | `Sum` |
-|---|---|---|---|---|---|---|
-| `value_long` | yes | yes | yes | yes | yes | yes |
-| `value_double` | yes | yes | yes | yes | yes | yes |
-| `value_json` | yes | yes | no | no | no | no |
-
-Asking for `Average`/`Minimum`/`Maximum`/`Sum` on a `value_json`-stored property (decimal, string, enum) returns a typed error: `HistoryAggregationNotSupportedException` from the store, surfaced as a structured MCP error response and as a disabled option in the UI's aggregation dropdown. Casting `value_json` to `numeric` for decimal aggregation is a noted post-MVP improvement.
-
-The in-memory implementation mirrors these semantics with a single linear pass grouping samples by the same epoch-anchored bucket-start formula used in the cross-store merge section (`floor((ts - epoch).Ticks / bucket.Ticks) * bucket.Ticks + epoch`). It does not maintain three internal storage slots; samples are kept as `(ts, object? value)` and the column-dispatch logic at query time inspects the value's runtime type.
+Fired only when `HistoryColumns.IsUlongProperty(propertyType)` is true. All other property types use the single-column SQL with no COALESCE overhead.
 
 ## Cross-Store Merge
 
-Timescale batches writes for efficiency (default `FlushInterval = 5 s`, configurable). Between flushes, the in-memory store already holds the very recent samples that Timescale has not yet committed. The merger uses each store's `Coverage` to dispatch queries efficiently and to fill the recent-data gap from in-memory.
-
-### Raw merge
-
-Split the query range across stores by coverage. Each store gets a sub-range it can fully serve. Higher-priority stores claim their range first; lower-priority stores fill what remains.
+The merger is structured in two phases: a **planner** that differs by query type, and a shared **executor** that consumes the plan.
 
 ```csharp
-var stores = registry.KnownSubjects.OfType<IHistoryStore>()
-    .OrderByDescending(s => s.Priority).ToArray();
+public record StoreDispatch(IHistoryStore Store, IReadOnlyList<HistoryRange> Ranges);
 
-var gaps = new List<HistoryCoverage> { new(query.From, query.To) };
-var merged = new SortedDictionary<DateTimeOffset, HistoryPoint>();
-var truncated = false;
-
-foreach (var store in stores)
+public static async Task<HistorySeries> QueryHistoryAsync(
+    this SubjectRegistry registry, HistoryQuery query, CancellationToken ct)
 {
-    if (gaps.Count == 0) break;
-    foreach (var sub in Intersect(gaps, store.Coverage))
-    {
-        var subSeries = await store.QueryAsync(
-            query with { From = sub.From, To = sub.To }, ct);
-        truncated |= subSeries.Truncated;
-        foreach (var p in subSeries.Points)
-            merged.TryAdd(p.Timestamp, p);
-    }
-    gaps = Subtract(gaps, store.Coverage);
-}
+    var stores = registry.KnownSubjects.OfType<IHistoryStore>()
+        .OrderByDescending(s => s.Priority).ToArray();
 
-return new HistorySeries(query.PropertyPath, merged.Values.ToImmutableArray(), truncated);
+    CheckEligibility(stores, query);
+
+    var plan = query.Bucket is null
+        ? PlanRawDispatch(stores, query)
+        : PlanBucketedDispatch(stores, query);
+
+    return await ExecuteWithBudget(plan, query, ct);
+}
 ```
 
-### Bucketed merge
+### Eligibility check
 
-**Per-bucket dispatch, no cross-store aggregation.** Each bucket in the query range is assigned to a single store; that store computes the bucket's aggregate using only its own samples. No data from two stores is ever combined inside one bucket's aggregate. This sidesteps the "average of averages" problem entirely: every aggregation (`Average`, `Minimum`, `Maximum`, `Sum`, `Count`, `Last`) works trivially per bucket because each bucket has one source of truth.
+For a query to succeed, every part of `[From, To]` must be servable by some store that supports the requested aggregation. The universal aggregations (`Last`, `Count`) are always servable and skip this check.
 
-**Assignment rule per bucket:** the highest-priority store whose `Coverage` fully contains the bucket's *effective range*. If none fully contains, fall back to the lowest-priority store with overlap (typically Timescale).
+```csharp
+static void CheckEligibility(IHistoryStore[] stores, HistoryQuery query)
+{
+    if (HistoryAggregations.Universal.Contains(query.Aggregation)) return;
 
-The *effective range* clips the bucket's logical span to the query bounds:
+    var eligible = stores.Where(s => s.SupportedAggregations.Contains(query.Aggregation));
+    var union = ComputeCoverageUnion(eligible.Select(s => s.Coverage));
+    if (!union.Contains(query.From, query.To))
+    {
+        throw new HistoryAggregationNotSupportedException(
+            query.Aggregation, query.From, query.To,
+            available: stores.SelectMany(s => s.SupportedAggregations).Distinct().ToArray());
+    }
+}
+```
+
+The exception carries the `available` list so MCP errors and UI tooltips can advertise what *would* work for the requested range.
+
+### Raw planner: coverage subtraction
+
+Each store gets a non-overlapping sub-range. Higher-priority stores claim their range first; lower-priority stores fill what remains.
+
+```csharp
+static IReadOnlyList<StoreDispatch> PlanRawDispatch(IHistoryStore[] stores, HistoryQuery query)
+{
+    var gaps = new List<HistoryCoverage> { new(query.From, query.To) };
+    var plan = new List<StoreDispatch>();
+    foreach (var store in stores.Where(s => Supports(s, query.Aggregation)))
+    {
+        var ranges = Intersect(gaps, store.Coverage).ToList();
+        if (ranges.Count > 0) plan.Add(new StoreDispatch(store, ranges));
+        gaps = Subtract(gaps, store.Coverage).ToList();
+        if (gaps.Count == 0) break;
+    }
+    return plan;
+}
+```
+
+### Bucketed planner: per-bucket dispatch
+
+Each bucket in the range is assigned to a single eligible store: the highest-priority store that supports the aggregation and whose `Coverage` fully contains the bucket's *effective range*:
 
 ```
 effective = [max(bucket.From, query.From), min(bucket.To, query.To)]
 ```
 
-This matters at the right edge of live queries: a bucket whose logical end extends past `query.To` (= "now") only needs to contain the truncated portion, so in-memory wins boundary buckets it otherwise would have lost to Timescale by a few seconds.
+Consecutive buckets assigned to the same store are grouped into one ranged sub-query. If no eligible store fully contains a bucket but at least one overlaps, fall back to the lowest-priority eligible overlapping store. Buckets entirely outside every eligible store's coverage are skipped (they appear as gaps in the final response — but eligibility check above ensures at least one store covers each bucket if we got this far).
 
-**SQL economy via grouping.** A naive implementation would issue one SQL per bucket. The merger groups consecutive buckets assigned to the same store into one ranged sub-query, so a typical chart is at most one or two round-trips:
+No data from two stores is ever combined inside one bucket's aggregate. This sidesteps the "average of averages" problem entirely; every aggregation works trivially per bucket because each bucket has one source of truth.
+
+### Shared executor: sequential budget
 
 ```csharp
-var buckets = EnumerateBucketRanges(query);
-var assignments = buckets.Select(b => (Bucket: b, Store: AssignBucket(stores, b, query)));
-var groups = GroupConsecutive(assignments, a => a.Store);
-
-foreach (var group in groups)
+static async Task<HistorySeries> ExecuteWithBudget(
+    IReadOnlyList<StoreDispatch> plan, HistoryQuery query, CancellationToken ct)
 {
-    var subQuery = query with {
-        From = group.First().Bucket.From,
-        To   = group.Last().Bucket.To
-    };
-    var part = await group.Key.QueryAsync(subQuery, ct);
-    truncated |= part.Truncated;
-    foreach (var p in part.Points) allPoints[p.Timestamp] = p;
+    var remaining = query.MaxPoints;
+    var truncated = false;
+    var collected = new SortedDictionary<DateTimeOffset, HistoryPoint>();
+
+    foreach (var (store, ranges) in plan)            // priority order
+    {
+        if (remaining <= 0) { truncated = true; break; }
+
+        // Newest-first within store so we keep the freshest under budget.
+        foreach (var range in ranges.OrderByDescending(r => r.To))
+        {
+            if (remaining <= 0) break;
+            var sub = await store.QueryAsync(
+                query with { From = range.From, To = range.To, MaxPoints = remaining }, ct);
+            truncated |= sub.Truncated;
+            foreach (var point in sub.Points)
+                if (collected.TryAdd(point.Timestamp, point))
+                    remaining--;
+        }
+    }
+
+    return new HistorySeries(query.PropertyPath, collected.Values.ToImmutableArray(), truncated);
 }
 ```
 
-**Bucket alignment invariant.** The in-memory implementation must use the same bucket-boundary computation as Postgres `time_bucket` (epoch-anchored: `floor((ts - epoch).Ticks / bucket.Ticks) * bucket.Ticks + epoch`). If alignment ever drifts, two stores would produce buckets at different timestamps and concatenation would interleave them. This is enforced by a shared helper in `HomeBlaze.History.Abstractions`.
+Properties of the executor:
+
+- **No over-fetching.** Each store receives the *remaining* budget, not the full `MaxPoints`. Higher-priority stores can short-circuit lower-priority queries entirely when they have enough data.
+- **Newest-first.** Sub-queries return the newest N (see "Sub-query 'newest N' contract" above). Combined with priority ordering, this naturally produces "newest MaxPoints overall" across stores.
+- **Truncated honestly.** Set when either a sub-query truncated *or* the budget ran out mid-iteration.
+- **Dedup via TryAdd.** Higher-priority store's value wins for overlapping timestamps (rare but possible for raw queries).
+
+### Live-edge bucket accuracy
+
+The bucketed planner assigns buckets based on `Coverage`. For a bucket larger than `InMemory.MaxAge`, the live-edge bucket (the rightmost bucket whose `To` reaches `query.To`) is never fully contained by InMemory and falls to Timescale. Timescale's `Coverage.To = _lastFlushHighWaterMark` (see TimescaleDB Store below) trails "now" by 0 to `FlushInterval` in steady state, so the live-edge bucket's aggregate omits the last `FlushInterval` of samples.
+
+Relative error is bounded by `FlushInterval / bucket_size`:
+
+| Bucket size (`FlushInterval = 5s`) | Live-edge error |
+|---|---|
+| 30s | covered by InMemory if `MaxAge >= 60s` (default) — perfect |
+| 5min | 1.7% |
+| 10min | 0.83% |
+| 1h | 0.14% |
+| 24h | 0.006% |
+
+For workloads that need pixel-perfect aggregation in the live-edge bucket at chart-typical sizes (5–15 min), increase `MaxAge` to match the smallest bucket size you care about. Most operators won't need to. A combinable-partial-aggregate path (Timescale returns aggregate state, InMemory contributes raw samples past `Coverage.To`, merger combines in-process) is a noted post-MVP refinement when real workloads expose the medium-bucket wobble.
+
+### Cross-store sizing constraint
+
+`InMemory.MaxAge >= 2 * TimescaleDb.FlushInterval`.
+
+Without this, samples can be invisible to queries during the window between InMemory eviction and Timescale commit. The default configs (`MaxAge = 60s`, `FlushInterval = 5s`) satisfy this comfortably. The constraint is documented in the `MaxAge` `[Configuration]` doc comment and surfaced as helper text in the edit component. Runtime validation is a noted fast-follow.
 
 ### Resulting behaviour
 
 | Query | Routing |
 |---|---|
-| `last 30 s`, raw or bucketed | In-memory fully contains every bucket. Timescale never touched. |
-| `last 1 hr`, raw | Split by coverage: in-memory serves the last 60 s, Timescale the rest. Two queries. |
-| `last 5 min`, bucket=10s | Per-bucket dispatch: Timescale serves buckets 1-24 in one SQL, in-memory serves buckets 25-30. Latest data without buffer lag. |
-| `last 1 hr`, bucket=1min | Most buckets don't fit in in-memory (60 s) → Timescale alone. One query. |
-| `last 30 days`, bucket=1hr | Timescale alone. |
-| Timescale offline, `last 30 s`, raw or bucketed | In-memory still answers. The DB outage is invisible for ranges it covers. |
+| `last 30 s`, raw or bucketed | InMemory fully contains every bucket; budget exhausts before Timescale is queried. Timescale never touched. |
+| `last 1 hr`, raw | Split by coverage: InMemory serves the last 60s, Timescale the rest with the remaining budget. Two queries (one per store). |
+| `last 5 min, bucket=10s` | Per-bucket dispatch: Timescale serves buckets 1-24 in one grouped sub-query, InMemory serves buckets 25-30. Latest data without buffer lag. |
+| `last 1 hr, bucket=1min` | Most buckets don't fit in InMemory (60s) → Timescale alone. One query. Live-edge bucket error: ~8.3%. |
+| `last 1 hr, bucket=5min` | Same as above. Live-edge bucket error: ~1.7%. |
+| `last 30 days, bucket=1hr` | Timescale alone. Live-edge bucket error: 0.14%. |
+| Timescale offline, `last 30 s`, raw | InMemory still answers. The DB outage is invisible for ranges it covers. |
+| Timescale offline, `last 1 hr`, raw | InMemory answers the last 60s; Timescale returns from its `Coverage.To` (frozen at last successful flush) for the older sub-range. Gaps between freeze point and `now - 60s` are honest empty buckets/missing samples. |
+| `TimeWeightedAverage` requested, toolkit unavailable | If only InMemory supports TWA and the range exceeds InMemory's coverage: `HistoryAggregationNotSupportedException` with `available` list. UI never showed TWA in the dropdown for this configuration. |
 
 A store that raises an exception during `QueryAsync` propagates that exception. The merger does not silently swallow errors. A misconfigured Timescale must not masquerade as "no data".
 
@@ -353,24 +545,36 @@ A store that raises an exception during `QueryAsync` propagates that exception. 
 ### Schema
 
 ```sql
-create table property_history (
-  ts            timestamptz       not null,
-  path          text              not null,
-  value_long    bigint            null,
-  value_double  double precision  null,
-  value_json    jsonb             null
+CREATE TABLE IF NOT EXISTS property_history (
+  ts            timestamptz       NOT NULL,
+  path          text              NOT NULL,
+  value_long    bigint            NULL,
+  value_double  double precision  NULL,
+  value_json    jsonb             NULL
 );
 
-select create_hypertable('property_history', 'ts', if_not_exists => true);
-create index if not exists ix_property_history_path_ts
-  on property_history (path, ts desc);
+SELECT create_hypertable('property_history', 'ts',
+    chunk_time_interval => INTERVAL '1 day',
+    if_not_exists => true);
+
+CREATE INDEX IF NOT EXISTS ix_property_history_path_ts
+    ON property_history (path, ts DESC);
+
+CREATE TABLE IF NOT EXISTS history_schema_version (
+    version       integer PRIMARY KEY,
+    applied_at    timestamptz NOT NULL DEFAULT now(),
+    description   text NOT NULL
+);
+INSERT INTO history_schema_version (version, description)
+VALUES (1, 'Initial MVP schema')
+ON CONFLICT (version) DO NOTHING;
 ```
 
-Three nullable value columns, dispatched per property type at write and read time. NULL columns in Postgres cost roughly one bit per column per row in the row header; the only payload byte cost is the populated column. Snake_case columns; C# DTOs and parameters remain PascalCase. Schema bootstrap runs idempotently on store start.
+Three nullable value columns, dispatched per property type at write and read time. Daily chunks make future compression (`add_compression_policy`) more granular and queries against compressed ranges more efficient. Snake_case columns; C# DTOs and parameters remain PascalCase. Schema bootstrap runs idempotently on store start.
 
 ### Driver choice
 
-Npgsql native, no ORM. EF Core's migrations fight `create_hypertable`, and change tracking on the hot write path is exactly the overhead to avoid. Dapper offers nothing for bulk writes. Reads are two or three SQL strings and don't earn an abstraction. Writes use `NpgsqlBinaryImporter` (`COPY` binary protocol) per batch.
+Npgsql native, no ORM. EF Core's migrations fight `create_hypertable`, and change tracking on the hot write path is exactly the overhead to avoid. Dapper offers nothing for bulk writes. Reads are a handful of SQL strings and don't earn an abstraction. Writes use `NpgsqlBinaryImporter` (`COPY` binary protocol) per batch.
 
 ### Configuration
 
@@ -378,34 +582,92 @@ Npgsql native, no ORM. EF Core's migrations fight `create_hypertable`, and chang
 |---|---|---|
 | `ConnectionString` | required | Npgsql connection string |
 | `Retention` | 30 days | Timescale `add_retention_policy` chunk delete job |
-| `BufferTime` | 250 ms | `ChangeQueueProcessor` coalesce window. Within one window only the last value per property is kept. Decides sample resolution. Min 50 ms. |
-| `FlushInterval` | 5 s | How often the store actually issues a `COPY`. The store accumulates batches delivered every `BufferTime` and writes them all at once on each flush. Must be `>= BufferTime` (validated at startup; clamped if lower). Larger values reduce DB write frequency at the cost of staleness up to `FlushInterval`. Setting it equal to `BufferTime` means one COPY per delivered batch. |
+| `BufferTime` | 250 ms | `ChangeQueueProcessor` coalesce window. Min 50 ms. |
+| `FlushInterval` | 5 s | How often the store issues a `COPY`. Must be `>= BufferTime` (validated at startup; clamped if lower). |
+| `ShutdownFlushTimeout` | 10 s | Maximum time to wait for the final synchronous COPY during graceful shutdown before giving up. |
 | `MaxJsonSize` | 8 KB | Per-string cap; overflow becomes a placeholder row |
 
-`[State]` properties for operator observability: `Status`, `StatusMessage`, `QueueDepth`, `DropCount`, `OversizeCount`, `RecordedCount`, `IncomingChangesPerSecond`, `RecordedChangesPerSecond`, `LastFlushUtc`, `LastError`. `IncomingChangesPerSecond` and `RecordedChangesPerSecond` are rolling 1-minute averages, same shape and naming as `OpcUaClient.IncomingChangesPerSecond`. The gap between the two surfaces filtering and backpressure.
+### State properties for operator observability
 
-**Shared rate counter.** Both rolling rates reuse the existing `ThroughputCounter` (lock-free 60-second sliding window) currently `internal sealed` in `Namotion.Interceptor.OpcUa`. As part of the MVP work, that file is promoted to `Namotion.Interceptor.Connectors` and made `public` so the OPC UA connectors, the history stores, and future change-pipeline consumers can share one implementation. `Namotion.Interceptor.Connectors` is the natural home: it already hosts `ChangeQueueProcessor` (which both OPC UA and the history stores already depend on), so no new dependency is introduced. The two existing OPC UA usages (`OpcUaSubjectClientSource`, `OpcUaSubjectServer`) update their `using` to the new namespace; the existing `ThroughputCounterTests` move to `Namotion.Interceptor.Connectors.Tests`.
+`Status`, `StatusMessage`, `QueueDepth`, `DropCount`, `OversizeCount`, `RecordedCount`, `IncomingChangesPerSecond`, `RecordedChangesPerSecond`, `LastFlushUtc`, `LastError`, plus:
+
+- `ToolkitAvailable` (bool?) — null until first probe, then true/false.
+- `ToolkitStatus` (string?) — human-readable detail (e.g., `"Available (version 1.18.0)"`, `"Not installed at the cluster level"`, `"Probe failed: connection refused"`).
+- `EstimatedStorageBytes` (long?) — refreshed periodically via `SELECT pg_total_relation_size('property_history')`. Trigger metric for the deferred path-normalisation optimization.
+
+**Shared rate counter.** Both rolling rates reuse the existing `ThroughputCounter` (lock-free 60-second sliding window) currently `internal sealed` in `Namotion.Interceptor.OpcUa`. As part of the MVP work, that file is promoted to `Namotion.Interceptor.Connectors` and made `public` so the OPC UA connectors, the history stores, and future change-pipeline consumers share one implementation. `Namotion.Interceptor.Connectors` already hosts `ChangeQueueProcessor` (referenced by both OPC UA and the history stores), so no new dependency is introduced.
 
 ### Coverage
 
-`Coverage.From = DateTimeOffset.UtcNow - Retention`, `Coverage.To = DateTimeOffset.UtcNow`. Both derived without DB calls.
+`Coverage.From = DateTimeOffset.UtcNow - Retention`. `Coverage.To = _lastFlushHighWaterMark`.
+
+The high-water-mark is the timestamp of the newest sample known to be committed to the DB:
+
+- Pre-first-flush (and pre-bootstrap): `Coverage = (StartTime, StartTime)` — empty range. The merger never assigns work to Timescale until it has actually committed something.
+- Seeded at bootstrap via `SELECT MAX(ts) FROM property_history`. This makes Coverage honest immediately after restart instead of advertising empty coverage until the first post-restart flush.
+- Clamped at startup to `now` if the seed is in the future (clock skew with a previous writer).
+- Advanced after each successful `COPY` to `max(_lastFlushHighWaterMark, batch.Max(s => s.Timestamp))`. Empty flushes don't advance it (sparse ranges between samples are routed to InMemory, which correctly returns empty).
+- Frozen during DB outages: the merger sees the gap and routes that range to InMemory instead of getting silent holes.
+
+If `_lastFlushHighWaterMark` ages past `now - Retention` (e.g., DB has been failing flushes for so long that the high-water-mark predates retention), the Coverage getter returns an empty `(to, to)` range instead of an inverted one.
+
+### Toolkit dependency
+
+Probe via `CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit` during schema bootstrap:
+
+- If toolkit is installed and not yet enabled: enables it. Bootstrap proceeds normally.
+- If toolkit is installed and already enabled: no-op.
+- If toolkit is not installed at the cluster level: catch the exception, set `ToolkitAvailable = false`, log a warning, continue startup.
+
+Re-probe on every successful reconnect (in case the operator installed toolkit during the outage). No periodic polling.
+
+`SupportedAggregations` reflects the current value of `ToolkitAvailable`:
+
+```csharp
+public IReadOnlySet<string> SupportedAggregations
+{
+    get
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal)
+        {
+            HistoryAggregations.Last, HistoryAggregations.First,
+            HistoryAggregations.Average, HistoryAggregations.Minimum,
+            HistoryAggregations.Maximum, HistoryAggregations.Sum,
+            HistoryAggregations.Count, HistoryAggregations.StdDev,
+        };
+        if (ToolkitAvailable == true)
+            set.Add(HistoryAggregations.TimeWeightedAverage);
+        return set;
+    }
+}
+```
+
+### Recommended Docker image
+
+For production deployments, the `timescale/timescaledb-ha:pg16-latest` image bundles `timescaledb_toolkit` along with TimescaleDB core, so all aggregations including `TimeWeightedAverage` work out of the box. The smaller `timescale/timescaledb` image works too; install the toolkit manually (`CREATE EXTENSION timescaledb_toolkit;`) or accept the degraded set. `time_bucket`, `time_bucket_gapfill`, and basic aggregations are in TimescaleDB core and don't require the toolkit.
+
+### Shutdown flush
+
+On `StopAsync`, the store performs a final synchronous `COPY` of any pending batch. Bounded by `ShutdownFlushTimeout` (default 10 s). If the timeout is reached, the pending batch is dropped: `Status = Failed`, `StatusMessage = "Shutdown flush timed out; <N> samples lost"`, and the log records the loss. The store accepts no new writes during the drain.
+
+On process crash (SIGKILL, OOM, etc.), the pending batch is lost regardless. Up to `FlushInterval` of samples can be lost on crash — documented limitation of batched writes.
 
 ## InMemory Store
 
-Top layer: `ConcurrentDictionary<string, PropertyBuffer>` keyed by property path. Inner layer: array-backed ring buffer per path with a per-buffer lock. Buffers are created on first write — properties that never change consume zero memory.
+Top layer: `ConcurrentDictionary<string, PropertyBuffer>` keyed by property path. Inner layer: array-backed ring buffer per path with a per-buffer lock. Buffers are created on first write; properties that never change consume zero memory.
 
 ### Configuration
 
 | Knob | Default | Purpose |
 |---|---|---|
-| `MaxAge` | 60 s | Drop samples older than this. Tuned to cover the Timescale `FlushInterval` plus a generous safety margin and to serve "last 1 min" charts entirely in-memory. |
+| `MaxAge` | 60 s | Drop samples older than this. Must be at least `2 * FlushInterval` of any companion persistent store to guarantee samples remain in-buffer until they're committed. Default satisfies the constraint for the default 5s Timescale flush. |
 | `MaxPointsPerProperty` | 1 000 | Per-property hard cap on the ring buffer. Sized to comfortably hold 16 Hz over a minute; protects against a single runaway property dominating memory. |
-| `BufferTime` | 250 ms | `ChangeQueueProcessor` batch window. Coalesces repeated writes to the same property within the window down to one sample. Larger values dramatically reduce per-property memory at the cost of slightly less granular recent history; users with 100k+ properties may set this to 1 s to halve memory pressure. Min 50 ms. |
+| `BufferTime` | 250 ms | `ChangeQueueProcessor` batch window. Min 50 ms. |
 | `MaxJsonSize` | 8 KB | Same placeholder rule as Timescale |
 
 **Realistic memory at scale:**
 
-Memory tracks actual change rate per property, not the per-property cap. With the defaults and a 250ms coalesce window, ~25% of raw writes survive coalescing.
+Memory tracks actual change rate per property, not the per-property cap. With the defaults and a 250 ms coalesce window, ~25% of raw writes survive coalescing.
 
 | Scenario | Memory |
 |---|---|
@@ -416,11 +678,29 @@ Memory tracks actual change rate per property, not the per-property cap. With th
 
 Operators with extreme scale (well above 100k properties) tune `MaxAge` down (to 30 s or 10 s) or `BufferTime` up (to 1 s) to keep memory bounded.
 
-`[State]` properties for operator observability mirror the Timescale store where applicable, plus memory metrics: `Status`, `StatusMessage`, `RecordedCount`, `OversizeCount`, `EvictedCount` (samples dropped by `MaxAge` or `MaxPointsPerProperty`), `IncomingChangesPerSecond`, `RecordedChangesPerSecond`, `TrackedPropertyCount`, `TotalSampleCount`, `EstimatedMemoryBytes`. `TotalSampleCount × 50` gives a rough byte estimate; the metric is exposed so operators can confirm tuning matches expectations. No queue or flush metrics since writes are synchronous.
+### State properties for operator observability
+
+`Status`, `StatusMessage`, `RecordedCount`, `OversizeCount`, `EvictedCount` (samples dropped by `MaxAge` or `MaxPointsPerProperty`), `IncomingChangesPerSecond`, `RecordedChangesPerSecond`, `TrackedPropertyCount`, `TotalSampleCount`, `EstimatedMemoryBytes`. `TotalSampleCount × 50` gives a rough byte estimate.
 
 ### Coverage
 
-`Coverage.From = max(StartTime, DateTimeOffset.UtcNow - MaxAge)`, `Coverage.To = DateTimeOffset.UtcNow`. The `max(StartTime, …)` clamp matters during the first `MaxAge` window after the store starts: the buffer doesn't actually have samples from before startup, so advertising coverage back to "now − 5 min" would cause the merger to route old-range queries here and get empty results while Timescale (which does have that data) gets skipped.
+`Coverage.From = max(StartTime, DateTimeOffset.UtcNow - MaxAge)`, `Coverage.To = DateTimeOffset.UtcNow`. The `max(StartTime, …)` clamp matters during the first `MaxAge` window after the store starts: the buffer doesn't actually have samples from before startup, so advertising coverage back to "now − MaxAge" would route old-range queries here for empty results while Timescale (which does have that data) gets skipped.
+
+### TimeWeightedAverage with look-back
+
+InMemory implements TWA via trapezoidal integration with look-back semantics matching toolkit's `time_weight('locf', ...)`:
+
+1. For a bucket `[bucket.From, bucket.To]`, query the buffer for in-bucket samples plus call `GetSampleAtOrBeforeAsync(path, bucket.From)` to find the value held entering the bucket.
+2. Integrate value × duration across each segment (look-back start → first in-bucket sample, then each adjacent pair, then last sample → bucket.To).
+3. Divide by total duration to produce TWA.
+
+Empty bucket (no in-bucket samples): TWA = look-back value (held throughout the bucket). If look-back returns null: TWA = null.
+
+This implementation must produce identical numbers to Timescale's `average(time_weight('locf', ts, value))` for the same input data. **An integration test that writes identical samples to both stores and asserts TWA equality across a battery of edge cases (empty bucket, single-sample bucket, boundary-sample bucket, sparse vs dense, look-back-only bucket where no in-bucket samples exist) is load-bearing for the unified-merger design.**
+
+### Shutdown semantics
+
+InMemory has no shutdown flush. Its data is process-local and lost on every restart. This is intentional: InMemory is documented as a hot buffer / dev / test store, not a production substitute. Configurations using only InMemory will lose history on every restart.
 
 ### Use cases
 
@@ -428,19 +708,15 @@ Operators with extreme scale (well above 100k properties) tune `MaxAge` down (to
 2. Default store in unit tests and the dev sample, since it has no external dependency.
 3. Local fallback during a brief Timescale outage for queries that fit its window.
 
-It is documented as not a production substitute for the DB store.
-
 ## UI
 
 ### Edit components
 
 One Blazor project per store, matching the `HomeBlaze.OpcUa.Blazor` convention.
 
-`TimescaleDbHistoryStoreEditComponent.razor`: tabs General (name, enabled, connection string, retention) and Advanced (`BufferTime`, `FlushInterval`, `MaxJsonSize`). Status block at the bottom shows `Status` and `StatusMessage` from the subject, same pattern as `OpcUaServerEditComponent`.
+`TimescaleDbHistoryStoreEditComponent.razor`: tabs General (name, enabled, connection string, retention) and Advanced (`BufferTime`, `FlushInterval`, `ShutdownFlushTimeout`, `MaxJsonSize`). Status block at the bottom shows `Status`, `StatusMessage`, `ToolkitStatus`, and `EstimatedStorageBytes`.
 
-`InMemoryHistoryStoreEditComponent.razor`: name, enabled, `MaxAge`, `MaxPointsPerProperty`, `BufferTime`, `MaxJsonSize`.
-
-No setup component. Neither store has an out-of-band discovery step; the standard "create new subject" flow is sufficient. The browser already renders store `[State]` properties, so no custom status view is needed.
+`InMemoryHistoryStoreEditComponent.razor`: name, enabled, `MaxAge`, `MaxPointsPerProperty`, `BufferTime`, `MaxJsonSize`. The `MaxAge` field has helper text noting the `>= 2 * FlushInterval` constraint.
 
 ### Property history dialog
 
@@ -457,53 +733,108 @@ Bucket: [Auto v]   Aggregation: [Average v]
 [ MudTimeSeriesChart, 400px high ]
 
 3 042 points · Truncated: no · Source: TimescaleDB + InMem
-
                                                        [Close]
 ```
 
-Defaults: 24h, Auto bucket, Average for numerics; 24h, raw, Last for non-numerics. Auto bucket picks `range / 200` rounded to a sane interval (1s, 5s, 30s, 1min, 5min, 15min, 1h, 6h, 1d), keeping the chart near 200 points across zoom levels.
+Defaults: 24h, Auto bucket. The default aggregation for numeric properties is `TimeWeightedAverage` if supported by all registered stores (labelled "Average"), falling through to `Average` (sample mean) if not. For non-numeric properties, default is `Last`. Auto bucket picks `range / 200` rounded to a sane interval (1s, 5s, 30s, 1min, 5min, 15min, 1h, 6h, 1d), keeping the chart near 200 points across zoom levels.
 
-Chart: MudBlazor 9.2's `MudTimeSeriesChart` (built in, no new dependency). Linear interpolation for numeric aggregations. Stepped interpolation when displaying `Last` of a non-numeric property, with hover tooltip showing the JSON value.
+### Aggregation dropdown gating
 
-`Truncated` flag from the response surfaces as a small warning indicator. The "Source" line names the stores that contributed, for trust and debugging.
+The dropdown shows only aggregations available *for the current property*:
+
+- For properties with `IsCumulative = true` (counters): show only `Last`, `First`, `Minimum`, `Maximum`, `Count`. Default: `Last`. Other aggregations are mathematically meaningless for counters (averaging or summing meter readings produces nonsense).
+- For all other properties: filter by `ValueColumnFor(propertyType)` (numeric vs JSON) and intersect with the union of `SupportedAggregations` across all registered stores. If `TimeWeightedAverage` isn't supported by every store with non-empty coverage, hide it entirely ("don't offer what can't be delivered").
+
+When `TimeWeightedAverage` is shown, it is labelled "Average" with a tooltip explaining time-weighted semantics. The sample mean (`Average`) appears as "Sample Average" lower in the dropdown for users who explicitly want it.
+
+Per-range filter refinement (re-evaluating availability as the user changes the time range) is a noted fast-follow.
+
+### Chart rendering
+
+MudBlazor 9.2's `MudTimeSeriesChart` (built in, no new dependency). `ChartPoint<T>` requires non-nullable numeric `Y`; null entries from the response can't be passed directly. The chart layer converts each `HistorySeries` into one or more `ChartSeries`:
+
+- For `Last`-aggregation responses (server-applied LOCF means no nulls in the typical case): one `ChartSeries`, stepped-line interpolation.
+- For other aggregations (gaps present as nulls): split the series at null entries into multiple `ChartSeries`, all with the same color/style, only the first carrying a legend name. Each contiguous run renders as its own line; the breaks between them appear as visual gaps.
+
+Tooltips show the raw value and timestamp.
+
+### Gap-rendering convention (chart layer)
+
+The store's `QueryAsync` returns explicit null entries for empty buckets in the wire format. The convention below describes the chart's visual treatment after the chart-layer split:
+
+| Aggregation | Chart treatment for null/empty buckets |
+|---|---|
+| `Last`, non-numeric | (Server-applied LOCF: no nulls in response.) Stepped line through the carried values. |
+| `TimeWeightedAverage` | (Server-applied integration: no nulls in response unless pre-first-sample.) Smooth line. |
+| `Count` | Server returns 0 for empty buckets. Bar/line shows zero. |
+| `First`, `Average`, `Min`, `Max`, `Sum`, `StdDev` | Nulls in response. Chart splits into sub-series; visual gap between runs. |
+
+The chart never invents data the server didn't return. Server-side gap-fill (LOCF / interpolate) for *other* aggregations beyond what's described here is a Phase 2 opt-in.
 
 ## MCP Tool
 
-Tool `get_property_history` lives in `HomeBlaze.Mcp` (the enriched layer), since it depends on `HomeBlaze.History.Abstractions`. Base `Namotion.Interceptor.Mcp` stays free of history concerns.
+Tool `get_property_history` lives in `HomeBlaze.AI` (the enriched layer), since it depends on `HomeBlaze.History.Abstractions`. Base `Namotion.Interceptor.Mcp` stays free of history concerns.
 
 | Parameter | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `path` | string | yes | | Subject property path |
-| `from` | string | yes | | ISO 8601 timestamp. Parsed with `DateTimeStyles.AssumeUniversal`: an explicit offset (`Z`, `+02:00`) is honoured, a bare timestamp like `2026-05-19T00:00:00` is treated as UTC. |
-| `to` | string | no | `now` (UTC) | ISO 8601, same parsing rule as `from`. |
+| `from` | string | yes | | ISO 8601 timestamp. Parsed with `DateTimeStyles.AssumeUniversal`: explicit offset (`Z`, `+02:00`) honoured; bare timestamps treated as UTC. |
+| `to` | string | no | `now` (UTC) | ISO 8601, same parsing rule. |
 | `bucket` | string | no | null (raw) | `TimeSpan`-parseable, e.g. `5m` |
-| `aggregation` | string | no | `last` | One of `last`, `average`, `minimum`, `maximum`, `sum`, `count` (case insensitive) |
+| `aggregation` | string | no | `Last` | Case-insensitive match against `HistoryAggregations` constants. |
 
 Response:
 
 ```json
 {
   "path": "Devices/LivingRoomThermostat/Temperature",
-  "from": "2026-05-19T00:00:00Z",
-  "to":   "2026-05-20T00:00:00Z",
+  "from": "2026-05-23T00:00:00Z",
+  "to":   "2026-05-24T00:00:00Z",
   "bucket": "5m",
-  "aggregation": "average",
+  "aggregation": "TimeWeightedAverage",
+  "value_type": "number",
   "points": [
-    { "ts": "2026-05-19T00:00:00Z", "value": 21.3 },
-    { "ts": "2026-05-19T00:05:00Z", "value": 21.4 },
-    { "ts": "2026-05-19T00:10:00Z", "value": null }
+    { "ts": "2026-05-23T00:00:00Z", "value": 21.3 },
+    { "ts": "2026-05-23T00:05:00Z", "value": 21.4 },
+    { "ts": "2026-05-23T00:10:00Z", "value": null }
   ],
   "truncated": false
 }
 ```
 
-`value` is a polymorphic JSON value: number when populated via `value_long` or `value_double`, JSON literal when populated via `value_json`, `null` when no value column is populated (explicit-null sample). Empty `points` and missing paths are not errors; they return successfully with an empty array. Real errors (DB unreachable, malformed parameters) propagate as MCP error responses.
+### `value_type` field
 
-`MaxPoints` is intentionally not exposed as a tool parameter. Callers that need more detail narrow `from`/`to` instead; the cap (10 000 raw, 1 000 bucketed) keeps any single response bounded and the `truncated` flag signals when it was hit.
+Reflects the **response value's type** (what consumers see in `value`), not the property's underlying type. Values:
+
+- `"number"` — `Number` field populated. Includes `Count` regardless of property type.
+- `"string"` — string-valued non-numeric property via `Last`/`First`.
+- `"boolean"` — bool property via `Last`/`First`.
+- `"enum"` — enum property via `Last`/`First` (enum name as JSON string).
+
+The hint helps programmatic consumers parse without inspecting each point's type.
+
+### Error responses
+
+Unknown aggregation, missing path, or aggregation not supported across the requested range:
+
+```json
+{
+  "error": "HistoryAggregationNotSupported",
+  "message": "Aggregation 'TimeWeightedAverage' is not supported. Available: Last, First, Average, Minimum, Maximum, Sum, Count, StdDev.",
+  "requested": "TimeWeightedAverage",
+  "available": ["Last", "First", "Average", "Minimum", "Maximum", "Sum", "Count", "StdDev"]
+}
+```
+
+No silent fallback to a different aggregation. The caller (LLM or otherwise) sees the failure and the available set, and can retry with a supported aggregation.
+
+Empty `points` and missing paths are not errors; they return successfully with an empty array (and `value_type` reflects the property's type if it exists).
+
+`MaxPoints` is not exposed as a tool parameter. Callers that need more detail narrow `from`/`to` instead; the cap (10 000 raw, 1 000 bucketed via the auto-bucket math) keeps any single response bounded and the `truncated` flag signals when it was hit.
 
 ## Configuration Summary
 
-Per store, expressed as `[Configuration]` properties so the registry, edit components, and config persistence all see the same surface.
+Per store, expressed as `[Configuration]` properties.
 
 | Knob | Timescale | InMemory |
 |---|---|---|
@@ -513,6 +844,7 @@ Per store, expressed as `[Configuration]` properties so the registry, edit compo
 | `MaxPointsPerProperty` | n/a | 1 000 |
 | `BufferTime` | 250 ms | 250 ms |
 | `FlushInterval` | 5 s | n/a |
+| `ShutdownFlushTimeout` | 10 s | n/a |
 | `MaxJsonSize` | 8 KB | 8 KB |
 
 ## Tests
@@ -520,51 +852,103 @@ Per store, expressed as `[Configuration]` properties so the registry, edit compo
 ### Unit tests
 
 - `HistoryEligibility.HasHistory` over every recordable and refused type.
-- `InMemoryHistoryStore` recording, retention trimming, raw and bucketed queries, oversize placeholder for long strings, refused types blocked by `HasHistory()`.
-- `HistoryQueryExtensions.QueryHistoryAsync` merge logic with fake `IHistoryStore` implementations covering: single store, two stores with disjoint coverage, two stores with overlapping coverage, store throwing, empty registry.
-- MCP tool: parameter parsing, case-insensitive aggregation, empty result on unknown path.
+- `HistoryColumns.ValueColumnFor` and `IsUlongProperty` over every supported type.
+- `BucketAlignment.BucketStart` correctness; epoch-anchored parity with Postgres `time_bucket`.
+- `InMemoryHistoryStore`: recording, retention trimming, raw and bucketed queries, oversize placeholder for long strings, refused types blocked by `HasHistory()`, TWA computation with look-back.
+- `InMemoryHistoryStore.GetSampleAtOrBeforeAsync` correctness with empty buffer, exact-match, before-buffer-start, after-buffer-end.
+- `HistoryQueryExtensions.QueryHistoryAsync` raw planner: single store, two disjoint, two overlapping, store throwing, empty registry.
+- `HistoryQueryExtensions.QueryHistoryAsync` bucketed planner: per-bucket dispatch, consecutive grouping, effective-range clipping at the right edge, single bucket spanning both stores.
+- `HistoryQueryExtensions.ExecuteWithBudget`: sequential budget exhaustion, newest-first sub-range ordering, dedup via TryAdd, truncated propagation.
+- `HistoryQueryExtensions.CheckEligibility`: store-without-aggregation skipped, throws when no eligible store covers, universal aggregations bypass check.
+- MCP tool: parameter parsing, case-insensitive aggregation, empty result on unknown path, error response shape, `value_type` correctness across response types.
 
 No Docker required for any unit test.
 
 ### Integration tests
 
-`HomeBlaze.History.TimescaleDb.Tests` with `[Trait("Category", "Integration")]`, excluded from the default `dotnet test` filter, matching the existing repo convention.
+`HomeBlaze.History.TimescaleDb.Tests` with `[Trait("Category", "Integration")]`, excluded from the default `dotnet test` filter.
 
-Container management via Testcontainers using the `timescale/timescaledb:latest-pg16` image. One container per test class via `IClassFixture<TimescaleDbFixture>`. Per-test schema (`test_<guid>`) for isolation without container churn.
+Two Testcontainers fixtures:
 
-| Category | Verifies |
-|---|---|
-| Bootstrap | Store starts against empty DB, creates hypertable and index. Second start is a no-op. |
-| Recording (`value_long`) | Integer and bool `[State]` writes land with `value_long` populated. Within-batch coalesce collapses repeated writes. |
-| Recording (`ulong` overflow) | A `ulong`-typed property is written values both below and above `long.MaxValue`. Sub-overflow values land in `value_long`; overflow values land in `value_json`. Bucketed `Average` for the property uses the COALESCE-aware SQL and the result equals the true mean across both columns. |
-| Recording (`value_double`) | `double` and `float` `[State]` writes land with `value_double` populated. |
-| Recording (`value_json`) | String, enum, and decimal `[State]` writes land with `value_json` populated. Enums as name strings, decimals as lossless JSON numbers. |
-| Recording (null) | Null writes produce all-NULL row. Aggregates skip; `count` includes. |
-| Recording ([Configuration] skip) | `[Configuration]` writes are not recorded. |
-| Oversize | Long string value produces placeholder row; `OversizeCount` increments. |
-| Refused types | `byte[]`, records, value objects are refused upstream by `HasHistory()`; verified explicitly. |
-| Raw query | Ordered points within range, capped at `MaxPoints`, `Truncated` flag correct. |
-| Aggregated query | `time_bucket` correctness for each aggregation including `Last`, dispatched to the correct value column per property type. |
-| Unsupported aggregation | `Average` requested on a `value_json`-stored property (decimal, string, enum) raises `HistoryAggregationNotSupportedException`. |
-| Raw coverage merge | In-memory + Timescale populated for the same path; recent samples served by in-memory only, older samples by Timescale only, in-memory wins on overlapping timestamps. |
-| Per-bucket dispatch (small bucket) | Query `last 5min, bucket=10s` with in-memory `MaxAge=60s`: older buckets come from Timescale, newest 6 buckets from in-memory. Effective range clipping verified at the right edge. |
-| Per-bucket dispatch (large bucket) | Query `last 1h, bucket=1min` with in-memory `MaxAge=60s`: only the latest bucket (or none, depending on alignment) fits in-memory; the rest assigned to Timescale. |
-| Per-bucket dispatch (no overlap) | Query fully inside in-memory's coverage: zero Timescale queries. |
-| Bucket alignment | In-memory and Timescale bucket boundaries are epoch-anchored and identical for the same bucket size. Concatenation never produces duplicate-timestamp buckets. |
-| Retention | Synthetic old rows inserted; `add_retention_policy` job removes them. |
-| Backpressure | Throttled DB; queue overflows; oldest dropped; `DropCount` increments. |
-| Reconnect | Container restart mid-run; store reconnects and resumes. |
+- `TimescaleDbHaFixture` uses `timescale/timescaledb-ha:pg16-latest` (toolkit available). Default for happy-path tests.
+- `TimescaleDbBaseFixture` uses `timescale/timescaledb:latest-pg16` (toolkit absent). For the toolkit-absent test class.
 
-The test project's README must note the Docker requirement. The fixture skips with a clear message when the Docker daemon is unreachable, rather than hanging.
+Per-test schema (`test_<guid>`) for isolation without container churn.
 
-## Open Questions
+| Category | Verifies | Fixture |
+|---|---|---|
+| Bootstrap | Schema created idempotently. Second start is a no-op. `history_schema_version` populated. | HA |
+| Toolkit probe (available) | `ToolkitAvailable = true`, version reported in `ToolkitStatus`, `TimeWeightedAverage` in `SupportedAggregations`. | HA |
+| Toolkit probe (absent) | `ToolkitAvailable = false`, message in `ToolkitStatus`, `TimeWeightedAverage` excluded from `SupportedAggregations`. Querying TWA over range with only Timescale coverage raises `HistoryAggregationNotSupportedException`. | Base |
+| Coverage high-water-mark | After flush, `Coverage.To` matches max sample timestamp. Empty flush doesn't advance. DB outage freezes Coverage.To. Restart re-seeds from `MAX(ts)`. | HA |
+| Recording (`value_long`) | Integer and bool `[State]` writes land with `value_long` populated. Within-batch coalesce collapses repeated writes. | HA |
+| Recording (`ulong` overflow) | Sub-overflow values land in `value_long`; overflow values land in `value_json`. Bucketed `Average` for the property uses COALESCE-aware SQL. | HA |
+| Recording (`value_double`) | `double` and `float` `[State]` writes land with `value_double` populated. | HA |
+| Recording (`value_json`) | String, enum, and decimal `[State]` writes land with `value_json` populated. | HA |
+| Recording (null) | Null writes produce all-NULL row. Aggregates skip; `count` includes. | HA |
+| Recording (`[Configuration]` skip) | `[Configuration]` writes are not recorded. | HA |
+| Oversize | Long string value produces placeholder row; `OversizeCount` increments. | HA |
+| Refused types | `byte[]`, records, value objects refused upstream by `HasHistory()`. | HA |
+| Raw query (newest-N semantics) | When samples exceed `MaxPoints`, the newest N are returned in chronological order. `Truncated = true`. | HA |
+| Bucketed query | `time_bucket` correctness for each aggregation, dispatched to the correct value column per property type. | HA |
+| TWA parity | Identical samples written to both stores produce identical TWA values across edge cases (empty bucket, single-sample bucket, boundary-sample bucket, look-back-only bucket). | HA |
+| `Last` LOCF | Empty buckets in `Last`-aggregation responses contain the carried value. Pre-first-sample buckets stay null. | HA |
+| `Count` empty bucket | Returns 0, not null. | HA |
+| `time_bucket_gapfill` integration | Bucketed queries emit explicit entries for empty buckets within the range (null values for gap-leaving aggregations). | HA |
+| Look-back primitive | `GetSampleAtOrBeforeAsync` returns most recent sample at or before timestamp; null when none exists. | Both |
+| Unsupported aggregation | `Average` requested on a `value_json`-stored property raises `HistoryAggregationNotSupportedException`. | HA |
+| Raw coverage merge | InMemory + Timescale populated for the same path; sequential-budget executor produces newest MaxPoints overall. | HA |
+| Per-bucket dispatch (small bucket) | Older buckets from Timescale, newest buckets from InMemory. Effective-range clipping verified at the right edge. | HA |
+| Per-bucket dispatch (large bucket) | `last 1h, bucket=1min` with `MaxAge=60s`: live-edge bucket served by Timescale with bounded error. | HA |
+| Per-bucket dispatch (no overlap) | Query fully inside InMemory's coverage: zero Timescale queries. | HA |
+| Bucket alignment | InMemory and Timescale produce identical bucket timestamps. Concatenation never produces duplicate-timestamp buckets. | HA |
+| Multi-store dedup | Two FakeHistoryStore returning samples at identical timestamps: merge dedups via TryAdd, higher-priority value wins. | Unit |
+| Retention | Synthetic old rows inserted; `add_retention_policy` job removes them. | HA |
+| Backpressure | Throttled DB; queue overflows; oldest dropped; `DropCount` increments. | HA |
+| Reconnect | Container restart mid-run; store reconnects and resumes. Toolkit re-probed. | HA |
+| Shutdown flush | Pending batch flushed on `StopAsync`. Timeout path: pending dropped, status reflects loss. | HA |
 
-- Recording complex types (records, value objects, dictionaries, lists of primitives): deferred. The MVP allow-list is numerics, bool, string, enum, decimal. Adding a structured-type path requires schema thought (one column or per-field expansion?) and an oversize policy that goes beyond a string length cap.
-- Aggregation (`Average`/`Minimum`/`Maximum`/`Sum`) on `value_json`-stored properties: deferred. Decimal aggregation can be added by casting `value_json #>> '{}'` to `numeric` in the bucketed query; the column dispatch already isolates the change to one SQL path. String and enum aggregations stay limited to `Last` and `Count`.
-- `StoreNonNumericValues` toggle to limit a store to numeric/bool history only: dropped from MVP because the tight allow-list makes the runaway-volume scenario it defended against impossible. Add back if a real "this DB is for charts only" use case appears.
-- Per-property opt-in/out attribute (`[Historize]` / `[NoHistory]`): defer to a follow-up unless a concrete need surfaces during MVP use.
-- Store-level include/exclude filter via glob patterns on property paths: deferred to a configuration follow-up.
-- Multi-property compare in the dialog: deferred until the single-property dialog has shaken out.
-- Streaming export of large raw ranges: a separate `ExportAsync` method on `IHistoryStore` is the natural seam, not the existing `QueryAsync`.
-- Continuous aggregates inside Timescale for long-retention downsampling: post-MVP, internal to the Timescale store, transparent to consumers.
-- Global `MaxTotalSamples` cap on the in-memory store with cross-property eviction: deferred. The MVP exposes `TotalSampleCount` and `EstimatedMemoryBytes` so operators can monitor and tune `MaxAge`/`MaxPointsPerProperty`/`BufferTime`. A global cap would need an eviction policy (drop from biggest buffer, oldest globally, LRU) and that decision is worth a separate think once we see real workloads.
+The test project's README must note the Docker requirement. The fixtures skip with a clear message when the Docker daemon is unreachable, rather than hanging.
+
+## Known Limitations
+
+- **Property renames orphan prior history.** A property's `path` is its identity in the history store. Renaming a subject or property creates a new identity; samples recorded under the old path become unreachable through normal queries (they remain in the database under the old path until retention expires).
+- **Type changes hide prior data.** Changing a property's declared type (e.g., `int` to `double`) shifts the read query to a different value column; samples recorded under the old type become invisible to the new query path. Avoid in production deployments.
+- **Crash data loss.** On process crash (SIGKILL, OOM, etc.), the Timescale store's pending batch is lost. Up to `FlushInterval` of samples can be lost. Graceful shutdown via the configured flush timeout drains the batch normally.
+- **InMemory-only data loss on restart.** Configurations using only `InMemoryHistoryStore` lose all history on every restart. InMemory is documented as a hot buffer / dev / test store, not a production substitute.
+- **Live-edge bucket inaccuracy for large buckets.** When `bucket_size > MaxAge`, the rightmost bucket of a bucketed query may be missing up to `FlushInterval` of samples. Relative error is `FlushInterval / bucket_size` (≤1.7% for 5-min buckets, ≤0.14% for 1-h buckets, ≤0.006% for 24-h buckets). Operators who need pixel-perfect live-edge precision raise `MaxAge` accordingly. Post-MVP combinable-partial-aggregate refinement is noted.
+- **Multi-instance store semantics.** Multiple `TimescaleDbHistoryStore` instances may be registered, but each records independently — multiple stores against the same database produce duplicate rows. HA / read-replica failover should be handled at the Npgsql connection layer (host list + failover mode), not by registering multiple store instances.
+- **Cross-instance history sync.** No explicit history sync mechanism beyond what the existing WebSocket topology provides as a side effect.
+
+## Open Questions / Future Work
+
+### Fast follow
+
+- **Runtime cross-store config validation.** Per-store check at `ExecuteAsync` startup that warns when `MaxAge < 2 * FlushInterval` of sibling Timescale stores. Adds a `ConfigurationWarning` `[State]` property.
+- **Median / Percentile aggregations.** Format (`Percentile:p` colon syntax vs preset names like `Percentile95`) decided when implementing. Toolkit-backed `approx_percentile` for scale; native `percentile_cont` for exact.
+- **TimescaleDB compression policy.** `add_compression_policy` typically yields 10× storage reduction on chunks older than the threshold. Requires `[Configuration] EnableCompression` and `CompressionAge` knobs plus bootstrap policy management. MVP already uses daily chunks to make this granular when it lands.
+- **LTTB downsampling.** Toolkit-backed `lttb(value, ts, N)` for visual-shape-preserving sample reduction. Conceptually distinct from statistical aggregation (returns a subset of raw samples, not bucket aggregates). API shape decided at implementation time.
+- **Per-range UI filter for aggregation dropdown.** Re-evaluate `TimeWeightedAverage` availability as the user changes the time range, so it shows for InMemory-only-coverage ranges even when Timescale doesn't support it.
+- **Multi-property compare in the dialog.**
+- **CSV/JSON export from the dialog.**
+
+### Phase 2
+
+- **`Rate` / `Delta` aggregations for cumulative properties.** Uses existing `StateAttribute.IsCumulative`. Toolkit's `counter_agg` for Timescale (handles counter resets); in-process equivalent for InMemory. Look-back infrastructure already in MVP.
+- **`StateDuration` aggregation for discrete properties.** Uses existing `StateAttribute.IsDiscrete`. Open question: result shape (extend `HistoryPoint`, parallel `StructuredHistorySeries` type, or repurpose `HistoryPoint.Json` for per-state durations).
+- **Server-side gap-fill with `Interpolate` mode.** Opt-in via new query field for linearly-varying numeric signals (temperature smoothing). MVP already does LOCF for `Last` automatically.
+- **Recording complex types.** Records, value objects, dictionaries, lists of primitives. Schema thought required (one column or per-field expansion).
+- **Numeric aggregation on `value_json`-stored properties.** Casting `value_json #>> '{}'` to `numeric` would let `Average`/etc. apply to decimal columns.
+- **Streaming export of large raw ranges.** A separate `ExportAsync` method on `IHistoryStore` as the seam.
+- **Continuous aggregates inside Timescale.** For long-retention downsampling, internal to the Timescale store, transparent to consumers.
+- **Global `MaxTotalSamples` cap on InMemory** with cross-property eviction. Needs an eviction policy decision (drop from biggest buffer, oldest globally, LRU).
+
+### Deferred
+
+- **Property path normalisation.** `properties(id, path)` lookup table with smallint/int foreign key. Trigger: when `EstimatedStorageBytes` alarms an operator.
+- **Property rename audit log + on-read column-fallback** to address rename and type-change limitations.
+- **Schema migration framework.** MVP uses idempotent SQL (`CREATE ... IF NOT EXISTS` patterns) plus a seeded `history_schema_version` table. Engine deferred until the first migration requiring data movement or conditional logic.
+- **`Mode`** for discrete properties (PG built-in `mode() within group`); **threshold-crossings** (`CrossingsAbove:N` etc.). Both useful but no concrete demand yet; threshold-crossings additionally blocked on parameterized-aggregation syntax decision.
+- **Per-property opt-in/out attributes (`[Historize]` / `[NoHistory]`).**
+- **Store-level include/exclude filter via glob patterns on property paths.**
+- **`StoreNonNumericValues` toggle** to limit a store to numeric/bool history only.
