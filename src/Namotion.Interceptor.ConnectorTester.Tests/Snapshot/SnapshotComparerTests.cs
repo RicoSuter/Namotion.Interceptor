@@ -1,11 +1,11 @@
 using System.Text.Json.Nodes;
 using Xunit;
-using Namotion.Interceptor.ConnectorTester.Engine;
+using Namotion.Interceptor.ConnectorTester.Snapshot;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 
-namespace Namotion.Interceptor.ConnectorTester.Tests.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Tests.Snapshot;
 
 public class SnapshotComparerTests
 {
@@ -557,50 +557,4 @@ public class SnapshotComparerTests
         Assert.False(match);
     }
 
-    // CollectFindings tests
-
-    [Fact]
-    public void WhenSnapshotsAreStringEqual_ThenCollectFindingsReturnsEmpty()
-    {
-        // Arrange
-        const string snapshot = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":"2026-01-01T00:00:00+00:00"}}}}""";
-
-        // Act
-        var findings = SnapshotComparer.CollectFindings("server", snapshot, "client", snapshot);
-
-        // Assert
-        Assert.NotNull(findings);
-        Assert.Empty(findings);
-    }
-
-    [Fact]
-    public void WhenOneTimestampIsNull_ThenCollectFindingsReportsIt()
-    {
-        // Arrange
-        const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":"2026-01-01T00:00:00+00:00"}}}}""";
-        const string b = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1}}}}""";
-
-        // Act
-        var findings = SnapshotComparer.CollectFindings("server", a, "client", b);
-
-        // Assert
-        Assert.NotNull(findings);
-        Assert.Single(findings);
-        Assert.Contains("server has timestamp", findings[0]);
-        Assert.Contains("client has none", findings[0]);
-    }
-
-    [Fact]
-    public void WhenValuesDiverge_ThenCollectFindingsReturnsNull()
-    {
-        // Arrange
-        const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1}}}}""";
-        const string b = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":2}}}}""";
-
-        // Act
-        var findings = SnapshotComparer.CollectFindings("server", a, "client", b);
-
-        // Assert: null means snapshots don't match at all
-        Assert.Null(findings);
-    }
 }

@@ -1,7 +1,8 @@
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Connectors;
 using Namotion.Interceptor.Connectors;
 
-namespace Namotion.Interceptor.ConnectorTester.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Engine.Chaos;
 
 /// <summary>
 /// Randomly disrupts a participant's connector by killing or disconnecting it.
@@ -13,13 +14,14 @@ public class ChaosEngine : BackgroundService
     private readonly string _targetName;
     private readonly ChaosConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
+    private readonly IFaultTargetResolver _targetResolver;
     private IFaultInjectable? _target;
     private readonly ILogger _logger;
     private readonly Random _random = new();
 
     private volatile bool _isDisrupted;
     private readonly Lock _eventLock = new();
-    private readonly List<ChaosEventRecord> _eventHistory = [];
+    private readonly List<ChaosEvent> _eventHistory = [];
     private long _chaosEventCount;
     private DateTimeOffset _currentEventStart;
 
@@ -27,7 +29,7 @@ public class ChaosEngine : BackgroundService
 
     public long ChaosEventCount => Interlocked.Read(ref _chaosEventCount);
 
-    public IReadOnlyList<ChaosEventRecord> EventHistory
+    public IReadOnlyList<ChaosEvent> EventHistory
     {
         get
         {
@@ -48,21 +50,29 @@ public class ChaosEngine : BackgroundService
         string targetName,
         ChaosConfiguration configuration,
         TestCycleCoordinator coordinator,
-        IFaultInjectable? target,
+        IFaultTargetResolver targetResolver,
         ILogger logger)
     {
         _targetName = targetName;
         _configuration = configuration;
         _coordinator = coordinator;
-        _target = target;
+        _targetResolver = targetResolver;
+        _target = null;
         _logger = logger;
 
         configuration.Validate();
     }
 
-    public void SetTarget(IFaultInjectable target)
+    public override Task StartAsync(CancellationToken cancellationToken)
     {
-        _target = target;
+        _target = _targetResolver.Resolve(_targetName);
+        if (_target is null)
+        {
+            _logger.LogWarning(
+                "ChaosEngine [{Target}] could not be wired to a connector. Chaos will be skipped for this participant.",
+                _targetName);
+        }
+        return base.StartAsync(cancellationToken);
     }
 
     public void ResetCounters()
@@ -77,15 +87,13 @@ public class ChaosEngine : BackgroundService
     /// <summary>
     /// Marks active disruption as recovered. Called by verification engine before convergence check.
     /// </summary>
-    public Task RecoverActiveDisruptionAsync(CancellationToken cancellationToken)
+    public void RecoverActiveDisruption()
     {
         if (_isDisrupted)
         {
             _isDisrupted = false;
             _logger.LogInformation("Chaos: {Target} recovered from disruption", _targetName);
         }
-
-        return Task.CompletedTask;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -131,7 +139,7 @@ public class ChaosEngine : BackgroundService
                 var recoveredAt = DateTimeOffset.UtcNow;
                 lock (_eventLock)
                 {
-                    _eventHistory.Add(new ChaosEventRecord(faultType, _currentEventStart, recoveredAt));
+                    _eventHistory.Add(new ChaosEvent(faultType, _currentEventStart, recoveredAt));
                 }
                 _logger.LogInformation("Chaos: {Target} recovered from {FaultType}", _targetName, faultType);
                 Interlocked.Increment(ref _chaosEventCount);
@@ -158,9 +166,4 @@ public class ChaosEngine : BackgroundService
         var range = max - min;
         return min + TimeSpan.FromMilliseconds(_random.NextDouble() * range.TotalMilliseconds);
     }
-}
-
-public record ChaosEventRecord(FaultType FaultType, DateTimeOffset DisruptedAt, DateTimeOffset RecoveredAt)
-{
-    public TimeSpan Duration => RecoveredAt - DisruptedAt;
 }
