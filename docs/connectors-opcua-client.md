@@ -445,6 +445,27 @@ builder.Services.AddOpcUaSubjectClientSource(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
+### Initial Load Failure Recovery
+
+When the initial subject load encounters a transient browse failure (e.g.,
+`BadServerHalted` on a single node), the loader rolls back any partial state
+it produced and lets `SubjectSourceBase` retry from a clean slate after
+`RetryTime`.
+
+**Guarantees on failure:**
+- No source ownership claims are committed
+- No staged sub-subjects leak into the registry
+- Root subject reference properties remain unassigned (no half-loaded sub-graphs)
+- Monitored items from the failed attempt are discarded
+
+**Retry:** the next `StartListeningAsync` attempt runs against a clean state.
+No special caller handling required.
+
+**Partial-deferral trade-off (dynamic properties only):** dynamic property
+slots added to root during discovery remain as empty slots after failure;
+they're reused on retry. For statically-typed root subjects (most production
+usage) no such slots exist and failure leaves root completely unchanged.
+
 ### Connection Loss Recovery
 
 The client handles connection loss through two cooperating mechanisms: the OPC UA SDK's built-in `SessionReconnectHandler` (automatic) and a health check loop that performs manual reconnection when the SDK handler fails or is insufficient.
@@ -764,7 +785,7 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 | `PollingManager` | Polling fallback for nodes that don't support subscriptions. Includes a circuit breaker. |
 | `ReadAfterWriteManager` | Schedules read-backs after writes for nodes where exception-based monitoring was revised to sampling. |
 | `SubscriptionHealthMonitor` | Retries failed monitored items that may succeed later (transient server errors). |
-| `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. |
+| `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. Transactional: queues source claims and root-level value assignments during discovery; commits atomically on success, rolls back staged subjects on failure. |
 | `OpcUaClientDiagnostics` | Read-only public facade that aggregates diagnostics from all internal components. |
 | `ReconnectionMetrics` | Thread-safe counters for reconnection tracking (attempts, successes, failures, abandoned). |
 | `ThroughputCounter` | Lock-free 60-second sliding window rate counter for incoming/outgoing changes per second. |
@@ -776,3 +797,5 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 **Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
 
 **Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. It allocates `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers on demand to avoid exposing internal types.
+
+**Transactional load.** `OpcUaSubjectLoader` uses an `OpcUaLoadContext` (per-call, `IDisposable`) that queues source claims and root-level `SetValueFromSource` calls during discovery. On success, `Apply()` commits them atomically (claims first so observers see fully-owned leaves before root attachments). On exception, `Dispose()` walks staged subjects in reverse order and detaches them from their parent contexts, cascading through the lifecycle handler to unregister them from the registry. Combined with `SubjectSourceBase`'s retry policy, this turns transient browse failures into a clean retry rather than permanent partial state.
