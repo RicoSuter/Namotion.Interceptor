@@ -20,6 +20,7 @@ namespace Namotion.Interceptor.Registry.Abstractions
     public class RegisteredSubject
     {
         public RegisteredSubject(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectMember> Members { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.SubjectPropertyParent> Parents { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> Properties { get; }
         public int ReferenceCount { get; }
@@ -29,38 +30,45 @@ namespace Namotion.Interceptor.Registry.Abstractions
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty?>? setValue = null, params System.Attribute[] attributes) { }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty AddProperty(string name, System.Type type, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, params System.Attribute[] attributes) { }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty AddProperty<TProperty>(string name, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty?>? setValue = null, params System.Attribute[] attributes) { }
-        public System.Collections.Generic.IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> GetPropertyAttributes(string propertyName) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectMember? TryGetMember(string memberName) { }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetProperty(string propertyName) { }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName) { }
     }
-    public class RegisteredSubjectProperty
+    public class RegisteredSubjectAttribute : Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty
+    {
+        public string AttributeName { get; }
+        public override string BrowseName { get; }
+        public string MemberName { get; }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectMember GetAttributedMember() { }
+    }
+    public abstract class RegisteredSubjectMember
+    {
+        protected RegisteredSubjectMember(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject parent, string name, System.Collections.Generic.IReadOnlyCollection<System.Attribute> reflectionAttributes) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectAttribute[] Attributes { get; }
+        public virtual string BrowseName { get; }
+        public string Name { get; }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubject Parent { get; }
+        public System.Collections.Generic.IReadOnlyCollection<System.Attribute> ReflectionAttributes { get; }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectAttribute AddAttribute(string name, System.Type type, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, params System.Attribute[] attributes) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectAttribute AddDerivedAttribute(string name, System.Type type, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, params System.Attribute[] attributes) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectAttribute? TryGetAttribute(string attributeName) { }
+    }
+    public class RegisteredSubjectProperty : Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectMember
     {
         public RegisteredSubjectProperty(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject parent, string name, System.Type type, System.Collections.Generic.IReadOnlyCollection<System.Attribute> reflectionAttributes) { }
-        public Namotion.Interceptor.Registry.Attributes.PropertyAttributeAttribute AttributeMetadata { get; }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty[] Attributes { get; }
-        public string BrowseName { get; }
         public bool CanContainSubjects { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild> Children { get; }
         public bool HasGetter { get; }
         public bool HasSetter { get; }
-        public bool IsAttribute { get; }
         public bool IsSubjectCollection { get; }
         public bool IsSubjectDictionary { get; }
         public bool IsSubjectReference { get; }
-        public string Name { get; }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubject Parent { get; }
         public Namotion.Interceptor.PropertyReference Reference { get; }
-        public System.Collections.Generic.IReadOnlyCollection<System.Attribute> ReflectionAttributes { get; }
         public Namotion.Interceptor.IInterceptorSubject Subject { get; }
         public System.Type Type { get; }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty AddAttribute(string name, System.Type type, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, params System.Attribute[] attributes) { }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty AddAttribute<TProperty>(string name, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty?>? setValue = null, params System.Attribute[] attributes) { }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty AddAttribute<TProperty>(string name, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue = null, params System.Attribute[] attributes) { }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty AddDerivedAttribute(string name, System.Type type, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, params System.Attribute[] attributes) { }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty GetAttributedProperty() { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectAttribute AddAttribute<TProperty>(string name, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty?>? setValue = null, params System.Attribute[] attributes) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectAttribute AddAttribute<TProperty>(string name, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue = null, params System.Attribute[] attributes) { }
         public object? GetValue() { }
         public void SetValue(object? value) { }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetAttribute(string attributeName) { }
         public static Namotion.Interceptor.PropertyReference op_Implicit(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
     public readonly struct SubjectPropertyChild : System.IEquatable<Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild>
@@ -83,6 +91,13 @@ namespace Namotion.Interceptor.Registry.Attributes
         public static string? GetInlinePathsPropertyName(System.Type type) { }
         public static bool IsInlinePathsProperty(System.Type type, string propertyName) { }
     }
+    [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=false, Inherited=true)]
+    public class MemberAttributeAttribute : System.Attribute
+    {
+        public MemberAttributeAttribute(string memberName, string attributeName) { }
+        public string AttributeName { get; }
+        public string MemberName { get; }
+    }
     [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=true, Inherited=true)]
     public class PathAttribute : System.Attribute
     {
@@ -91,11 +106,9 @@ namespace Namotion.Interceptor.Registry.Attributes
         public string Path { get; }
     }
     [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=false, Inherited=true)]
-    public sealed class PropertyAttributeAttribute : System.Attribute
+    public sealed class PropertyAttributeAttribute : Namotion.Interceptor.Registry.Attributes.MemberAttributeAttribute
     {
         public PropertyAttributeAttribute(string propertyName, string attributeName) { }
-        public string AttributeName { get; }
-        public string PropertyName { get; }
     }
 }
 namespace Namotion.Interceptor.Registry
@@ -113,7 +126,9 @@ namespace Namotion.Interceptor.Registry
     }
     public static class SubjectRegistryExtensions
     {
+        public static System.Collections.Generic.IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectAttribute> GetAllAttributes(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectMember member) { }
         public static System.Collections.Generic.IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> GetAllProperties(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public static System.Collections.Generic.IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> GetAllPropertiesAndAttributes(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
         public static string GetOrAddSubjectId(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty GetRegisteredProperty(this Namotion.Interceptor.PropertyReference propertyReference) { }
         public static void SetSubjectId(this Namotion.Interceptor.IInterceptorSubject subject, string id) { }

@@ -319,6 +319,16 @@ Sources claim ownership of properties in two phases: initially inside `StartList
 - Automatic cleanup when subjects are detached from the object graph
 - Safe ownership claims that prevent conflicts with other sources
 
+To enumerate the members a source should claim, walk the registry with a nested loop: `subject.GetAllProperties()` yields properties across child subjects, and `property.GetAllAttributes()` yields the attributes attached to each one.
+
+Values on properties and attributes vary in shape. Sources decide per case:
+
+- **Scalars** (strings, numbers, timestamps) — serialize directly.
+- **Complex objects** (records, POCOs, collections, dictionaries) — provide a custom serializer or skip.
+- **Trackable subjects** (`member.CanContainSubjects == true`) — either skip or recurse via `member.Children`.
+
+The example below skips all subject-containing members via `!CanContainSubjects`.
+
 ```csharp
 public sealed class DatabaseSource : SubjectSourceBase
 {
@@ -359,20 +369,32 @@ public sealed class DatabaseSource : SubjectSourceBase
 
         foreach (var property in registeredSubject.GetAllProperties())
         {
+            if (!property.CanContainSubjects)
+                TryClaim(property);
+
+            foreach (var attribute in property.GetAllAttributes())
+            {
+                if (!attribute.CanContainSubjects)
+                    TryClaim(attribute);
+            }
+        }
+
+        return subscription;
+
+        void TryClaim(RegisteredSubjectProperty property)
+        {
             // ClaimSource returns false if already owned by another source
             if (!_ownership.ClaimSource(property.Reference))
             {
                 _logger.LogWarning(
                     "Property {Name} already owned by another source, skipping.",
                     property.Name);
-                continue;
+                return;
             }
 
             // Set up database subscription for this property...
             property.Reference.SetPropertyData("DatabaseRowId", rowId);
         }
-
-        return subscription;
     }
 
     public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)

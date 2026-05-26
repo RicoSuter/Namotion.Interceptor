@@ -29,6 +29,4 @@ public interface IInterceptorSubject
     /// </summary>
     /// <param name="properties">The additional properties.</param>
     void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties);
-    
-    // TODO(perf): Use span here?
 }

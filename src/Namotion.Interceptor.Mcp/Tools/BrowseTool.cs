@@ -163,7 +163,7 @@ internal class BrowseTool
 
         foreach (var property in subject.Properties)
         {
-            if (property.IsAttribute || !pathProvider.IsPropertyIncluded(property))
+            if (!pathProvider.IsPropertyIncluded(property))
             {
                 continue;
             }

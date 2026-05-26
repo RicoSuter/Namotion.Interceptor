@@ -36,7 +36,7 @@ public class PathProviderOpcUaNodeMapper : IOpcUaNodeMapper
 
         // Default ReferenceType: "HasProperty" for attributes, null for others
         // This allows CompositeNodeMapper to fill in from other sources
-        var referenceType = property.IsAttribute ? "HasProperty" : null;
+        var referenceType = property is RegisteredSubjectAttribute ? "HasProperty" : null;
 
         return new OpcUaNodeConfiguration
         {
@@ -56,9 +56,6 @@ public class PathProviderOpcUaNodeMapper : IOpcUaNodeMapper
 
         foreach (var property in subject.Properties)
         {
-            if (property.IsAttribute)
-                continue;
-
             if (!_pathProvider.IsPropertyIncluded(property))
             {
                 continue;

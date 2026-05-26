@@ -1,9 +1,11 @@
-﻿using System.Collections.Frozen;
+using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -12,9 +14,23 @@ public class RegisteredSubject
 {
     private readonly Lock _lock = new();
 
-    private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
+    // Primary storage for all registered members (properties and attributes).
+    // Writers build a new FrozenDictionary under _lock and assign atomically;
+    // readers observe a consistent snapshot via the volatile reference read.
+    private volatile FrozenDictionary<string, RegisteredSubjectMember> _members;
+
+    // Filtered view of _members excluding attributes. Rebuilt under _lock on
+    // non-attribute adds; the volatile reference guarantees publication of the
+    // new array to readers on weak memory models (ARM). The array itself is
+    // never mutated after publication, so ImmutableCollectionsMarshal can wrap
+    // it as an ImmutableArray without copying.
+    private volatile RegisteredSubjectProperty[] _propertiesSnapshot = [];
+
     private ImmutableArray<SubjectPropertyParent> _parents = [];
 
+    /// <summary>
+    /// Gets the subject this registration wraps.
+    /// </summary>
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
     /// <summary>
@@ -37,64 +53,73 @@ public class RegisteredSubject
     }
 
     /// <summary>
-    /// Gets all registered properties.
+    /// Gets all registered members (properties, including attributes).
     /// </summary>
-    public ImmutableArray<RegisteredSubjectProperty> Properties => _properties.Values;
+    /// <remarks>
+    /// Each individual read returns a consistent snapshot, but reading <see cref="Members"/>
+    /// and <see cref="Properties"/> across concurrent writes may observe them at different
+    /// versions. The two views are quiescently consistent — they converge once writes settle.
+    /// </remarks>
+    public IReadOnlyDictionary<string, RegisteredSubjectMember> Members => _members;
 
     /// <summary>
-    /// Gets all attributes that are attached to this property.
+    /// Gets all registered properties (attributes are excluded; access via
+    /// <see cref="RegisteredSubjectMember.Attributes"/>).
     /// </summary>
-    public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
+    /// <remarks>
+    /// Each individual read returns a consistent snapshot, but reading <see cref="Properties"/>
+    /// and <see cref="Members"/> across concurrent writes may observe them at different
+    /// versions. The two views are quiescently consistent — they converge once writes settle.
+    /// </remarks>
+    public ImmutableArray<RegisteredSubjectProperty> Properties
     {
-        foreach (var property in _properties.Values)
-        {
-            if (property.IsAttribute && property.AttributeMetadata.PropertyName == propertyName)
-            {
-                yield return property;
-            }
-        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ImmutableCollectionsMarshal.AsImmutableArray(_propertiesSnapshot);
     }
 
     /// <summary>
-    /// Gets a property attribute by name.
+    /// Gets a member by name (property or attribute).
     /// </summary>
-    /// <param name="propertyName">The property name.</param>
-    /// <param name="attributeName">The attribute name to find.</param>
-    /// <returns>The attribute property.</returns>
-    public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
+    /// <param name="memberName">The member name.</param>
+    /// <returns>The member or null.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public RegisteredSubjectMember? TryGetMember(string memberName)
     {
-        foreach (var property in _properties.Values)
-        {
-            if (property.IsAttribute &&
-                property.AttributeMetadata.PropertyName == propertyName &&
-                property.AttributeMetadata.AttributeName == attributeName)
-            {
-                return property;
-            }
-        }
-        return null;
+        return _members.GetValueOrDefault(memberName);
     }
 
     /// <summary>
-    /// Gets the property with the given name.
+    /// Gets the property with the given name. An attribute registered under the
+    /// supplied name is also returned because attributes inherit from properties;
+    /// use <see cref="TryGetMember"/> when the intent is to look up either kind.
     /// </summary>
     /// <param name="propertyName">The property name.</param>
     /// <returns>The property or null.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
-        return _properties.GetValueOrDefault(propertyName);
+        return _members.GetValueOrDefault(propertyName) as RegisteredSubjectProperty;
     }
 
+    /// <summary>
+    /// Initializes a new <see cref="RegisteredSubject"/> and populates its members
+    /// from the subject's properties.
+    /// </summary>
+    /// <param name="subject">The subject to register.</param>
     public RegisteredSubject(IInterceptorSubject subject)
     {
         Subject = subject;
-        _properties = subject
-            .Properties
-            .ToFrozenDictionary(
-                p => p.Key,
-                p => new RegisteredSubjectProperty(
-                    this, p.Key, p.Value.Type, p.Value.Attributes));
+
+        var members = new Dictionary<string, RegisteredSubjectMember>();
+        foreach (var property in subject.Properties)
+        {
+            members[property.Key] = CreateMember(
+                this, property.Key, property.Value.Type, property.Value.Attributes);
+        }
+
+        _members = members.ToFrozenDictionary();
+
+        PopulateInitialCaches();
     }
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
@@ -146,69 +171,71 @@ public class RegisteredSubject
     /// <summary>
     /// Adds a dynamic derived property to the subject with tracking of dependencies.
     /// </summary>
-    /// <param name="name">The name of the property.</param>
-    /// <param name="getValue">The get method.</param>
-    /// <param name="setValue">The set method.</param>
-    /// <param name="attributes">The custom attributes.</param>
-    /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name, 
+    /// <typeparam name="TProperty">The property type.</typeparam>
+    /// <param name="name">The property name.</param>
+    /// <param name="getValue">The value getter function.</param>
+    /// <param name="setValue">The optional value setter action.</param>
+    /// <param name="attributes">The .NET reflection attributes.</param>
+    /// <returns>The created property.</returns>
+    public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name,
         Func<IInterceptorSubject, TProperty?>? getValue,
         Action<IInterceptorSubject, TProperty?>? setValue = null,
         params Attribute[] attributes)
     {
-        return AddProperty(name, typeof(TProperty), 
-            getValue is not null ? x => (TProperty)getValue(x)! : null, 
-            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
-            attributes.Concat([new DerivedAttribute()]).ToArray());
+        return AddProperty(name, typeof(TProperty),
+            getValue is not null ? x => (TProperty)getValue(x)! : null,
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null,
+            AppendAttribute(attributes, new DerivedAttribute()));
     }
 
     /// <summary>
-    /// Adds a dynamic derived property to the subject with tracking of dependencies.
+    /// Adds a dynamic property to the subject.
     /// </summary>
-    /// <param name="name">The name of the property.</param>
-    /// <param name="getValue">The get method.</param>
-    /// <param name="setValue">The set method.</param>
-    /// <param name="attributes">The custom attributes.</param>
-    /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddProperty<TProperty>(string name, 
+    /// <typeparam name="TProperty">The property type.</typeparam>
+    /// <param name="name">The property name.</param>
+    /// <param name="getValue">The value getter function.</param>
+    /// <param name="setValue">The optional value setter action.</param>
+    /// <param name="attributes">The .NET reflection attributes.</param>
+    /// <returns>The created property.</returns>
+    public RegisteredSubjectProperty AddProperty<TProperty>(string name,
         Func<IInterceptorSubject, TProperty?>? getValue,
         Action<IInterceptorSubject, TProperty?>? setValue = null,
         params Attribute[] attributes)
     {
-        return AddProperty(name, typeof(TProperty), 
-            getValue is not null ? x => (TProperty)getValue(x)! : null, 
-            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+        return AddProperty(name, typeof(TProperty),
+            getValue is not null ? x => (TProperty)getValue(x)! : null,
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null,
             attributes);
     }
 
     /// <summary>
     /// Adds a dynamic derived property to the subject with tracking of dependencies.
     /// </summary>
-    /// <param name="name">The name of the property.</param>
+    /// <param name="name">The property name.</param>
     /// <param name="type">The property type.</param>
-    /// <param name="getValue">The get method.</param>
-    /// <param name="setValue">The set method.</param>
-    /// <param name="attributes">The custom attributes.</param>
-    /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddDerivedProperty(string name, 
+    /// <param name="getValue">The value getter function.</param>
+    /// <param name="setValue">The optional value setter action.</param>
+    /// <param name="attributes">The .NET reflection attributes.</param>
+    /// <returns>The created property.</returns>
+    public RegisteredSubjectProperty AddDerivedProperty(string name,
         Type type,
         Func<IInterceptorSubject, object?>? getValue,
         Action<IInterceptorSubject, object?>? setValue = null,
         params Attribute[] attributes)
     {
-        return AddProperty(name, type, getValue, setValue, attributes
-            .Concat([new DerivedAttribute()]).ToArray());
+        return AddProperty(name, type, getValue, setValue,
+            AppendAttribute(attributes, new DerivedAttribute()));
     }
 
     /// <summary>
     /// Adds a dynamic property with backing data to the subject.
     /// </summary>
-    /// <param name="name">The name of the property.</param>
+    /// <param name="name">The property name.</param>
     /// <param name="type">The property type.</param>
-    /// <param name="getValue">The get method.</param>
-    /// <param name="setValue">The set method.</param>
-    /// <param name="attributes">The custom attributes.</param>
-    /// <returns>The property.</returns>
+    /// <param name="getValue">The value getter function.</param>
+    /// <param name="setValue">The value setter action.</param>
+    /// <param name="attributes">The .NET reflection attributes.</param>
+    /// <returns>The created property.</returns>
     public RegisteredSubjectProperty AddProperty(
         string name,
         Type type,
@@ -240,23 +267,183 @@ public class RegisteredSubject
 
     private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
     {
-        var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
+        var subjectProperty = CreateMember(this, name, type, attributes);
 
         lock (_lock)
         {
-            var newProperties = _properties
-                .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
-                .ToFrozenDictionary(p => p.Key, p => p.Value);
+            // Rebuild _members with an explicit dictionary copy; avoids LINQ enumerator
+            // wrappers. FrozenDictionary rebuild cost is unchanged (O(N) perfect-hash build).
+            var newMembers = new Dictionary<string, RegisteredSubjectMember>(_members.Count + 1);
+            foreach (var existing in _members)
+                newMembers[existing.Key] = existing.Value;
+            newMembers[subjectProperty.Name] = subjectProperty;
+            _members = newMembers.ToFrozenDictionary();
 
-            _properties = newProperties;
+            // Publish the new member's own AttributesCache. Scans _members for any
+            // attributes whose MemberName targets this member (covers the rare case
+            // where an attribute was registered before its owner). A reader that
+            // observes the new member via _members before this assignment lands
+            // sees the empty-array default from RegisteredSubjectMember, never null.
+            subjectProperty.AttributesCache = ComputeAttributesFor(subjectProperty.Name);
 
-            foreach (var property in newProperties.Values)
+            if (subjectProperty is RegisteredSubjectAttribute newAttribute)
             {
-                property.AttributesCache = null;
+                // Rebuild the target member's cache to include the new attribute.
+                // Cross-member visibility lag: between the _members publish above and
+                // this assignment, a reader can observe the new attribute via
+                // Members[name]/TryGetMember while parent.Attributes still returns the
+                // pre-add array. Both views are individually consistent (no nulls, no
+                // torn reads) and converge once this write lands — quiescent
+                // consistency, not strong consistency. Callers that need the two views
+                // to agree must serialize against AddAttribute externally.
+                if (_members.TryGetValue(newAttribute.MemberName, out var targetMember)
+                    && !ReferenceEquals(targetMember, newAttribute))
+                {
+                    targetMember.AttributesCache = ComputeAttributesFor(newAttribute.MemberName);
+                }
+            }
+            else
+            {
+                // Regular property: extend the properties snapshot.
+                var existing = _propertiesSnapshot;
+                var extended = new RegisteredSubjectProperty[existing.Length + 1];
+                Array.Copy(existing, extended, existing.Length);
+                extended[existing.Length] = subjectProperty;
+                _propertiesSnapshot = extended;
             }
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);
         return subjectProperty;
+    }
+
+    /// <summary>
+    /// Creates a <see cref="RegisteredSubjectAttribute"/> when the reflection set
+    /// includes a <see cref="MemberAttributeAttribute"/>, otherwise a plain
+    /// <see cref="RegisteredSubjectProperty"/>.
+    /// </summary>
+    private static RegisteredSubjectProperty CreateMember(
+        RegisteredSubject parent, string name, Type type,
+        IReadOnlyCollection<Attribute> reflectionAttributes)
+    {
+        foreach (var reflectionAttribute in reflectionAttributes)
+        {
+            if (reflectionAttribute is MemberAttributeAttribute memberAttribute)
+                return new RegisteredSubjectAttribute(parent, name, type, reflectionAttributes, memberAttribute);
+        }
+
+        return new RegisteredSubjectProperty(parent, name, type, reflectionAttributes);
+    }
+
+    /// <summary>
+    /// Populates each member's <see cref="RegisteredSubjectMember.AttributesCache"/>
+    /// and <see cref="_propertiesSnapshot"/> from the initial <see cref="_members"/>.
+    /// Called once at construction, before any concurrent reader can observe this subject.
+    /// </summary>
+    private void PopulateInitialCaches()
+    {
+        // Fast path: no attributes. Common case for attribute-free subjects.
+        // Skips the dictionary + per-member List<T> allocations, and lets the
+        // default empty AttributesCache from RegisteredSubjectMember stand.
+        var hasAttributes = false;
+        foreach (var member in _members.Values)
+        {
+            if (member is RegisteredSubjectAttribute)
+            {
+                hasAttributes = true;
+                break;
+            }
+        }
+
+        if (!hasAttributes)
+        {
+            // Single-pass with defensive `is RegisteredSubjectProperty` check
+            // instead of blind cast, so future RegisteredSubjectMember subclasses
+            // (e.g., methods) are skipped rather than crashing here. When every
+            // member is a property (the dominant case on the refactor branch),
+            // index reaches _members.Count and the trim is skipped — the cost
+            // collapses to `isinst` per member instead of `castclass`, which is
+            // roughly equivalent.
+            var snapshot = new RegisteredSubjectProperty[_members.Count];
+            var index = 0;
+            foreach (var member in _members.Values)
+            {
+                if (member is RegisteredSubjectProperty property)
+                    snapshot[index++] = property;
+            }
+            if (index != snapshot.Length)
+                Array.Resize(ref snapshot, index);
+            _propertiesSnapshot = snapshot;
+            return;
+        }
+
+        // hasAttributes == true here, so attributesByMember will gain at least one entry.
+        var attributesByMember = new Dictionary<string, List<RegisteredSubjectAttribute>>();
+        var properties = new List<RegisteredSubjectProperty>(_members.Count);
+
+        foreach (var member in _members.Values)
+        {
+            if (member is RegisteredSubjectAttribute attribute)
+            {
+                if (!attributesByMember.TryGetValue(attribute.MemberName, out var list))
+                {
+                    list = [];
+                    attributesByMember[attribute.MemberName] = list;
+                }
+                list.Add(attribute);
+            }
+            else if (member is RegisteredSubjectProperty property)
+            {
+                properties.Add(property);
+            }
+            // Other RegisteredSubjectMember subclasses are intentionally skipped
+            // from _propertiesSnapshot (it only holds property-kind members).
+        }
+
+        _propertiesSnapshot = properties.ToArray();
+
+        foreach (var (memberName, list) in attributesByMember)
+        {
+            if (_members.TryGetValue(memberName, out var member))
+            {
+                member.AttributesCache = list.ToArray();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Scans <see cref="_members"/> for all attributes targeting <paramref name="memberName"/>.
+    /// Must be called under <see cref="_lock"/>.
+    /// </summary>
+    private RegisteredSubjectAttribute[] ComputeAttributesFor(string memberName)
+    {
+        // TODO(perf): O(M) scan over all members per call, invoked up to twice per
+        // AddPropertyInternal. For N sequential dynamic attribute adds against a single
+        // owner this is O(N²). Bounded in practice (attributes per property are typically
+        // ≤5), so we accept the cost. If profiling shows this as a hot path, maintain a
+        // per-target-name index alongside _members.
+        List<RegisteredSubjectAttribute>? result = null;
+        foreach (var member in _members.Values)
+        {
+            if (member is RegisteredSubjectAttribute attribute && attribute.MemberName == memberName)
+            {
+                result ??= [];
+                result.Add(attribute);
+            }
+        }
+        return result is null ? [] : result.ToArray();
+    }
+
+    /// <summary>
+    /// Allocation-minimal single-attribute append. Avoids the LINQ Concat/ToArray
+    /// iterator wrapper chain. Shared with <see cref="RegisteredSubjectMember"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static Attribute[] AppendAttribute(Attribute[] attributes, Attribute extra)
+    {
+        var combined = new Attribute[attributes.Length + 1];
+        Array.Copy(attributes, combined, attributes.Length);
+        combined[attributes.Length] = extra;
+        return combined;
     }
 }

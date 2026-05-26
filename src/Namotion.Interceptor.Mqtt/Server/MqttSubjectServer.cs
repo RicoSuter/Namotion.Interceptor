@@ -2,7 +2,6 @@ using System;
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -403,13 +402,8 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
             await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
 
-            var properties = _subject
-                .TryGetRegisteredSubject()?
-                .GetAllProperties()
-                .Where(p => !p.CanContainSubjects)
-                .GetPaths(_configuration.PathProvider, _subject);
-
-            if (properties is null) return;
+            var registeredSubject = _subject.TryGetRegisteredSubject();
+            if (registeredSubject is null) return;
 
             var server = _mqttServer;
             if (server is null) return;
@@ -417,52 +411,10 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
             await _publishSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var timestampPropertyName = _configuration.SourceTimestampPropertyName;
-
-                foreach (var (path, property) in properties)
+                foreach (var member in registeredSubject.GetAllPropertiesAndAttributes())
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    var topic = MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
-
-                    byte[] payload;
-                    try
-                    {
-                        payload = _configuration.ValueConverter.Serialize(
-                            property.GetValue(),
-                            property.Type);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to serialize initial value for topic {Topic}.", topic);
-                        continue;
-                    }
-
-                    var message = new MqttApplicationMessage
-                    {
-                        Topic = topic,
-                        PayloadSegment = new ArraySegment<byte>(payload),
-                        QualityOfServiceLevel = _configuration.DefaultQualityOfService,
-                        Retain = _configuration.UseRetainedMessages
-                    };
-
-                    if (timestampPropertyName is not null)
-                    {
-                        var writeTimestamp = property.Reference.TryGetWriteTimestamp();
-                        if (writeTimestamp.HasValue)
-                        {
-                            message.UserProperties =
-                            [
-                                new MqttUserProperty(
-                                    timestampPropertyName,
-                                    _configuration.SourceTimestampSerializer(writeTimestamp.Value))
-                            ];
-                        }
-                    }
-
-                    await server.InjectApplicationMessage(
-                        new InjectedMqttApplicationMessage(message) { SenderClientId = _serverClientId },
-                        cancellationToken).ConfigureAwait(false);
+                    if (member.CanContainSubjects) continue;
+                    await PublishOneAsync(member, server, cancellationToken).ConfigureAwait(false);
                 }
             }
             finally
@@ -478,6 +430,56 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
         {
             _logger.LogError(ex, "Failed to publish initial state to client.");
         }
+    }
+
+    private async Task PublishOneAsync(RegisteredSubjectProperty property, MqttServer server, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var path = property.TryGetPath(_configuration.PathProvider, _subject);
+        if (path is null) return;
+
+        var topic = MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
+
+        byte[] payload;
+        try
+        {
+            payload = _configuration.ValueConverter.Serialize(
+                property.GetValue(),
+                property.Type);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to serialize initial value for topic {Topic}.", topic);
+            return;
+        }
+
+        var message = new MqttApplicationMessage
+        {
+            Topic = topic,
+            PayloadSegment = new ArraySegment<byte>(payload),
+            QualityOfServiceLevel = _configuration.DefaultQualityOfService,
+            Retain = _configuration.UseRetainedMessages
+        };
+
+        var timestampPropertyName = _configuration.SourceTimestampPropertyName;
+        if (timestampPropertyName is not null)
+        {
+            var writeTimestamp = property.Reference.TryGetWriteTimestamp();
+            if (writeTimestamp.HasValue)
+            {
+                message.UserProperties =
+                [
+                    new MqttUserProperty(
+                        timestampPropertyName,
+                        _configuration.SourceTimestampSerializer(writeTimestamp.Value))
+                ];
+            }
+        }
+
+        await server.InjectApplicationMessage(
+            new InjectedMqttApplicationMessage(message) { SenderClientId = _serverClientId },
+            cancellationToken).ConfigureAwait(false);
     }
 
     private Task InterceptingPublishAsync(InterceptingPublishEventArgs args)

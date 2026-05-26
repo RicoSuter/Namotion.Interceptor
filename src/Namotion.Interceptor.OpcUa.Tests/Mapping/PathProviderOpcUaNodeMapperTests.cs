@@ -140,9 +140,9 @@ public class PathProviderOpcUaNodeMapperTests
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithIsAttribute_SetsReferenceTypeHasProperty()
+    public void TryGetNodeConfiguration_WithAttribute_SetsReferenceTypeHasProperty()
     {
-        // Arrange - Number_Unit is a PropertyAttribute (IsAttribute = true)
+        // Arrange - Number_Unit is a RegisteredSubjectAttribute
         var pathProvider = new AttributeBasedPathProvider("opc");
         var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
@@ -165,7 +165,7 @@ public class PathProviderOpcUaNodeMapperTests
     [Fact]
     public void TryGetNodeConfiguration_WithNonAttribute_DoesNotSetReferenceType()
     {
-        // Arrange - Name is a regular property (IsAttribute = false)
+        // Arrange - Name is a regular property (not a RegisteredSubjectAttribute)
         var pathProvider = new AttributeBasedPathProvider("opc");
         var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
@@ -183,7 +183,7 @@ public class PathProviderOpcUaNodeMapperTests
     #region TryGetPropertyAsync Tests
 
     [Fact]
-    public async Task TryGetPropertyAsync_WithIsAttribute_SkipsAttributes()
+    public async Task TryGetPropertyAsync_WithAttribute_SkipsAttributes()
     {
         // Arrange - TryGetPropertyAsync should skip properties that are attributes
         var pathProvider = new AttributeBasedPathProvider("opc");

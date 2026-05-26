@@ -1,6 +1,5 @@
 using System;
 using System.Buffers;
-using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,6 +9,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Resilience;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;
@@ -316,28 +316,29 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             return;
         }
 
-        // Get all leaf properties, filtered by PathProvider if configured
-        var properties = registeredSubject
-            .GetAllProperties()
-            .Where(p => !p.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(p)))
-            .ToList();
-
         var claimedCount = 0;
-        foreach (var property in properties)
+        foreach (var member in registeredSubject.GetAllPropertiesAndAttributes())
         {
-            if (_ownership.ClaimSource(property.Reference))
+            if (!member.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(member)))
             {
-                claimedCount++;
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "Property {Subject}.{Property} already owned by another source.",
-                    property.Subject.GetType().Name, property.Name);
+                if (TryClaim(member)) claimedCount++;
             }
         }
 
         _logger.LogInformation("Claimed ownership of {Count} properties for WebSocket sync.", claimedCount);
+    }
+
+    private bool TryClaim(RegisteredSubjectProperty property)
+    {
+        if (_ownership.ClaimSource(property.Reference))
+        {
+            return true;
+        }
+
+        _logger.LogWarning(
+            "Property {Subject}.{Property} already owned by another source.",
+            property.Subject.GetType().Name, property.Name);
+        return false;
     }
 
     /// <inheritdoc />
