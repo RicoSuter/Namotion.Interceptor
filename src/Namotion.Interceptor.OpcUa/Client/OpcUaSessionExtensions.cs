@@ -166,7 +166,6 @@ internal static class OpcUaSessionExtensions
             return;
         }
 
-        var continuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
         var actual = response.Results.Count;
         if (actual != count)
         {
@@ -175,27 +174,45 @@ internal static class OpcUaSessionExtensions
                 actual, count);
         }
         var process = Math.Min(actual, count);
+
+        // Collect ALL continuation points upfront so they can be released if
+        // ThrowIfTransient aborts mid-loop. Without this, CPs from both
+        // already-processed and not-yet-processed results leak on the server
+        // until the server-side session timeout.
+        var continuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
         for (var i = 0; i < process; i++)
         {
-            var browseResult = response.Results[i];
-            var nodeId = nodeIds[offset + i];
-            if (!StatusCode.IsGood(browseResult.StatusCode))
+            if (response.Results[i].ContinuationPoint is { Length: > 0 } cp)
             {
-                OpcUaStatusCodeClassifier.ThrowIfTransient(browseResult.StatusCode, "Browse", nodeId);
-                logger.LogWarning(
-                    "BrowseAsync returned permanent bad status for {NodeId} ({StatusCode}); skipping (this NodeId cannot be browsed).",
-                    nodeId, browseResult.StatusCode);
-                continue;
+                continuationPoints.Add((nodeIds[offset + i], cp));
             }
-            var bucket = GetOrCreateBucket(result, nodeId);
-            if (browseResult.References is { Count: > 0 })
+        }
+
+        try
+        {
+            for (var i = 0; i < process; i++)
             {
-                bucket.AddRange(browseResult.References);
+                var browseResult = response.Results[i];
+                var nodeId = nodeIds[offset + i];
+                if (!StatusCode.IsGood(browseResult.StatusCode))
+                {
+                    OpcUaStatusCodeClassifier.ThrowIfTransient(browseResult.StatusCode, "Browse", nodeId);
+                    logger.LogWarning(
+                        "BrowseAsync returned permanent bad status for {NodeId} ({StatusCode}); skipping (this NodeId cannot be browsed).",
+                        nodeId, browseResult.StatusCode);
+                    continue;
+                }
+                var bucket = GetOrCreateBucket(result, nodeId);
+                if (browseResult.References is { Count: > 0 })
+                {
+                    bucket.AddRange(browseResult.References);
+                }
             }
-            if (browseResult.ContinuationPoint is { Length: > 0 })
-            {
-                continuationPoints.Add((nodeId, browseResult.ContinuationPoint));
-            }
+        }
+        catch
+        {
+            await ReleaseContinuationPointsAsync(session, continuationPoints, logger).ConfigureAwait(false);
+            throw;
         }
 
         await ProcessContinuationPointsAsync(session, continuationPoints, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
@@ -334,6 +351,18 @@ internal static class OpcUaSessionExtensions
         }
 
         var process = Math.Min(actual, count);
+
+        // Collect CPs upfront so they're in `next` before ThrowIfTransient can
+        // abort. The caller (ProcessContinuationPointsAsync) releases `next` on
+        // exception, so pre-collecting ensures no CPs leak from this response.
+        for (var i = 0; i < process; i++)
+        {
+            if (nextResponse.Results[i].ContinuationPoint is { Length: > 0 } cp)
+            {
+                next.Add((current[offset + i].NodeId, cp));
+            }
+        }
+
         for (var i = 0; i < process; i++)
         {
             var browseResult = nextResponse.Results[i];
@@ -349,10 +378,6 @@ internal static class OpcUaSessionExtensions
             if (browseResult.References is { Count: > 0 })
             {
                 GetOrCreateBucket(result, nodeId).AddRange(browseResult.References);
-            }
-            if (browseResult.ContinuationPoint is { Length: > 0 })
-            {
-                next.Add((nodeId, browseResult.ContinuationPoint));
             }
         }
     }
