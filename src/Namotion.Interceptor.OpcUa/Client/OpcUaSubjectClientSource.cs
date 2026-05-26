@@ -667,16 +667,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
-        _structureLock.Wait();
-        try
-        {
-            _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
-            _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
-        }
-        finally
-        {
-            _structureLock.Release();
-        }
+        _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
+        _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
     }
 
     public async ValueTask DisposeAsync()
@@ -686,11 +678,19 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return; // Already disposed
         }
 
-        var sessionManager = _sessionManager;
-        if (sessionManager is not null)
+        await _structureLock.WaitAsync().ConfigureAwait(false);
+        try
         {
-            await sessionManager.DisposeAsync().ConfigureAwait(false);
-            _sessionManager = null;
+            var sessionManager = _sessionManager;
+            if (sessionManager is not null)
+            {
+                await sessionManager.DisposeAsync().ConfigureAwait(false);
+                _sessionManager = null;
+            }
+        }
+        finally
+        {
+            _structureLock.Release();
         }
 
         // Clean up property data to prevent memory leaks

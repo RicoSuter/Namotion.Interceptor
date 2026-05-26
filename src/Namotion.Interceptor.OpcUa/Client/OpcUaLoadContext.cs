@@ -119,6 +119,13 @@ internal sealed class OpcUaLoadContext : IDisposable
     {
         if (!_queuedClaimProperties.Add(property))
         {
+            var existing = _pendingClaims.Find(c => PropertyReference.Comparer.Equals(c.Property, property));
+            if (existing.NodeId != nodeId)
+            {
+                _logger.LogWarning(
+                    "Duplicate claim for {Subject}.{Property} with different NodeId (existing: {ExistingNodeId}, new: {NewNodeId}). Keeping first claim.",
+                    property.Subject.GetType().Name, property.Name, existing.NodeId, nodeId);
+            }
             return;
         }
         _pendingClaims.Add((property, nodeId, monitoredItem));

@@ -167,6 +167,13 @@ internal class OpcUaSubjectLoader
         {
             var (nodeReference, resolvedNodeId) = distinctReferences[i];
 
+            if (string.IsNullOrEmpty(nodeReference.BrowseName?.Name))
+            {
+                _logger.LogWarning(
+                    "Skipping node with null or empty BrowseName (NodeId: {NodeId}).", nodeReference.NodeId);
+                continue;
+            }
+
             var property = await _configuration.NodeMapper
                 .TryGetPropertyAsync(registeredSubject, nodeReference, session, cancellationToken)
                 .ConfigureAwait(false);

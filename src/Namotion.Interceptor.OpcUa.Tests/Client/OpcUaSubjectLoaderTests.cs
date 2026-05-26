@@ -2004,6 +2004,100 @@ public class OpcUaSubjectLoaderTests
         Assert.DoesNotContain(registeredSubject.Properties, p => p.Name == "BadObject");
     }
 
+    [Fact]
+    public async Task WhenAddressSpaceHasCycle_ThenLoaderTerminatesWithoutInfiniteRecursion()
+    {
+        // Arrange: Root -> ChildA -> ChildB -> BackToRoot (cycle back to root's NodeId).
+        // The loader must terminate and not recurse infinitely.
+        var rootId = new NodeId(1, 0);
+        var nodeAId = new NodeId(1001, 2);
+        var nodeBId = new NodeId(1002, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] =
+            [
+                CreateObjectReferenceDescription("ChildA", new ExpandedNodeId(nodeAId))
+            ],
+            [nodeAId] =
+            [
+                CreateObjectReferenceDescription("ChildB", new ExpandedNodeId(nodeBId))
+            ],
+            [nodeBId] =
+            [
+                CreateObjectReferenceDescription("BackToRoot", new ExpandedNodeId(rootId))
+            ]
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: loader terminated and traversed both levels before hitting the cycle
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        Assert.Contains(registeredSubject.Properties, p => p.Name == "ChildA");
+
+        var childASubject = registeredSubject.Properties.Single(p => p.Name == "ChildA").GetValue() as IInterceptorSubject;
+        Assert.NotNull(childASubject);
+        var childARegistered = childASubject.TryGetRegisteredSubject()!;
+        Assert.Contains(childARegistered.Properties, p => p.Name == "ChildB");
+    }
+
+    [Fact]
+    public async Task WhenBrowseNameIsNull_ThenNodeIsSkippedWithoutCrash()
+    {
+        // Arrange: a child node has a null BrowseName.Name (malformed server response).
+        // The loader should skip it gracefully, not throw NullReferenceException.
+        var rootId = new NodeId(1, 0);
+        var goodNodeId = new NodeId(2001, 2);
+        var badNodeId = new NodeId(2002, 2);
+
+        var nullBrowseNameRef = new ReferenceDescription
+        {
+            BrowseName = new QualifiedName(null),
+            NodeId = new ExpandedNodeId(badNodeId),
+            NodeClass = NodeClass.Variable
+        };
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] =
+            [
+                nullBrowseNameRef,
+                CreateTestReferenceDescription("GoodVar", new ExpandedNodeId(goodNodeId))
+            ]
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [goodNodeId] = (DataTypeIds.Int32, -1),
+            [badNodeId] = (DataTypeIds.Int32, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
+
+        // Act: should not throw
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: the good node was processed despite the bad sibling
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        Assert.Contains(registeredSubject.Properties, p => p.Name == "GoodVar");
+    }
+
     private Mock<ISession> CreateMockSessionWithChildren(ReferenceDescription[] children)
     {
         var mockSession = CreateMockSession();
