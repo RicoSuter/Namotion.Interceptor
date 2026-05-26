@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices;
@@ -5,6 +7,8 @@ namespace HomeBlaze.Abstractions.Devices;
 /// <summary>
 /// Command-only interface for controlling switch devices.
 /// </summary>
+[SubjectAbstraction]
+[Description("Controls a switch with turn on, turn off, and toggle operations.")]
 public interface ISwitchController
 {
     /// <summary>

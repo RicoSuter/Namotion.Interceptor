@@ -9,6 +9,7 @@
                   Label="@Property.GetDisplayName()"
                   Value="@((string?)Value)"
                   ValueChanged="@(v => OnValueChanged(v))"
+                  InputType="@(IsSecret ? InputType.Password : InputType.Text)"
                   Required="@isRequired"
                   Variant="Variant.Outlined"
                   Class="mb-3" />
@@ -97,6 +98,9 @@ else
 
     [Parameter]
     public EventCallback<object?> ValueChanged { get; set; }
+
+    [Parameter]
+    public bool IsSecret { get; set; }
 
     private async Task OnValueChanged(object? newValue)
     {

@@ -28,8 +28,10 @@ public struct PropertyReference : IEquatable<PropertyReference>
             }
 
             _metadata = Subject.Properties
-                .TryGetValue(Name, out var metadata) ? metadata : 
-                throw new InvalidOperationException("No metadata found.");
+                .TryGetValue(Name, out var metadata) ? metadata :
+                throw new InvalidOperationException(
+                    $"No metadata found for property '{Name}' on {Subject.GetType().Name}. " +
+                    $"Available properties ({Subject.Properties.Count}): [{string.Join(", ", Subject.Properties.Keys)}]");
 
             return _metadata!.Value;
         }
@@ -45,6 +47,7 @@ public struct PropertyReference : IEquatable<PropertyReference>
         Subject.Data.TryRemove((Name, key), out _);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetPropertyData(string key, out object? value)
     {
         return Subject.Data.TryGetValue((Name, key), out value);
@@ -93,12 +96,18 @@ public struct PropertyReference : IEquatable<PropertyReference>
 
     /// <summary>
     /// Sets the write timestamp from raw UTC ticks, avoiding DateTimeOffset conversion on the hot path.
+    /// Uses <see cref="Interlocked.Exchange(ref long, long)"/> to guarantee atomic 64-bit writes
+    /// on 32-bit runtimes (the library targets netstandard2.0, which includes x86 .NET Framework;
+    /// ECMA-335 only guarantees atomicity for writes up to <c>native int</c> size, so plain stores
+    /// of a <c>long</c> can tear on 32-bit). Paired with <see cref="Interlocked.Read(ref long)"/>
+    /// on the read side for symmetric atomicity. The exchange's return value is intentionally
+    /// unused.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void SetWriteTimestampUtcTicks(long utcTicks)
+    internal void SetWriteTimestamp(long timestamp)
     {
         var holder = (long[])Subject.Data.GetOrAdd((Name, WriteTimestampKey), static _ => new long[1])!;
-        Interlocked.Exchange(ref holder[0], utcTicks);
+        Interlocked.Exchange(ref holder[0], timestamp);
     }
 
     #region Equality

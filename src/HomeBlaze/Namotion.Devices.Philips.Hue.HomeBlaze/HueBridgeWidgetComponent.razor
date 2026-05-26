@@ -1,0 +1,64 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(HueBridge))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Hub" Class="mr-2" />
+            <MudText Typo="Typo.h6">Hue Bridge</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(BridgeSubject?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(BridgeSubject?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        <MudStack Row="true" Spacing="4">
+            <MudStack>
+                <MudText Typo="Typo.caption">Lights</MudText>
+                <MudText Typo="Typo.h5">@(BridgeSubject?.Lights?.Count ?? 0)</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Sensors</MudText>
+                <MudText Typo="Typo.h5">@SensorCount</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Rooms</MudText>
+                <MudText Typo="Typo.h5">@(BridgeSubject?.Rooms?.Count ?? 0)</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Zones</MudText>
+                <MudText Typo="Typo.h5">@(BridgeSubject?.Zones?.Count ?? 0)</MudText>
+            </MudStack>
+        </MudStack>
+
+        @if (BridgeSubject?.Power != null)
+        {
+            <MudDivider />
+            <MudStack Row="true" Spacing="4">
+                <MudStack>
+                    <MudText Typo="Typo.caption">Power</MudText>
+                    <MudText Typo="Typo.h5">@(BridgeSubject.Power)W</MudText>
+                </MudStack>
+            </MudStack>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private HueBridge? BridgeSubject => Subject as HueBridge;
+
+    private int SensorCount =>
+        (BridgeSubject?.MotionSensors?.Count ?? 0) +
+        (BridgeSubject?.ButtonDevices?.Count ?? 0);
+}

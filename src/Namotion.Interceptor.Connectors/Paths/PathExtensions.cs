@@ -2,7 +2,6 @@ using System.Text;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Paths;
 
@@ -96,99 +95,6 @@ public static class PathExtensions
         {
             property.SetValue(value);
         }
-    }
-
-    /// <summary>
-    /// Gets the complete source path of the given property.
-    /// </summary>
-    /// <param name="property">The property.</param>
-    /// <param name="pathProvider">The source path provider.</param>
-    /// <param name="rootSubject">The root subject or null.</param>
-    /// <returns>The path.</returns>
-    public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
-    {
-        var propertiesInPath = property
-            .GetPropertiesInPath(rootSubject)
-            .ToArray();
-
-        if (propertiesInPath.Length > 0 &&
-            pathProvider.IsPropertyIncluded(propertiesInPath.Last().property))
-        {
-            return pathProvider.GetPath(propertiesInPath);
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Gets all complete source paths of the given properties.
-    /// </summary>
-    /// <param name="properties">The properties.</param>
-    /// <param name="pathProvider">The source path provider.</param>
-    /// <param name="rootSubject">The root subject or null.</param>
-    /// <returns>The paths.</returns>
-    public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetPaths(
-        this IEnumerable<RegisteredSubjectProperty> properties, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
-    {
-        foreach (var property in properties)
-        {
-            var path = property.TryGetPath(pathProvider, rootSubject);
-            if (path is not null)
-            {
-                yield return (path, property);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets all complete source paths of the given property changes.
-    /// </summary>
-    /// <param name="changes">The changes.</param>
-    /// <param name="pathProvider">The source path provider.</param>
-    /// <param name="rootSubject">The root subject or null.</param>
-    /// <returns>The paths.</returns>
-    public static IEnumerable<(string path, SubjectPropertyChange change)> GetPaths(
-        this IEnumerable<SubjectPropertyChange> changes, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
-    {
-        // TODO(perf): Can be optimized probably (no sequential but reuse subbranches)
-
-        foreach (var change in changes)
-        {
-            var registeredProperty = change.Property.TryGetRegisteredProperty();
-            if (registeredProperty is not null)
-            {
-                var path = registeredProperty.TryGetPath(pathProvider, rootSubject);
-                if (path is not null)
-                {
-                    yield return (path, change);
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Get bread crumb properties in path (i.e. reverse list of parents).
-    /// </summary>
-    /// <param name="property">The property.</param>
-    /// <param name="rootSubject">The root subject.</param>
-    /// <returns>The list of properties between the root subject and the property.</returns>
-    public static IEnumerable<(RegisteredSubjectProperty property, object? index)> GetPropertiesInPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
-    {
-        return GetPropertiesInPathReverse(property, rootSubject)
-            .Reverse();
-    }
-
-    private static IEnumerable<(RegisteredSubjectProperty property, object? index)> GetPropertiesInPathReverse(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
-    {
-        SubjectPropertyParent? pathWithProperty = new SubjectPropertyParent { Property = property };
-        do
-        {
-            property = pathWithProperty.Value.Property;
-            yield return (property ?? throw new InvalidOperationException("Property is null."), pathWithProperty.Value.Index);
-            pathWithProperty = property?.Parent.Subject != rootSubject
-                ? property?.Parent.Parents.FirstOrDefault()
-                : null;
-        } while (pathWithProperty?.Property is not null);
     }
 
     /// <summary>
@@ -370,6 +276,7 @@ public static class PathExtensions
         }
         else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
         {
+            // TODO: Use registeredProperty.IsSubjectReference here instead in if
             // TODO(perf): Use nextSubject = registeredProperty.GetValue() as IInterceptorSubject;
             nextSubject = registeredProperty.Children.SingleOrDefault().Subject;
 

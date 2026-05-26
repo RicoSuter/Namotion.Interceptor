@@ -39,6 +39,17 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
     internal ReadAfterWriteMetrics Metrics { get; } = new();
 
+    internal int PendingReadCount
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _pendingReads.Count;
+            }
+        }
+    }
+
     /// <summary>
     /// Creates a new read-after-write manager.
     /// </summary>

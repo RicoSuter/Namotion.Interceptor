@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -215,7 +216,7 @@ public class WriteRetryQueueTests
         var flush1 = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
         var flush2 = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
-        await Task.Delay(100); // Let them start
+        await AsyncTestHelpers.WaitUntilAsync(() => callCount >= 1);
 
         // Assert - only one should be running
         Assert.Equal(1, callCount);
@@ -319,6 +320,37 @@ public class WriteRetryQueueTests
         Assert.True(queue.IsEmpty);
     }
     
+    [Fact]
+    public void WhenDrainForLocalReapply_ThenReturnsAllItemsAndClearsQueue()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        queue.Enqueue(CreateChanges(5));
+        Assert.Equal(5, queue.PendingWriteCount);
+
+        // Act
+        var drained = queue.DrainForLocalReapply();
+
+        // Assert
+        Assert.Equal(5, drained.Length);
+        Assert.True(queue.IsEmpty);
+        Assert.Equal(0, queue.PendingWriteCount);
+    }
+
+    [Fact]
+    public void WhenDrainForLocalReapplyOnEmptyQueue_ThenReturnsEmptyArray()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+
+        // Act
+        var drained = queue.DrainForLocalReapply();
+
+        // Assert
+        Assert.Empty(drained);
+        Assert.True(queue.IsEmpty);
+    }
+
     private static SubjectPropertyChange CreateChange(int id)
     {
         var subjectMock = new Mock<IInterceptorSubject>();

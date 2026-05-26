@@ -370,8 +370,7 @@ internal static class SubjectMetadataExtractor
     private static bool HasDerivedAttribute(IPropertySymbol property)
     {
         return property.GetAttributes()
-            .Any(a => a.AttributeClass?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ==
-                KnownTypes.DerivedAttribute);
+            .Any(a => SymbolExtensions.IsTypeOrInheritsFrom(a.AttributeClass, KnownTypes.DerivedAttribute));
     }
 
     private static bool HasInterceptorSubjectAttribute(INamedTypeSymbol? type)
@@ -383,8 +382,7 @@ internal static class SubjectMetadataExtractor
 
         return type
             .GetAttributes()
-            .Any(a => a.AttributeClass?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ==
-                KnownTypes.InterceptorSubjectAttribute);
+            .Any(a => SymbolExtensions.IsTypeOrInheritsFrom(a.AttributeClass, KnownTypes.InterceptorSubjectAttribute));
     }
 
     private static bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)

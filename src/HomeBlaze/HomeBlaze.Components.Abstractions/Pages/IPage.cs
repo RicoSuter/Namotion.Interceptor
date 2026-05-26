@@ -10,6 +10,11 @@ public interface IPage
     /// Gets the navigation title (shorter than display title, used in nav menu).
     /// </summary>
     string? NavigationTitle { get; }
+    
+    /// <summary>
+    /// Gets the navigation icon name.
+    /// </summary>
+    string? NavigationIconName { get; }
 
     /// <summary>
     /// Gets the navigation order (lower numbers appear first).

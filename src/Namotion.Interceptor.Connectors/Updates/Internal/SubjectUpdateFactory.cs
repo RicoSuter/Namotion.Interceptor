@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -150,7 +149,7 @@ internal static class SubjectUpdateFactory
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
+                SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value, builder);
             }
         }
         else if (property.IsSubjectCollection)
@@ -162,7 +161,7 @@ internal static class SubjectUpdateFactory
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
+                SubjectItemsUpdateFactory.BuildCollectionComplete(update, value, builder);
             }
         }
         else if (property.IsSubjectReference)
@@ -194,7 +193,7 @@ internal static class SubjectUpdateFactory
 
         if (property.IsSubjectDictionary)
         {
-            var newValue = change.GetNewValue<IDictionary?>();
+            var newValue = change.GetNewValue<object?>();
             if (newValue is null)
             {
                 update.Kind = SubjectPropertyUpdateKind.Value;
@@ -202,13 +201,13 @@ internal static class SubjectUpdateFactory
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
+                SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<object?>(),
                     newValue, builder);
             }
         }
         else if (property.IsSubjectCollection)
         {
-            var newValue = change.GetNewValue<IEnumerable<IInterceptorSubject>?>();
+            var newValue = change.GetNewValue<object?>();
             if (newValue is null)
             {
                 update.Kind = SubjectPropertyUpdateKind.Value;
@@ -216,8 +215,7 @@ internal static class SubjectUpdateFactory
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildCollectionDiff(update,
-                    change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
+                SubjectItemsUpdateFactory.BuildCollectionDiff(update, change.GetOldValue<object?>(),
                     newValue, builder);
             }
         }
@@ -291,6 +289,7 @@ internal static class SubjectUpdateFactory
                 var kind = parentProperty.IsSubjectDictionary
                     ? SubjectPropertyUpdateKind.Dictionary
                     : SubjectPropertyUpdateKind.Collection;
+            
                 AddCollectionOrDictionaryItemToParent(parentProperties, parentProperty.Name, parentInfo.Index, childId, kind);
             }
             else
@@ -316,6 +315,15 @@ internal static class SubjectUpdateFactory
         if (parentProperties.TryGetValue(propertyName, out var existingUpdate))
         {
             existingUpdate.Items ??= [];
+
+            // Skip if this subject is already referenced in Items (multiple property
+            // changes on the same child each trigger BuildPathToRoot)
+            for (var i = 0; i < existingUpdate.Items.Count; i++)
+            {
+                if (existingUpdate.Items[i].Id == childId)
+                    return;
+            }
+
             existingUpdate.Items.Add(new SubjectPropertyItemUpdate
             {
                 Index = index,
@@ -360,6 +368,9 @@ internal static class SubjectUpdateFactory
         foreach (var attribute in property.Attributes)
         {
             if (!attribute.HasGetter)
+                continue;
+
+            if (!IsPropertyIncluded(attribute, builder.Processors))
                 continue;
 
             attributes ??= new Dictionary<string, SubjectPropertyUpdate>();

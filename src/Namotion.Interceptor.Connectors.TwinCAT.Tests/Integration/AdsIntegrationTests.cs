@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Integration.Models;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Integration.Testing;
@@ -57,29 +58,20 @@ public class AdsIntegrationTests
     }
 
     /// <summary>
-    /// Creates a TwinCatSubjectClientSource and a SubjectSourceBackgroundService that handles the
-    /// full lifecycle: connect, subscribe, load initial state, and process property changes.
+    /// Creates a TwinCatSubjectClientSource. As a <see cref="SubjectSourceBase"/> derivative it
+    /// is itself a hosted service that owns the full lifecycle (connect, subscribe, load initial state,
+    /// process property changes).
     /// </summary>
-    private static (TwinCatSubjectClientSource ClientSource, SubjectSourceBackgroundService BackgroundService)
-        CreateClientWithBackgroundService(
-            IInterceptorSubject model,
-            AdsTestServer server,
-            IInterceptorSubjectContext context)
+    private static TwinCatSubjectClientSource CreateClientSource(
+        IInterceptorSubject model,
+        AdsTestServer server)
     {
         var configuration = CreateConfiguration(server);
+        configuration.BufferTime = TimeSpan.FromMilliseconds(50);
+        configuration.RetryTime = TimeSpan.FromSeconds(5);
+
         var sourceLogger = NullLoggerFactory.Instance.CreateLogger<TwinCatSubjectClientSource>();
-        var serviceLogger = NullLoggerFactory.Instance.CreateLogger<SubjectSourceBackgroundService>();
-
-        var clientSource = new TwinCatSubjectClientSource(model, configuration, sourceLogger);
-
-        var backgroundService = new SubjectSourceBackgroundService(
-            clientSource,
-            context,
-            serviceLogger,
-            bufferTime: TimeSpan.FromMilliseconds(50),
-            retryTime: TimeSpan.FromSeconds(5));
-
-        return (clientSource, backgroundService);
+        return new TwinCatSubjectClientSource(model, configuration, sourceLogger);
     }
 
     private async Task RunIntegrationTestAsync(
@@ -87,26 +79,19 @@ public class AdsIntegrationTests
         Func<TwinCatSubjectClientSource, CancellationToken, Task> testBody)
     {
         _fixture.ResetSymbolValues();
-        var context = model.Context!;
-        var (clientSource, backgroundService) = CreateClientWithBackgroundService(model, _fixture.Server, context);
+        var clientSource = CreateClientSource(model, _fixture.Server);
         using var cts = new CancellationTokenSource(TestTimeout);
 
         try
         {
-            // Start both services matching production DI registration order:
-            // TwinCatSubjectClientSource (rescan + polling loops) then SubjectSourceBackgroundService (listening + writes)
             await clientSource.StartAsync(cts.Token);
-            await backgroundService.StartAsync(cts.Token);
             await testBody(clientSource, cts.Token);
         }
         finally
         {
             await cts.CancelAsync();
-            try { await backgroundService.StopAsync(CancellationToken.None); }
-            catch (OperationCanceledException) { }
             try { await clientSource.StopAsync(CancellationToken.None); }
             catch (OperationCanceledException) { }
-            backgroundService.Dispose();
             await clientSource.DisposeAsync();
         }
     }
@@ -116,32 +101,27 @@ public class AdsIntegrationTests
     public async Task ConnectToServer_ShouldEstablishConnection()
     {
         // Arrange
-        _fixture.ResetSymbolValues();
-        var server = _fixture.Server;
-
-        var context = CreateContext();
-        var model = new IntegrationTestModel(context);
-        var configuration = CreateConfiguration(server);
-        var logger = NullLoggerFactory.Instance.CreateLogger<TwinCatSubjectClientSource>();
-
-        await using var clientSource = new TwinCatSubjectClientSource(model, configuration, logger);
-
-        var propertyWriter = new SubjectPropertyWriter(
-            clientSource,
-            flushRetryQueueAsync: null,
-            logger);
-
-        // Act
+        var model = new IntegrationTestModel(CreateContext());
+        await using var clientSource = CreateClientSource(model, _fixture.Server);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var subscription = await clientSource.StartListeningAsync(propertyWriter, cts.Token);
 
-        // Assert
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => clientSource.Diagnostics.IsConnected,
-            timeout: TimeSpan.FromSeconds(15),
-            message: "Client should connect to in-process ADS server");
+        try
+        {
+            // Act
+            await clientSource.StartAsync(cts.Token);
 
-        subscription?.Dispose();
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientSource.Diagnostics.IsConnected,
+                timeout: TimeSpan.FromSeconds(15),
+                message: "Client should connect to in-process ADS server");
+        }
+        finally
+        {
+            await cts.CancelAsync();
+            try { await clientSource.StopAsync(CancellationToken.None); }
+            catch (OperationCanceledException) { }
+        }
         // Note: clientSource is disposed via await using, which may throw InvalidCastException
         // in Beckhoff 7.0.x during AdsSession.Dispose(). This is a known SDK issue.
     }

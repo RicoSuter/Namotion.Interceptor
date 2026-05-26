@@ -43,13 +43,16 @@
       FullName: {
         Kind: Value,
         Value: NewChild ,
-        Timestamp: DateTimeOffset_3
+        Timestamp: DateTimeOffset_2
       },
       LastName: {
         Kind: Value
       },
       Mother: {
         Kind: Object
+      },
+      Relationships: {
+        Kind: Value
       }
     }
   }

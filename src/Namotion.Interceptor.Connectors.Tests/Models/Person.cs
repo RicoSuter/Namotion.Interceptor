@@ -34,4 +34,6 @@ public partial class Person
     public partial Person? Mother { get; set; }
 
     public partial List<Person> Children { get; set; }
+
+    public partial Dictionary<string, Person>? Relationships { get; set; }
 }

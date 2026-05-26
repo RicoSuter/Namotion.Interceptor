@@ -1,169 +1,393 @@
-using System.Reflection;
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
-using Opc.Ua.Bindings;
+using Opc.Ua.Configuration;
 using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServer : StandardServer
+internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISubjectConnector, IFaultInjectable
 {
-    // TODO: Remove when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 is released.
-    // Workaround: UaSCUaBinaryChannel.Dispose() doesn't close its Socket, so lingering sockets
-    // (held by SocketAsyncEngine) retain the chain: Socket → Channel → Listener → m_callback → Server.
-    // We null m_callback via reflection to break this chain. Once the SDK disposes sockets in
-    // channel Dispose, SocketAsyncEngine releases its references and this becomes unnecessary.
-    private static readonly FieldInfo? TransportListenerCallbackField =
-        typeof(TcpTransportListener)
-            .GetField("m_callback", BindingFlags.NonPublic | BindingFlags.Instance);
+    // Per-instance key so multiple servers can expose the same property tree without
+    // overwriting each other's BaseDataVariableState reference on shared properties.
+    internal string OpcUaVariableKey { get; } = "OpcUaVariable:" + Guid.NewGuid();
 
+    private readonly IInterceptorSubject _subject;
+    private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
-    private readonly CustomNodeManagerFactory _nodeManagerFactory;
+    private readonly OpcUaServerConfiguration _configuration;
 
-    private IServerInternal? _server;
-    private SessionEventHandler? _sessionCreatedHandler;
-    private SessionEventHandler? _sessionClosingHandler;
-    private List<ITransportListener>? _savedTransportListeners;
+    private LifecycleInterceptor? _lifecycleInterceptor;
+    private volatile OpcUaStandardServer? _server;
+    private volatile bool _isForceKill;
+    private volatile CancellationTokenSource? _forceKillCts;
+    private int _consecutiveFailures;
+    private DateTimeOffset? _startTime;
+    private Exception? _lastError;
 
-    public OpcUaSubjectServer(IInterceptorSubject subject, OpcUaSubjectServerBackgroundService source, OpcUaServerConfiguration configuration, ILogger logger)
+    internal ThroughputCounter IncomingThroughput { get; } = new();
+    internal ThroughputCounter OutgoingThroughput { get; } = new();
+
+    /// <inheritdoc />
+    public IInterceptorSubject RootSubject => _subject;
+
+    /// <inheritdoc />
+    Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
     {
-        _logger = logger;
-        _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration, logger);
-        AddNodeManager(_nodeManagerFactory);
+        // For a multi-connection server, all fault types are treated as force-kill.
+        // There's no meaningful "soft disconnect" when the server has multiple clients.
+        _isForceKill = true;
+        try { _forceKillCts?.Cancel(); }
+        catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+        return Task.CompletedTask;
     }
 
-    // TODO: Remove saved listener workaround when https://github.com/OPCFoundation/UA-.NETStandard/pull/3561 is released.
-    // Workaround: ServerBase.StopAsync calls Close() then Clear() on the listener list.
-    // TcpTransportListener.Close() only stops listening sockets — it does NOT call Dispose().
-    // ServerBase.Dispose() later iterates TransportListeners to dispose them, but the list is
-    // already empty. So TcpTransportListener.Dispose() never runs, leaking timers, channels,
-    // and buffer managers. We save listener references before StopAsync clears the list,
-    // then manually dispose them after shutdown.
+    /// <inheritdoc />
+    public OpcUaServerDiagnostics Diagnostics { get; }
+
+    /// <inheritdoc />
+    public StandardServer? CurrentServer => _server;
 
     /// <summary>
-    /// Closes all transport listeners to stop accepting new connections.
-    /// Must be called before closing sessions during shutdown to prevent
-    /// clients from reconnecting while the server is shutting down.
-    /// Also saves references so they can be properly disposed later,
-    /// since the SDK's StopAsync clears the TransportListeners list
-    /// before Dispose can process them.
+    /// Gets a value indicating whether the server is running.
     /// </summary>
-    public void CloseTransportListeners()
+    internal bool IsRunning => _server?.CurrentInstance != null;
+
+    /// <summary>
+    /// Gets the number of active sessions.
+    /// </summary>
+    internal int ActiveSessionCount => _server?.CurrentInstance?.SessionManager?.GetSessions()?.Count ?? 0;
+
+    /// <summary>
+    /// Gets the server start time.
+    /// </summary>
+    internal DateTimeOffset? StartTime => _startTime;
+
+    /// <summary>
+    /// Gets the last error.
+    /// </summary>
+    internal Exception? LastError => _lastError;
+
+    /// <summary>
+    /// Gets the consecutive failure count.
+    /// </summary>
+    internal int ConsecutiveFailures => _consecutiveFailures;
+
+    public OpcUaSubjectServer(
+        IInterceptorSubject subject,
+        OpcUaServerConfiguration configuration,
+        ILogger logger)
     {
-        _savedTransportListeners ??= [.. TransportListeners];
-        foreach (var listener in _savedTransportListeners)
+        _subject = subject;
+        _context = subject.Context;
+        _logger = logger;
+        _configuration = configuration;
+        Diagnostics = new OpcUaServerDiagnostics(this);
+    }
+
+    /// <inheritdoc />
+    public bool TryGetVariableNode(PropertyReference property, [NotNullWhen(true)] out BaseDataVariableState? variable)
+    {
+        if (property.TryGetPropertyData(OpcUaVariableKey, out var data) && data is BaseDataVariableState resolved)
         {
-            try { listener.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing transport listener."); }
+            variable = resolved;
+            return true;
+        }
+
+        variable = null;
+        return false;
+    }
+
+    private bool IsPropertyIncluded(PropertyReference propertyReference)
+    {
+        return propertyReference.TryGetRegisteredProperty() is { } property &&
+               property.IsPropertyIncluded(_configuration.NodeMapper);
+    }
+
+    private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    {
+        var server = _server;
+        var currentInstance = server?.CurrentInstance;
+        if (currentInstance == null)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        // Use the SDK's NodeManager.Lock for thread-safe node updates.
+        // This is the same lock the SDK uses for Read/Write/subscription operations.
+        // ClearChangeMasks → OnMonitoredNodeChanged also acquires this lock,
+        // but Monitor is reentrant on the same thread so no deadlock.
+        var nodeManagerLock = server?.NodeManagerLock;
+        if (nodeManagerLock == null)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        var span = changes.Span;
+        lock (nodeManagerLock)
+        {
+            for (var i = 0; i < span.Length; i++)
+            {
+                var change = span[i];
+                if (change.Property.TryGetPropertyData(OpcUaVariableKey, out var data) &&
+                    data is BaseDataVariableState node &&
+                    change.Property.TryGetRegisteredProperty() is { } registeredProperty)
+                {
+                    var value = change.GetNewValue<object?>();
+                    var convertedValue = _configuration.ValueConverter
+                        .ConvertToNodeValue(value, registeredProperty);
+
+                    node.Value = convertedValue;
+                    node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+                    node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                }
+            }
+        }
+
+        OutgoingThroughput.Add(span.Length);
+        return ValueTask.CompletedTask;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _context.WithRegistry();
+
+        _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetaching += OnSubjectDetaching;
+        }
+
+        try
+        {
+            await ExecuteServerLoopAsync(stoppingToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (_lifecycleInterceptor is not null)
+            {
+                _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;
+            }
         }
     }
 
-    /// <summary>
-    /// Disposes all saved transport listeners. Must be called after shutdown
-    /// because the SDK's StopAsync clears the TransportListeners list before
-    /// Dispose can process them, causing TcpTransportListener.Dispose() to
-    /// never run (leaking timers, channels, and buffer managers).
-    /// </summary>
-    public void DisposeTransportListeners()
+    private async Task ExecuteServerLoopAsync(CancellationToken stoppingToken)
     {
-        if (_savedTransportListeners is null)
+        // Reset failure counter on fresh start so that accumulated failures from
+        // previous stop/start cycles don't cause excessive backoff delays.
+        _consecutiveFailures = 0;
+
+        while (!stoppingToken.IsCancellationRequested)
         {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _forceKillCts = cts;
+            var linkedToken = cts.Token;
+
+            var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
+
+            if (_configuration.CleanCertificateStore)
+            {
+                CleanCertificateStore(application);
+            }
+
+            var server = new OpcUaStandardServer(_subject, this, _configuration, _logger);
+            try
+            {
+                try
+                {
+                    _server = server;
+
+                    // Create the ChangeQueueProcessor (and its subscription) BEFORE starting the server.
+                    // This ensures property changes during OPC UA node creation are captured in the queue
+                    // and not lost in the gap between node creation and processing start.
+                    using var changeQueueProcessor = new ChangeQueueProcessor(
+                        source: this, _context,
+                        propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
+                        _configuration.BufferTime, _logger);
+
+                    await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
+                    await application.StartAsync(server).ConfigureAwait(false);
+
+                    _startTime = DateTimeOffset.UtcNow;
+                    _consecutiveFailures = 0;
+                    _lastError = null;
+
+                    await changeQueueProcessor.ProcessAsync(linkedToken);
+                }
+                finally
+                {
+                    _startTime = null;
+                    var serverToClean = _server;
+                    _server = null;
+                    serverToClean?.ClearPropertyData();
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Normal shutdown takes priority over force-kill (checked first intentionally).
+                // If both stoppingToken and _isForceKill are set, we exit cleanly rather than restart.
+            }
+            catch (OperationCanceledException) when (_isForceKill)
+            {
+                // Force-kill: CTS was cancelled by KillAsync
+                _logger.LogWarning("OPC UA server force-killed. Restarting...");
+            }
+            catch (Exception ex)
+            {
+                _consecutiveFailures++;
+                _lastError = ex;
+                _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
+
+                // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s (capped) + 0-2s random jitter
+                // Jitter prevents thundering herd when multiple servers fail simultaneously
+                var baseDelay = Math.Min(Math.Pow(2, _consecutiveFailures - 1), 30);
+                var jitter = Random.Shared.NextDouble() * 2;
+                await Task.Delay(TimeSpan.FromSeconds(baseDelay + jitter), stoppingToken);
+            }
+            finally
+            {
+                try
+                {
+                    if (_isForceKill)
+                    {
+                        // Force-kill: close transport listeners immediately so clients see
+                        // an abrupt connection loss (realistic crash simulation).
+                        if (application.Server is OpcUaStandardServer s)
+                        {
+                            s.CloseTransportListeners();
+                        }
+                    }
+
+                    // Always run ShutdownServerAsync to ensure the SDK's internal tasks
+                    // (SubscriptionManager publish/refresh threads) are properly signaled
+                    // to exit via OnServerStoppingAsync. Without StopAsync, these
+                    // fire-and-forget tasks keep the entire server object graph alive as
+                    // GC roots, causing ~8-16 MB leak per server restart.
+                    // On force-kill the transport is already dead, so this only cleans up
+                    // internal state — it doesn't change what clients observe.
+                    await ShutdownServerAsync(application).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to shutdown OPC UA server.");
+                }
+                finally
+                {
+                    _isForceKill = false;
+
+                    // Dispose transport listeners before server.Dispose().
+                    // The SDK's StopAsync calls Close() on each listener (which only
+                    // stops accepting connections) then clears the TransportListeners list.
+                    // When server.Dispose() later tries to Dispose() listeners, the list
+                    // is empty — so TcpTransportListener.Dispose() never runs, leaving
+                    // per-client channel sockets and inactivity timers alive as GC roots
+                    // that retain the entire server object graph.
+                    try { server.DisposeTransportListeners(); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Error disposing transport listeners."); }
+
+                    try { server.Dispose(); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
+
+                    cts.Dispose();
+                }
+            }
+        }
+    }
+
+    private async Task ShutdownServerAsync(ApplicationInstance application)
+    {
+        try
+        {
+            if (application.Server is OpcUaStandardServer server)
+            {
+                // Close transport listeners first to stop accepting new connections.
+                // Without this, clients reconnect during shutdown faster than sessions
+                // can be closed, causing StopAsync to hang indefinitely.
+                server.CloseTransportListeners();
+
+                if (server.CurrentInstance?.SessionManager is { } sessionManager)
+                {
+                    var sessions = sessionManager.GetSessions();
+                    foreach (var session in sessions)
+                    {
+                        try { session.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing session during shutdown."); }
+                    }
+                }
+            }
+
+            // Timeout prevents hang when clients keep reconnecting during shutdown
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            try
+            {
+                await application.StopAsync().AsTask().WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+            {
+                _logger.LogWarning("OPC UA server shutdown timed out after 10s. Continuing with disposal.");
+            }
+        }
+        catch (ServiceResultException e) when (e.StatusCode == StatusCodes.BadServerHalted)
+        {
+            // Server already halted
+        }
+    }
+
+    private void CleanCertificateStore(ApplicationInstance application)
+    {
+        var path = application
+            .ApplicationConfiguration
+            .SecurityConfiguration
+            .ApplicationCertificate
+            .StorePath;
+
+        if (string.IsNullOrEmpty(path))
+        {
+            _logger.LogWarning("Certificate store path is empty, skipping cleanup.");
             return;
         }
 
-        if (TransportListenerCallbackField is null)
+        try
         {
-            _logger.LogWarning(
-                "TcpTransportListener.m_callback field not found. " +
-                "The OPC UA SDK may have changed its internals — transport listener memory leak workaround is inactive.");
-        }
-
-        foreach (var listener in _savedTransportListeners)
-        {
-            try { (listener as IDisposable)?.Dispose(); }
-            catch (Exception ex) { _logger.LogDebug(ex, "Error disposing transport listener."); }
-
-            // TODO: Remove when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 is released.
-            try { TransportListenerCallbackField?.SetValue(listener, null); }
-            catch (Exception ex) { _logger.LogDebug(ex, "Error clearing transport listener callback."); }
-        }
-
-        _savedTransportListeners = null;
-    }
-
-    /// <summary>
-    /// Gets the node manager's lock object for thread-safe node updates.
-    /// This is the same lock used by the SDK for Read/Write operations.
-    /// </summary>
-    internal object? NodeManagerLock => _nodeManagerFactory.NodeManager?.Lock;
-
-    public void ClearPropertyData()
-    {
-        _nodeManagerFactory.NodeManager?.ClearPropertyData();
-    }
-
-    public void RemoveSubjectNodes(IInterceptorSubject subject)
-    {
-        _nodeManagerFactory.NodeManager?.RemoveSubjectNodes(subject);
-    }
-
-    protected override void OnServerStarted(IServerInternal server)
-    {
-        // Unsubscribe any existing handlers to prevent accumulation on server restart
-        if (_server is not null && _sessionCreatedHandler is not null)
-        {
-            _server.SessionManager.SessionCreated -= _sessionCreatedHandler;
-        }
-        if (_server is not null && _sessionClosingHandler is not null)
-        {
-            _server.SessionManager.SessionClosing -= _sessionClosingHandler;
-        }
-
-        _server = server;
-
-        _sessionCreatedHandler = (session, _) =>
-        {
-            _logger.LogInformation("OPC UA session {SessionId} with user {UserIdentity} created.", session.Id, session.Identity.DisplayName);
-        };
-
-        _sessionClosingHandler = (session, _) =>
-        {
-            _logger.LogInformation("OPC UA session {SessionId} with user {UserIdentity} closing.", session.Id, session.Identity.DisplayName);
-        };
-
-        server.SessionManager.SessionCreated += _sessionCreatedHandler;
-        server.SessionManager.SessionClosing += _sessionClosingHandler;
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            // TODO: Remove when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 is released.
-            // Workaround: StandardServer.OnServerStarted subscribes CertificateValidator.CertificateUpdate
-            // but never unsubscribes. The shared CertificateValidator outlives the server, retaining every
-            // disposed server instance. Once the SDK unsubscribes in StandardServer.Dispose, this is redundant
-            // (double-unsubscribe is harmless but unnecessary).
-            if (CertificateValidator is not null)
+            if (Directory.Exists(path))
             {
-                CertificateValidator.CertificateUpdate -= OnCertificateUpdateAsync;
-            }
-
-            if (_server is not null)
-            {
-                if (_sessionCreatedHandler is not null)
-                {
-                    _server.SessionManager.SessionCreated -= _sessionCreatedHandler;
-                }
-
-                if (_sessionClosingHandler is not null)
-                {
-                    _server.SessionManager.SessionClosing -= _sessionClosingHandler;
-                }
-
-                _server = null;
+                Directory.Delete(path, true);
+                _logger.LogDebug("Cleaned certificate store at {Path}.", path);
             }
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean certificate store at {Path}. Continuing with existing certificates.", path);
+        }
+    }
 
-        base.Dispose(disposing);
+    internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
+    {
+        IncomingThroughput.Add(1);
+        var receivedTimestamp = DateTimeOffset.UtcNow;
+
+        var registeredProperty = property.TryGetRegisteredProperty();
+        if (registeredProperty is not null)
+        {
+            var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
+
+            try
+            {
+                property.SetValueFromSource(this, changedTimestamp, receivedTimestamp, convertedValue);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Failed to apply property update from OPC UA client.");
+            }
+        }
+    }
+
+    private void OnSubjectDetaching(SubjectLifecycleChange change)
+    {
+        _server?.RemoveSubjectNodes(change.Subject);
     }
 }

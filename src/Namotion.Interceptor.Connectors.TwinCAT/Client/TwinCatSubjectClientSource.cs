@@ -1,5 +1,3 @@
-using System.Reactive.Disposables;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -15,7 +13,7 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 /// Connects a subject graph to a Beckhoff TwinCAT PLC via ADS protocol.
 /// Thin orchestrator composing <see cref="AdsConnectionManager"/> and <see cref="AdsSubscriptionManager"/>.
 /// </summary>
-internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
+internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisposable
 {
     private readonly IInterceptorSubject _subject;
     private readonly AdsClientConfiguration _configuration;
@@ -43,11 +41,13 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         IInterceptorSubject subject,
         AdsClientConfiguration configuration,
         ILogger logger)
+        : base(
+            (subject ?? throw new ArgumentNullException(nameof(subject))).Context,
+            logger ?? throw new ArgumentNullException(nameof(logger)),
+            (configuration ?? throw new ArgumentNullException(nameof(configuration))).BufferTime,
+            configuration.RetryTime,
+            configuration.WriteRetryQueueSize)
     {
-        ArgumentNullException.ThrowIfNull(subject);
-        ArgumentNullException.ThrowIfNull(configuration);
-        ArgumentNullException.ThrowIfNull(logger);
-
         configuration.Validate();
 
         _subject = subject;
@@ -86,29 +86,66 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     internal AdsSubscriptionManager SubscriptionManager => _subscriptionManager;
 
     /// <inheritdoc />
-    public IInterceptorSubject RootSubject => _subject;
+    public override IInterceptorSubject RootSubject => _subject;
 
     /// <inheritdoc />
-    public int WriteBatchSize => 0; // No limit - sequential writes
+    public override int WriteBatchSize => 0; // No limit - sequential writes
 
     /// <inheritdoc />
-    public async Task<IDisposable?> StartListeningAsync(
+    protected override async Task<IAsyncDisposable?> StartListeningAsync(
         SubjectPropertyWriter propertyWriter,
         CancellationToken cancellationToken)
     {
         _propertyWriter = propertyWriter;
 
-        await _connectionManager.ConnectWithRetryAsync(cancellationToken).ConfigureAwait(false);
-        FullRescan();
+        // Start rescan + polling loops first so they can react to connection events
+        // (e.g. ConnectionRestored) the moment ConnectWithRetryAsync establishes a session.
+        // Both loops handle the no-connection case as a no-op, matching the legacy two-BG-service
+        // layout where these loops ran independently of the connect lifecycle.
+        var lifetime = BackgroundTaskLifetime.Start(
+            cancellationToken,
+            _logger,
+            RunListenLoopsAsync,
+            () =>
+            {
+                // ClearAll() keeps the underlying CompositeDisposable reusable for the next
+                // listen attempt; BackgroundTaskLifetime takes care of cancelling and awaiting
+                // the loop tasks before this cleanup runs.
+                _subscriptionManager.ClearAll();
+                return ValueTask.CompletedTask;
+            });
 
-        // Return a wrapper that calls ClearAll() instead of the raw CompositeDisposable.
-        // CompositeDisposable.Dispose() is permanent (future Add() calls immediately dispose),
-        // while ClearAll() uses Clear() which keeps the CompositeDisposable reusable.
-        return Disposable.Create(() => _subscriptionManager.ClearAll());
+        try
+        {
+            await _connectionManager.ConnectWithRetryAsync(cancellationToken).ConfigureAwait(false);
+            FullRescan();
+            return lifetime;
+        }
+        catch
+        {
+            await lifetime.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task RunListenLoopsAsync(CancellationToken stoppingToken)
+    {
+        // Use a linked CTS so that if either loop faults, the other is torn down.
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var rescanTask = RunRescanLoopAsync(linkedCts.Token);
+        var pollingTask = RunPollingLoopAsync(linkedCts.Token);
+
+        var firstCompleted = await Task.WhenAny(rescanTask, pollingTask).ConfigureAwait(false);
+        if (firstCompleted.IsFaulted)
+        {
+            await linkedCts.CancelAsync().ConfigureAwait(false);
+        }
+
+        await Task.WhenAll(rescanTask, pollingTask).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    public override async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         var connection = _connectionManager.Connection;
         if (connection is null)
@@ -228,7 +265,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     }
 
     /// <inheritdoc />
-    public async ValueTask<WriteResult> WriteChangesAsync(
+    public override async ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
@@ -514,7 +551,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
     /// <summary>
     /// Requests a debounced rescan. Multiple rapid calls are coalesced into a single rescan
-    /// by the <see cref="ExecuteAsync"/> loop after the configured debounce time elapses.
+    /// by the listen-time rescan loop after the configured debounce time elapses.
     /// </summary>
     internal void RequestRescan(string? reason = null)
     {
@@ -566,23 +603,6 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
             return true;
         }
-    }
-
-    /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // Use a linked CTS so that if either loop faults, the other is torn down.
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var rescanTask = RunRescanLoopAsync(linkedCts.Token);
-        var pollingTask = RunPollingLoopAsync(linkedCts.Token);
-
-        var firstCompleted = await Task.WhenAny(rescanTask, pollingTask).ConfigureAwait(false);
-        if (firstCompleted.IsFaulted)
-        {
-            await linkedCts.CancelAsync().ConfigureAwait(false);
-        }
-
-        await Task.WhenAll(rescanTask, pollingTask).ConfigureAwait(false);
     }
 
     private async Task RunRescanLoopAsync(CancellationToken stoppingToken)
@@ -694,22 +714,20 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             return;
         }
 
-        // Cancel the stoppingToken so ExecuteAsync exits cleanly, then
-        // await the loop task before disposing the resources it uses.
-        Dispose();
-
+        // Cancel the base BackgroundService stopping token. The listen lifetime
+        // (BackgroundTaskLifetime owning the rescan/polling loops) is awaited by
+        // SubjectSourceBase.ExecuteAsync, so by the time StopAsync returns the
+        // loops have already torn down.
         try
         {
-            await (ExecuteTask ?? Task.CompletedTask).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected when stoppingToken is cancelled during DisposeAsync.
+            await StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            _logger.LogDebug(exception, "ExecuteAsync faulted during disposal.");
+            _logger.LogDebug(exception, "StopAsync faulted during disposal.");
         }
+
+        Dispose();
 
         await _subscriptionManager.DisposeAsync().ConfigureAwait(false);
         await _connectionManager.DisposeAsync().ConfigureAwait(false);

@@ -1,0 +1,8 @@
+{
+  "$type": "Namotion.Devices.MyStrom.MyStromSwitch",
+  "name": "myStrom Switch",
+  "hostAddress": "192.168.1.x",
+  "allowTurnOff": true,
+  "pollingInterval": "00:00:15",
+  "retryInterval": "00:00:30"
+}

@@ -2,12 +2,16 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
+
+public enum CycleResult { Pass, Fail }
 
 /// <summary>
 /// Top-level orchestrator. Runs repeating mutate/converge cycles.
@@ -16,12 +20,16 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 public class VerificationEngine : BackgroundService
 {
     private static readonly TimeSpan SnapshotPollInterval = TimeSpan.FromSeconds(5);
-    private const string MemoryLogPath = "logs/memory.log";
 
-    private static readonly JsonSerializerOptions SnapshotJsonOptions = new()
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new()
     {
-        WriteIndented = false
+        WriteIndented = true
     };
+
+    private readonly string _cyclesLogPath;
+    private readonly string _chaosEventsLogPath;
+    private readonly string _findingsLogPath;
+    private readonly string _runDirectory;
 
     private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
@@ -48,7 +56,8 @@ public class VerificationEngine : BackgroundService
         List<ChaosEngine> chaosEngines,
         CycleLoggerProvider? cycleLoggerProvider,
         IHostApplicationLifetime applicationLifetime,
-        ILogger logger)
+        ILogger logger,
+        string runDirectory)
     {
         _configuration = configuration;
         _coordinator = coordinator;
@@ -58,21 +67,28 @@ public class VerificationEngine : BackgroundService
         _cycleLoggerProvider = cycleLoggerProvider;
         _applicationLifetime = applicationLifetime;
         _logger = logger;
+        _runDirectory = runDirectory;
+        _cyclesLogPath = Path.Combine(runDirectory, "cycles.csv");
+        _chaosEventsLogPath = Path.Combine(runDirectory, "chaos-events.csv");
+        _findingsLogPath = Path.Combine(runDirectory, "findings.log");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Reset memory log for this run
-        Directory.CreateDirectory(Path.GetDirectoryName(MemoryLogPath)!);
-        if (File.Exists(MemoryLogPath))
-        {
-            File.Delete(MemoryLogPath);
-        }
+        var cyclesHeader = string.Format(
+            "{0,24}, {1,6}, {2,6}, {3,20}, {4,14}, {5,16}, {6,12}, {7,16}, {8,20}, {9,12}, {10,10}, {11,10}",
+            "Timestamp", "Cycle", "Result", "Profile", "MutateSeconds", "ConvergeSeconds", "CycleSeconds",
+            "ValueMutations", "StructuralMutations", "ChaosEvents",
+            "HeapMB", "ProcessMB");
+        await File.WriteAllTextAsync(_cyclesLogPath, cyclesHeader + Environment.NewLine, stoppingToken);
 
-        // Brief startup delay to let connectors initialize
+        var chaosHeader = string.Format(
+            "{0,24}, {1,6}, {2,16}, {3,12}, {4,16}",
+            "Timestamp", "Cycle", "Participant", "FaultType", "DurationSeconds");
+        await File.WriteAllTextAsync(_chaosEventsLogPath, chaosHeader + Environment.NewLine, stoppingToken);
+
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
-        // Log configuration header
         _logger.LogInformation("""
             === Connector Tester Configuration ===
             Connector: {Connector}
@@ -86,7 +102,8 @@ public class VerificationEngine : BackgroundService
             string.Join(", ", _participants.Select(p => p.Key)));
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Rate} mutations/sec", engine.Name, engine.MutationRate);
+            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
+                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
         }
 
         if (_configuration.ChaosProfiles.Count > 0)
@@ -96,12 +113,11 @@ public class VerificationEngine : BackgroundService
                 string.Join(" -> ", _configuration.ChaosProfiles.Select(p => p.Name)));
         }
 
-        // Validate chaos profile participant names
         foreach (var profile in _configuration.ChaosProfiles)
         {
             foreach (var participant in profile.Participants)
             {
-                if (!_chaosEngines.Any(e => e.TargetName == participant))
+                if (_chaosEngines.All(e => e.TargetName != participant))
                 {
                     _logger.LogWarning(
                         "Chaos profile '{Profile}' references '{Participant}' which has no chaos engine (no Chaos config or not a known participant). It will be ignored.",
@@ -113,8 +129,8 @@ public class VerificationEngine : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             _cycleNumber++;
+            _coordinator.SetCycle(_cycleNumber);
 
-            // Reset counters
             foreach (var engine in _mutationEngines)
                 engine.ResetCounters();
             foreach (var engine in _chaosEngines)
@@ -126,7 +142,6 @@ public class VerificationEngine : BackgroundService
 
             var cycleStopwatch = Stopwatch.StartNew();
 
-            // 1. Mutate phase
             _coordinator.Resume();
             var profileLabel = activeProfileName != null ? $" [profile: {activeProfileName}]" : "";
             _logger.LogInformation("=== Cycle {Cycle}: Mutate phase started ({Duration}){Profile} ===",
@@ -134,47 +149,41 @@ public class VerificationEngine : BackgroundService
 
             await Task.Delay(_configuration.MutatePhaseDuration, stoppingToken);
 
-            // 2. Transition to converge
             _coordinator.Pause();
             _logger.LogInformation("=== Cycle {Cycle}: Converge phase started ===", _cycleNumber);
 
-            // Recover all active chaos disruptions
             foreach (var chaosEngine in _chaosEngines)
             {
                 await chaosEngine.RecoverActiveDisruptionAsync(stoppingToken);
             }
 
-            // Grace period for server startup, port binding, and client reconnection.
             // OPC UA needs ~15-20s: server restart + port bind, client keep-alive
             // detection (up to 5s), reconnect handler (5s), session + subscription setup.
             await Task.Delay(TimeSpan.FromSeconds(20), stoppingToken);
 
-            // 3. Poll-compare snapshots
             var convergeStopwatch = Stopwatch.StartNew();
             var converged = false;
             var maxPolls = (int)(_configuration.ConvergenceTimeout / SnapshotPollInterval);
 
             for (var poll = 0; poll < maxPolls; poll++)
             {
-                var snapshots = _participants
-                    .Select(participant => (
-                        Name: participant.Key,
-                        Snapshot: CreateSnapshot(participant.Value)))
-                    .ToList();
+                var snapshots = CaptureAllSnapshots();
 
-                var firstSnapshot = snapshots[0].Snapshot;
-                if (snapshots.All(snapshot => snapshot.Snapshot == firstSnapshot))
+                var referenceSubjects = SnapshotComparer.ParseSubjects(snapshots[0].Snapshot);
+                if (snapshots.All(snapshot => SnapshotComparer.SnapshotsMatch(referenceSubjects, snapshot.Snapshot)))
                 {
                     convergeStopwatch.Stop();
                     cycleStopwatch.Stop();
 
-                    WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "PASS");
-                    AppendMemoryLog(activeProfileName, "PASS");
+                    LogFindings(snapshots, convergeStopwatch.Elapsed);
+
+                    WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, CycleResult.Pass);
+                    CompactHeapAndLogCycle(activeProfileName, CycleResult.Pass, cycleStopwatch.Elapsed, convergeStopwatch.Elapsed);
                     _logger.LogInformation(
                         "=== Cycle {Cycle}: PASS (converged in {ConvergeTime:F1}s, cycle {CycleTime:F0}s) ===",
                         _cycleNumber, convergeStopwatch.Elapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds);
 
-                    _cycleLoggerProvider?.FinishCycle(_cycleNumber, true);
+                    _cycleLoggerProvider?.FinishCycle(_cycleNumber, CycleResult.Pass);
                     converged = true;
                     break;
                 }
@@ -187,36 +196,19 @@ public class VerificationEngine : BackgroundService
                 cycleStopwatch.Stop();
                 convergeStopwatch.Stop();
 
-                // Log failure details
-                var snapshots = _participants
-                    .Select(participant => (
-                        Name: participant.Key,
-                        Snapshot: CreateSnapshot(participant.Value)))
-                    .ToList();
+                var snapshots = CaptureAllSnapshots();
 
                 _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
                     _cycleNumber, _configuration.ConvergenceTimeout);
 
-                // Log snapshot diffs
-                var referenceSnapshot = snapshots[0];
-                foreach (var snapshot in snapshots.Skip(1))
-                {
-                    if (snapshot.Snapshot != referenceSnapshot.Snapshot)
-                    {
-                        _logger.LogError("Mismatch between {Reference} and {Other}",
-                            referenceSnapshot.Name, snapshot.Name);
-                    }
-                }
+                await LogFailureSnapshotsAsync(snapshots, stoppingToken);
 
-                // Log full snapshots
-                foreach (var snapshot in snapshots)
-                {
-                    _logger.LogError("Snapshot [{Name}]: {Snapshot}", snapshot.Name, snapshot.Snapshot);
-                }
+                LogPropertyDiffsWithTimestamps(snapshots);
+                LogReSyncCheck(snapshots);
 
-                WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
-                AppendMemoryLog(activeProfileName, "FAIL");
-                _cycleLoggerProvider?.FinishCycle(_cycleNumber, false);
+                WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, CycleResult.Fail);
+                CompactHeapAndLogCycle(activeProfileName, CycleResult.Fail, cycleStopwatch.Elapsed, convergeStopwatch.Elapsed);
+                _cycleLoggerProvider?.FinishCycle(_cycleNumber, CycleResult.Fail);
 
                 _failed = true;
                 _applicationLifetime.StopApplication();
@@ -225,36 +217,63 @@ public class VerificationEngine : BackgroundService
         }
     }
 
-    private static string CreateSnapshot(TestNode root)
+    private List<(string Name, string Snapshot)> CaptureAllSnapshots()
     {
-        var update = SubjectUpdate.CreateCompleteUpdate(root, []);
-
-        // Strip timestamps from structural properties (Collection, Dictionary, Object).
-        // These are set during local graph creation and are inherently different per participant.
-        // Value property timestamps ARE compared and must converge via source timestamps.
-        if (update.Subjects != null)
-        {
-            foreach (var subject in update.Subjects.Values)
-            {
-                if (subject == null)
-                {
-                    continue;
-                }
-
-                foreach (var property in subject.Values)
-                {
-                    if (property.Kind != SubjectPropertyUpdateKind.Value)
-                    {
-                        property.Timestamp = null;
-                    }
-                }
-            }
-        }
-
-        return JsonSerializer.Serialize(update, SnapshotJsonOptions);
+        return _participants
+            .Select(participant => (
+                Name: participant.Key,
+                Snapshot: SnapshotComparer.Capture(participant.Value)))
+            .ToList();
     }
 
-    private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, string result)
+    private void LogFindings(List<(string Name, string Snapshot)> snapshots, TimeSpan convergeTime)
+    {
+        try
+        {
+            var findings = new List<string>();
+
+            // 1. Convergence time anomaly (>10s with no chaos active)
+            var chaosActive = _chaosEngines.Any(engine => engine.ChaosEventCount > 0);
+            if (convergeTime.TotalSeconds > 10 && !chaosActive)
+            {
+                findings.Add($"slow-convergence: {convergeTime.TotalSeconds:F1}s with no chaos active");
+            }
+
+            // 2. Null-timestamp forgiveness (JSON walk needed)
+            for (var i = 1; i < snapshots.Count; i++)
+            {
+                var timestampFindings = SnapshotComparer.CollectFindings(
+                    snapshots[0].Name, snapshots[0].Snapshot,
+                    snapshots[i].Name, snapshots[i].Snapshot);
+
+                if (timestampFindings is { Count: > 0 })
+                {
+                    findings.AddRange(timestampFindings.Select(finding => $"null-timestamp: {finding}"));
+                }
+            }
+
+            if (findings.Count == 0)
+            {
+                return;
+            }
+
+            _logger.LogWarning("Cycle {Cycle}: {Count} finding(s)", _cycleNumber, findings.Count);
+
+            var lines = new List<string>
+            {
+                $"[{DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}] Cycle {_cycleNumber}: {findings.Count} finding(s)"
+            };
+            lines.AddRange(findings.Select(finding => $"  {finding}"));
+            lines.Add("");
+            File.AppendAllLines(_findingsLogPath, lines);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log findings");
+        }
+    }
+
+    private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, CycleResult result)
     {
         var totalMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
         var totalChaos = _chaosEngines.Sum(engine => engine.ChaosEventCount);
@@ -271,8 +290,8 @@ public class VerificationEngine : BackgroundService
         // Per-participant breakdown
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Values:N0} value mutations",
-                engine.Name, engine.ValueMutationCount);
+            _logger.LogInformation("  {Name}: {Values:N0} value mutations, {Structural:N0} structural mutations",
+                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount);
         }
 
         // Chaos event timeline
@@ -286,26 +305,256 @@ public class VerificationEngine : BackgroundService
         }
     }
 
-    private void AppendMemoryLog(string? profileName, string result)
+    private void CompactHeapAndLogCycle(string? profileName, CycleResult result, TimeSpan cycleDuration, TimeSpan convergeDuration)
     {
-        // Compact LOH to prevent fragmentation from large temporary objects
-        // created during server restart cycles (NodeSet XML, serialization buffers).
         GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
 
         using var process = Process.GetCurrentProcess();
-        var workingSetMb = process.WorkingSet64 / (1024.0 * 1024.0);
         var heapMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
-        var profile = profileName != null ? $"profile: {profileName}" : "no profile";
+        var processMb = process.WorkingSet64 / (1024.0 * 1024.0);
 
-        var line = string.Format(
-            CultureInfo.InvariantCulture,
-            "{0:yyyy-MM-ddTHH:mm:ss.fffZ}, Cycle {1}, {2}, {3}, ProcessMB: {4:F1}, HeapMB: {5:F1}",
-            DateTimeOffset.UtcNow, _cycleNumber, profile, result, workingSetMb, heapMb);
+        var totalValueMutations = _mutationEngines.Sum(e => e.ValueMutationCount);
+        var totalStructuralMutations = _mutationEngines.Sum(e => e.StructuralMutationCount);
+        var totalChaosEvents = _chaosEngines.Sum(e => e.ChaosEventCount);
 
-        File.AppendAllText(MemoryLogPath, line + Environment.NewLine);
+        var mutateSeconds = _configuration.MutatePhaseDuration.TotalSeconds;
+        var line = string.Format(CultureInfo.InvariantCulture,
+            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,6}, {2,6}, {3,20}, {4,14:F1}, {5,16:F1}, {6,12:F1}, {7,16}, {8,20}, {9,12}, {10,10:F1}, {11,10:F1}",
+            DateTimeOffset.UtcNow, _cycleNumber, result, profileName ?? "",
+            mutateSeconds, convergeDuration.TotalSeconds, cycleDuration.TotalSeconds,
+            totalValueMutations, totalStructuralMutations, totalChaosEvents,
+            heapMb, processMb);
+
+        try
+        {
+            File.AppendAllText(_cyclesLogPath, line + Environment.NewLine);
+
+            foreach (var engine in _chaosEngines)
+            {
+                foreach (var record in engine.EventHistory)
+                {
+                    var chaosLine = string.Format(CultureInfo.InvariantCulture,
+                        "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,6}, {2,16}, {3,12}, {4,16:F1}",
+                        record.DisruptedAt.UtcDateTime, _cycleNumber, engine.TargetName,
+                        record.FaultType, record.Duration.TotalSeconds);
+                    File.AppendAllText(_chaosEventsLogPath, chaosLine + Environment.NewLine);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to append to cycles.csv or chaos-events.csv");
+        }
+    }
+
+    /// <summary>
+    /// Writes formatted JSON snapshots to disk for each participant, so failures can
+    /// be diffed with any text tool. Runs only on convergence failure; never replaces
+    /// the failure signal.
+    /// </summary>
+    private async Task LogFailureSnapshotsAsync(
+        List<(string Name, string Snapshot)> snapshots,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            Directory.CreateDirectory(_runDirectory);
+
+            foreach (var snapshot in snapshots)
+            {
+                var fileName = $"cycle-{_cycleNumber:D4}-fail-{snapshot.Name}.json";
+                var filePath = Path.Combine(_runDirectory, fileName);
+
+                // Re-serialize with indentation for readability.
+                var node = JsonNode.Parse(snapshot.Snapshot);
+                var formatted = node?.ToJsonString(IndentedJsonOptions) ?? snapshot.Snapshot;
+
+                await File.WriteAllTextAsync(filePath, formatted, cancellationToken);
+                _logger.LogInformation("Snapshot [{Name}] written to {FilePath}", snapshot.Name, filePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write failure snapshots to disk");
+        }
+    }
+
+    /// <summary>
+    /// Diffs the snapshots and logs each diverged property with values and timestamps.
+    /// All data comes from the normalized snapshot JSON: Value-kind timestamps are
+    /// preserved by <see cref="SnapshotComparer.Capture"/>, so a missing timestamp
+    /// field means the property was never written via the interceptor chain on that
+    /// participant. Structural-kind properties (Object/Collection/Dictionary) have
+    /// their timestamps stripped during normalization and are not informative here.
+    /// </summary>
+    private void LogPropertyDiffsWithTimestamps(List<(string Name, string Snapshot)> snapshots)
+    {
+        try
+        {
+            if (snapshots.Count < 2)
+            {
+                return;
+            }
+
+            var reference = SnapshotComparer.ParseSubjects(snapshots[0].Snapshot);
+            if (reference is null)
+            {
+                return;
+            }
+            var referenceName = snapshots[0].Name;
+
+            for (var i = 1; i < snapshots.Count; i++)
+            {
+                var other = SnapshotComparer.ParseSubjects(snapshots[i].Snapshot);
+                if (other is null)
+                {
+                    continue;
+                }
+                var otherName = snapshots[i].Name;
+
+                foreach (var (subjectId, refSubjectNode) in reference)
+                {
+                    if (other[subjectId] is not JsonObject otherProperties)
+                    {
+                        _logger.LogError(
+                            "  Subject {SubjectId}: present in {Reference}, missing from {Other}",
+                            subjectId, referenceName, otherName);
+                        continue;
+                    }
+
+                    var refProperties = refSubjectNode!.AsObject();
+                    foreach (var (propertyName, refPropertyNode) in refProperties)
+                    {
+                        if (otherProperties[propertyName] is not JsonObject otherProp)
+                        {
+                            _logger.LogError(
+                                "  {SubjectId}.{Property}: present in {Reference}, missing from {Other}",
+                                subjectId, propertyName, referenceName, otherName);
+                            continue;
+                        }
+
+                        var refProp = refPropertyNode!.AsObject();
+                        if (SnapshotComparer.PropertiesMatch(refProp, otherProp))
+                        {
+                            continue;
+                        }
+
+                        _logger.LogError(
+                            "  {SubjectId}.{Property}: {Reference}={RefSummary}, {Other}={OtherSummary}",
+                            subjectId, propertyName,
+                            referenceName, SummarizeProperty(refProp),
+                            otherName, SummarizeProperty(otherProp));
+                    }
+                }
+
+                // Also report subjects present only on the other side, and properties
+                // present only on the other side within shared subjects.
+                foreach (var (subjectId, otherSubjectNode) in other)
+                {
+                    if (!reference.ContainsKey(subjectId))
+                    {
+                        _logger.LogError(
+                            "  Subject {SubjectId}: missing from {Reference}, present in {Other}",
+                            subjectId, referenceName, otherName);
+                        continue;
+                    }
+
+                    if (otherSubjectNode is not JsonObject otherSharedProperties)
+                    {
+                        continue;
+                    }
+
+                    var refSharedProperties = reference[subjectId]!.AsObject();
+                    foreach (var (propertyName, _) in otherSharedProperties)
+                    {
+                        if (!refSharedProperties.ContainsKey(propertyName))
+                        {
+                            _logger.LogError(
+                                "  {SubjectId}.{Property}: missing from {Reference}, present in {Other}",
+                                subjectId, propertyName, referenceName, otherName);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log property diffs with timestamps");
+        }
+    }
+
+    /// <summary>
+    /// Re-sync diagnostic. Takes the reference participant's complete update and applies
+    /// it to each diverged participant, then re-compares.
+    /// "Match after re-apply" => suspect connector wire (lost or out-of-order messages).
+    /// "Still diverged" => suspect snapshot logic, ApplySubjectUpdate, or the model.
+    /// Mutates participant state intentionally; runs only after the cycle has failed
+    /// and the process is shutting down.
+    /// </summary>
+    private void LogReSyncCheck(List<(string Name, string Snapshot)> snapshots)
+    {
+        try
+        {
+            var referenceRoot = _participants[snapshots[0].Name];
+            var completeUpdate = SubjectUpdate.CreateCompleteUpdate(referenceRoot, []);
+
+            for (var i = 1; i < snapshots.Count; i++)
+            {
+                if (SnapshotComparer.SnapshotsMatch(snapshots[i].Snapshot, snapshots[0].Snapshot))
+                {
+                    continue;
+                }
+
+                var otherRoot = _participants[snapshots[i].Name];
+                otherRoot.ApplySubjectUpdate(completeUpdate, DefaultSubjectFactory.Instance);
+
+                // Reference is paused and not mutated since snapshots[0] was taken; re-using
+                // that string avoids redundant work and a subtle correctness footgun if a
+                // future change introduced reference-side mutation between cycles.
+                var otherReSnapshot = SnapshotComparer.Capture(otherRoot);
+
+                if (SnapshotComparer.SnapshotsMatch(snapshots[0].Snapshot, otherReSnapshot))
+                {
+                    _logger.LogWarning(
+                        "Re-sync check: {Participant} converged after applying reference complete update -> transient delivery gap",
+                        snapshots[i].Name);
+                }
+                else
+                {
+                    _logger.LogError(
+                        "Re-sync check: {Participant} still diverged after applying reference complete update -> suspect snapshot logic, ApplySubjectUpdate, or model",
+                        snapshots[i].Name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to perform re-sync check");
+        }
+    }
+
+    private static string SummarizeProperty(JsonObject property)
+    {
+        var kind = property[SnapshotComparer.KindKey]?.GetValue<string>() ?? "?";
+        return kind switch
+        {
+            "Value" => FormatValueSummary(property),
+            "Object" => $"Object id={property[SnapshotComparer.IdKey]?.ToJsonString() ?? "null"}",
+            "Collection" or "Dictionary" =>
+                $"{kind} count={property[SnapshotComparer.CountKey]?.ToJsonString() ?? "?"} " +
+                $"items={property[SnapshotComparer.ItemsKey]?.ToJsonString() ?? "[]"}",
+            _ => property.ToJsonString()
+        };
+    }
+
+    private static string FormatValueSummary(JsonObject property)
+    {
+        var value = property[SnapshotComparer.ValueKey]?.ToJsonString() ?? "null";
+        var timestamp = property[SnapshotComparer.TimestampKey]?.GetValue<string>() ?? "never";
+        return $"{value} (written {timestamp})";
     }
 
     private string? ApplyChaosProfile()

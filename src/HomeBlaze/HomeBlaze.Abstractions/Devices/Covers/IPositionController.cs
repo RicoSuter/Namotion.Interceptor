@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Covers;
@@ -5,6 +7,8 @@ namespace HomeBlaze.Abstractions.Devices.Covers;
 /// <summary>
 /// Controller interface for devices with adjustable position.
 /// </summary>
+[SubjectAbstraction]
+[Description("Controls position of a cover device.")]
 public interface IPositionController
 {
     /// <summary>

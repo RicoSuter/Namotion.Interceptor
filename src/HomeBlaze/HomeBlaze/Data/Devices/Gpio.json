@@ -1,0 +1,111 @@
+{
+  "$type": "Namotion.Devices.Gpio.GpioSubject",
+  "pollingInterval": "00:00:05",
+  "retryInterval": "00:00:30",
+  "useSimulation": true,
+  "pins": {
+    "0": {
+      "mode": "Input"
+    },
+    "1": {
+      "mode": "Input"
+    },
+    "2": {
+      "name": "I2C1 SDA",
+      "mode": "Input"
+    },
+    "3": {
+      "name": "I2C1 SCL",
+      "mode": "Input"
+    },
+    "4": {
+      "name": "GPCLK0",
+      "mode": "Input"
+    },
+    "5": {
+      "mode": "Input"
+    },
+    "6": {
+      "mode": "Input"
+    },
+    "7": {
+      "name": "SPI0 CE1",
+      "mode": "Input"
+    },
+    "8": {
+      "name": "SPI0 CE0",
+      "mode": "Input"
+    },
+    "9": {
+      "name": "SPI0 MISO",
+      "mode": "Input"
+    },
+    "10": {
+      "name": "SPI0 MOSI",
+      "mode": "Input"
+    },
+    "11": {
+      "name": "SPI0 SCLK",
+      "mode": "Input"
+    },
+    "12": {
+      "name": "PWM0",
+      "mode": "Input"
+    },
+    "13": {
+      "name": "PWM1",
+      "mode": "Input"
+    },
+    "14": {
+      "name": "UART TX",
+      "mode": "Input"
+    },
+    "15": {
+      "name": "UART RX",
+      "mode": "Input"
+    },
+    "16": {
+      "mode": "Input"
+    },
+    "17": {
+      "name": "GPIO17",
+      "mode": "Input"
+    },
+    "18": {
+      "name": "PCM CLK / PWM0",
+      "mode": "Input"
+    },
+    "19": {
+      "mode": "Input"
+    },
+    "20": {
+      "mode": "Input"
+    },
+    "21": {
+      "mode": "Input"
+    },
+    "22": {
+      "name": "GPIO22",
+      "mode": "Input"
+    },
+    "23": {
+      "name": "GPIO23",
+      "mode": "Input"
+    },
+    "24": {
+      "name": "GPIO24",
+      "mode": "Input"
+    },
+    "25": {
+      "name": "GPIO25",
+      "mode": "Input"
+    },
+    "26": {
+      "mode": "Input"
+    },
+    "27": {
+      "name": "GPIO27",
+      "mode": "Input"
+    }
+  }
+}

@@ -31,9 +31,8 @@ public class TwinCatSubjectExtensionsTests
         var provider = services.BuildServiceProvider();
         var hostedServices = provider.GetServices<IHostedService>().ToList();
 
-        Assert.Equal(2, hostedServices.Count);
+        Assert.Single(hostedServices);
         Assert.Contains(hostedServices, service => service is TwinCatSubjectClientSource);
-        Assert.Contains(hostedServices, service => service is SubjectSourceBackgroundService);
     }
 
     [Fact]
@@ -144,13 +143,12 @@ public class TwinCatSubjectExtensionsTests
                 PathProvider = new AttributeBasedPathProvider("ads", '.')
             });
 
-        // Assert — should have 4 hosted services (2 per registration)
+        // Assert — should have 2 hosted services (one per registration)
         var provider = services.BuildServiceProvider();
         var hostedServices = provider.GetServices<IHostedService>().ToList();
 
-        Assert.Equal(4, hostedServices.Count);
+        Assert.Equal(2, hostedServices.Count);
         Assert.Equal(2, hostedServices.OfType<TwinCatSubjectClientSource>().Count());
-        Assert.Equal(2, hostedServices.OfType<SubjectSourceBackgroundService>().Count());
     }
 
     [Fact]

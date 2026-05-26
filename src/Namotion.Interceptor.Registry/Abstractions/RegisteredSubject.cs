@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubject
 {
-    private readonly Lock _parentsLock = new();
+    private readonly Lock _lock = new();
 
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
     private ImmutableArray<SubjectPropertyParent> _parents = [];
@@ -25,13 +25,13 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the properties which reference this subject.
-    /// Thread-safe: Lock ensures atomic struct copy during read.
+    /// Thread-safe: lock ensures atomic struct copy during read.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
     {
         get
         {
-            lock (_parentsLock)
+            lock (_lock)
                 return _parents;
         }
     }
@@ -99,7 +99,7 @@ public class RegisteredSubject
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
     {
-        lock (_parentsLock)
+        lock (_lock)
         {
             _parents = _parents.Add(new SubjectPropertyParent { Property = parent, Index = index });
         }
@@ -107,9 +107,39 @@ public class RegisteredSubject
 
     internal void RemoveParent(RegisteredSubjectProperty parent, object? index)
     {
-        lock (_parentsLock)
+        lock (_lock)
         {
             _parents = _parents.Remove(new SubjectPropertyParent { Property = parent, Index = index });
+        }
+    }
+
+    internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
+    {
+        lock (_lock)
+        {
+            var parents = _parents;
+            for (var i = parents.Length - 1; i >= 0; i--)
+            {
+                if (parents[i].Property == parent)
+                {
+                    parents = parents.RemoveAt(i);
+                }
+            }
+
+            _parents = parents;
+        }
+    }
+
+    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? oldIndex, object? newIndex)
+    {
+        lock (_lock)
+        {
+            var oldParent = new SubjectPropertyParent { Property = property, Index = oldIndex };
+            var idx = _parents.IndexOf(oldParent);
+            if (idx >= 0)
+            {
+                _parents = _parents.SetItem(idx, new SubjectPropertyParent { Property = property, Index = newIndex });
+            }
         }
     }
 
@@ -180,7 +210,7 @@ public class RegisteredSubject
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
     public RegisteredSubjectProperty AddProperty(
-        string name, 
+        string name,
         Type type,
         Func<IInterceptorSubject, object?>? getValue,
         Action<IInterceptorSubject, object?>? setValue,
@@ -191,15 +221,19 @@ public class RegisteredSubject
             type,
             attributes,
             getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
-            setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue, setValue) : null,
+            setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue?.Invoke(s), setValue) : null,
             isIntercepted: true,
             isDynamic: true));
 
         var property = AddPropertyInternal(name, type, attributes);
 
-        // trigger change event
+        // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
+        // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
+        // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
+        // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
+        // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
         property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
-            o => getValue?.Invoke(o), delegate { });
+            null, delegate { });
 
         return property;
     }
@@ -208,15 +242,18 @@ public class RegisteredSubject
     {
         var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
 
-        var newProperties = _properties
-            .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
-            .ToFrozenDictionary(p => p.Key, p => p.Value);
-
-        _properties = newProperties;
-
-        foreach (var property in newProperties.Values)
+        lock (_lock)
         {
-            property.AttributesCache = null;
+            var newProperties = _properties
+                .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
+                .ToFrozenDictionary(p => p.Key, p => p.Value);
+
+            _properties = newProperties;
+
+            foreach (var property in newProperties.Values)
+            {
+                property.AttributesCache = null;
+            }
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);

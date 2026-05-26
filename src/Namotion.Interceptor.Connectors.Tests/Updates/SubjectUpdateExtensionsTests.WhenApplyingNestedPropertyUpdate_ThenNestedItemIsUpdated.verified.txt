@@ -8,10 +8,6 @@
           {
             Index: 0,
             Id: 2
-          },
-          {
-            Index: 0,
-            Id: 2
           }
         ]
       }
@@ -25,7 +21,7 @@
       FullName: {
         Kind: Value,
         Value: UpdatedChild ,
-        Timestamp: DateTimeOffset_2
+        Timestamp: DateTimeOffset_1
       }
     }
   }

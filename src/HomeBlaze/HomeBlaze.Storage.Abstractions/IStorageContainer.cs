@@ -36,6 +36,9 @@ public interface IStorageContainer
 
     /// <summary>
     /// Writes content to a blob at the specified path.
+    /// Implementations must ensure atomic writes: either the full content is written successfully,
+    /// or the previous content remains intact (e.g., write to a temporary location, then rename).
+    /// A crash or failure during write must not leave the blob in a corrupted partial state.
     /// </summary>
     /// <param name="path">The relative path to the blob.</param>
     /// <param name="content">The content to write.</param>

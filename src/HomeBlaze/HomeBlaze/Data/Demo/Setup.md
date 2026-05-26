@@ -14,11 +14,11 @@ The demo simulates a small factory with the following equipment (live data):
 
 | Equipment | Current Speed | Target Speed | Temperature | Status |
 |-----------|---------------|--------------|-------------|--------|
-| **Conveyor Belt** | {{ Root.Children[Demo].Children[Conveyor].CurrentSpeed }} | {{ Root.Children[Demo].Children[Conveyor].TargetSpeed }} | {{ Root.Children[Demo].Children[Conveyor].Temperature }} | {{ Root.Children[Demo].Children[Conveyor].Status }} |
-| **Exhaust Fan** | {{ Root.Children[Demo].Children[ExhaustFan].CurrentSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan].TargetSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan].Temperature }} | {{ Root.Children[Demo].Children[ExhaustFan].Status }} |
-| **Cooling Fan** | {{ Root.Children[Demo].Children[CoolingFan].CurrentSpeed }} | {{ Root.Children[Demo].Children[CoolingFan].TargetSpeed }} | {{ Root.Children[Demo].Children[CoolingFan].Temperature }} | {{ Root.Children[Demo].Children[CoolingFan].Status }} |
-| **Water Pump** | {{ Root.Children[Demo].Children[WaterPump].CurrentSpeed }} | {{ Root.Children[Demo].Children[WaterPump].TargetSpeed }} | {{ Root.Children[Demo].Children[WaterPump].Temperature }} | {{ Root.Children[Demo].Children[WaterPump].Status }} |
-| **Compressor** | {{ Root.Children[Demo].Children[Compressor].CurrentSpeed }} | {{ Root.Children[Demo].Children[Compressor].TargetSpeed }} | {{ Root.Children[Demo].Children[Compressor].Temperature }} | {{ Root.Children[Demo].Children[Compressor].Status }} |
+| **Conveyor Belt** | {{ ../Conveyor/CurrentSpeed }} | {{ ../Conveyor/TargetSpeed }} | {{ ../Conveyor/Temperature }} | {{ ../Conveyor/Status }} |
+| **Exhaust Fan** | {{ ../ExhaustFan/CurrentSpeed }} | {{ ../ExhaustFan/TargetSpeed }} | {{ ../ExhaustFan/Temperature }} | {{ ../ExhaustFan/Status }} |
+| **Cooling Fan** | {{ ../CoolingFan/CurrentSpeed }} | {{ ../CoolingFan/TargetSpeed }} | {{ ../CoolingFan/Temperature }} | {{ ../CoolingFan/Status }} |
+| **Water Pump** | {{ ../WaterPump/CurrentSpeed }} | {{ ../WaterPump/TargetSpeed }} | {{ ../WaterPump/Temperature }} | {{ ../WaterPump/Status }} |
+| **Compressor** | {{ ../Compressor/CurrentSpeed }} | {{ ../Compressor/TargetSpeed }} | {{ ../Compressor/Temperature }} | {{ ../Compressor/Status }} |
 
 ## Motor Properties
 
@@ -45,7 +45,7 @@ These properties auto-calculate when dependencies change:
 
 ```
 Data/
-  demo/
+  Demo/
     Conveyor.json         # 600 RPM conveyor
     ExhaustFan.json      # 1500 RPM exhaust system
     CoolingFan.json      # 1800 RPM HVAC system
@@ -134,8 +134,8 @@ To start with a clean slate:
 
 ## Next Steps
 
-- Review [Building Custom Subjects](../docs/BuildingSubjects.md) to create your own subject types
-- Check out [Architecture](../Docs/Architecture.md) to understand the system design
+- Review [Building Custom Subjects](../Docs/development/building-subjects.md) to create your own subject types
+- Check out [Architecture](../Docs/architecture/overview.md) to understand the system design
 - Explore the source code in `HomeBlaze.Samples/Motor.cs`
 
 ---

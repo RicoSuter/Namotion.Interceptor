@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Messaging;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Messaging;
 /// <summary>
 /// Interface for subjects that can send notifications.
 /// </summary>
+[SubjectAbstraction]
+[Description("Sends notification messages.")]
 public interface INotificationPublisher
 {
     /// <summary>

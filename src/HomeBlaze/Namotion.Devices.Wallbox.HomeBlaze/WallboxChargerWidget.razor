@@ -1,0 +1,59 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(WallboxCharger))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.EvStation" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Charger?.Title ?? "Wallbox Charger")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(Charger?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(Charger?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+
+        @if (Charger?.Model != null)
+        {
+            <MudText Typo="Typo.caption">@Charger.Model @(Charger.ProductCode != null ? $"({Charger.ProductCode})" : "")</MudText>
+        }
+
+        <MudDivider />
+
+        <MudStack Row="true" Spacing="4">
+            <MudStack>
+                <MudText Typo="Typo.caption">Status</MudText>
+                <MudText Typo="Typo.h6">@Charger?.ChargerStatus</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Power</MudText>
+                <MudText Typo="Typo.h6">@(Charger?.ChargingPower.HasValue == true ? $"{(Charger.ChargingPower.Value / 1000m):F1} kW" : "—")</MudText>
+            </MudStack>
+
+            @if (Charger?.ChargeLevel.HasValue == true)
+            {
+                <MudStack>
+                    <MudText Typo="Typo.caption">Charge Level</MudText>
+                    <MudText Typo="Typo.h6">@($"{Charger.ChargeLevel.Value * 100:F0}%")</MudText>
+                </MudStack>
+            }
+        </MudStack>
+
+        @if (Charger?.IsLocked == true)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Locked</MudChip>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private WallboxCharger? Charger => Subject as WallboxCharger;
+}

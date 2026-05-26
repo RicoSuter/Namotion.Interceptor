@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.TwinCAT;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Registry.Paths;
@@ -70,18 +69,6 @@ public static class TwinCatSubjectExtensions
                     serviceProvider.GetRequiredService<ILogger<TwinCatSubjectClientSource>>());
             })
             .AddSingleton<IHostedService>(serviceProvider =>
-                serviceProvider.GetRequiredKeyedService<TwinCatSubjectClientSource>(key))
-            .AddSingleton<IHostedService>(serviceProvider =>
-            {
-                var configuration = serviceProvider.GetRequiredKeyedService<AdsClientConfiguration>(key);
-                var subject = serviceProvider.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectSourceBackgroundService(
-                    serviceProvider.GetRequiredKeyedService<TwinCatSubjectClientSource>(key),
-                    subject.Context,
-                    serviceProvider.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
-                    configuration.BufferTime,
-                    configuration.RetryTime,
-                    configuration.WriteRetryQueueSize);
-            });
+                serviceProvider.GetRequiredKeyedService<TwinCatSubjectClientSource>(key));
     }
 }

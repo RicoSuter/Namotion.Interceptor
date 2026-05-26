@@ -70,16 +70,16 @@ public class OpcUaStallDetectionTests
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);
-            Assert.NotNull(client.Diagnostics);
+            Assert.NotNull(client.Source!.Diagnostics);
 
             // Verify initial connection
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Diagnostics.IsConnected,
+                () => client.Source!.Diagnostics.IsConnected,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should be connected after startup");
             logger.Log("Initial connection established");
 
-            var initialReconnectAttempts = client.Diagnostics.TotalReconnectionAttempts;
+            var initialReconnectAttempts = client.Source!.Diagnostics.TotalReconnectionAttempts;
             logger.Log($"Initial reconnect attempts: {initialReconnectAttempts}");
 
             // Stop server - DO NOT restart it
@@ -88,7 +88,7 @@ public class OpcUaStallDetectionTests
 
             // Wait for client to detect disconnection (longer timeout for parallel test execution)
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Diagnostics.IsConnected,
+                () => !client.Source!.Diagnostics.IsConnected,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
@@ -98,10 +98,10 @@ public class OpcUaStallDetectionTests
             // reconnection attempt (~10-50ms when server is down). The 100ms polling interval
             // can miss it entirely, causing flaky test timeouts on CI.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Diagnostics.TotalReconnectionAttempts > initialReconnectAttempts,
+                () => client.Source!.Diagnostics.TotalReconnectionAttempts > initialReconnectAttempts,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should start reconnecting");
-            logger.Log($"Client started reconnecting (attempts: {client.Diagnostics.TotalReconnectionAttempts})");
+            logger.Log($"Client started reconnecting (attempts: {client.Source!.Diagnostics.TotalReconnectionAttempts})");
 
             // Wait for client to demonstrate ongoing recovery behavior.
             // Two possible paths depending on timing:
@@ -116,10 +116,10 @@ public class OpcUaStallDetectionTests
             await AsyncTestHelpers.WaitUntilAsync(
                 () =>
                 {
-                    var attempts = client.Diagnostics.TotalReconnectionAttempts;
+                    var attempts = client.Source!.Diagnostics.TotalReconnectionAttempts;
                     if (attempts > initialReconnectAttempts + 2)
                     {
-                        logger.Log($"Recovery verified: IsReconnecting={client.Diagnostics.IsReconnecting}, " +
+                        logger.Log($"Recovery verified: IsReconnecting={client.Source!.Diagnostics.IsReconnecting}, " +
                                    $"Attempts={attempts}");
                         return true;
                     }
@@ -180,7 +180,7 @@ public class OpcUaStallDetectionTests
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);
-            Assert.NotNull(client.Diagnostics);
+            Assert.NotNull(client.Source!.Diagnostics);
 
             // Verify initial sync
             server.Root.Name = "BeforeStall";
@@ -212,7 +212,7 @@ public class OpcUaStallDetectionTests
 
             // Wait for connection status to stabilize
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Diagnostics.IsConnected,
+                () => client.Source!.Diagnostics.IsConnected,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should report as connected after recovery");
             logger.Log("Test passed - client recovered after stall");
@@ -272,7 +272,7 @@ public class OpcUaStallDetectionTests
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);
-            Assert.NotNull(client.Diagnostics);
+            Assert.NotNull(client.Source!.Diagnostics);
 
             // Verify initial sync
             server.Root.Name = "BeforeRestart";
@@ -282,8 +282,8 @@ public class OpcUaStallDetectionTests
                 message: "Initial sync should complete");
             logger.Log("Initial sync verified");
 
-            var initialReconnectAttempts = client.Diagnostics.TotalReconnectionAttempts;
-            var initialSuccessfulReconnects = client.Diagnostics.SuccessfulReconnections;
+            var initialReconnectAttempts = client.Source!.Diagnostics.TotalReconnectionAttempts;
+            var initialSuccessfulReconnects = client.Source!.Diagnostics.SuccessfulReconnections;
             logger.Log($"Before restart - attempts: {initialReconnectAttempts}, successful: {initialSuccessfulReconnects}");
 
             // Stop server briefly
@@ -292,10 +292,10 @@ public class OpcUaStallDetectionTests
 
             // Wait for client to detect disconnection (longer timeout for slow CI runners)
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Diagnostics.IsConnected || client.Diagnostics.IsReconnecting,
+                () => !client.Source!.Diagnostics.IsConnected || client.Source!.Diagnostics.IsReconnecting,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should detect disconnection or start reconnecting");
-            logger.Log($"Client state after stop - Connected: {client.Diagnostics.IsConnected}, Reconnecting: {client.Diagnostics.IsReconnecting}");
+            logger.Log($"Client state after stop - Connected: {client.Source!.Diagnostics.IsConnected}, Reconnecting: {client.Source!.Diagnostics.IsReconnecting}");
 
             // Restart server quickly (well before MaxReconnectDuration of 30s)
             logger.Log("Restarting server quickly...");
@@ -311,14 +311,14 @@ public class OpcUaStallDetectionTests
 
             // Verify client is connected
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Diagnostics.IsConnected,
+                () => client.Source!.Diagnostics.IsConnected,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should report as connected after recovery");
 
             // Log final state for debugging
-            logger.Log($"After restart - attempts: {client.Diagnostics.TotalReconnectionAttempts}, " +
-                       $"successful: {client.Diagnostics.SuccessfulReconnections}, " +
-                       $"connected: {client.Diagnostics.IsConnected}");
+            logger.Log($"After restart - attempts: {client.Source!.Diagnostics.TotalReconnectionAttempts}, " +
+                       $"successful: {client.Source!.Diagnostics.SuccessfulReconnections}, " +
+                       $"connected: {client.Source!.Diagnostics.IsConnected}");
 
             logger.Log("Test passed - SDK reconnected without stall detection trigger");
         }

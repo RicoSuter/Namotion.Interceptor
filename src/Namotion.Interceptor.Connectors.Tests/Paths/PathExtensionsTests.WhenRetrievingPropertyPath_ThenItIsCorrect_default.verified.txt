@@ -13,6 +13,7 @@
   Father.Father,
   Father.Mother,
   Father.Children,
+  Father.Relationships,
   Mother,
   Mother.FirstName,
   Mother.MaxLength,
@@ -22,6 +23,7 @@
   Mother.Father,
   Mother.Mother,
   Mother.Children,
+  Mother.Relationships,
   Children,
   Children[0].FirstName,
   Children[0].MaxLength,
@@ -31,6 +33,7 @@
   Children[0].Father,
   Children[0].Mother,
   Children[0].Children,
+  Children[0].Relationships,
   Children[1].FirstName,
   Children[1].MaxLength,
   Children[1].Unit,
@@ -39,6 +42,7 @@
   Children[1].Father,
   Children[1].Mother,
   Children[1].Children,
+  Children[1].Relationships,
   Children[2].FirstName,
   Children[2].MaxLength,
   Children[2].Unit,
@@ -46,5 +50,7 @@
   Children[2].FullName,
   Children[2].Father,
   Children[2].Mother,
-  Children[2].Children
+  Children[2].Children,
+  Children[2].Relationships,
+  Relationships
 ]

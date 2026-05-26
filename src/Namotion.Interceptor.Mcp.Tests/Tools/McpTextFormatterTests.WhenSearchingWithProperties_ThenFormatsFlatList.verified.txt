@@ -1,0 +1,11 @@
+﻿# path [Type] $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
+# Use get_property for exact values or browse with format=json for structured data.
+
+/Demo/Motor1 [MyApp.Motor] $title=Motor 1
+  Speed: 1500 | integer, writable
+  IsRunning: true | boolean
+
+/Demo/Motor2 [MyApp.Motor] $title=Motor 2
+  Speed: 2400 | integer, writable
+  IsRunning: false | boolean
+[2 subjects]

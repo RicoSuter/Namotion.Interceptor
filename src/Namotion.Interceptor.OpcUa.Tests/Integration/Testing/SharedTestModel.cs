@@ -301,6 +301,12 @@ public partial class DataTypesTestArea
 
     [Path("opc", "ByteArray")]
     public partial byte[] ByteArray { get; set; }
+
+    [Path("opc", "GuidValue")]
+    public partial Guid GuidValue { get; set; }
+
+    [Path("opc", "NullableGuidValue")]
+    public partial Guid? NullableGuidValue { get; set; }
 }
 
 /// <summary>

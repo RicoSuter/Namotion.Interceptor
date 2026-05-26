@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry;
+﻿using System.Collections.Immutable;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -232,6 +233,239 @@ public class LifecycleInterceptorTests
         // Assert
         Assert.Single(handler.GetEvents(), e => e == "prop+ NA.FooBar"); // should attach FooBar only once
         return Verify(handler.GetEvents());
+    }
+
+    [Fact]
+    public void WhenAssigningReadOnlyList_ThenSubjectsAreAttached()
+    {
+        // Arrange: property typed IReadOnlyList<Car>
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var garage = new Garage(context) { Name = "TestGarage" };
+        var car1 = new Car { Name = "Car1" };
+        var car2 = new Car { Name = "Car2" };
+
+        // Act
+        garage.Cars = [car1, car2];
+
+        // Assert: both cars attached via the IReadOnlyList<Car> property
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("Cars[0]") && e.Contains("Car1") && e.Contains("attached"));
+        Assert.Contains(events, e => e.Contains("Cars[1]") && e.Contains("Car2") && e.Contains("attached"));
+    }
+
+    [Fact]
+    public void WhenReplacingReadOnlyList_ThenOldSubjectsAreDetachedAndNewAttached()
+    {
+        // Arrange: property typed IReadOnlyList<Car>
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var garage = new Garage(context) { Name = "TestGarage" };
+        var car1 = new Car { Name = "Car1" };
+        var car2 = new Car { Name = "Car2" };
+        var car3 = new Car { Name = "Car3" };
+
+        garage.Cars = [car1, car2];
+        handler.Clear();
+
+        // Act
+        garage.Cars = [car2, car3];
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("Car1") && e.Contains("detached"));
+        Assert.Contains(events, e => e.Contains("Car3") && e.Contains("attached"));
+    }
+
+    [Fact]
+    public void WhenAssigningReadOnlyDictionary_ThenSubjectsAreAttached()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var garage = new Garage(context) { Name = "TestGarage" };
+        var car1 = new Car { Name = "Car1" };
+        var car2 = new Car { Name = "Car2" };
+
+        // Act: Dictionary<string, Car> is assigned to IReadOnlyDictionary<string, Car> property.
+        // At runtime the value implements IDictionary, so the fast path handles it.
+        garage.CarsByName = new Dictionary<string, Car>
+        {
+            ["first"] = car1,
+            ["second"] = car2
+        };
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("CarsByName") && e.Contains("Car1") && e.Contains("attached"));
+        Assert.Contains(events, e => e.Contains("CarsByName") && e.Contains("Car2") && e.Contains("attached"));
+    }
+
+    [Fact]
+    public void WhenReplacingReadOnlyDictionary_ThenOldSubjectsAreDetachedAndNewAttached()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var garage = new Garage(context) { Name = "TestGarage" };
+        var car1 = new Car { Name = "Car1" };
+        var car2 = new Car { Name = "Car2" };
+        var car3 = new Car { Name = "Car3" };
+
+        garage.CarsByName = new Dictionary<string, Car>
+        {
+            ["first"] = car1,
+            ["second"] = car2
+        };
+        handler.Clear();
+
+        // Act
+        garage.CarsByName = new Dictionary<string, Car>
+        {
+            ["second"] = car2,
+            ["third"] = car3
+        };
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("Car1") && e.Contains("detached"));
+        Assert.Contains(events, e => e.Contains("Car3") && e.Contains("attached"));
+    }
+
+    [Fact]
+    public void WhenAssigningImmutableArray_ThenSubjectsAreAttached()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var garage = new Garage(context) { Name = "TestGarage" };
+        var tire1 = new Tire { Pressure = 2.0m };
+        var tire2 = new Tire { Pressure = 2.5m };
+
+        // Act
+        garage.SpareTires = [tire1, tire2];
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Equal(2, events.Count(e => e.Contains("SpareTires") && e.Contains("attached")));
+    }
+
+    [Fact]
+    public void WhenReplacingImmutableArray_ThenOldSubjectsAreDetachedAndNewAttached()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var garage = new Garage(context) { Name = "TestGarage" };
+        var tire1 = new Tire { Pressure = 2.0m };
+        var tire2 = new Tire { Pressure = 2.5m };
+        var tire3 = new Tire { Pressure = 3.0m };
+
+        garage.SpareTires = [tire1, tire2];
+        handler.Clear();
+
+        // Act
+        garage.SpareTires = [tire2, tire3];
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Single(events, e => e.Contains("SpareTires") && e.Contains("detached"));
+        Assert.Single(events, e => e.Contains("SpareTires") && e.Contains("attached"));
+    }
+
+    [Fact]
+    public void WhenAssigningTrueReadOnlyDictionary_ThenSubjectsAreAttached()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var garage = new Garage(context) { Name = "TestGarage" };
+        var car1 = new Car { Name = "Car1" };
+        var car2 = new Car { Name = "Car2" };
+
+        // Act: assign a wrapper that only implements IReadOnlyDictionary (not IDictionary),
+        // exercising the IEnumerable + KVP reflection fallback path.
+        garage.CarsByName = new ReadOnlyDictionaryWrapper<string, Car>(new Dictionary<string, Car>
+        {
+            ["first"] = car1,
+            ["second"] = car2
+        });
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("CarsByName") && e.Contains("Car1") && e.Contains("attached"));
+        Assert.Contains(events, e => e.Contains("CarsByName") && e.Contains("Car2") && e.Contains("attached"));
+    }
+
+    [Fact]
+    public void WhenReplacingTrueReadOnlyDictionary_ThenOldSubjectsAreDetachedAndNewAttached()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var garage = new Garage(context) { Name = "TestGarage" };
+        var car1 = new Car { Name = "Car1" };
+        var car2 = new Car { Name = "Car2" };
+        var car3 = new Car { Name = "Car3" };
+
+        garage.CarsByName = new ReadOnlyDictionaryWrapper<string, Car>(new Dictionary<string, Car>
+        {
+            ["first"] = car1,
+            ["second"] = car2
+        });
+        handler.Clear();
+
+        // Act: replace with a new wrapper; car1 should detach, car3 should attach.
+        garage.CarsByName = new ReadOnlyDictionaryWrapper<string, Car>(new Dictionary<string, Car>
+        {
+            ["second"] = car2,
+            ["third"] = car3
+        });
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("Car1") && e.Contains("detached"));
+        Assert.Contains(events, e => e.Contains("Car3") && e.Contains("attached"));
     }
 
     public class AddPropertyToSubjectHandler : ILifecycleHandler

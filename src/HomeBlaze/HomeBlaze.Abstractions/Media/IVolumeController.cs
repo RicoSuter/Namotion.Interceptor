@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Media;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Media;
 /// <summary>
 /// Controller interface for devices with adjustable volume.
 /// </summary>
+[SubjectAbstraction]
+[Description("Controls volume level.")]
 public interface IVolumeController
 {
     /// <summary>

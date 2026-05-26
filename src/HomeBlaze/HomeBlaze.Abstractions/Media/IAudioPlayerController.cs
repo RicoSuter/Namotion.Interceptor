@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Media;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Media;
 /// <summary>
 /// Controller interface for audio players.
 /// </summary>
+[SubjectAbstraction]
+[Description("Controls audio playback with play, pause, stop, skip, seek, and mute.")]
 public interface IAudioPlayerController : IVolumeController
 {
     /// <summary>

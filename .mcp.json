@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "homeblaze": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://localhost:7298/mcp"],
+      "env": {
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0"
+      }
+    }
+  }
+}

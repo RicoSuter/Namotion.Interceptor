@@ -2,8 +2,6 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -18,7 +16,7 @@ public class ChangeQueueProcessor : IDisposable
     private const int FlushDedupedBufferMinSize = 256;
     private const int FlushDedupedBufferMaxSize = 1024;
 
-    private readonly Func<RegisteredSubjectProperty, bool> _propertyFilter;
+    private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
     private readonly ILogger _logger;
@@ -50,14 +48,18 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     /// <param name="source">Source to ignore (to prevent update loops).</param>
     /// <param name="context">The interceptor subject context.</param>
-    /// <param name="propertyFilter">Filter to determine if a property should be included.</param>
+    /// <param name="propertyFilter">Filter to determine if a property change should be included.
+    /// The <see cref="PropertyReference"/> may not have a registered property (e.g., when the subject
+    /// is momentarily unregistered due to a concurrent structural mutation). Callers should handle
+    /// this case explicitly — typically by resolving via <c>TryGetRegisteredProperty()</c> and
+    /// returning <c>false</c> when null.</param>
     /// <param name="writeHandler">Handler to write batched changes.</param>
     /// <param name="bufferTime">Time to buffer changes before flushing.</param>
     /// <param name="logger">The logger.</param>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
-        Func<RegisteredSubjectProperty, bool> propertyFilter,
+        Func<PropertyReference, bool> propertyFilter,
         Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
         TimeSpan? bufferTime,
         ILogger logger)
@@ -132,8 +134,7 @@ public class ChangeQueueProcessor : IDisposable
                     continue;
                 }
 
-                var property = change.Property.TryGetRegisteredProperty();
-                if (property is null || !_propertyFilter(property))
+                if (!_propertyFilter(change.Property))
                 {
                     continue;
                 }

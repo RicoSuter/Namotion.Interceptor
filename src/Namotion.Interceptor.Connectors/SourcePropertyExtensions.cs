@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Connectors;
 /// <remarks>
 /// These extensions use the property data storage mechanism to maintain a mapping between
 /// properties and their corresponding <see cref="ISubjectSource"/> instances. This association
-/// is used by the <see cref="SubjectSourceBackgroundService"/> to dispatch changes only to the
+/// is used by <see cref="SubjectSourceBase"/> derivatives to dispatch changes only to the
 /// owning source, and by transactions to determine which source to write changes to during commit.
 /// Each property can have at most one source (single owner model).
 /// </remarks>

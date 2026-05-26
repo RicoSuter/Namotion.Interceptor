@@ -1,0 +1,75 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ShellyDevice))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Hub" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(DeviceSubject?.Title ?? "Shelly Device")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(DeviceSubject?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(DeviceSubject?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        <MudStack Row="true" Spacing="4">
+            @if (DeviceSubject?.Switches.Length > 0)
+            {
+                <MudStack>
+                    <MudText Typo="Typo.caption">Switches</MudText>
+                    <MudText Typo="Typo.h5">@DeviceSubject.Switches.Length</MudText>
+                </MudStack>
+            }
+
+            @if (DeviceSubject?.Covers.Length > 0)
+            {
+                <MudStack>
+                    <MudText Typo="Typo.caption">Covers</MudText>
+                    <MudText Typo="Typo.h5">@DeviceSubject.Covers.Length</MudText>
+                </MudStack>
+            }
+
+            @if (DeviceSubject?.EnergyMeter != null)
+            {
+                <MudStack>
+                    <MudText Typo="Typo.caption">Power</MudText>
+                    <MudText Typo="Typo.h5">@(DeviceSubject.EnergyMeter.MeasuredPower?.ToString("F0") ?? "\u2014") W</MudText>
+                </MudStack>
+            }
+
+            @if (DeviceSubject?.Inputs.Length > 0)
+            {
+                <MudStack>
+                    <MudText Typo="Typo.caption">Inputs</MudText>
+                    <MudText Typo="Typo.h5">@DeviceSubject.Inputs.Length</MudText>
+                </MudStack>
+            }
+        </MudStack>
+
+        @if (DeviceSubject?.HostAddress != null)
+        {
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.OpenInNew"
+                       Href="@($"http://{DeviceSubject.HostAddress}")"
+                       Target="_blank"
+                       Size="Size.Small">
+                Open Web UI
+            </MudButton>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private ShellyDevice? DeviceSubject => Subject as ShellyDevice;
+}

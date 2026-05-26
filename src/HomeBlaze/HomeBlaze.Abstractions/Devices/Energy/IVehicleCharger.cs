@@ -1,21 +1,13 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Energy;
 
 /// <summary>
-/// Interface for electric vehicle chargers.
+/// Combined interface for electric vehicle chargers.
 /// </summary>
-public interface IVehicleCharger : IEnergyCharger
+[SubjectAbstraction]
+[Description("Electric vehicle charger with state and control.")]
+public interface IVehicleCharger : IVehicleChargerState, IVehicleChargerController
 {
-    /// <summary>
-    /// The current charge level of the connected vehicle (0..1).
-    /// </summary>
-    [State(Unit = StateUnit.Percent)]
-    decimal? ChargeLevel { get; }
-
-    /// <summary>
-    /// The current charging power.
-    /// </summary>
-    [State(Unit = StateUnit.KiloWatt)]
-    decimal? ChargingPower { get; }
 }
