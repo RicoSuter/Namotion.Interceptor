@@ -469,7 +469,7 @@ builder.Services.AddWebSocketSubjectServer<Sensor>(configuration =>
 {
     configuration.Port = 8080;
     configuration.Path = "/ws";
-    configuration.Mapper = new WebSocketPathProviderMapper(new AttributeBasedPathProvider("ws"));
+    configuration.PathProvider = new AttributeBasedPathProvider("ws");
 });
 ```
 
@@ -553,7 +553,7 @@ Each connector ships thin wrappers that adapt generic infrastructure to protocol
 | Connector | Mapper Wrappers                                                                                               |
 |-----------|---------------------------------------------------------------------------------------------------------------|
 | MQTT      | `MqttPathProviderMapper`, `MqttAttributeMapper`, `MqttFluentMapper<T>`, `MqttCompositeMapper` |
-| WebSocket | `WebSocketPathProviderMapper`                                                                         |
+| WebSocket | Uses `PathProviderBase` directly (no mapper abstraction)                                               |
 | OPC UA    | `OpcUaPathProviderMapper`, `OpcUaAttributeMapper`, `OpcUaFluentMapper<T>`, `OpcUaCompositeMapper` |
 
 See the protocol-specific documentation for details on each connector's mapping types and configuration.

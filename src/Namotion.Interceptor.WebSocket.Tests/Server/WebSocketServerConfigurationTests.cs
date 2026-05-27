@@ -31,7 +31,7 @@ public class WebSocketServerConfigurationTests
         Assert.Equal(10 * 1024 * 1024, configuration.MaxMessageSize);
         Assert.Equal(1000, configuration.WriteBatchSize);
         Assert.Null(configuration.BindAddress);
-        Assert.Null(configuration.Mapper);
+        Assert.Null(configuration.PathProvider);
         Assert.Null(configuration.SubjectFactory);
         Assert.Empty(configuration.Processors);
     }

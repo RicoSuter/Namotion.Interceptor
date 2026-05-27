@@ -152,7 +152,7 @@ builder.Services.AddWebSocketSubjectServer<Device>(configuration =>
     configuration.BroadcastTimeout = TimeSpan.FromSeconds(10);  // Default: 10s
 
     // Path mapping
-    configuration.Mapper = new WebSocketPathProviderMapper(new AttributeBasedPathProvider("ws"));
+    configuration.PathProvider = new AttributeBasedPathProvider("ws");
 
     // Subject creation for client updates
     configuration.SubjectFactory = new DefaultSubjectFactory();
@@ -190,7 +190,7 @@ builder.Services.AddWebSocketSubjectClientSource<Device>(configuration =>
     configuration.CircuitBreakerCooldown = TimeSpan.FromSeconds(60); // Wait before retrying
 
     // Path mapping
-    configuration.Mapper = new WebSocketPathProviderMapper(new AttributeBasedPathProvider("ws"));
+    configuration.PathProvider = new AttributeBasedPathProvider("ws");
 
     // Subject creation for server updates
     configuration.SubjectFactory = new DefaultSubjectFactory();

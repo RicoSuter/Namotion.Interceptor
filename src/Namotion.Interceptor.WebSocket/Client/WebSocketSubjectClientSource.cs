@@ -307,7 +307,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
     private void ClaimPropertyOwnership()
     {
-        var mapper = _configuration.Mapper;
+        var pathProvider = _configuration.PathProvider;
 
         var registeredSubject = _subject.TryGetRegisteredSubject();
         if (registeredSubject is null)
@@ -318,7 +318,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.CanContainSubjects && (mapper is null || mapper.TryGetMapping(p, _subject, out _)))
+            .Where(p => !p.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(p)))
             .ToList();
 
         var claimedCount = 0;
