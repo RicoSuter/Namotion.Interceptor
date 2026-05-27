@@ -33,7 +33,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
     private readonly MqttClientFactory _factory;
 
     private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
-    private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
+    private readonly ConcurrentDictionary<PropertyReference, (string? Topic, MqttPropertyMapping? Mapping)> _propertyToTopic = new();
 
     private readonly SourceOwnershipManager _ownership;
 
@@ -253,7 +253,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                         continue;
                     }
 
-                    var topic = TryGetTopicForProperty(change.Property, property);
+                    var (topic, mapping) = TryGetTopicForProperty(change.Property, property);
                     if (topic is null) continue;
 
                     byte[] payload;
@@ -273,8 +273,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                     {
                         Topic = topic,
                         PayloadSegment = new ArraySegment<byte>(payload),
-                        QualityOfServiceLevel = _configuration.DefaultQualityOfService,
-                        Retain = _configuration.UseRetainedMessages
+                        QualityOfServiceLevel = mapping?.QualityOfService ?? _configuration.DefaultQualityOfService,
+                        Retain = mapping?.Retain ?? _configuration.UseRetainedMessages
                     };
 
                     if (userPropertiesArray is not null)
@@ -390,7 +390,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         foreach (var property in properties)
         {
-            var topic = TryGetTopicForProperty(property.Reference, property);
+            var (topic, _) = TryGetTopicForProperty(property.Reference, property);
             if (topic is null) continue;
 
             if (!_ownership.ClaimSource(property.Reference))
@@ -412,21 +412,25 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         _logger.LogInformation("Subscribed to {Count} MQTT topics.", properties.Count);
     }
 
-    private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    private (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        if (_propertyToTopic.TryGetValue(propertyReference, out var cachedTopic))
+        if (_propertyToTopic.TryGetValue(propertyReference, out var cached))
         {
-            return cachedTopic;
+            return cached;
         }
 
         string? topic = null;
+        MqttPropertyMapping? resolvedMapping = null;
         if (_configuration.Mapper.TryGetMapping(property, out var mapping) && mapping.Topic is not null)
         {
             topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
+            resolvedMapping = mapping;
         }
 
+        var entry = (topic, resolvedMapping);
+
         // Add first, then validate (guarantees no memory leak)
-        if (_propertyToTopic.TryAdd(propertyReference, topic))
+        if (_propertyToTopic.TryAdd(propertyReference, entry))
         {
             var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
             if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
@@ -435,7 +439,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             }
         }
 
-        return topic;
+        return entry;
     }
 
     private PropertyReference? TryGetPropertyForTopic(string topic)
@@ -468,7 +472,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         return propertyReference;
     }
 
-    internal Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
+    private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
     {
         var topic = e.ApplicationMessage.Topic;
         if (TryGetPropertyForTopic(topic) is not { } propertyReference)
@@ -515,7 +519,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         return Task.CompletedTask;
     }
 
-    internal Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
+    private Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
     {
         if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
         {
