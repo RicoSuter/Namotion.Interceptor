@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Mqtt.Attributes;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Mqtt.Mapping;
@@ -41,7 +42,7 @@ public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, M
         RegisteredSubject root, MqttLookupKey key, CancellationToken cancellationToken)
     {
         var topic = key.Topic;
-        foreach (var property in root.Properties)
+        foreach (var property in root.GetAllProperties())
         {
             foreach (var attribute in property.ReflectionAttributes)
             {

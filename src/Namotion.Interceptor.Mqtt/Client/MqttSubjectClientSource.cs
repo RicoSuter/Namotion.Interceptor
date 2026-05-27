@@ -442,7 +442,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         return entry;
     }
 
-    private PropertyReference? TryGetPropertyForTopic(string topic)
+    private async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(string topic)
     {
         if (_topicToProperty.TryGetValue(topic, out var cachedProperty))
         {
@@ -453,7 +453,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         var registered = _subject.TryGetRegisteredSubject();
         var property = registered is null
             ? null
-            : _configuration.Mapper.TryGetPropertyAsync(registered, new MqttLookupKey(path), CancellationToken.None).GetAwaiter().GetResult();
+            : await _configuration.Mapper.TryGetPropertyAsync(registered, new MqttLookupKey(path), CancellationToken.None).ConfigureAwait(false);
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)
@@ -472,18 +472,18 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         return propertyReference;
     }
 
-    private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
+    private async Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
     {
         var topic = e.ApplicationMessage.Topic;
-        if (TryGetPropertyForTopic(topic) is not { } propertyReference)
+        if (await TryGetPropertyForTopicAsync(topic).ConfigureAwait(false) is not { } propertyReference)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var registeredProperty = propertyReference.TryGetRegisteredProperty();
         if (registeredProperty is null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         object? value;
@@ -495,13 +495,13 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to deserialize MQTT message for topic {Topic}.", topic);
-            return Task.CompletedTask;
+            return;
         }
 
         var propertyWriter = _propertyWriter;
         if (propertyWriter is null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         // Extract timestamps
@@ -515,8 +515,6 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         propertyWriter.Write(
             (propertyReference, value, this, sourceTimestamp, receivedTimestamp),
             static state => state.propertyReference.SetValueFromSource(state.Item3, state.sourceTimestamp, state.receivedTimestamp, state.value));
-
-        return Task.CompletedTask;
     }
 
     private Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)

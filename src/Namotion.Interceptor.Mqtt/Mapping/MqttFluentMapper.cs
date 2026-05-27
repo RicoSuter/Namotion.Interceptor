@@ -5,6 +5,7 @@ using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -42,7 +43,7 @@ public class MqttFluentMapper<TSubject>
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
         RegisteredSubject root, MqttLookupKey key, CancellationToken cancellationToken)
     {
-        foreach (var property in root.Properties)
+        foreach (var property in root.GetAllProperties())
         {
             if (property.IsAttribute)
                 continue;

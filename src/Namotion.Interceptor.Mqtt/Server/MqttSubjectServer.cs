@@ -337,7 +337,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
         return entry;
     }
 
-    private PropertyReference? TryGetPropertyForTopic(string path)
+    private async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(string path)
     {
         if (_pathToProperty.TryGetValue(path, out var cachedProperty))
         {
@@ -347,7 +347,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
         var registered = _subject.TryGetRegisteredSubject();
         var property = registered is null
             ? null
-            : _configuration.Mapper.TryGetPropertyAsync(registered, new MqttLookupKey(path), CancellationToken.None).GetAwaiter().GetResult();
+            : await _configuration.Mapper.TryGetPropertyAsync(registered, new MqttLookupKey(path), CancellationToken.None).ConfigureAwait(false);
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)
@@ -493,26 +493,26 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
         }
     }
 
-    private Task InterceptingPublishAsync(InterceptingPublishEventArgs args)
+    private async Task InterceptingPublishAsync(InterceptingPublishEventArgs args)
     {
         // Skip messages published by this server (injected messages may have null/empty ClientId)
         if (string.IsNullOrEmpty(args.ClientId) || args.ClientId == _serverClientId)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var topic = args.ApplicationMessage.Topic;
         var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
 
-        if (TryGetPropertyForTopic(path) is not { } propertyReference)
+        if (await TryGetPropertyForTopicAsync(path).ConfigureAwait(false) is not { } propertyReference)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var registeredProperty = propertyReference.TryGetRegisteredProperty();
         if (registeredProperty is null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         // Server-authoritative relay: prevent the broker from distributing this client
@@ -539,8 +539,6 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
         {
             _logger.LogError(ex, "Failed to deserialize MQTT payload for topic {Topic}.", topic);
         }
-
-        return Task.CompletedTask;
     }
 
     private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg)
