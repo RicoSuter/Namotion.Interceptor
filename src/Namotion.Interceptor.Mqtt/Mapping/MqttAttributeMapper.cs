@@ -40,10 +40,10 @@ public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, M
     }
 
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        MqttLookupKey key, RegisteredSubject root, CancellationToken cancellationToken)
+        MqttLookupKey key, RegisteredSubject rootSubject, CancellationToken cancellationToken)
     {
         var topic = key.Topic;
-        foreach (var property in root.GetAllProperties())
+        foreach (var property in rootSubject.GetAllProperties())
         {
             foreach (var attribute in property.ReflectionAttributes)
             {

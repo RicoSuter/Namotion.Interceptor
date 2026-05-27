@@ -29,11 +29,11 @@ public sealed class OpcUaCompositeMapper
         => _forward.TryGetMapping(property, rootSubject, out mapping);
 
     public async ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        OpcUaLookupKey key, RegisteredSubject root, CancellationToken cancellationToken)
+        OpcUaLookupKey key, RegisteredSubject rootSubject, CancellationToken cancellationToken)
     {
         for (var i = _mappers.Length - 1; i >= 0; i--)
         {
-            var found = await _mappers[i].TryGetPropertyAsync(key, root, cancellationToken)
+            var found = await _mappers[i].TryGetPropertyAsync(key, rootSubject, cancellationToken)
                 .ConfigureAwait(false);
             if (found is not null) return found;
         }

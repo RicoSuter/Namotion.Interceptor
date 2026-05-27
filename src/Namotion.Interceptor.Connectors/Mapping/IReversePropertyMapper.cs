@@ -12,6 +12,6 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
     /// </summary>
     ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
         TKey key,
-        RegisteredSubject root,
+        RegisteredSubject rootSubject,
         CancellationToken cancellationToken);
 }

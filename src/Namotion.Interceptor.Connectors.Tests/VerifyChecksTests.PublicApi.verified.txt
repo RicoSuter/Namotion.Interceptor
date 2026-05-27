@@ -139,7 +139,7 @@ namespace Namotion.Interceptor.Connectors.Mapping
     }
     public interface IReversePropertyMapper<TMapping, in TKey> : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<TMapping>
     {
-        System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(TKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(TKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject rootSubject, System.Threading.CancellationToken cancellationToken);
     }
 }
 namespace Namotion.Interceptor.Connectors.Paths
