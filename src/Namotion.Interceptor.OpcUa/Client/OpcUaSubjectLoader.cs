@@ -121,8 +121,8 @@ internal class OpcUaSubjectLoader
                 if (property.IsSubjectReference)
                 {
                     // Check if this should be treated as a VariableNode
-                    _configuration.NodeMapper.TryGetMapping(property, out var nodeConfiguration);
-                    if (nodeConfiguration?.NodeClass == Mapping.OpcUaNodeClass.Variable)
+                    var mapping = _configuration.NodeMapper.TryGetMapping(property, out var m) ? m : null;
+                    if (mapping?.NodeClass == Mapping.OpcUaNodeClass.Variable)
                     {
                         await LoadVariableNodeForSubjectAsync(property, resolvedNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
                     }

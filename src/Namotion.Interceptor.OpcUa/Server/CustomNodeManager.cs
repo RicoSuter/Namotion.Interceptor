@@ -180,8 +180,8 @@ internal class CustomNodeManager : CustomNodeManager2
                     if (referencedSubject.Subject is not null)
                     {
                         // Check if this should be a VariableNode instead of ObjectNode
-                        _nodeMapper.TryGetMapping(property, out var nodeConfiguration);
-                        if (nodeConfiguration?.NodeClass == OpcUaNodeClass.Variable)
+                        var mapping = _nodeMapper.TryGetMapping(property, out var m) ? m : null;
+                        if (mapping?.NodeClass == OpcUaNodeClass.Variable)
                         {
                             CreateVariableNodeForSubject(propertyName, property, parentNodeId, prefix);
                         }
@@ -202,28 +202,27 @@ internal class CustomNodeManager : CustomNodeManager2
     private void CreateReferenceObjectNode(string propertyName, RegisteredSubjectProperty property, SubjectPropertyChild child, NodeId parentNodeId, string parentPath)
     {
         var path = parentPath + propertyName;
-        _nodeMapper.TryGetMapping(property, out var nodeConfiguration);
-        var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, child.Index);
-        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
+        var mapping = _nodeMapper.TryGetMapping(property, out var m) ? m : null;
+        var browseName = _nodeFactory.GetBrowseName(this, propertyName, mapping, child.Index);
+        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, mapping);
 
         CreateChildObject(property, browseName, child.Subject, path, parentNodeId, referenceTypeId);
     }
 
     private void CreateArrayObjectNode(string propertyName, RegisteredSubjectProperty property, ICollection<SubjectPropertyChild> children, NodeId parentNodeId, string parentPath)
     {
-        // Cache node configuration to avoid repeated lookups
-        _nodeMapper.TryGetMapping(property, out var nodeConfiguration);
+        var mapping = _nodeMapper.TryGetMapping(property, out var m) ? m : null;
 
-        var nodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
-        var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
+        var nodeId = _nodeFactory.GetNodeId(this, mapping, parentPath + propertyName);
+        var browseName = _nodeFactory.GetBrowseName(this, propertyName, mapping, null);
 
-        var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, nodeConfiguration);
-        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
+        var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, mapping);
+        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, mapping);
 
-        var propertyNode = _nodeFactory.CreateFolderNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
+        var propertyNode = _nodeFactory.CreateFolderNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, mapping);
 
         // Child objects below the array folder use path: parentPath + propertyName + "[index]"
-        var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
+        var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, mapping);
         foreach (var child in children)
         {
             var childBrowseName = new QualifiedName($"{propertyName}[{child.Index}]", NamespaceIndex);
@@ -235,17 +234,16 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateDictionaryObjectNode(string propertyName, RegisteredSubjectProperty property, ICollection<SubjectPropertyChild> children, NodeId parentNodeId, string parentPath)
     {
-        // Cache node configuration to avoid repeated lookups
-        _nodeMapper.TryGetMapping(property, out var nodeConfiguration);
+        var mapping = _nodeMapper.TryGetMapping(property, out var m) ? m : null;
 
-        var nodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
-        var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
+        var nodeId = _nodeFactory.GetNodeId(this, mapping, parentPath + propertyName);
+        var browseName = _nodeFactory.GetBrowseName(this, propertyName, mapping, null);
 
-        var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, nodeConfiguration);
-        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
+        var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, mapping);
+        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, mapping);
 
-        var propertyNode = _nodeFactory.CreateFolderNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
-        var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
+        var propertyNode = _nodeFactory.CreateFolderNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, mapping);
+        var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, mapping);
         foreach (var child in children)
         {
             var indexString = child.Index?.ToString();
@@ -275,13 +273,13 @@ internal class CustomNodeManager : CustomNodeManager2
         // Use configurationProperty for node identity, property for value/type
         var actualConfigurationProperty = configurationProperty ?? property;
 
-        _nodeMapper.TryGetMapping(actualConfigurationProperty, out var nodeConfiguration);
-        var nodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
-        var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
-        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
+        var mapping = _nodeMapper.TryGetMapping(actualConfigurationProperty, out var m) ? m : null;
+        var nodeId = _nodeFactory.GetNodeId(this, mapping, parentPath + propertyName);
+        var browseName = _nodeFactory.GetBrowseName(this, propertyName, mapping, null);
+        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, mapping);
         var dataTypeOverride = _nodeFactory.GetDataTypeOverride(this, _nodeMapper.TryGetMapping(property, out var propertyMapping) ? propertyMapping : null);
 
-        var variableNode = ConfigureVariableNode(property, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, nodeConfiguration);
+        var variableNode = ConfigureVariableNode(property, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, mapping);
 
         property.Reference.SetPropertyData(_serverService.OpcUaVariableKey, variableNode);
 
@@ -320,12 +318,12 @@ internal class CustomNodeManager : CustomNodeManager2
         string path,
         NodeId referenceTypeId)
     {
-        _nodeMapper.TryGetMapping(attribute, out var nodeConfiguration);
-        var nodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, path);
-        var browseName = _nodeFactory.GetBrowseName(this, attributeName, nodeConfiguration, null);
-        var dataTypeOverride = _nodeFactory.GetDataTypeOverride(this, nodeConfiguration);
+        var mapping = _nodeMapper.TryGetMapping(attribute, out var m) ? m : null;
+        var nodeId = _nodeFactory.GetNodeId(this, mapping, path);
+        var browseName = _nodeFactory.GetBrowseName(this, attributeName, mapping, null);
+        var dataTypeOverride = _nodeFactory.GetDataTypeOverride(this, mapping);
 
-        var variableNode = ConfigureVariableNode(attribute, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, nodeConfiguration);
+        var variableNode = ConfigureVariableNode(attribute, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, mapping);
 
         attribute.Reference.SetPropertyData(_serverService.OpcUaVariableKey, variableNode);
 
@@ -342,13 +340,13 @@ internal class CustomNodeManager : CustomNodeManager2
         QualifiedName browseName,
         NodeId? referenceTypeId,
         NodeId? dataTypeOverride,
-        OpcUaPropertyMapping? nodeConfiguration)
+        OpcUaPropertyMapping? mapping)
     {
         var value = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(), property);
         var typeInfo = _configuration.ValueConverter.GetNodeTypeInfo(property.Type);
 
-        var variableNode = _nodeFactory.CreateVariableNode(this, parentNodeId, nodeId, browseName, typeInfo, referenceTypeId, dataTypeOverride, nodeConfiguration);
-        _nodeFactory.AddAdditionalReferences(this, variableNode, nodeConfiguration);
+        var variableNode = _nodeFactory.CreateVariableNode(this, parentNodeId, nodeId, browseName, typeInfo, referenceTypeId, dataTypeOverride, mapping);
+        _nodeFactory.AddAdditionalReferences(this, variableNode, mapping);
         variableNode.Handle = property.Reference;
 
         // Adjust access according to property setter
@@ -416,7 +414,7 @@ internal class CustomNodeManager : CustomNodeManager2
         var path = parentPath + propertyName;
         foreach (var childProperty in childSubject.Properties)
         {
-            _nodeMapper.TryGetMapping(childProperty, out var childConfig);
+            var childConfig = _nodeMapper.TryGetMapping(childProperty, out var m) ? m : null;
             if (childConfig?.IsValue != true)
             {
                 var childName = childProperty.ResolvePropertyName(_nodeMapper);
@@ -459,12 +457,12 @@ internal class CustomNodeManager : CustomNodeManager2
         else
         {
             // Create new node and add to dictionary (protected by _structureLock)
-            _nodeMapper.TryGetMapping(property, out var nodeConfiguration);
-            var nodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, path);
+            var mapping = _nodeMapper.TryGetMapping(property, out var m) ? m : null;
+            var nodeId = _nodeFactory.GetNodeId(this, mapping, path);
             var typeDefinitionId = GetTypeDefinitionIdForSubject(subject);
 
-            var node = _nodeFactory.CreateObjectNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
-            _nodeFactory.AddAdditionalReferences(this, node, nodeConfiguration);
+            var node = _nodeFactory.CreateObjectNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, mapping);
+            _nodeFactory.AddAdditionalReferences(this, node, mapping);
             _subjects[registeredSubject] = node;
             CreateSubjectNodes(node.NodeId, registeredSubject, path + PathDelimiter);
         }

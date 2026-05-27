@@ -23,69 +23,69 @@ internal sealed class OpcUaNodeFactory
         _resolver = new OpcUaNodeIdResolver(logger);
     }
 
-    public NodeId GetNodeId(CustomNodeManager manager, OpcUaPropertyMapping? nodeConfiguration, string fullPath)
+    public NodeId GetNodeId(CustomNodeManager manager, OpcUaPropertyMapping? mapping, string fullPath)
     {
         var namespaceIndex = manager.NamespaceIndexes[0];
 
-        if (nodeConfiguration is { NodeIdentifier: not null })
+        if (mapping is { NodeIdentifier: not null })
         {
-            return nodeConfiguration.NodeNamespaceUri is not null ?
-                NodeId.Create(nodeConfiguration.NodeIdentifier, nodeConfiguration.NodeNamespaceUri, manager.GetSystemContext().NamespaceUris) :
-                new NodeId(nodeConfiguration.NodeIdentifier, namespaceIndex);
+            return mapping.NodeNamespaceUri is not null ?
+                NodeId.Create(mapping.NodeIdentifier, mapping.NodeNamespaceUri, manager.GetSystemContext().NamespaceUris) :
+                new NodeId(mapping.NodeIdentifier, namespaceIndex);
         }
 
         return new NodeId(fullPath, namespaceIndex);
     }
 
-    public QualifiedName GetBrowseName(CustomNodeManager manager, string name, OpcUaPropertyMapping? nodeConfiguration, object? index)
+    public QualifiedName GetBrowseName(CustomNodeManager manager, string name, OpcUaPropertyMapping? mapping, object? index)
     {
         var namespaceIndex = manager.NamespaceIndexes[0];
 
-        if (nodeConfiguration?.BrowseName is null)
+        if (mapping?.BrowseName is null)
         {
             return new QualifiedName(name + (index is not null ? $"[{index}]" : string.Empty), namespaceIndex);
         }
 
-        if (nodeConfiguration.BrowseNamespaceUri is not null)
+        if (mapping.BrowseNamespaceUri is not null)
         {
-            return new QualifiedName(nodeConfiguration.BrowseName, (ushort)manager.GetSystemContext().NamespaceUris.GetIndex(nodeConfiguration.BrowseNamespaceUri));
+            return new QualifiedName(mapping.BrowseName, (ushort)manager.GetSystemContext().NamespaceUris.GetIndex(mapping.BrowseNamespaceUri));
         }
 
-        return new QualifiedName(nodeConfiguration.BrowseName, namespaceIndex);
+        return new QualifiedName(mapping.BrowseName, namespaceIndex);
     }
 
-    public NodeId? GetReferenceTypeId(CustomNodeManager manager, OpcUaPropertyMapping? nodeConfiguration)
+    public NodeId? GetReferenceTypeId(CustomNodeManager manager, OpcUaPropertyMapping? mapping)
     {
-        if (nodeConfiguration?.ReferenceType is null)
+        if (mapping?.ReferenceType is null)
         {
             return null;
         }
 
         return _resolver.Resolve(
-            nodeConfiguration.ReferenceType,
-            nodeConfiguration.ReferenceTypeNamespace,
+            mapping.ReferenceType,
+            mapping.ReferenceTypeNamespace,
             NodeIdCategory.ReferenceType,
             manager.GetSystemContext(),
             manager.GetPredefinedNodes());
     }
 
-    public NodeId? GetChildReferenceTypeId(CustomNodeManager manager, OpcUaPropertyMapping? nodeConfiguration)
+    public NodeId? GetChildReferenceTypeId(CustomNodeManager manager, OpcUaPropertyMapping? mapping)
     {
-        if (nodeConfiguration?.ItemReferenceType is null)
+        if (mapping?.ItemReferenceType is null)
         {
             return null;
         }
 
         return _resolver.Resolve(
-            nodeConfiguration.ItemReferenceType,
-            nodeConfiguration.ItemReferenceTypeNamespace,
+            mapping.ItemReferenceType,
+            mapping.ItemReferenceTypeNamespace,
             NodeIdCategory.ReferenceType,
             manager.GetSystemContext(),
             manager.GetPredefinedNodes());
     }
 
-    public NodeId? GetTypeDefinitionId(CustomNodeManager manager, OpcUaPropertyMapping? nodeConfiguration) =>
-        GetTypeDefinitionIdCore(manager, nodeConfiguration?.TypeDefinition, nodeConfiguration?.TypeDefinitionNamespace);
+    public NodeId? GetTypeDefinitionId(CustomNodeManager manager, OpcUaPropertyMapping? mapping) =>
+        GetTypeDefinitionIdCore(manager, mapping?.TypeDefinition, mapping?.TypeDefinitionNamespace);
 
     public NodeId? GetTypeDefinitionId(CustomNodeManager manager, OpcUaNodeAttribute? typeAttribute) =>
         GetTypeDefinitionIdCore(manager, typeAttribute?.TypeDefinition, typeAttribute?.TypeDefinitionNamespace);
@@ -105,16 +105,16 @@ internal sealed class OpcUaNodeFactory
             manager.GetPredefinedNodes());
     }
 
-    public NodeId? GetDataTypeOverride(CustomNodeManager manager, OpcUaPropertyMapping? nodeConfiguration)
+    public NodeId? GetDataTypeOverride(CustomNodeManager manager, OpcUaPropertyMapping? mapping)
     {
-        if (nodeConfiguration?.DataType is null)
+        if (mapping?.DataType is null)
         {
             return null;
         }
 
         return _resolver.Resolve(
-            nodeConfiguration.DataType,
-            nodeConfiguration.DataTypeNamespace,
+            mapping.DataType,
+            mapping.DataTypeNamespace,
             NodeIdCategory.DataType,
             manager.GetSystemContext(),
             manager.GetPredefinedNodes());
@@ -123,7 +123,7 @@ internal sealed class OpcUaNodeFactory
     public FolderState CreateFolderNode(
         CustomNodeManager manager,
         NodeId parentId, NodeId nodeId, QualifiedName browseName,
-        NodeId? typeDefinition, NodeId? referenceType, OpcUaPropertyMapping? nodeConfiguration)
+        NodeId? typeDefinition, NodeId? referenceType, OpcUaPropertyMapping? mapping)
     {
         var parentNode = manager.FindNode(parentId);
 
@@ -131,9 +131,9 @@ internal sealed class OpcUaNodeFactory
         {
             NodeId = nodeId,
             BrowseName = browseName,
-            DisplayName = new LocalizedText(nodeConfiguration?.DisplayName ?? browseName.Name),
-            Description = nodeConfiguration?.Description is not null
-                ? new LocalizedText(nodeConfiguration.Description)
+            DisplayName = new LocalizedText(mapping?.DisplayName ?? browseName.Name),
+            Description = mapping?.Description is not null
+                ? new LocalizedText(mapping.Description)
                 : null,
             TypeDefinitionId = typeDefinition ?? ObjectTypeIds.FolderType,
             WriteMask = AttributeWriteMask.None,
@@ -141,7 +141,7 @@ internal sealed class OpcUaNodeFactory
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasComponent
         };
 
-        if (nodeConfiguration?.EventNotifier is { } eventNotifier && eventNotifier != byte.MaxValue)
+        if (mapping?.EventNotifier is { } eventNotifier && eventNotifier != byte.MaxValue)
         {
             folderNode.EventNotifier = eventNotifier;
         }
@@ -149,14 +149,14 @@ internal sealed class OpcUaNodeFactory
         parentNode?.AddChild(folderNode);
 
         manager.AddNode(folderNode);
-        AddModellingRuleReference(folderNode, nodeConfiguration);
+        AddModellingRuleReference(folderNode, mapping);
         return folderNode;
     }
 
     public BaseObjectState CreateObjectNode(
         CustomNodeManager manager,
         NodeId parentId, NodeId nodeId, QualifiedName browseName,
-        NodeId? typeDefinition, NodeId? referenceType, OpcUaPropertyMapping? nodeConfiguration)
+        NodeId? typeDefinition, NodeId? referenceType, OpcUaPropertyMapping? mapping)
     {
         var parentNode = manager.FindNode(parentId);
 
@@ -164,9 +164,9 @@ internal sealed class OpcUaNodeFactory
         {
             NodeId = nodeId,
             BrowseName = browseName,
-            DisplayName = new LocalizedText(nodeConfiguration?.DisplayName ?? browseName.Name),
-            Description = nodeConfiguration?.Description is not null
-                ? new LocalizedText(nodeConfiguration.Description)
+            DisplayName = new LocalizedText(mapping?.DisplayName ?? browseName.Name),
+            Description = mapping?.Description is not null
+                ? new LocalizedText(mapping.Description)
                 : null,
             TypeDefinitionId = typeDefinition ?? ObjectTypeIds.BaseObjectType,
             WriteMask = AttributeWriteMask.None,
@@ -174,7 +174,7 @@ internal sealed class OpcUaNodeFactory
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasComponent
         };
 
-        if (nodeConfiguration?.EventNotifier is { } eventNotifier && eventNotifier != byte.MaxValue)
+        if (mapping?.EventNotifier is { } eventNotifier && eventNotifier != byte.MaxValue)
         {
             objectNode.EventNotifier = eventNotifier;
         }
@@ -182,7 +182,7 @@ internal sealed class OpcUaNodeFactory
         parentNode?.AddChild(objectNode);
 
         manager.AddNode(objectNode);
-        AddModellingRuleReference(objectNode, nodeConfiguration);
+        AddModellingRuleReference(objectNode, mapping);
         return objectNode;
     }
 
@@ -190,7 +190,7 @@ internal sealed class OpcUaNodeFactory
         CustomNodeManager manager,
         NodeId parentId, NodeId nodeId, QualifiedName browseName,
         Opc.Ua.TypeInfo dataType, NodeId? referenceType, NodeId? dataTypeOverride,
-        OpcUaPropertyMapping? nodeConfiguration)
+        OpcUaPropertyMapping? mapping)
     {
         var parentNode = manager.FindNode(parentId);
 
@@ -200,9 +200,9 @@ internal sealed class OpcUaNodeFactory
 
             SymbolicName = browseName.Name,
             BrowseName = browseName,
-            DisplayName = new LocalizedText(nodeConfiguration?.DisplayName ?? browseName.Name),
-            Description = nodeConfiguration?.Description is not null
-                ? new LocalizedText(nodeConfiguration.Description)
+            DisplayName = new LocalizedText(mapping?.DisplayName ?? browseName.Name),
+            Description = mapping?.Description is not null
+                ? new LocalizedText(mapping.Description)
                 : null,
 
             TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
@@ -219,20 +219,20 @@ internal sealed class OpcUaNodeFactory
         parentNode?.AddChild(variable);
 
         manager.AddNode(variable);
-        AddModellingRuleReference(variable, nodeConfiguration);
+        AddModellingRuleReference(variable, mapping);
         return variable;
     }
 
-    public void AddAdditionalReferences(CustomNodeManager manager, NodeState node, OpcUaPropertyMapping? nodeConfiguration)
+    public void AddAdditionalReferences(CustomNodeManager manager, NodeState node, OpcUaPropertyMapping? mapping)
     {
-        if (nodeConfiguration?.AdditionalReferences is null)
+        if (mapping?.AdditionalReferences is null)
         {
             return;
         }
 
         var namespaceIndex = manager.NamespaceIndexes[0];
 
-        foreach (var reference in nodeConfiguration.AdditionalReferences)
+        foreach (var reference in mapping.AdditionalReferences)
         {
             var referenceTypeId = _resolver.Resolve(
                 reference.ReferenceType,
@@ -257,14 +257,14 @@ internal sealed class OpcUaNodeFactory
         }
     }
 
-    private static void AddModellingRuleReference(NodeState node, OpcUaPropertyMapping? nodeConfiguration)
+    private static void AddModellingRuleReference(NodeState node, OpcUaPropertyMapping? mapping)
     {
-        if (nodeConfiguration?.ModellingRule is null or ModellingRule.Unset)
+        if (mapping?.ModellingRule is null or ModellingRule.Unset)
         {
             return;
         }
 
-        var modellingRuleNodeId = GetModellingRuleNodeId(nodeConfiguration.ModellingRule.Value);
+        var modellingRuleNodeId = GetModellingRuleNodeId(mapping.ModellingRule.Value);
         if (modellingRuleNodeId is not null)
         {
             node.AddReference(ReferenceTypeIds.HasModellingRule, false, modellingRuleNodeId);

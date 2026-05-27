@@ -37,7 +37,7 @@ internal static class OpcUaPropertyExtensions
     {
         foreach (var property in subject.Properties)
         {
-            if (nodeMapper.TryGetMapping(property, out var config) && config.IsValue == true)
+            if (nodeMapper.TryGetMapping(property, out var mapping) && mapping.IsValue == true)
             {
                 return property;
             }

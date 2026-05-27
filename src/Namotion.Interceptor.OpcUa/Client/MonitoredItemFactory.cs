@@ -22,8 +22,7 @@ internal static class MonitoredItemFactory
     /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
     public static MonitoredItem Create(OpcUaClientConfiguration configuration, NodeId nodeId, RegisteredSubjectProperty property)
     {
-        var hasMapping = configuration.NodeMapper.TryGetMapping(property, out var nodeConfiguration);
-        var mapping = hasMapping ? nodeConfiguration : null;
+        var mapping = configuration.NodeMapper.TryGetMapping(property, out var m) ? m : null;
         var item = new MonitoredItem(configuration.TelemetryContext)
         {
             StartNodeId = nodeId,
