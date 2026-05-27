@@ -175,17 +175,26 @@ internal static class OpcUaSessionExtensions
         }
         var process = Math.Min(actual, count);
 
-        // Collect ALL continuation points upfront so they can be released if
-        // ThrowIfTransient aborts mid-loop. Without this, CPs from both
-        // already-processed and not-yet-processed results leak on the server
-        // until the server-side session timeout.
+        // Collect continuation points from Good-status results upfront so they
+        // can be released if ThrowIfTransient aborts during result processing.
+        // CPs from bad-status results are released immediately: following them
+        // with BrowseNext would re-add references for nodes the processing loop
+        // intentionally skips.
         var continuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
+        var orphanCps = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
         for (var i = 0; i < process; i++)
         {
             if (response.Results[i].ContinuationPoint is { Length: > 0 } cp)
             {
-                continuationPoints.Add((nodeIds[offset + i], cp));
+                if (StatusCode.IsGood(response.Results[i].StatusCode))
+                    continuationPoints.Add((nodeIds[offset + i], cp));
+                else
+                    orphanCps.Add((nodeIds[offset + i], cp));
             }
+        }
+        if (orphanCps.Count > 0)
+        {
+            await ReleaseContinuationPointsAsync(session, orphanCps, logger).ConfigureAwait(false);
         }
 
         try
@@ -352,15 +361,24 @@ internal static class OpcUaSessionExtensions
 
         var process = Math.Min(actual, count);
 
-        // Collect CPs upfront so they're in `next` before ThrowIfTransient can
-        // abort. The caller (ProcessContinuationPointsAsync) releases `next` on
-        // exception, so pre-collecting ensures no CPs leak from this response.
+        // Collect CPs from Good-status results upfront so they're in `next`
+        // before ThrowIfTransient can abort. The caller releases `next` on
+        // exception. CPs from bad-status results are released immediately to
+        // avoid following pagination for nodes whose results are discarded.
+        var orphanCps = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
         for (var i = 0; i < process; i++)
         {
             if (nextResponse.Results[i].ContinuationPoint is { Length: > 0 } cp)
             {
-                next.Add((current[offset + i].NodeId, cp));
+                if (StatusCode.IsGood(nextResponse.Results[i].StatusCode))
+                    next.Add((current[offset + i].NodeId, cp));
+                else
+                    orphanCps.Add((current[offset + i].NodeId, cp));
             }
+        }
+        if (orphanCps.Count > 0)
+        {
+            await ReleaseContinuationPointsAsync(session, orphanCps, logger).ConfigureAwait(false);
         }
 
         for (var i = 0; i < process; i++)
