@@ -88,7 +88,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
     private bool IsPropertyIncluded(PropertyReference propertyReference) =>
         propertyReference.TryGetRegisteredProperty() is { } property &&
-        _configuration.Mapper.TryGetMapping(property, out _);
+        _configuration.Mapper.TryGetMapping(property, _subject, out _);
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
@@ -316,7 +316,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
         string? topic = null;
         MqttPropertyMapping? resolvedMapping = null;
-        if (_configuration.Mapper.TryGetMapping(property, out var mapping) && mapping.Topic is not null)
+        if (_configuration.Mapper.TryGetMapping(property, _subject, out var mapping) && mapping.Topic is not null)
         {
             topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
             resolvedMapping = mapping;
@@ -420,7 +420,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
             if (allProperties is null) return;
 
             var properties = allProperties
-                .Select(p => (property: p, hasMapping: _configuration.Mapper.TryGetMapping(p, out var m), mapping: m))
+                .Select(p => (property: p, hasMapping: _configuration.Mapper.TryGetMapping(p, _subject, out var m), mapping: m))
                 .Where(x => x.hasMapping && x.mapping!.Topic is not null)
                 .Select(x => (path: x.mapping!.Topic!, property: x.property, mapping: x.mapping!));
 

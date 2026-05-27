@@ -377,7 +377,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.CanContainSubjects && _configuration.Mapper.TryGetMapping(p, out _))
+            .Where(p => !p.CanContainSubjects && _configuration.Mapper.TryGetMapping(p, _subject, out _))
             .ToList();
 
         if (properties.Count == 0)
@@ -421,7 +421,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         string? topic = null;
         MqttPropertyMapping? resolvedMapping = null;
-        if (_configuration.Mapper.TryGetMapping(property, out var mapping) && mapping.Topic is not null)
+        if (_configuration.Mapper.TryGetMapping(property, _subject, out var mapping) && mapping.Topic is not null)
         {
             topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
             resolvedMapping = mapping;

@@ -12,17 +12,20 @@ internal class OpcUaSubjectLoader
 {
     private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
 
+    private readonly IInterceptorSubject _subject;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
     private readonly OpcUaSubjectClientSource _source;
 
     public OpcUaSubjectLoader(
+        IInterceptorSubject subject,
         OpcUaClientConfiguration configuration,
         SourceOwnershipManager ownership,
         OpcUaSubjectClientSource source,
         ILogger logger)
     {
+        _subject = subject;
         _configuration = configuration;
         _ownership = ownership;
         _source = source;
@@ -115,13 +118,13 @@ internal class OpcUaSubjectLoader
                     _configuration.TypeResolver.GetDynamicPropertyAttributes(nodeReference, session));
             }
 
-            var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+            var propertyName = property.ResolvePropertyName(_configuration.Mapper, _subject);
             if (propertyName is not null)
             {
                 if (property.IsSubjectReference)
                 {
                     // Check if this should be treated as a VariableNode
-                    var mapping = _configuration.NodeMapper.TryGetMapping(property, out var m) ? m : null;
+                    var mapping = _configuration.Mapper.TryGetMapping(property, _subject, out var m) ? m : null;
                     if (mapping?.NodeClass == Mapping.OpcUaNodeClass.Variable)
                     {
                         await LoadVariableNodeForSubjectAsync(property, resolvedNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
@@ -170,7 +173,7 @@ internal class OpcUaSubjectLoader
         // First pass: match known attributes from C# model
         foreach (var attribute in property.Attributes)
         {
-            if (!_configuration.NodeMapper.TryGetMapping(attribute, out var attributeConfiguration))
+            if (!_configuration.Mapper.TryGetMapping(attribute, _subject, out var attributeConfiguration))
                 continue;
 
             var attributeBrowseName = attributeConfiguration.BrowseName ?? attribute.BrowseName;
@@ -386,14 +389,14 @@ internal class OpcUaSubjectLoader
         ISession session,
         CancellationToken cancellationToken)
     {
-        // Use NodeMapper for property lookup (supports attributes, path provider, and fluent config)
-        return await _configuration.NodeMapper.TryGetPropertyAsync(
+        // Use Mapper for property lookup (supports attributes, path provider, and fluent config)
+        return await _configuration.Mapper.TryGetPropertyAsync(
             registeredSubject, new OpcUaLookupKey(nodeReference, session), cancellationToken).ConfigureAwait(false);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
-        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
+        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property, _subject);
         property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
 
         if (!_ownership.ClaimSource(property.Reference))
@@ -422,7 +425,7 @@ internal class OpcUaSubjectLoader
         }
 
         // Find [OpcUaValue] property and monitor the node for it
-        var valueProperty = childSubject.TryGetValueProperty(_configuration.NodeMapper);
+        var valueProperty = childSubject.TryGetValueProperty(_configuration.Mapper, _subject);
         if (valueProperty != null)
         {
             MonitorValueNode(nodeId, valueProperty, monitoredItems);
@@ -441,7 +444,7 @@ internal class OpcUaSubjectLoader
                     continue; // Skip the value property
                 }
 
-                var childPropertyName = childProperty.ResolvePropertyName(_configuration.NodeMapper);
+                var childPropertyName = childProperty.ResolvePropertyName(_configuration.Mapper, _subject);
                 if (childPropertyName == childNode.BrowseName.Name)
                 {
                     MonitorValueNode(childNodeId, childProperty, monitoredItems);

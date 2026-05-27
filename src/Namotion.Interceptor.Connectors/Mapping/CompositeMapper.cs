@@ -3,6 +3,9 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Mapping;
 
+/// <summary>
+/// Combines multiple mappers with "last wins" merge semantics.
+/// </summary>
 public class CompositeMapper<TMapping> : IPropertyMapper<TMapping>
     where TMapping : IPropertyMapping<TMapping>
 {
@@ -22,15 +25,16 @@ public class CompositeMapper<TMapping> : IPropertyMapper<TMapping>
 
     public bool TryGetMapping(
         RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out TMapping? mapping)
     {
         mapping = default;
         var found = false;
         foreach (var inner in _mappers)
         {
-            if (inner.TryGetMapping(property, out var partial))
+            if (inner.TryGetMapping(property, rootSubject, out var partial))
             {
-                mapping = found ? _merge(partial, mapping!) : partial;
+                mapping = found ? _merge(partial, mapping!) : partial; // Later mappers override earlier ones (partial=primary, accumulated=fallback)
                 found = true;
             }
         }

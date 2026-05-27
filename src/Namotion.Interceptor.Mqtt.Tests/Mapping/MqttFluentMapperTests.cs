@@ -23,7 +23,7 @@ public class MqttFluentMapperTests
         var property = registeredSubject.TryGetProperty("Temperature")!;
 
         // Act
-        var result = mapper.TryGetMapping(property, out var mapping);
+        var result = mapper.TryGetMapping(property, subject, out var mapping);
 
         // Assert
         Assert.True(result);
@@ -44,7 +44,7 @@ public class MqttFluentMapperTests
         var property = registeredSubject.TryGetProperty("Unmapped")!;
 
         // Act
-        var result = mapper.TryGetMapping(property, out _);
+        var result = mapper.TryGetMapping(property, subject, out _);
 
         // Assert
         Assert.False(result);
@@ -62,7 +62,7 @@ public class MqttFluentMapperTests
         var property = registeredSubject.TryGetProperty("Temperature")!;
 
         // Act
-        mapper.TryGetMapping(property, out var mapping);
+        mapper.TryGetMapping(property, subject, out var mapping);
 
         // Assert
         Assert.Equal("sensors/temperature", mapping!.Topic);

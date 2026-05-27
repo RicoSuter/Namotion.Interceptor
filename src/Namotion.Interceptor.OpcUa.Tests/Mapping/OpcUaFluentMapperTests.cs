@@ -12,7 +12,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 public class OpcUaFluentMapperTests
 {
     [Fact]
-    public void TryGetNodeConfiguration_WithMappedProperty_ReturnsConfiguration()
+    public void WhenPropertyIsMapped_ThenReturnsConfiguration()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -23,14 +23,14 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(property, out var config));
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
         Assert.Equal("CustomName", config.BrowseName);
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithUnmappedProperty_ReturnsNull()
+    public void WhenPropertyIsUnmapped_ThenReturnsFalse()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -41,11 +41,11 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Number")!; // Not mapped
 
         // Act & Assert
-        Assert.False(mapper.TryGetMapping(property, out _));
+        Assert.False(mapper.TryGetMapping(property, subject, out _));
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithMultipleProperties_ReturnsCorrectConfiguration()
+    public void WhenMultiplePropertiesMapped_ThenReturnsCorrectConfiguration()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -58,8 +58,8 @@ public class OpcUaFluentMapperTests
         var numberProperty = registeredSubject.TryGetProperty("Number")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(nameProperty, out var nameConfig));
-        Assert.True(mapper.TryGetMapping(numberProperty, out var numberConfig));
+        Assert.True(mapper.TryGetMapping(nameProperty, subject, out var nameConfig));
+        Assert.True(mapper.TryGetMapping(numberProperty, subject, out var numberConfig));
 
         // Assert
         Assert.Equal("NameNode", nameConfig.BrowseName);
@@ -70,7 +70,7 @@ public class OpcUaFluentMapperTests
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithAllFluentMethods_ReturnsFullConfiguration()
+    public void WhenAllFluentMethodsUsed_ThenReturnsFullConfiguration()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -100,7 +100,7 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(property, out var config));
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
         Assert.Equal("TestName", config.BrowseName);
@@ -126,7 +126,7 @@ public class OpcUaFluentMapperTests
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithChainedCalls_UpdatesConfiguration()
+    public void WhenChainedCallsOverridePrevious_ThenLastCallWins()
     {
         // Arrange - Multiple fluent calls should update the same config
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -141,7 +141,7 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(property, out var config));
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
         Assert.Equal("Second", config.BrowseName); // Last call wins
@@ -150,7 +150,7 @@ public class OpcUaFluentMapperTests
     }
 
     [Fact]
-    public void Map_ReturnsMapperForChaining()
+    public void WhenMappingMultipleProperties_ThenMapperSupportsChaining()
     {
         // Arrange & Act
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -162,13 +162,13 @@ public class OpcUaFluentMapperTests
         var registeredSubject = new RegisteredSubject(subject);
 
         // Assert - All properties should be mapped
-        Assert.True(mapper.TryGetMapping(registeredSubject.TryGetProperty("Name")!, out _));
-        Assert.True(mapper.TryGetMapping(registeredSubject.TryGetProperty("Number")!, out _));
-        Assert.True(mapper.TryGetMapping(registeredSubject.TryGetProperty("Connected")!, out _));
+        Assert.True(mapper.TryGetMapping(registeredSubject.TryGetProperty("Name")!, subject, out _));
+        Assert.True(mapper.TryGetMapping(registeredSubject.TryGetProperty("Number")!, subject, out _));
+        Assert.True(mapper.TryGetMapping(registeredSubject.TryGetProperty("Connected")!, subject, out _));
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithAdditionalReference_ReturnsReference()
+    public void WhenAdditionalReferenceConfigured_ThenReturnsReference()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -181,7 +181,7 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(property, out var config));
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
         Assert.NotNull(config.AdditionalReferences);
@@ -193,7 +193,7 @@ public class OpcUaFluentMapperTests
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithMultipleAdditionalReferences_ReturnsAll()
+    public void WhenMultipleAdditionalReferencesConfigured_ThenReturnsAll()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -207,7 +207,7 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(property, out var config));
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
         Assert.NotNull(config.AdditionalReferences);
@@ -224,7 +224,7 @@ public class OpcUaFluentMapperTests
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithNestedMapping_ReturnsNestedConfiguration()
+    public void WhenNestedMappingConfigured_ThenReturnsNestedConfiguration()
     {
         // Arrange - create test model with nested structure (TestRoot -> Person -> Address)
         var context = InterceptorSubjectContext.Create()
@@ -254,9 +254,9 @@ public class OpcUaFluentMapperTests
         var cityProperty = addressSubject.Properties.First(p => p.Name == "City");
 
         // Act
-        Assert.True(mapper.TryGetMapping(personProperty, out var personConfig));
-        Assert.True(mapper.TryGetMapping(addressProperty, out var addressConfig));
-        Assert.True(mapper.TryGetMapping(cityProperty, out var cityConfig));
+        Assert.True(mapper.TryGetMapping(personProperty, root, out var personConfig));
+        Assert.True(mapper.TryGetMapping(addressProperty, root, out var addressConfig));
+        Assert.True(mapper.TryGetMapping(cityProperty, root, out var cityConfig));
 
         // Assert
         Assert.Equal("MainPerson", personConfig.BrowseName);
@@ -267,7 +267,7 @@ public class OpcUaFluentMapperTests
     #region Namespace Parameter Tests
 
     [Fact]
-    public void TypeDefinition_WithNamespace_SetsConfiguration()
+    public void WhenTypeDefinitionHasNamespace_ThenSetsConfiguration()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -280,7 +280,7 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(property, out var config));
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
         Assert.Equal("DeviceType", config.TypeDefinition);
@@ -288,7 +288,7 @@ public class OpcUaFluentMapperTests
     }
 
     [Fact]
-    public void TypeDefinition_WithoutNamespace_SetsOnlyIdentifier()
+    public void WhenTypeDefinitionHasNoNamespace_ThenSetsOnlyIdentifier()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -301,7 +301,7 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(property, out var config));
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
         Assert.Equal("FolderType", config.TypeDefinition);
@@ -309,7 +309,7 @@ public class OpcUaFluentMapperTests
     }
 
     [Fact]
-    public void ReferenceType_WithNamespace_SetsConfiguration()
+    public void WhenReferenceTypeHasNamespace_ThenSetsConfiguration()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -322,7 +322,7 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(property, out var config));
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
         Assert.Equal("HasDevice", config.ReferenceType);
@@ -330,7 +330,7 @@ public class OpcUaFluentMapperTests
     }
 
     [Fact]
-    public void DataType_WithNamespace_SetsConfiguration()
+    public void WhenDataTypeHasNamespace_ThenSetsConfiguration()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -343,7 +343,7 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(property, out var config));
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
         Assert.Equal("TemperatureType", config.DataType);
@@ -351,7 +351,7 @@ public class OpcUaFluentMapperTests
     }
 
     [Fact]
-    public void ItemReferenceType_WithNamespace_SetsConfiguration()
+    public void WhenItemReferenceTypeHasNamespace_ThenSetsConfiguration()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -364,7 +364,7 @@ public class OpcUaFluentMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        Assert.True(mapper.TryGetMapping(property, out var config));
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
         Assert.Equal("ContainsDevice", config.ItemReferenceType);
@@ -376,7 +376,7 @@ public class OpcUaFluentMapperTests
     #region TryGetPropertyAsync Tests
 
     [Fact]
-    public async Task TryGetPropertyAsync_WithMatchingBrowseName_ReturnsProperty()
+    public async Task WhenMatchingBrowseName_ThenReturnsProperty()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()
@@ -404,7 +404,7 @@ public class OpcUaFluentMapperTests
     }
 
     [Fact]
-    public async Task TryGetPropertyAsync_WithUnmappedProperty_ReturnsNull()
+    public async Task WhenPropertyIsUnmapped_ThenReturnsNull()
     {
         // Arrange
         var mapper = new OpcUaFluentMapper<TestRoot>()

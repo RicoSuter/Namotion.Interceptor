@@ -13,11 +13,11 @@ public class CompositeMapperTests
             new(primary.A ?? fallback.A, primary.B ?? fallback.B);
     }
 
-    private static RegisteredSubjectProperty NameProperty()
+    private static (RegisteredSubjectProperty Property, IInterceptorSubject Subject) NameProperty()
     {
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var person = new Person(context) { FirstName = "x" };
-        return person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+        return (person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!, person);
     }
 
     [Fact]
@@ -25,11 +25,12 @@ public class CompositeMapperTests
     {
         // Arrange
         var mapper = new CompositeMapper<TestMapping>(
-            new DelegateMapper<TestMapping>(_ => null),
-            new DelegateMapper<TestMapping>(_ => null));
+            new DelegateMapper<TestMapping>((_, _) => null),
+            new DelegateMapper<TestMapping>((_, _) => null));
 
         // Act
-        var found = mapper.TryGetMapping(NameProperty(), out var mapping);
+        var (property, subject) = NameProperty();
+        var found = mapper.TryGetMapping(property, subject, out var mapping);
 
         // Assert
         Assert.False(found);
@@ -41,11 +42,12 @@ public class CompositeMapperTests
     {
         // Arrange
         var mapper = new CompositeMapper<TestMapping>(
-            new DelegateMapper<TestMapping>(_ => new TestMapping(A: "first", B: 1)),
-            new DelegateMapper<TestMapping>(_ => new TestMapping(A: "second", B: null)));
+            new DelegateMapper<TestMapping>((_, _) => new TestMapping(A: "first", B: 1)),
+            new DelegateMapper<TestMapping>((_, _) => new TestMapping(A: "second", B: null)));
 
         // Act
-        mapper.TryGetMapping(NameProperty(), out var mapping);
+        var (property, subject) = NameProperty();
+        mapper.TryGetMapping(property, subject, out var mapping);
 
         // Assert
         Assert.NotNull(mapping);
@@ -59,11 +61,12 @@ public class CompositeMapperTests
         // Arrange
         var mapper = new CompositeMapper<TestMapping>(
             (primary, fallback) => new TestMapping(A: fallback.A, B: primary.B ?? fallback.B),
-            new DelegateMapper<TestMapping>(_ => new TestMapping(A: "first", B: 1)),
-            new DelegateMapper<TestMapping>(_ => new TestMapping(A: "second", B: 2)));
+            new DelegateMapper<TestMapping>((_, _) => new TestMapping(A: "first", B: 1)),
+            new DelegateMapper<TestMapping>((_, _) => new TestMapping(A: "second", B: 2)));
 
         // Act
-        mapper.TryGetMapping(NameProperty(), out var mapping);
+        var (property, subject) = NameProperty();
+        mapper.TryGetMapping(property, subject, out var mapping);
 
         // Assert
         Assert.NotNull(mapping);

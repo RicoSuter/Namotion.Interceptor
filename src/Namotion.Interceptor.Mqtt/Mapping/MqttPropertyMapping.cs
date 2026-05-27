@@ -3,6 +3,9 @@ using Namotion.Interceptor.Connectors.Mapping;
 
 namespace Namotion.Interceptor.Mqtt.Mapping;
 
+/// <summary>
+/// MQTT-specific property mapping carrying topic, QoS, and retain settings.
+/// </summary>
 public sealed record MqttPropertyMapping(
     string? Topic = null,
     MqttQualityOfServiceLevel? QualityOfService = null,

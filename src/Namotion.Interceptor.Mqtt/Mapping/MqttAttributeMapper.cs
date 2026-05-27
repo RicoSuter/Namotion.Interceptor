@@ -23,6 +23,7 @@ public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, M
 
     public bool TryGetMapping(
         RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)
     {
         // Single-pass lookup to avoid LINQ allocation

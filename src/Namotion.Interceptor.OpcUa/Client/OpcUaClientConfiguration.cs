@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 public class OpcUaClientConfiguration
 {
-    private static readonly IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey> DefaultNodeMapper =
+    private static readonly IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey> DefaultMapper =
         new OpcUaCompositeMapper(
             new OpcUaPathProviderMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultConnectorName)),
             new OpcUaAttributeMapper());
@@ -332,7 +332,7 @@ public class OpcUaClientConfiguration
     /// Maps C# properties to OPC UA nodes.
     /// Defaults to composite of OpcUaPathProviderMapper (with "opc" source) and OpcUaAttributeMapper.
     /// </summary>
-    public IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey> NodeMapper { get; set; } = DefaultNodeMapper;
+    public IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey> Mapper { get; set; } = DefaultMapper;
 
     /// <summary>
     /// Gets or sets the timeout for session disposal during shutdown.

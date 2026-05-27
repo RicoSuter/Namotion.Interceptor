@@ -27,6 +27,7 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
     /// <inheritdoc />
     public bool TryGetMapping(
         RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
     {
         // Get class-level OpcUaNode from the property's type (for object references)

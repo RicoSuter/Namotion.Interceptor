@@ -21,6 +21,7 @@ public class OpcUaPathProviderMapper : IReversePropertyMapper<OpcUaPropertyMappi
     /// <inheritdoc />
     public bool TryGetMapping(
         RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
     {
         if (!_pathProvider.IsPropertyIncluded(property))

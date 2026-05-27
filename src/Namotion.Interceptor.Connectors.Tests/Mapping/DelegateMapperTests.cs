@@ -16,10 +16,10 @@ public class DelegateMapperTests
         var person = new Person(context) { FirstName = "x" };
         var nameProperty = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
 
-        var mapper = new DelegateMapper<TestMapping>(p => new TestMapping(p.Name));
+        var mapper = new DelegateMapper<TestMapping>((p, _) => new TestMapping(p.Name));
 
         // Act
-        var found = mapper.TryGetMapping(nameProperty, out var mapping);
+        var found = mapper.TryGetMapping(nameProperty, person, out var mapping);
 
         // Assert
         Assert.True(found);
@@ -34,10 +34,10 @@ public class DelegateMapperTests
         var person = new Person(context);
         var nameProperty = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
 
-        var mapper = new DelegateMapper<TestMapping>(_ => null);
+        var mapper = new DelegateMapper<TestMapping>((_, _) => null);
 
         // Act
-        var found = mapper.TryGetMapping(nameProperty, out var mapping);
+        var found = mapper.TryGetMapping(nameProperty, person, out var mapping);
 
         // Assert
         Assert.False(found);

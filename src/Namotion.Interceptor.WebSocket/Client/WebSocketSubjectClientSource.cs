@@ -318,7 +318,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.CanContainSubjects && (mapper is null || mapper.TryGetMapping(p, out _)))
+            .Where(p => !p.CanContainSubjects && (mapper is null || mapper.TryGetMapping(p, _subject, out _)))
             .ToList();
 
         var claimedCount = 0;

@@ -117,12 +117,12 @@ namespace Namotion.Interceptor.Connectors.Mapping
     {
         public CompositeMapper(params Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<TMapping>[] mappers) { }
         public CompositeMapper(System.Func<TMapping, TMapping, TMapping> merge, params Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<TMapping>[] mappers) { }
-        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping) { }
+        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping) { }
     }
     public class DelegateMapper<TMapping> : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<TMapping>
     {
-        public DelegateMapper(System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, TMapping?> selector) { }
-        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping) { }
+        public DelegateMapper(System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.IInterceptorSubject, TMapping?> selector) { }
+        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping) { }
     }
     public static class ExpressionPathHelper
     {
@@ -130,7 +130,7 @@ namespace Namotion.Interceptor.Connectors.Mapping
     }
     public interface IPropertyMapper<TMapping>
     {
-        bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping);
+        bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping);
     }
     public interface IPropertyMapping<TSelf>
         where TSelf : Namotion.Interceptor.Connectors.Mapping.IPropertyMapping<TSelf>

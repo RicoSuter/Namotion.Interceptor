@@ -7,6 +7,9 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Mqtt.Mapping;
 
+/// <summary>
+/// Combines multiple MQTT property mappers with last-wins merge semantics.
+/// </summary>
 public sealed class MqttCompositeMapper
     : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
 {
@@ -23,8 +26,9 @@ public sealed class MqttCompositeMapper
 
     public bool TryGetMapping(
         RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)
-        => _forward.TryGetMapping(property, out mapping);
+        => _forward.TryGetMapping(property, rootSubject, out mapping);
 
     public async ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
         RegisteredSubject root, MqttLookupKey key, CancellationToken cancellationToken)

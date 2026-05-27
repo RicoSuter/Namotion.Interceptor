@@ -24,8 +24,9 @@ public sealed class OpcUaCompositeMapper
 
     public bool TryGetMapping(
         RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
-        => _forward.TryGetMapping(property, out mapping);
+        => _forward.TryGetMapping(property, rootSubject, out mapping);
 
     public async ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
         RegisteredSubject root, OpcUaLookupKey key, CancellationToken cancellationToken)

@@ -34,6 +34,7 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
     /// <inheritdoc />
     public bool TryGetMapping(
         RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
     {
         var path = GetPropertyPath(property);

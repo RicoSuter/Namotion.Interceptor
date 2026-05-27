@@ -506,6 +506,7 @@ public interface IPropertyMapper<TMapping>
 {
     bool TryGetMapping(
         RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out TMapping? mapping);
 }
 
@@ -531,7 +532,7 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
 
 #### Default Composition
 
-Each connector defaults its `Mapper` (or `NodeMapper` for OPC UA) to a composite that chains a path-provider adapter with a protocol-specific attribute mapper. For example, the MQTT client defaults to:
+Each connector defaults its `Mapper` to a composite that chains a path-provider adapter with a protocol-specific attribute mapper. For example, the MQTT client defaults to:
 
 ```csharp
 Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/'))
@@ -540,7 +541,7 @@ Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/'))
 The OPC UA client defaults to:
 
 ```csharp
-NodeMapper = new OpcUaCompositeMapper(
+Mapper = new OpcUaCompositeMapper(
     new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
     new OpcUaAttributeMapper())
 ```
@@ -551,7 +552,7 @@ Each connector ships thin wrappers that adapt generic infrastructure to protocol
 
 | Connector | Mapper Wrappers                                                                                               |
 |-----------|---------------------------------------------------------------------------------------------------------------|
-| MQTT      | `MqttPathProviderMapper`, `MqttCompositeMapper`                                                       |
+| MQTT      | `MqttPathProviderMapper`, `MqttAttributeMapper`, `MqttFluentMapper<T>`, `MqttCompositeMapper` |
 | WebSocket | `WebSocketPathProviderMapper`                                                                         |
 | OPC UA    | `OpcUaPathProviderMapper`, `OpcUaAttributeMapper`, `OpcUaFluentMapper<T>`, `OpcUaCompositeMapper` |
 

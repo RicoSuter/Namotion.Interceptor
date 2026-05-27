@@ -98,7 +98,7 @@ await server.StartAsync(cancellationToken);
 | `BaseAddress` | `string` | "opc.tcp://localhost:4840/" | Server endpoint address |
 | `NamespaceUri` | `string` | "http://namotion.com/Interceptor/" | Primary namespace URI for custom nodes |
 | `ValueConverter` | `OpcUaValueConverter` | *required* | Converts between C# properties and OPC UA values |
-| `NodeMapper` | `IPropertyMapper<OpcUaPropertyMapping>` | OpcUaCompositeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
+| `Mapper` | `IPropertyMapper<OpcUaPropertyMapping>` | OpcUaCompositeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
 | `BufferTime` | `TimeSpan?` | 8ms | Time window to buffer incoming property changes before publishing to clients |
 | `TelemetryContext` | `ITelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |

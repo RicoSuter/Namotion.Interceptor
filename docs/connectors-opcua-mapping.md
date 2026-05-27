@@ -21,18 +21,18 @@ Some configuration applies only to one side:
 - `SamplingInterval`, `QueueSize`, `DataChangeTrigger` - Client monitoring
 - `EventNotifier`, `ModellingRule` - Server node structure
 
-## Node Mapper Configuration
+## Mapper Configuration
 
-The mapping is driven by the `IPropertyMapper<OpcUaPropertyMapping>` interface (or `IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>` for the client, which adds reverse lookup), configured via the `NodeMapper` property on `OpcUaClientConfiguration` and `OpcUaServerConfiguration`. This extends the general [property mapper](connectors.md#property-mappers) concept with OPC UA-specific node metadata. The default is an `OpcUaCompositeMapper` combining:
+The mapping is driven by the `IPropertyMapper<OpcUaPropertyMapping>` interface (or `IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>` for the client, which adds reverse lookup), configured via the `Mapper` property on `OpcUaClientConfiguration` and `OpcUaServerConfiguration`. This extends the general [property mapper](connectors.md#property-mappers) concept with OPC UA-specific node metadata. The default is an `OpcUaCompositeMapper` combining:
 - `OpcUaPathProviderMapper`: maps `[Path("opc", "...")]` attributes (see [Path Providers](connectors.md#path-providers))
 - `OpcUaAttributeMapper`: maps `[OpcUaNode]` and `[OpcUaReference]` attributes
 
-For custom mapping, set `NodeMapper` explicitly:
+For custom mapping, set `Mapper` explicitly:
 
 ```csharp
 var config = new OpcUaClientConfiguration
 {
-    NodeMapper = new OpcUaCompositeMapper(
+    Mapper = new OpcUaCompositeMapper(
         new OpcUaFluentMapper<Machine>(),        // Instance overrides (see Fluent Configuration)
         new OpcUaAttributeMapper(),               // Attribute defaults
         new OpcUaPathProviderMapper(
@@ -419,7 +419,7 @@ var mapper = new OpcUaFluentMapper<Machine>()
 // Combine both: Fluent overrides, attributes provide defaults
 var config = new OpcUaClientConfiguration
 {
-    NodeMapper = new OpcUaCompositeMapper(
+    Mapper = new OpcUaCompositeMapper(
         mapper,                          // Instance overrides
         new OpcUaAttributeMapper())  // Class-level defaults
 };
@@ -446,7 +446,7 @@ var mapper = new OpcUaFluentMapper<Machine>()
 var config = new OpcUaClientConfiguration
 {
     ServerUrl = "opc.tcp://localhost:4840",
-    NodeMapper = new OpcUaCompositeMapper(
+    Mapper = new OpcUaCompositeMapper(
         mapper,                              // Fluent config takes priority
         new OpcUaAttributeMapper(),      // Then attributes
         new OpcUaPathProviderMapper(DefaultPathProvider.Instance))  // Fallback

@@ -8,6 +8,9 @@ using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mqtt.Mapping;
 
+/// <summary>
+/// Maps properties to MQTT topics using a path provider for segment resolution.
+/// </summary>
 public class MqttPathProviderMapper
     : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
 {
@@ -20,6 +23,7 @@ public class MqttPathProviderMapper
 
     public bool TryGetMapping(
         RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)
     {
         if (!_pathProvider.IsPropertyIncluded(property))
@@ -28,7 +32,7 @@ public class MqttPathProviderMapper
             return false;
         }
 
-        var topic = property.TryGetPath(_pathProvider, rootSubject: null);
+        var topic = property.TryGetPath(_pathProvider, rootSubject);
         if (topic is null)
         {
             mapping = null;

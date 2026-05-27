@@ -7,17 +7,17 @@ namespace Namotion.Interceptor.OpcUa;
 
 internal static class OpcUaPropertyExtensions
 {
-    public static string? ResolvePropertyName(this RegisteredSubjectProperty property, IPropertyMapper<OpcUaPropertyMapping> nodeMapper)
+    public static string? ResolvePropertyName(this RegisteredSubjectProperty property, IPropertyMapper<OpcUaPropertyMapping> nodeMapper, IInterceptorSubject rootSubject)
     {
-        if (!nodeMapper.TryGetMapping(property, out var mapping))
+        if (!nodeMapper.TryGetMapping(property, rootSubject, out var mapping))
             return null;
 
         return mapping.BrowseName ?? property.BrowseName;
     }
 
-    public static bool IsPropertyIncluded(this RegisteredSubjectProperty property, IPropertyMapper<OpcUaPropertyMapping> nodeMapper)
+    public static bool IsPropertyIncluded(this RegisteredSubjectProperty property, IPropertyMapper<OpcUaPropertyMapping> nodeMapper, IInterceptorSubject rootSubject)
     {
-        return nodeMapper.TryGetMapping(property, out _);
+        return nodeMapper.TryGetMapping(property, rootSubject, out _);
     }
 
     public static OpcUaNodeAttribute? TryGetOpcUaNodeAttribute(this RegisteredSubjectProperty property)
@@ -33,11 +33,11 @@ internal static class OpcUaPropertyExtensions
         return null;
     }
 
-    public static RegisteredSubjectProperty? TryGetValueProperty(this RegisteredSubject subject, IPropertyMapper<OpcUaPropertyMapping> nodeMapper)
+    public static RegisteredSubjectProperty? TryGetValueProperty(this RegisteredSubject subject, IPropertyMapper<OpcUaPropertyMapping> nodeMapper, IInterceptorSubject rootSubject)
     {
         foreach (var property in subject.Properties)
         {
-            if (nodeMapper.TryGetMapping(property, out var mapping) && mapping.IsValue == true)
+            if (nodeMapper.TryGetMapping(property, rootSubject, out var mapping) && mapping.IsValue == true)
             {
                 return property;
             }

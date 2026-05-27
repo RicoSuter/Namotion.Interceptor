@@ -106,7 +106,7 @@ public record OpcUaPropertyMapping : IPropertyMapping<OpcUaPropertyMapping>
     /// This configuration takes priority; null fields are filled from the fallback.
     /// </summary>
     /// <param name="other">Fallback configuration to use when this has null fields.</param>
-    public OpcUaPropertyMapping WithFallback(OpcUaPropertyMapping? other)
+    internal OpcUaPropertyMapping WithFallback(OpcUaPropertyMapping? other)
     {
         if (other is null) return this;
 

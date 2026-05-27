@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.OpcUa.Server;
 
 public class OpcUaServerConfiguration
 {
-    private static readonly IPropertyMapper<OpcUaPropertyMapping> DefaultNodeMapper =
+    private static readonly IPropertyMapper<OpcUaPropertyMapping> DefaultMapper =
         new OpcUaCompositeMapper(
             new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
             new OpcUaAttributeMapper());
@@ -42,7 +42,7 @@ public class OpcUaServerConfiguration
     /// Maps C# properties to OPC UA nodes.
     /// Defaults to composite of OpcUaPathProviderMapper (with "opc" source) and OpcUaAttributeMapper.
     /// </summary>
-    public IPropertyMapper<OpcUaPropertyMapping> NodeMapper { get; init; } = DefaultNodeMapper;
+    public IPropertyMapper<OpcUaPropertyMapping> Mapper { get; set; } = DefaultMapper;
 
     /// <summary>
     /// Gets or sets a value indicating whether to clean up old certificates from the

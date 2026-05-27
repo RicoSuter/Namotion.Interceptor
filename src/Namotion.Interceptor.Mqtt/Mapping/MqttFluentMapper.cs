@@ -11,6 +11,9 @@ using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mqtt.Mapping;
 
+/// <summary>
+/// Code-based fluent mapper for configuring MQTT property mappings at runtime.
+/// </summary>
 public class MqttFluentMapper<TSubject>
     : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
 {
@@ -28,6 +31,7 @@ public class MqttFluentMapper<TSubject>
 
     public bool TryGetMapping(
         RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)
     {
         var path = property.GetPath();
@@ -48,7 +52,7 @@ public class MqttFluentMapper<TSubject>
             if (property.IsAttribute)
                 continue;
 
-            if (TryGetMapping(property, out var mapping) && mapping.Topic == key.Topic)
+            if (TryGetMapping(property, root.Subject, out var mapping) && mapping.Topic == key.Topic)
                 return new ValueTask<RegisteredSubjectProperty?>(property);
         }
         return new ValueTask<RegisteredSubjectProperty?>(result: null);
