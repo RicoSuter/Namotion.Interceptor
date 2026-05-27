@@ -35,7 +35,9 @@ public static class MqttSubjectExtensions
                 BrokerHost = brokerHost,
                 BrokerPort = brokerPort,
                 TopicPrefix = topicPrefix,
-                Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider(pathProviderName, '/'))
+                Mapper = new MqttCompositeMapper(
+                    new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider(pathProviderName, '/')),
+                    new MqttAttributePropertyMapper(pathProviderName))
             });
     }
 
@@ -85,7 +87,9 @@ public static class MqttSubjectExtensions
                 BrokerHost = brokerHost,
                 BrokerPort = brokerPort,
                 TopicPrefix = topicPrefix,
-                Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider(pathProviderName, '/'))
+                Mapper = new MqttCompositeMapper(
+                    new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider(pathProviderName, '/')),
+                    new MqttAttributePropertyMapper(pathProviderName))
             });
     }
 

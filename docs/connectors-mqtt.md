@@ -177,11 +177,22 @@ The `Mapper` property accepts any `IReversePropertyMapper<MqttPropertyMapping, M
 | `QualityOfService` | `MqttQualityOfServiceLevel?` | Per-property QoS override            |
 | `Retain`           | `bool?`                      | Per-property retain flag override    |
 
-The built-in `MqttPathProviderPropertyMapper` wraps a `PathProviderBase` and produces mappings with the `Topic` field populated from the path provider. For more complex scenarios, use `MqttCompositeMapper` to combine multiple mappers with merge semantics. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
+The built-in mapper types:
+
+| Mapper | Purpose |
+|---|---|
+| `MqttPathProviderPropertyMapper` | Wraps a `PathProviderBase` to produce topics from `[Path]` attributes |
+| `MqttAttributePropertyMapper` | Reads `[MqttTopic]` attributes for per-topic QoS and Retain overrides |
+| `MqttFluentPropertyMapper<T>` | Code-based per-property configuration via lambda expressions |
+| `MqttCompositeMapper` | Combines multiple mappers with merge semantics |
+
+The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, pathProviderName)`) default to a composite of `MqttPathProviderPropertyMapper` + `MqttAttributePropertyMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
 
 ## Topic Mapping
 
-Properties are mapped to MQTT topics using the `[Path]` attribute. The topic is constructed by combining the optional `TopicPrefix` with the path specified in the attribute.
+### [Path] attribute
+
+Properties are mapped to MQTT topics using the `[Path]` attribute. The topic is constructed by combining the optional `TopicPrefix` with the path from the attribute.
 
 ```csharp
 [InterceptorSubject]
@@ -197,6 +208,37 @@ public partial class Sensor
     [Path("mqtt", "metrics/Humidity")]
     public partial decimal Humidity { get; set; }
 }
+```
+
+### [MqttTopic] attribute
+
+For per-topic QoS and Retain overrides, use `[MqttTopic]` instead of (or alongside) `[Path]`:
+
+```csharp
+[InterceptorSubject]
+public partial class Sensor
+{
+    [MqttTopic("sensors/temperature")]
+    public partial decimal Temperature { get; set; }
+
+    [MqttTopic("alerts/critical", QualityOfService = MqttQualityOfServiceLevel.ExactlyOnce,
+        Retain = true, RetainSet = true)]
+    public partial string CriticalAlert { get; set; }
+}
+```
+
+When both `[Path]` and `[MqttTopic]` are present on the same property, `[MqttTopic]` fields take priority (it runs later in the composite chain).
+
+### Fluent mapper
+
+For configuration that cannot be expressed in attributes (e.g., mapping the same model to different topics per instance), use `MqttFluentPropertyMapper<T>`:
+
+```csharp
+var mapper = new MqttFluentPropertyMapper<Sensor>()
+    .Map(s => s.Temperature, b => b
+        .WithTopic("line1/sensors/temp")
+        .WithQualityOfService(MqttQualityOfServiceLevel.ExactlyOnce)
+        .WithRetain(true));
 ```
 
 ## Serialization
