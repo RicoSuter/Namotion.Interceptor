@@ -9,13 +9,13 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
-public class OpcUaFluentPropertyMapperTests
+public class OpcUaFluentMapperTests
 {
     [Fact]
     public void TryGetNodeConfiguration_WithMappedProperty_ReturnsConfiguration()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p.BrowseName("CustomName"));
 
         var subject = new TestRoot(new InterceptorSubjectContext());
@@ -33,7 +33,7 @@ public class OpcUaFluentPropertyMapperTests
     public void TryGetNodeConfiguration_WithUnmappedProperty_ReturnsNull()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p.BrowseName("CustomName"));
 
         var subject = new TestRoot(new InterceptorSubjectContext());
@@ -48,7 +48,7 @@ public class OpcUaFluentPropertyMapperTests
     public void TryGetNodeConfiguration_WithMultipleProperties_ReturnsCorrectConfiguration()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p.BrowseName("NameNode").SamplingInterval(100))
             .Map(r => r.Number, p => p.BrowseName("NumberNode").SamplingInterval(500));
 
@@ -73,7 +73,7 @@ public class OpcUaFluentPropertyMapperTests
     public void TryGetNodeConfiguration_WithAllFluentMethods_ReturnsFullConfiguration()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("TestName")
                 .BrowseNamespaceUri("http://test/")
@@ -129,7 +129,7 @@ public class OpcUaFluentPropertyMapperTests
     public void TryGetNodeConfiguration_WithChainedCalls_UpdatesConfiguration()
     {
         // Arrange - Multiple fluent calls should update the same config
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("First")
                 .SamplingInterval(100)
@@ -153,7 +153,7 @@ public class OpcUaFluentPropertyMapperTests
     public void Map_ReturnsMapperForChaining()
     {
         // Arrange & Act
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p.BrowseName("Name1"))
             .Map(r => r.Number, p => p.BrowseName("Name2"))
             .Map(r => r.Connected, p => p.BrowseName("Name3"));
@@ -171,7 +171,7 @@ public class OpcUaFluentPropertyMapperTests
     public void TryGetNodeConfiguration_WithAdditionalReference_ReturnsReference()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("TestNode")
                 .AdditionalReference("HasInterface", null, "i=17602"));
@@ -196,7 +196,7 @@ public class OpcUaFluentPropertyMapperTests
     public void TryGetNodeConfiguration_WithMultipleAdditionalReferences_ReturnsAll()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("TestNode")
                 .AdditionalReference("HasInterface", null, "i=17602")
@@ -238,7 +238,7 @@ public class OpcUaFluentPropertyMapperTests
             }
         };
 
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Person, person => person
                 .BrowseName("MainPerson")
                 .Map(p => p.Address!, address => address
@@ -270,7 +270,7 @@ public class OpcUaFluentPropertyMapperTests
     public void TypeDefinition_WithNamespace_SetsConfiguration()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("Device")
                 .TypeDefinition("DeviceType", "http://opcfoundation.org/UA/DI/"));
@@ -291,7 +291,7 @@ public class OpcUaFluentPropertyMapperTests
     public void TypeDefinition_WithoutNamespace_SetsOnlyIdentifier()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("Folder")
                 .TypeDefinition("FolderType"));
@@ -312,7 +312,7 @@ public class OpcUaFluentPropertyMapperTests
     public void ReferenceType_WithNamespace_SetsConfiguration()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("Device")
                 .ReferenceType("HasDevice", "http://opcfoundation.org/UA/DI/"));
@@ -333,7 +333,7 @@ public class OpcUaFluentPropertyMapperTests
     public void DataType_WithNamespace_SetsConfiguration()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("Temperature")
                 .DataType("TemperatureType", "http://example.com/types/"));
@@ -354,7 +354,7 @@ public class OpcUaFluentPropertyMapperTests
     public void ItemReferenceType_WithNamespace_SetsConfiguration()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("Devices")
                 .ItemReferenceType("ContainsDevice", "http://example.com/types/"));
@@ -379,7 +379,7 @@ public class OpcUaFluentPropertyMapperTests
     public async Task TryGetPropertyAsync_WithMatchingBrowseName_ReturnsProperty()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p.BrowseName("CustomName"));
 
         var subject = new TestRoot(new InterceptorSubjectContext());
@@ -407,7 +407,7 @@ public class OpcUaFluentPropertyMapperTests
     public async Task TryGetPropertyAsync_WithUnmappedProperty_ReturnsNull()
     {
         // Arrange
-        var mapper = new OpcUaFluentPropertyMapper<TestRoot>()
+        var mapper = new OpcUaFluentMapper<TestRoot>()
             .Map(r => r.Name, p => p.BrowseName("CustomName"));
 
         var subject = new TestRoot(new InterceptorSubjectContext());

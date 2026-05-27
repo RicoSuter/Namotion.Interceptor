@@ -469,7 +469,7 @@ builder.Services.AddWebSocketSubjectServer<Sensor>(configuration =>
 {
     configuration.Port = 8080;
     configuration.Path = "/ws";
-    configuration.Mapper = new WebSocketPathProviderPropertyMapper(new AttributeBasedPathProvider("ws"));
+    configuration.Mapper = new WebSocketPathProviderMapper(new AttributeBasedPathProvider("ws"));
 });
 ```
 
@@ -524,25 +524,25 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
 
 | Class                                          | Description                                                                                       |
 |------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| `DelegatePropertyMapper<TMapping>`             | Wraps a `Func<RegisteredSubjectProperty, TMapping?>` for simple one-off mappers                   |
-| `CompositePropertyMapper<TMapping>`            | Combines multiple mappers with "last wins" merge semantics via `IPropertyMapping<TMapping>.Merge` |
+| `DelegateMapper<TMapping>`             | Wraps a `Func<RegisteredSubjectProperty, TMapping?>` for simple one-off mappers                   |
+| `CompositeMapper<TMapping>`            | Combines multiple mappers with "last wins" merge semantics via `IPropertyMapping<TMapping>.Merge` |
 
-`CompositePropertyMapper<TMapping>` requires the mapping record to implement `IPropertyMapping<TMapping>`, which provides the static `Merge` method for combining partial configurations.
+`CompositeMapper<TMapping>` requires the mapping record to implement `IPropertyMapping<TMapping>`, which provides the static `Merge` method for combining partial configurations.
 
 #### Default Composition
 
 Each connector defaults its `Mapper` (or `NodeMapper` for OPC UA) to a composite that chains a path-provider adapter with a protocol-specific attribute mapper. For example, the MQTT client defaults to:
 
 ```csharp
-Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/'))
+Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/'))
 ```
 
 The OPC UA client defaults to:
 
 ```csharp
 NodeMapper = new OpcUaCompositeMapper(
-    new OpcUaPathProviderPropertyMapper(new AttributeBasedPathProvider("opc")),
-    new OpcUaAttributePropertyMapper())
+    new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
+    new OpcUaAttributeMapper())
 ```
 
 #### Connector-Specific Wrappers
@@ -551,9 +551,9 @@ Each connector ships thin wrappers that adapt generic infrastructure to protocol
 
 | Connector | Mapper Wrappers                                                                                               |
 |-----------|---------------------------------------------------------------------------------------------------------------|
-| MQTT      | `MqttPathProviderPropertyMapper`, `MqttCompositeMapper`                                                       |
-| WebSocket | `WebSocketPathProviderPropertyMapper`                                                                         |
-| OPC UA    | `OpcUaPathProviderPropertyMapper`, `OpcUaAttributePropertyMapper`, `OpcUaFluentPropertyMapper<T>`, `OpcUaCompositeMapper` |
+| MQTT      | `MqttPathProviderMapper`, `MqttCompositeMapper`                                                       |
+| WebSocket | `WebSocketPathProviderMapper`                                                                         |
+| OPC UA    | `OpcUaPathProviderMapper`, `OpcUaAttributeMapper`, `OpcUaFluentMapper<T>`, `OpcUaCompositeMapper` |
 
 See the protocol-specific documentation for details on each connector's mapping types and configuration.
 

@@ -10,14 +10,14 @@ namespace Namotion.Interceptor.Mqtt.Mapping;
 public sealed class MqttCompositeMapper
     : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
 {
-    private readonly CompositePropertyMapper<MqttPropertyMapping> _forward;
+    private readonly CompositeMapper<MqttPropertyMapping> _forward;
     private readonly IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>[] _mappers;
 
     public MqttCompositeMapper(
         params IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>[] mappers)
     {
         _mappers = mappers;
-        _forward = new CompositePropertyMapper<MqttPropertyMapping>(
+        _forward = new CompositeMapper<MqttPropertyMapping>(
             mappers.Cast<IPropertyMapper<MqttPropertyMapping>>().ToArray());
     }
 

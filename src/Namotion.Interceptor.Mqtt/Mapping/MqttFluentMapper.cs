@@ -9,12 +9,12 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Mqtt.Mapping;
 
-public class MqttFluentPropertyMapper<TSubject>
+public class MqttFluentMapper<TSubject>
     : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
 {
     private readonly ConcurrentDictionary<string, MqttPropertyMapping> _mappings = new();
 
-    public MqttFluentPropertyMapper<TSubject> Map<TValue>(
+    public MqttFluentMapper<TSubject> Map<TValue>(
         Expression<Func<TSubject, TValue>> selector,
         Action<MqttFluentMappingBuilder> configure)
     {

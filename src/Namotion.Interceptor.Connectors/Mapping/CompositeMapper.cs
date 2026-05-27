@@ -3,16 +3,16 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Mapping;
 
-public class CompositePropertyMapper<TMapping> : IPropertyMapper<TMapping>
+public class CompositeMapper<TMapping> : IPropertyMapper<TMapping>
     where TMapping : IPropertyMapping<TMapping>
 {
     private readonly Func<TMapping, TMapping, TMapping> _merge;
     private readonly IPropertyMapper<TMapping>[] _mappers;
 
-    public CompositePropertyMapper(params IPropertyMapper<TMapping>[] mappers)
+    public CompositeMapper(params IPropertyMapper<TMapping>[] mappers)
         : this(TMapping.Merge, mappers) { }
 
-    public CompositePropertyMapper(
+    public CompositeMapper(
         Func<TMapping, TMapping, TMapping> merge,
         params IPropertyMapper<TMapping>[] mappers)
     {

@@ -6,13 +6,13 @@ using Xunit;
 
 namespace Namotion.Interceptor.Mqtt.Tests.Mapping;
 
-public class MqttFluentPropertyMapperTests
+public class MqttFluentMapperTests
 {
     [Fact]
     public void WhenPropertyIsMapped_ThenReturnsMappingWithConfiguredValues()
     {
         // Arrange
-        var mapper = new MqttFluentPropertyMapper<MqttFluentTestSensor>()
+        var mapper = new MqttFluentMapper<MqttFluentTestSensor>()
             .Map(s => s.Temperature, b => b
                 .WithTopic("sensors/temperature")
                 .WithQualityOfService(MqttQualityOfServiceLevel.AtLeastOnce)
@@ -36,7 +36,7 @@ public class MqttFluentPropertyMapperTests
     public void WhenPropertyIsNotMapped_ThenReturnsFalse()
     {
         // Arrange
-        var mapper = new MqttFluentPropertyMapper<MqttFluentTestSensor>()
+        var mapper = new MqttFluentMapper<MqttFluentTestSensor>()
             .Map(s => s.Temperature, b => b.WithTopic("sensors/temperature"));
 
         var subject = new MqttFluentTestSensor(new InterceptorSubjectContext());
@@ -54,7 +54,7 @@ public class MqttFluentPropertyMapperTests
     public void WhenTopicOnly_ThenQosAndRetainAreNull()
     {
         // Arrange
-        var mapper = new MqttFluentPropertyMapper<MqttFluentTestSensor>()
+        var mapper = new MqttFluentMapper<MqttFluentTestSensor>()
             .Map(s => s.Temperature, b => b.WithTopic("sensors/temperature"));
 
         var subject = new MqttFluentTestSensor(new InterceptorSubjectContext());

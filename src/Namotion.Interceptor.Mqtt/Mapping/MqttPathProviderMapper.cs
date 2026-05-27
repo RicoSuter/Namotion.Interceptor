@@ -8,12 +8,12 @@ using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mqtt.Mapping;
 
-public class MqttPathProviderPropertyMapper
+public class MqttPathProviderMapper
     : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
 {
     private readonly PathProviderBase _pathProvider;
 
-    public MqttPathProviderPropertyMapper(PathProviderBase pathProvider)
+    public MqttPathProviderMapper(PathProviderBase pathProvider)
     {
         _pathProvider = pathProvider;
     }

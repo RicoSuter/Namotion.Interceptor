@@ -11,11 +11,11 @@ namespace Namotion.Interceptor.Mqtt.Mapping;
 /// Maps properties to MQTT topics using <see cref="MqttTopicAttribute"/> annotations.
 /// Supports both forward mapping (property to topic) and reverse lookup (topic to property).
 /// </summary>
-public class MqttAttributePropertyMapper : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
+public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
 {
     private readonly string _connectorName;
 
-    public MqttAttributePropertyMapper(string? connectorName = null)
+    public MqttAttributeMapper(string? connectorName = null)
     {
         _connectorName = connectorName ?? MqttConstants.DefaultConnectorName;
     }

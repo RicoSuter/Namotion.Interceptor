@@ -6,7 +6,7 @@ using Opc.Ua;
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
 /// <summary>
-/// Test model for OpcUaAttributePropertyMapper unit tests.
+/// Test model for OpcUaAttributeMapper unit tests.
 /// </summary>
 [InterceptorSubject]
 public partial class AttributeMapperTestModel

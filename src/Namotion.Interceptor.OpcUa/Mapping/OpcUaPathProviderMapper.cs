@@ -9,11 +9,11 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// Maps properties using an IPathProvider for inclusion and browse names.
 /// Provides default reference type of "HasProperty".
 /// </summary>
-public class OpcUaPathProviderPropertyMapper : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
+public class OpcUaPathProviderMapper : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
 {
     private readonly IPathProvider _pathProvider;
 
-    public OpcUaPathProviderPropertyMapper(IPathProvider pathProvider)
+    public OpcUaPathProviderMapper(IPathProvider pathProvider)
     {
         _pathProvider = pathProvider;
     }

@@ -33,7 +33,7 @@ public class MqttConnectionMonitorTests
         return new MqttClientConfiguration
         {
             BrokerHost = "localhost",
-            Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("test", '/')),
+            Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("test", '/')),
             HealthCheckInterval = healthCheckInterval ?? TimeSpan.FromMilliseconds(100),
             ReconnectDelay = reconnectDelay ?? TimeSpan.FromMilliseconds(10),
             MaximumReconnectDelay = maximumReconnectDelay ?? TimeSpan.FromSeconds(1),

@@ -7,13 +7,13 @@ using Xunit;
 
 namespace Namotion.Interceptor.Mqtt.Tests.Mapping;
 
-public class MqttAttributePropertyMapperTests
+public class MqttAttributeMapperTests
 {
     [Fact]
     public void WhenPropertyHasMqttTopicAttribute_ThenReturnsMappingWithTopic()
     {
         // Arrange
-        var mapper = new MqttAttributePropertyMapper();
+        var mapper = new MqttAttributeMapper();
         var subject = new MqttAttributeTestSensor(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Temperature")!;
@@ -30,7 +30,7 @@ public class MqttAttributePropertyMapperTests
     public void WhenPropertyHasNoMqttTopicAttribute_ThenReturnsNull()
     {
         // Arrange
-        var mapper = new MqttAttributePropertyMapper();
+        var mapper = new MqttAttributeMapper();
         var subject = new MqttAttributeTestSensor(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Unmapped")!;
@@ -46,7 +46,7 @@ public class MqttAttributePropertyMapperTests
     public void WhenPropertyHasQosAndRetain_ThenReturnsMappingWithThoseValues()
     {
         // Arrange
-        var mapper = new MqttAttributePropertyMapper();
+        var mapper = new MqttAttributeMapper();
         var subject = new MqttAttributeTestSensor(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Humidity")!;
@@ -65,7 +65,7 @@ public class MqttAttributePropertyMapperTests
     public void WhenPropertyHasDefaultQos_ThenQosIsNull()
     {
         // Arrange
-        var mapper = new MqttAttributePropertyMapper();
+        var mapper = new MqttAttributeMapper();
         var subject = new MqttAttributeTestSensor(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Temperature")!;
@@ -82,7 +82,7 @@ public class MqttAttributePropertyMapperTests
     public void WhenConnectorNameDoesNotMatch_ThenReturnsNull()
     {
         // Arrange
-        var mapper = new MqttAttributePropertyMapper("other-connector");
+        var mapper = new MqttAttributeMapper("other-connector");
         var subject = new MqttAttributeTestSensor(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Temperature")!;

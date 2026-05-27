@@ -4,7 +4,7 @@ using Namotion.Interceptor.Registry;
 
 namespace Namotion.Interceptor.Connectors.Tests.Mapping;
 
-public class DelegatePropertyMapperTests
+public class DelegateMapperTests
 {
     private sealed record TestMapping(string Value);
 
@@ -16,7 +16,7 @@ public class DelegatePropertyMapperTests
         var person = new Person(context) { FirstName = "x" };
         var nameProperty = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
 
-        var mapper = new DelegatePropertyMapper<TestMapping>(p => new TestMapping(p.Name));
+        var mapper = new DelegateMapper<TestMapping>(p => new TestMapping(p.Name));
 
         // Act
         var found = mapper.TryGetMapping(nameProperty, out var mapping);
@@ -34,7 +34,7 @@ public class DelegatePropertyMapperTests
         var person = new Person(context);
         var nameProperty = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
 
-        var mapper = new DelegatePropertyMapper<TestMapping>(_ => null);
+        var mapper = new DelegateMapper<TestMapping>(_ => null);
 
         // Act
         var found = mapper.TryGetMapping(nameProperty, out var mapping);

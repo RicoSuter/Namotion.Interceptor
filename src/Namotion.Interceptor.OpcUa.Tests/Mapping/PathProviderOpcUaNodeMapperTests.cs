@@ -8,14 +8,14 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
-public class OpcUaPathProviderPropertyMapperTests
+public class OpcUaPathProviderMapperTests
 {
     [Fact]
     public void TryGetNodeConfiguration_WithIncludedProperty_ReturnsBrowseName()
     {
         // Arrange - TestRoot.Name has [Path("opc", "Name")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Name")!;
@@ -32,7 +32,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - TestNodeMapperModel.PlainProp has no [Path] attribute
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("PlainProp")!;
@@ -46,7 +46,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - TestRoot.Name has [Path("opc", "Name")] but we use "mqtt" provider
         var pathProvider = new AttributeBasedPathProvider("mqtt");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Name")!;
@@ -60,7 +60,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - TestRoot.Connected has [Path("opc", "Connected")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Connected")!;
@@ -77,7 +77,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - TestRoot.Person has [Path("opc", "Person")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Person")!;
@@ -94,7 +94,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - TestRoot.ScalarNumbers has [Path("opc", "ScalarNumbers")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("ScalarNumbers")!;
@@ -111,7 +111,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - PathProvider only sets BrowseName, nothing else
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Name")!;
@@ -133,7 +133,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - Number_Unit is a PropertyAttribute (IsAttribute = true)
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -155,7 +155,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - Name is a regular property (IsAttribute = false)
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Name")!;
@@ -174,7 +174,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - TryGetPropertyAsync should skip properties that are attributes
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -202,7 +202,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - TestRoot.Name has [Path("opc", "Name")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -229,7 +229,7 @@ public class OpcUaPathProviderPropertyMapperTests
     {
         // Arrange - PlainProp has no [Path] attribute, so is excluded
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 

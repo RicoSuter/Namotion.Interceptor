@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// <summary>
 /// Maps properties using OpcUaNode, OpcUaReference, and OpcUaValue attributes.
 /// </summary>
-public class OpcUaAttributePropertyMapper : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
+public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
 {
     private readonly string? _defaultNamespaceUri;
 
@@ -19,7 +19,7 @@ public class OpcUaAttributePropertyMapper : IReversePropertyMapper<OpcUaProperty
     /// Creates a new attribute-based node mapper.
     /// </summary>
     /// <param name="defaultNamespaceUri">Default namespace URI for nodes without explicit namespace.</param>
-    public OpcUaAttributePropertyMapper(string? defaultNamespaceUri = null)
+    public OpcUaAttributeMapper(string? defaultNamespaceUri = null)
     {
         _defaultNamespaceUri = defaultNamespaceUri;
     }

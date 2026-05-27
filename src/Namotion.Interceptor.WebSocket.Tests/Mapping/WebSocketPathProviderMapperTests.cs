@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Namotion.Interceptor.WebSocket.Tests.Mapping;
 
-public class WebSocketPathProviderPropertyMapperTests
+public class WebSocketPathProviderMapperTests
 {
     [Fact]
     public void WhenPathProviderIncludes_ThenMapperReturnsEmptyMapping()
@@ -15,7 +15,7 @@ public class WebSocketPathProviderPropertyMapperTests
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var root = new TestRoot(context);
         var prop = root.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestRoot.Name))!;
-        var mapper = new WebSocketPathProviderPropertyMapper(DefaultPathProvider.Instance);
+        var mapper = new WebSocketPathProviderMapper(DefaultPathProvider.Instance);
 
         // Act
         var found = mapper.TryGetMapping(prop, out var mapping);

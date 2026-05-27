@@ -6,19 +6,19 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 
 /// <summary>
 /// Composite that adds OPC UA-specific reverse lookup (later mappers win, reverse-iterate for
-/// early return) on top of <see cref="CompositePropertyMapper{TMapping}"/>'s forward composition.
+/// early return) on top of <see cref="CompositeMapper{TMapping}"/>'s forward composition.
 /// </summary>
 public sealed class OpcUaCompositeMapper
     : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
 {
-    private readonly CompositePropertyMapper<OpcUaPropertyMapping> _forward;
+    private readonly CompositeMapper<OpcUaPropertyMapping> _forward;
     private readonly IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>[] _mappers;
 
     public OpcUaCompositeMapper(
         params IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>[] mappers)
     {
         _mappers = mappers;
-        _forward = new CompositePropertyMapper<OpcUaPropertyMapping>(
+        _forward = new CompositeMapper<OpcUaPropertyMapping>(
             mappers.Cast<IPropertyMapper<OpcUaPropertyMapping>>().ToArray());
     }
 

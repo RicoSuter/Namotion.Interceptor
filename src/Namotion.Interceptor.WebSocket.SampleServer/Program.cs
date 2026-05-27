@@ -28,7 +28,7 @@ builder.Services.AddHostedService<ServerWorker>();
 builder.Services.AddWebSocketSubjectServer<Root>(configuration =>
 {
     configuration.Port = 8080;
-    configuration.Mapper = new WebSocketPathProviderPropertyMapper(new AttributeBasedPathProvider("ws"));
+    configuration.Mapper = new WebSocketPathProviderMapper(new AttributeBasedPathProvider("ws"));
 });
 
 Console.WriteLine("Starting WebSocket server on ws://localhost:8080/ws");

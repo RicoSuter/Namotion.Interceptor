@@ -6,13 +6,13 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
-public class OpcUaAttributePropertyMapperTests
+public class OpcUaAttributeMapperTests
 {
     [Fact]
     public void TryGetNodeConfiguration_WithOpcUaNodeAttribute_ReturnsBrowseName()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
@@ -29,7 +29,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithSamplingInterval_ReturnsSamplingInterval()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("MonitoredProp")!;
@@ -46,7 +46,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithDataChangeFilter_ReturnsFilterSettings()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("FilteredProp")!;
@@ -64,7 +64,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithDiscardOldest_ReturnsDiscardOldest()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("QueueProp")!;
@@ -80,7 +80,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithTypeDefinition_ReturnsTypeDefinition()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("TypedProp")!;
@@ -97,7 +97,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithOpcUaReferenceAttribute_ReturnsReferenceType()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("RefProp")!;
@@ -113,7 +113,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithOpcUaValueAttribute_SetsIsValue()
     {
         // Arrange - use AttributeMapperVariableChild which has [OpcUaNode(NodeClass = OpcUaNodeClass.Variable)]
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperVariableChild(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Value")!;
@@ -129,7 +129,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithModellingRule_ReturnsModellingRule()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("MandatoryProp")!;
@@ -145,7 +145,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithNodeClass_ReturnsNodeClass()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("VariableClassProp")!;
@@ -161,7 +161,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithNoOpcUaAttributes_ReturnsNull()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("PlainProp")!;
@@ -174,7 +174,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_DefaultSamplingInterval_ReturnsNull()
     {
         // Arrange - SimpleProp has OpcUaNode but no explicit SamplingInterval (uses default int.MinValue)
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
@@ -190,7 +190,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithEventNotifierZero_ReturnsZero()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("EventNotifierZeroProp")!;
@@ -206,7 +206,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_OpcUaValueWithoutNodeClassVariable_ThrowsException()
     {
         // Arrange - property with [OpcUaValue] but class doesn't have NodeClass = Variable
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperInvalidValueModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("InvalidValue")!;
@@ -221,7 +221,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_CollectionWithClassLevelAttribute_ReturnsTypeDefinition()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperCollectionParent(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Items")!;
@@ -237,7 +237,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_DictionaryWithClassLevelAttribute_ReturnsTypeDefinition()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperCollectionParent(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("ItemsByKey")!;
@@ -253,7 +253,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_ArrayWithClassLevelAttribute_ReturnsTypeDefinition()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperCollectionParent(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("ItemsArray")!;
@@ -271,7 +271,7 @@ public class OpcUaAttributePropertyMapperTests
     public async Task TryGetPropertyAsync_WithMatchingNodeIdentifier_ReturnsProperty()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -300,7 +300,7 @@ public class OpcUaAttributePropertyMapperTests
     public async Task TryGetPropertyAsync_WithMatchingBrowseName_ReturnsProperty()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -327,7 +327,7 @@ public class OpcUaAttributePropertyMapperTests
     public async Task TryGetPropertyAsync_WithNonMatchingNamespace_ReturnsNull()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -354,7 +354,7 @@ public class OpcUaAttributePropertyMapperTests
     public async Task TryGetPropertyAsync_WithNoMatch_ReturnsNull()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -379,7 +379,7 @@ public class OpcUaAttributePropertyMapperTests
     public async Task TryGetPropertyAsync_WithDefaultNamespaceUri_UsesDefault()
     {
         // Arrange - use default namespace that matches the node
-        var mapper = new OpcUaAttributePropertyMapper(defaultNamespaceUri: "http://default/");
+        var mapper = new OpcUaAttributeMapper(defaultNamespaceUri: "http://default/");
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -411,7 +411,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithDataTypeNamespace_ReturnsDataTypeNamespace()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("DataTypeProp")!;
@@ -428,7 +428,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithReferenceTypeNamespaceOnReferenceAttribute_ReturnsReferenceTypeNamespace()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("RefAttrProp")!;
@@ -445,7 +445,7 @@ public class OpcUaAttributePropertyMapperTests
     public void TryGetNodeConfiguration_WithItemReferenceTypeNamespace_ReturnsItemReferenceTypeNamespace()
     {
         // Arrange
-        var mapper = new OpcUaAttributePropertyMapper();
+        var mapper = new OpcUaAttributeMapper();
         var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("CollectionProp")!;

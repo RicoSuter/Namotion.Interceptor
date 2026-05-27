@@ -5,7 +5,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Tests.Mapping;
 
-public class CompositePropertyMapperTests
+public class CompositeMapperTests
 {
     private sealed record TestMapping(string? A, int? B) : IPropertyMapping<TestMapping>
     {
@@ -24,9 +24,9 @@ public class CompositePropertyMapperTests
     public void WhenAllInnerMappersReturnNull_ThenCompositeReturnsFalse()
     {
         // Arrange
-        var mapper = new CompositePropertyMapper<TestMapping>(
-            new DelegatePropertyMapper<TestMapping>(_ => null),
-            new DelegatePropertyMapper<TestMapping>(_ => null));
+        var mapper = new CompositeMapper<TestMapping>(
+            new DelegateMapper<TestMapping>(_ => null),
+            new DelegateMapper<TestMapping>(_ => null));
 
         // Act
         var found = mapper.TryGetMapping(NameProperty(), out var mapping);
@@ -40,9 +40,9 @@ public class CompositePropertyMapperTests
     public void WhenLaterMapperHasFields_ThenItOverridesEarlierMapperFields()
     {
         // Arrange
-        var mapper = new CompositePropertyMapper<TestMapping>(
-            new DelegatePropertyMapper<TestMapping>(_ => new TestMapping(A: "first", B: 1)),
-            new DelegatePropertyMapper<TestMapping>(_ => new TestMapping(A: "second", B: null)));
+        var mapper = new CompositeMapper<TestMapping>(
+            new DelegateMapper<TestMapping>(_ => new TestMapping(A: "first", B: 1)),
+            new DelegateMapper<TestMapping>(_ => new TestMapping(A: "second", B: null)));
 
         // Act
         mapper.TryGetMapping(NameProperty(), out var mapping);
@@ -57,10 +57,10 @@ public class CompositePropertyMapperTests
     public void WhenExplicitMergerProvided_ThenItOverridesDefaultMerge()
     {
         // Arrange
-        var mapper = new CompositePropertyMapper<TestMapping>(
+        var mapper = new CompositeMapper<TestMapping>(
             (primary, fallback) => new TestMapping(A: fallback.A, B: primary.B ?? fallback.B),
-            new DelegatePropertyMapper<TestMapping>(_ => new TestMapping(A: "first", B: 1)),
-            new DelegatePropertyMapper<TestMapping>(_ => new TestMapping(A: "second", B: 2)));
+            new DelegateMapper<TestMapping>(_ => new TestMapping(A: "first", B: 1)),
+            new DelegateMapper<TestMapping>(_ => new TestMapping(A: "second", B: 2)));
 
         // Act
         mapper.TryGetMapping(NameProperty(), out var mapping);

@@ -24,8 +24,8 @@ Some configuration applies only to one side:
 ## Node Mapper Configuration
 
 The mapping is driven by the `IPropertyMapper<OpcUaPropertyMapping>` interface (or `IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>` for the client, which adds reverse lookup), configured via the `NodeMapper` property on `OpcUaClientConfiguration` and `OpcUaServerConfiguration`. This extends the general [property mapper](connectors.md#property-mappers) concept with OPC UA-specific node metadata. The default is an `OpcUaCompositeMapper` combining:
-- `OpcUaPathProviderPropertyMapper`: maps `[Path("opc", "...")]` attributes (see [Path Providers](connectors.md#path-providers))
-- `OpcUaAttributePropertyMapper`: maps `[OpcUaNode]` and `[OpcUaReference]` attributes
+- `OpcUaPathProviderMapper`: maps `[Path("opc", "...")]` attributes (see [Path Providers](connectors.md#path-providers))
+- `OpcUaAttributeMapper`: maps `[OpcUaNode]` and `[OpcUaReference]` attributes
 
 For custom mapping, set `NodeMapper` explicitly:
 
@@ -33,9 +33,9 @@ For custom mapping, set `NodeMapper` explicitly:
 var config = new OpcUaClientConfiguration
 {
     NodeMapper = new OpcUaCompositeMapper(
-        new OpcUaFluentPropertyMapper<Machine>(),        // Instance overrides (see Fluent Configuration)
-        new OpcUaAttributePropertyMapper(),               // Attribute defaults
-        new OpcUaPathProviderPropertyMapper(
+        new OpcUaFluentMapper<Machine>(),        // Instance overrides (see Fluent Configuration)
+        new OpcUaAttributeMapper(),               // Attribute defaults
+        new OpcUaPathProviderMapper(
             new AttributeBasedPathProvider("opc"))),  // Path fallback
     // ... other settings
 };
@@ -404,7 +404,7 @@ For runtime configuration without attributes.
 
 **Important:** Fluent configuration is **property-level only**. It configures specific property instances (e.g., `Motor1.Speed` vs `Motor2.Speed`), not type-level defaults.
 
-For **class-level configuration** (TypeDefinition, NodeClass that applies to all instances of a type), use `[OpcUaNode]` attributes on the class with `OpcUaAttributePropertyMapper` in a composite mapper to pick them up.
+For **class-level configuration** (TypeDefinition, NodeClass that applies to all instances of a type), use `[OpcUaNode]` attributes on the class with `OpcUaAttributeMapper` in a composite mapper to pick them up.
 
 ```csharp
 // Class-level: Use attributes (applies to ALL Motor instances)
@@ -412,7 +412,7 @@ For **class-level configuration** (TypeDefinition, NodeClass that applies to all
 public partial class Motor { ... }
 
 // Instance-level: Use fluent (different config per instance)
-var mapper = new OpcUaFluentPropertyMapper<Machine>()
+var mapper = new OpcUaFluentMapper<Machine>()
     .Map(m => m.Motor1, m => m.BrowseName("MainMotor").SamplingInterval(50))
     .Map(m => m.Motor2, m => m.BrowseName("AuxMotor").SamplingInterval(100));
 
@@ -421,14 +421,14 @@ var config = new OpcUaClientConfiguration
 {
     NodeMapper = new OpcUaCompositeMapper(
         mapper,                          // Instance overrides
-        new OpcUaAttributePropertyMapper())  // Class-level defaults
+        new OpcUaAttributeMapper())  // Class-level defaults
 };
 ```
 
 ### Basic Fluent Example
 
 ```csharp
-var mapper = new OpcUaFluentPropertyMapper<Machine>()
+var mapper = new OpcUaFluentMapper<Machine>()
     .Map(m => m.Motor1, motor => motor
         .BrowseName("MainDriveMotor")
         .ReferenceType("HasComponent")
@@ -448,8 +448,8 @@ var config = new OpcUaClientConfiguration
     ServerUrl = "opc.tcp://localhost:4840",
     NodeMapper = new OpcUaCompositeMapper(
         mapper,                              // Fluent config takes priority
-        new OpcUaAttributePropertyMapper(),      // Then attributes
-        new OpcUaPathProviderPropertyMapper(DefaultPathProvider.Instance))  // Fallback
+        new OpcUaAttributeMapper(),      // Then attributes
+        new OpcUaPathProviderMapper(DefaultPathProvider.Instance))  // Fallback
 };
 ```
 
@@ -469,7 +469,7 @@ public static class MotorMappingExtensions
 }
 
 // Usage
-var mapper = new OpcUaFluentPropertyMapper<Machine>()
+var mapper = new OpcUaFluentMapper<Machine>()
     .Map(m => m.Motor1, motor => motor
         .BrowseName("MainMotor")
         .ConfigureMotor())
@@ -483,7 +483,7 @@ var mapper = new OpcUaFluentPropertyMapper<Machine>()
 Add non-hierarchical references (e.g., `HasInterface`) using `.AdditionalReference()`:
 
 ```csharp
-var mapper = new OpcUaFluentPropertyMapper<Machine>()
+var mapper = new OpcUaFluentMapper<Machine>()
     .Map(m => m.Motor1, motor => motor
         .BrowseName("MainMotor")
         .ReferenceType("HasComponent")
@@ -511,12 +511,12 @@ The `AdditionalReference` method parameters:
 
 ## Composite Mappers
 
-Multiple mappers can be combined with "last wins" merge semantics. Later mappers override earlier ones. Use `OpcUaCompositeMapper` when reverse lookup is needed (client), or `CompositePropertyMapper<OpcUaPropertyMapping>` for forward-only scenarios (server):
+Multiple mappers can be combined with "last wins" merge semantics. Later mappers override earlier ones. Use `OpcUaCompositeMapper` when reverse lookup is needed (client), or `CompositeMapper<OpcUaPropertyMapping>` for forward-only scenarios (server):
 
 ```csharp
 var mapper = new OpcUaCompositeMapper(
-    new OpcUaPathProviderPropertyMapper(pathProvider),  // Base - fallback names
-    new OpcUaAttributePropertyMapper(),                  // Override - attributes
+    new OpcUaPathProviderMapper(pathProvider),  // Base - fallback names
+    new OpcUaAttributeMapper(),                  // Override - attributes
     fluentMapper);                                   // Final - runtime overrides
 ```
 
@@ -530,7 +530,7 @@ Result: { BrowseName: "Speed", SamplingInterval: 50 }
          ↑ Attribute wins (later)  ↑ Fluent wins (latest)
 ```
 
-**Note on ReferenceType defaults:** `OpcUaPathProviderPropertyMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `OpcUaAttributePropertyMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain (`OpcUaCompositeMapper` or `CompositePropertyMapper<OpcUaPropertyMapping>`) to resolve defaults correctly.
+**Note on ReferenceType defaults:** `OpcUaPathProviderMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `OpcUaAttributeMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain (`OpcUaCompositeMapper` or `CompositeMapper<OpcUaPropertyMapping>`) to resolve defaults correctly.
 
 > For custom value converters and type resolvers, see [Extensibility](connectors-opcua-client.md#extensibility).
 

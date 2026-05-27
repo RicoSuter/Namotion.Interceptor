@@ -94,7 +94,7 @@ builder.Services.AddMqttSubjectClientSource(
     {
         BrokerHost = "mqtt.example.com",
         BrokerPort = 1883,
-        Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/')),
+        Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
 
         // Authentication
         Username = "user",
@@ -144,7 +144,7 @@ builder.Services.AddMqttSubjectServer(
     {
         BrokerHost = "127.0.0.1", // Optional: bind to specific interface (default: all interfaces)
         BrokerPort = 1883,
-        Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/')),
+        Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
 
         // Connection settings
         ClientId = "my-server-id",
@@ -181,12 +181,12 @@ The built-in mapper types:
 
 | Mapper                           | Purpose                                                               |
 |----------------------------------|-----------------------------------------------------------------------|
-| `MqttPathProviderPropertyMapper` | Wraps a `PathProviderBase` to produce topics from `[Path]` attributes |
-| `MqttAttributePropertyMapper`    | Reads `[MqttTopic]` attributes for per-topic QoS and Retain overrides |
-| `MqttFluentPropertyMapper<T>`    | Code-based per-property configuration via lambda expressions          |
+| `MqttPathProviderMapper` | Wraps a `PathProviderBase` to produce topics from `[Path]` attributes |
+| `MqttAttributeMapper`    | Reads `[MqttTopic]` attributes for per-topic QoS and Retain overrides |
+| `MqttFluentMapper<T>`    | Code-based per-property configuration via lambda expressions          |
 | `MqttCompositeMapper`            | Combines multiple mappers with merge semantics                        |
 
-The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, pathProviderName)`) default to a composite of `MqttPathProviderPropertyMapper` + `MqttAttributePropertyMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
+The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, pathProviderName)`) default to a composite of `MqttPathProviderMapper` + `MqttAttributeMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
 
 ## Topic Mapping
 
@@ -231,10 +231,10 @@ When both `[Path]` and `[MqttTopic]` are present on the same property, `[MqttTop
 
 ### Fluent mapper
 
-For configuration that cannot be expressed in attributes (e.g., mapping the same model to different topics per instance), use `MqttFluentPropertyMapper<T>`:
+For configuration that cannot be expressed in attributes (e.g., mapping the same model to different topics per instance), use `MqttFluentMapper<T>`:
 
 ```csharp
-var mapper = new MqttFluentPropertyMapper<Sensor>()
+var mapper = new MqttFluentMapper<Sensor>()
     .Map(s => s.Temperature, b => b
         .WithTopic("line1/sensors/temp")
         .WithQualityOfService(MqttQualityOfServiceLevel.ExactlyOnce)

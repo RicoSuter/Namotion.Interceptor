@@ -206,8 +206,8 @@ public static class OpcUaSubjectExtensions
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
             TelemetryContext = telemetryContext,
             NodeMapper = new OpcUaCompositeMapper(
-                new OpcUaPathProviderPropertyMapper(new AttributeBasedPathProvider(sourceName)),
-                new OpcUaAttributePropertyMapper())
+                new OpcUaPathProviderMapper(new AttributeBasedPathProvider(sourceName)),
+                new OpcUaAttributeMapper())
         };
     }
 
@@ -224,8 +224,8 @@ public static class OpcUaSubjectExtensions
             ValueConverter = new OpcUaValueConverter(),
             TelemetryContext = telemetryContext,
             NodeMapper = new OpcUaCompositeMapper(
-                new OpcUaPathProviderPropertyMapper(new AttributeBasedPathProvider(sourceName)),
-                new OpcUaAttributePropertyMapper())
+                new OpcUaPathProviderMapper(new AttributeBasedPathProvider(sourceName)),
+                new OpcUaAttributeMapper())
         };
     }
 

@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Mqtt.Tests;
 public class MqttClientConfigurationTests
 {
     private static IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> CreateTestMapper() =>
-        new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("test", '/'));
+        new MqttPathProviderMapper(new AttributeBasedPathProvider("test", '/'));
 
     [Fact]
     public void Validate_ValidConfiguration_DoesNotThrow()

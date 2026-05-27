@@ -173,7 +173,7 @@ if (!skipServer)
                 _ => new MqttServerConfiguration
                 {
                     BrokerPort = 1883,
-                    Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/')),
+                    Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
                     DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                     UseRetainedMessages = true,
                     SourceTimestampSerializer = SerializeTickTimestamp,
@@ -188,7 +188,7 @@ if (!skipServer)
                 config =>
                 {
                     config.Port = serverPort;
-                    config.Mapper = new WebSocketPathProviderPropertyMapper(new AttributeBasedPathProvider("ws"));
+                    config.Mapper = new WebSocketPathProviderMapper(new AttributeBasedPathProvider("ws"));
                 });
             break;
     }
@@ -270,7 +270,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                 {
                     BrokerHost = "localhost",
                     BrokerPort = serverPort,
-                    Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/')),
+                    Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
                     DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                     UseRetainedMessages = true,
                     SourceTimestampSerializer = SerializeTickTimestamp,
@@ -292,7 +292,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     config.ServerUri = new Uri($"ws://localhost:{serverPort}/ws");
                     config.ReconnectDelay = TimeSpan.FromSeconds(1);
                     config.MaxReconnectDelay = TimeSpan.FromSeconds(10);
-                    config.Mapper = new WebSocketPathProviderPropertyMapper(new AttributeBasedPathProvider("ws"));
+                    config.Mapper = new WebSocketPathProviderMapper(new AttributeBasedPathProvider("ws"));
                     config.WriteRetryQueueSize = 10_000;
                 });
             break;
