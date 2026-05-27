@@ -141,7 +141,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `CertificateStoreBasePath` | "pki" | Base directory for certificate stores |
 | `SessionFactory` | null | Custom session factory (uses `DefaultSessionFactory` when null) |
 | `TelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
-| `NodeMapper` | CompositeNodeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
+| `NodeMapper` | OpcUaCompositeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
 
 **Subscription Tuning:**
 

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using MQTTnet;
 using Namotion.Interceptor.Mqtt.Client;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
@@ -32,7 +33,7 @@ public class MqttConnectionMonitorTests
         return new MqttClientConfiguration
         {
             BrokerHost = "localhost",
-            PathProvider = new AttributeBasedPathProvider("test", '/'),
+            Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("test", '/')),
             HealthCheckInterval = healthCheckInterval ?? TimeSpan.FromMilliseconds(100),
             ReconnectDelay = reconnectDelay ?? TimeSpan.FromMilliseconds(10),
             MaximumReconnectDelay = maximumReconnectDelay ?? TimeSpan.FromSeconds(1),

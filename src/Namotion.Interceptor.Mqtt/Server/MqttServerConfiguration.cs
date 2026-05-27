@@ -1,6 +1,7 @@
 using System;
 using MQTTnet.Protocol;
-using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.Mqtt.Mapping;
 
 namespace Namotion.Interceptor.Mqtt.Server;
 
@@ -32,9 +33,9 @@ public class MqttServerConfiguration
     public string? TopicPrefix { get; init; }
 
     /// <summary>
-    /// Gets or sets the path provider for property-to-topic mapping.
+    /// Gets or sets the property mapper for property-to-topic mapping.
     /// </summary>
-    public required PathProviderBase PathProvider { get; init; }
+    public required IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> Mapper { get; init; }
 
     /// <summary>
     /// Gets or sets the default QoS level. Default is AtLeastOnce (1) for guaranteed delivery.
@@ -96,9 +97,9 @@ public class MqttServerConfiguration
     /// </summary>
     public void Validate()
     {
-        if (PathProvider is null)
+        if (Mapper is null)
         {
-            throw new ArgumentException("PathProvider must be specified.", nameof(PathProvider));
+            throw new ArgumentException("Mapper must be specified.", nameof(Mapper));
         }
     }
 }

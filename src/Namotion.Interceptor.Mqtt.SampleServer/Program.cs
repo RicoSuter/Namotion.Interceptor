@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using MQTTnet.Protocol;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
@@ -33,7 +34,7 @@ builder.Services.AddMqttSubjectServer(
     {
         // BrokerHost = "127.0.0.1", // Optional: bind to specific interface
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
+        Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/')),
         DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
         UseRetainedMessages = true
     });

@@ -21,10 +21,9 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("Name", config.BrowseName);
     }
 
@@ -38,11 +37,8 @@ public class PathProviderOpcUaNodeMapperTests
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("PlainProp")!;
 
-        // Act
-        var config = mapper.TryGetNodeConfiguration(property);
-
-        // Assert
-        Assert.Null(config);
+        // Act & Assert
+        Assert.False(mapper.TryGetMapping(property, out _));
     }
 
     [Fact]
@@ -55,11 +51,8 @@ public class PathProviderOpcUaNodeMapperTests
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Name")!;
 
-        // Act
-        var config = mapper.TryGetNodeConfiguration(property);
-
-        // Assert
-        Assert.Null(config);
+        // Act & Assert
+        Assert.False(mapper.TryGetMapping(property, out _));
     }
 
     [Fact]
@@ -73,10 +66,9 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Connected")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("Connected", config.BrowseName);
     }
 
@@ -91,10 +83,9 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Person")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("Person", config.BrowseName);
     }
 
@@ -109,10 +100,9 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("ScalarNumbers")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("ScalarNumbers", config.BrowseName);
     }
 
@@ -127,10 +117,9 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("Name", config.BrowseName);
         Assert.Null(config.BrowseNamespaceUri);
         Assert.Null(config.NodeIdentifier);
@@ -154,10 +143,9 @@ public class PathProviderOpcUaNodeMapperTests
         Assert.NotNull(attributeProperty);
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(attributeProperty);
+        Assert.True(mapper.TryGetMapping(attributeProperty, out var config));
 
         // Assert - Attributes get ReferenceType = "HasProperty"
-        Assert.NotNull(config);
         Assert.Equal("Unit", config.BrowseName);
         Assert.Equal("HasProperty", config.ReferenceType);
     }
@@ -173,10 +161,9 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert - Non-attributes don't get a ReferenceType set
-        Assert.NotNull(config);
         Assert.Null(config.ReferenceType);
     }
 
@@ -204,7 +191,7 @@ public class PathProviderOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert - Should be null because attributes are skipped in TryGetPropertyAsync
         Assert.Null(result);
@@ -230,7 +217,7 @@ public class PathProviderOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -257,7 +244,7 @@ public class PathProviderOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert
         Assert.Null(result);

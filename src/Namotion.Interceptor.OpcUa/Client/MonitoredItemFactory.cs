@@ -22,7 +22,7 @@ internal static class MonitoredItemFactory
     /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
     public static MonitoredItem Create(OpcUaClientConfiguration configuration, NodeId nodeId, RegisteredSubjectProperty property)
     {
-        var nodeConfiguration = configuration.NodeMapper.TryGetNodeConfiguration(property);
+        configuration.NodeMapper.TryGetMapping(property, out var nodeConfiguration);
         var item = new MonitoredItem(configuration.TelemetryContext)
         {
             StartNodeId = nodeId,
@@ -64,7 +64,7 @@ internal static class MonitoredItemFactory
     /// Creates a DataChangeFilter based on the node configuration and configuration defaults.
     /// Returns null if no filter options are specified (uses OPC UA library defaults).
     /// </summary>
-    private static DataChangeFilter? CreateDataChangeFilter(OpcUaClientConfiguration configuration, OpcUaNodeConfiguration? nodeConfiguration)
+    private static DataChangeFilter? CreateDataChangeFilter(OpcUaClientConfiguration configuration, OpcUaPropertyMapping? nodeConfiguration)
     {
         // Apply NodeMapper configuration overrides, then configuration defaults
         var trigger = nodeConfiguration?.DataChangeTrigger ?? configuration.DefaultDataChangeTrigger;

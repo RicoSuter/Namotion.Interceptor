@@ -253,7 +253,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
             var configuration = new OpcUaServerConfiguration
             {
                 ValueConverter = new OpcUaValueConverter(),
-                NodeMapper = new CompositeNodeMapper(
+                NodeMapper = new OpcUaCompositeMapper(
                     new PathProviderOpcUaNodeMapper(new StateAttributeOpcUaPathProvider()),
                     new AttributeOpcUaNodeMapper()),
                 ApplicationName = ApplicationName ?? defaults.ApplicationName,

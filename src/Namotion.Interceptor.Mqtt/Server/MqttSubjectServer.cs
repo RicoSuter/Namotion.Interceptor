@@ -11,9 +11,8 @@ using MQTTnet;
 using MQTTnet.Packets;
 using MQTTnet.Server;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Connectors.Paths;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -89,7 +88,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
     private bool IsPropertyIncluded(PropertyReference propertyReference) =>
         propertyReference.TryGetRegisteredProperty() is { } property &&
-        _configuration.PathProvider.IsPropertyIncluded(property);
+        _configuration.Mapper.TryGetMapping(property, out _);
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
@@ -315,8 +314,11 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
             return cachedTopic;
         }
 
-        var path = property.TryGetPath(_configuration.PathProvider, _subject);
-        var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
+        string? topic = null;
+        if (_configuration.Mapper.TryGetMapping(property, out var mapping) && mapping.Topic is not null)
+        {
+            topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
+        }
 
         // Add first, then validate (guarantees no memory leak)
         if (_propertyToTopic.TryAdd(propertyReference, topic))
@@ -338,7 +340,10 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
             return cachedProperty;
         }
 
-        var (property, _) = _subject.TryGetPropertyFromPath(path, _configuration.PathProvider);
+        var registered = _subject.TryGetRegisteredSubject();
+        var property = registered is null
+            ? null
+            : _configuration.Mapper.TryGetPropertyAsync(registered, new MqttLookupKey(path), CancellationToken.None).GetAwaiter().GetResult();
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)
@@ -403,13 +408,17 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
             await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
 
-            var properties = _subject
+            var allProperties = _subject
                 .TryGetRegisteredSubject()?
                 .GetAllProperties()
-                .Where(p => !p.CanContainSubjects)
-                .GetPaths(_configuration.PathProvider, _subject);
+                .Where(p => !p.CanContainSubjects);
 
-            if (properties is null) return;
+            if (allProperties is null) return;
+
+            var properties = allProperties
+                .Select(p => (property: p, hasMapping: _configuration.Mapper.TryGetMapping(p, out var m), mapping: m))
+                .Where(x => x.hasMapping && x.mapping!.Topic is not null)
+                .Select(x => (path: x.mapping!.Topic!, property: x.property));
 
             var server = _mqttServer;
             if (server is null) return;

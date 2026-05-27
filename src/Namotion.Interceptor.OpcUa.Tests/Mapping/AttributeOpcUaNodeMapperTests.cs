@@ -18,10 +18,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("SimpleProp", config.BrowseName);
         Assert.Equal("http://test/", config.BrowseNamespaceUri);
     }
@@ -36,10 +35,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("MonitoredProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal(500, config.SamplingInterval);
         Assert.Equal(10u, config.QueueSize);
     }
@@ -54,10 +52,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("FilteredProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal(DataChangeTrigger.StatusValueTimestamp, config.DataChangeTrigger);
         Assert.Equal(DeadbandType.Absolute, config.DeadbandType);
         Assert.Equal(0.5, config.DeadbandValue);
@@ -73,10 +70,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("QueueProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.False(config.DiscardOldest);
     }
 
@@ -90,10 +86,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("TypedProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("AnalogItemType", config.TypeDefinition);
         Assert.Equal("http://opcfoundation.org/UA/", config.TypeDefinitionNamespace);
     }
@@ -108,10 +103,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("RefProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("HasComponent", config.ReferenceType);
     }
 
@@ -125,10 +119,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Value")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.True(config.IsValue);
     }
 
@@ -142,10 +135,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("MandatoryProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal(ModellingRule.Mandatory, config.ModellingRule);
     }
 
@@ -159,10 +151,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("VariableClassProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal(OpcUaNodeClass.Variable, config.NodeClass);
     }
 
@@ -175,11 +166,8 @@ public class AttributeOpcUaNodeMapperTests
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("PlainProp")!;
 
-        // Act
-        var config = mapper.TryGetNodeConfiguration(property);
-
-        // Assert
-        Assert.Null(config);
+        // Act & Assert
+        Assert.False(mapper.TryGetMapping(property, out _));
     }
 
     [Fact]
@@ -192,10 +180,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Null(config.SamplingInterval); // Default (int.MinValue) should become null
     }
 
@@ -209,10 +196,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("EventNotifierZeroProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal((byte)0, config.EventNotifier);
     }
 
@@ -226,7 +212,7 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("InvalidValue")!;
 
         // Act & Assert
-        var exception = Assert.Throws<InvalidOperationException>(() => mapper.TryGetNodeConfiguration(property));
+        var exception = Assert.Throws<InvalidOperationException>(() => mapper.TryGetMapping(property, out _));
         Assert.Contains("OpcUaValue", exception.Message);
         Assert.Contains("NodeClass", exception.Message);
     }
@@ -241,10 +227,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Items")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("CollectionItemType", config.TypeDefinition);
     }
 
@@ -258,10 +243,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("ItemsByKey")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("CollectionItemType", config.TypeDefinition);
     }
 
@@ -275,10 +259,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("ItemsArray")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("CollectionItemType", config.TypeDefinition);
     }
 
@@ -306,7 +289,7 @@ public class AttributeOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert - Should match via NodeIdentifier (Priority 1), not BrowseName (Priority 2)
         Assert.NotNull(result);
@@ -333,7 +316,7 @@ public class AttributeOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -361,7 +344,7 @@ public class AttributeOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert
         Assert.Null(result);
@@ -386,7 +369,7 @@ public class AttributeOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert
         Assert.Null(result);
@@ -413,7 +396,7 @@ public class AttributeOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -434,10 +417,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("DataTypeProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("CustomDataType", config.DataType);
         Assert.Equal("http://custom/datatypes/", config.DataTypeNamespace);
     }
@@ -452,10 +434,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("RefAttrProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("HasComponent", config.ReferenceType);
         Assert.Equal("http://custom/reftypes/", config.ReferenceTypeNamespace);
     }
@@ -470,10 +451,9 @@ public class AttributeOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("CollectionProp")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("CustomItemRef", config.ItemReferenceType);
         Assert.Equal("http://custom/itemrefs/", config.ItemReferenceTypeNamespace);
     }

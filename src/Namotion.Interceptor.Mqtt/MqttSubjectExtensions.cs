@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mqtt.Client;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -34,7 +35,7 @@ public static class MqttSubjectExtensions
                 BrokerHost = brokerHost,
                 BrokerPort = brokerPort,
                 TopicPrefix = topicPrefix,
-                PathProvider = new AttributeBasedPathProvider(pathProviderName, '/')
+                Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider(pathProviderName, '/'))
             });
     }
 
@@ -84,7 +85,7 @@ public static class MqttSubjectExtensions
                 BrokerHost = brokerHost,
                 BrokerPort = brokerPort,
                 TopicPrefix = topicPrefix,
-                PathProvider = new AttributeBasedPathProvider(pathProviderName, '/')
+                Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider(pathProviderName, '/'))
             });
     }
 

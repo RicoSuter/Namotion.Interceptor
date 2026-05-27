@@ -31,7 +31,7 @@ public class WebSocketServerConfigurationTests
         Assert.Equal(10 * 1024 * 1024, configuration.MaxMessageSize);
         Assert.Equal(1000, configuration.WriteBatchSize);
         Assert.Null(configuration.BindAddress);
-        Assert.Null(configuration.PathProvider);
+        Assert.Null(configuration.Mapper);
         Assert.Null(configuration.SubjectFactory);
         Assert.Empty(configuration.Processors);
     }
@@ -43,7 +43,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { Port = 0 };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { Port = 70000 };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { Path = "" };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { Path = "   " };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public class WebSocketServerConfigurationTests
         };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { MaxMessageSize = 0 };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { MaxConnections = 0 };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public class WebSocketServerConfigurationTests
         };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { WriteBatchSize = -1 };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { HeartbeatInterval = TimeSpan.FromSeconds(-1) };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]

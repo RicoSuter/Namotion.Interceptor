@@ -94,7 +94,7 @@ builder.Services.AddMqttSubjectClientSource(
     {
         BrokerHost = "mqtt.example.com",
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
+        Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/')),
 
         // Authentication
         Username = "user",
@@ -144,7 +144,7 @@ builder.Services.AddMqttSubjectServer(
     {
         BrokerHost = "127.0.0.1", // Optional: bind to specific interface (default: all interfaces)
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
+        Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/')),
 
         // Connection settings
         ClientId = "my-server-id",
@@ -166,6 +166,18 @@ builder.Services.AddMqttSubjectServer(
         SourceTimestampPropertyName = "ts"
     });
 ```
+
+### Mapper Configuration
+
+The `Mapper` property accepts any `IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>`. The `MqttPropertyMapping` record carries protocol-specific fields:
+
+| Field              | Type                         | Description                          |
+|--------------------|------------------------------|--------------------------------------|
+| `Topic`            | `string?`                    | The MQTT topic path for the property |
+| `QualityOfService` | `MqttQualityOfServiceLevel?` | Per-property QoS override            |
+| `Retain`           | `bool?`                      | Per-property retain flag override    |
+
+The built-in `MqttPathProviderPropertyMapper` wraps a `PathProviderBase` and produces mappings with the `Topic` field populated from the path provider. For more complex scenarios, use `MqttCompositeMapper` to combine multiple mappers with merge semantics. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
 
 ## Topic Mapping
 

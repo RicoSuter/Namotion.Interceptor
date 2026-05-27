@@ -1,7 +1,8 @@
 using System;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Connectors.Updates;
-using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.WebSocket.Mapping;
 
 namespace Namotion.Interceptor.WebSocket.Client;
 
@@ -78,9 +79,9 @@ public class WebSocketClientConfiguration
     public TimeSpan CircuitBreakerCooldown { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
-    /// Path provider for property filtering/mapping.
+    /// Property mapper for filtering/mapping.
     /// </summary>
-    public PathProviderBase? PathProvider { get; set; }
+    public IPropertyMapper<WebSocketPropertyMapping>? Mapper { get; set; }
 
     /// <summary>
     /// Subject factory for creating subjects from server updates.

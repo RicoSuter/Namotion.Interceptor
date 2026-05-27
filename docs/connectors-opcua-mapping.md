@@ -23,7 +23,7 @@ Some configuration applies only to one side:
 
 ## Node Mapper Configuration
 
-The mapping is driven by the `IOpcUaNodeMapper` interface, configured via the `NodeMapper` property on `OpcUaClientConfiguration` and `OpcUaServerConfiguration`. This extends the general [path provider](connectors.md#path-providers) concept with OPC UA-specific node metadata. The default is a `CompositeNodeMapper` combining:
+The mapping is driven by the `IPropertyMapper<OpcUaPropertyMapping>` interface (or `IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>` for the client, which adds reverse lookup), configured via the `NodeMapper` property on `OpcUaClientConfiguration` and `OpcUaServerConfiguration`. This extends the general [property mapper](connectors.md#property-mappers) concept with OPC UA-specific node metadata. The default is an `OpcUaCompositeMapper` combining:
 - `PathProviderOpcUaNodeMapper` — maps `[Path("opc", "...")]` attributes (see [Path Providers](connectors.md#path-providers))
 - `AttributeOpcUaNodeMapper` — maps `[OpcUaNode]` and `[OpcUaReference]` attributes
 
@@ -32,11 +32,11 @@ For custom mapping, set `NodeMapper` explicitly:
 ```csharp
 var config = new OpcUaClientConfiguration
 {
-    NodeMapper = new CompositeNodeMapper(
-        new FluentOpcUaNodeMapper<Machine>(),       // Instance overrides (see Fluent Configuration)
-        new AttributeOpcUaNodeMapper(),              // Attribute defaults
+    NodeMapper = new OpcUaCompositeMapper(
+        new FluentOpcUaNodeMapper<Machine>(),        // Instance overrides (see Fluent Configuration)
+        new AttributeOpcUaNodeMapper(),               // Attribute defaults
         new PathProviderOpcUaNodeMapper(
-            new AttributeBasedPathProvider("opc"))), // Path fallback
+            new AttributeBasedPathProvider("opc"))),  // Path fallback
     // ... other settings
 };
 ```
@@ -419,7 +419,7 @@ var mapper = new FluentOpcUaNodeMapper<Machine>()
 // Combine both: Fluent overrides, attributes provide defaults
 var config = new OpcUaClientConfiguration
 {
-    NodeMapper = new CompositeNodeMapper(
+    NodeMapper = new OpcUaCompositeMapper(
         mapper,                          // Instance overrides
         new AttributeOpcUaNodeMapper())  // Class-level defaults
 };
@@ -446,7 +446,7 @@ var mapper = new FluentOpcUaNodeMapper<Machine>()
 var config = new OpcUaClientConfiguration
 {
     ServerUrl = "opc.tcp://localhost:4840",
-    NodeMapper = new CompositeNodeMapper(
+    NodeMapper = new OpcUaCompositeMapper(
         mapper,                              // Fluent config takes priority
         new AttributeOpcUaNodeMapper(),      // Then attributes
         new PathProviderOpcUaNodeMapper(DefaultPathProvider.Instance))  // Fallback
@@ -511,10 +511,10 @@ The `AdditionalReference` method parameters:
 
 ## Composite Mappers
 
-Multiple mappers can be combined with "last wins" merge semantics. Later mappers override earlier ones:
+Multiple mappers can be combined with "last wins" merge semantics. Later mappers override earlier ones. Use `OpcUaCompositeMapper` when reverse lookup is needed (client), or `CompositePropertyMapper<OpcUaPropertyMapping>` for forward-only scenarios (server):
 
 ```csharp
-var mapper = new CompositeNodeMapper(
+var mapper = new OpcUaCompositeMapper(
     new PathProviderOpcUaNodeMapper(pathProvider),  // Base - fallback names
     new AttributeOpcUaNodeMapper(),                  // Override - attributes
     fluentMapper);                                   // Final - runtime overrides
@@ -530,7 +530,7 @@ Result: { BrowseName: "Speed", SamplingInterval: 50 }
          ↑ Attribute wins (later)  ↑ Fluent wins (latest)
 ```
 
-**Note on ReferenceType defaults:** `PathProviderOpcUaNodeMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `AttributeOpcUaNodeMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain to resolve defaults correctly.
+**Note on ReferenceType defaults:** `PathProviderOpcUaNodeMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `AttributeOpcUaNodeMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain (`OpcUaCompositeMapper` or `CompositePropertyMapper<OpcUaPropertyMapping>`) to resolve defaults correctly.
 
 > For custom value converters and type resolvers, see [Extensibility](connectors-opcua-client.md#extensibility).
 
@@ -665,7 +665,7 @@ Creating new OPC UA ObjectTypes/VariableTypes in the address space (not just ref
 ### Structural Synchronization
 
 Dynamic address space sync when C# objects attach/detach at runtime (see PR #121):
-- Uses `IOpcUaNodeMapper.TryGetConfiguration()` to get node configuration
+- Uses `IPropertyMapper<OpcUaPropertyMapping>.TryGetMapping()` to get node configuration
 - Creates/removes nodes dynamically via `CustomNodeManager`
 - Fires ModelChangeEvents for client notification
 

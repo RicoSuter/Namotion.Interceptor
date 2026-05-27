@@ -14,16 +14,13 @@ public class CompositeNodeMapperTests
     public void TryGetNodeConfiguration_WithNoMappers_ReturnsNull()
     {
         // Arrange
-        var composite = new CompositeNodeMapper();
+        var composite = new OpcUaCompositeMapper();
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
-        // Act
-        var result = composite.TryGetNodeConfiguration(property);
-
-        // Assert
-        Assert.Null(result);
+        // Act & Assert
+        Assert.False(composite.TryGetMapping(property, out _));
     }
 
     [Fact]
@@ -31,16 +28,15 @@ public class CompositeNodeMapperTests
     {
         // Arrange
         var attributeMapper = new AttributeOpcUaNodeMapper();
-        var composite = new CompositeNodeMapper(attributeMapper);
+        var composite = new OpcUaCompositeMapper(attributeMapper);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
         // Act
-        var result = composite.TryGetNodeConfiguration(property);
+        Assert.True(composite.TryGetMapping(property, out var result));
 
         // Assert
-        Assert.NotNull(result);
         Assert.Equal("SimpleProp", result.BrowseName);
     }
 
@@ -54,16 +50,15 @@ public class CompositeNodeMapperTests
         var attributeMapper = new AttributeOpcUaNodeMapper();
 
         // Attribute mapper is second, so it wins for overlapping fields
-        var composite = new CompositeNodeMapper(pathMapper, attributeMapper);
+        var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("MonitoredProp")!;
 
         // Act
-        var result = composite.TryGetNodeConfiguration(property);
+        Assert.True(composite.TryGetMapping(property, out var result));
 
         // Assert
-        Assert.NotNull(result);
         Assert.Equal("MonitoredProp", result.BrowseName); // From attribute mapper (last wins)
         Assert.Equal(500, result.SamplingInterval); // From attribute mapper
     }
@@ -77,16 +72,15 @@ public class CompositeNodeMapperTests
         var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
         var attributeMapper = new AttributeOpcUaNodeMapper();
 
-        var composite = new CompositeNodeMapper(pathMapper, attributeMapper);
+        var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
         // Act
-        var result = composite.TryGetNodeConfiguration(property);
+        Assert.True(composite.TryGetMapping(property, out var result));
 
         // Assert
-        Assert.NotNull(result);
         Assert.Equal("SimpleProp", result.BrowseName);
         Assert.Equal("http://test/", result.BrowseNamespaceUri);
     }
@@ -100,17 +94,14 @@ public class CompositeNodeMapperTests
         var pathProvider = new AttributeBasedPathProvider("opc");
         var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
 
-        var composite = new CompositeNodeMapper(attributeMapper, pathMapper);
+        var composite = new OpcUaCompositeMapper(attributeMapper, pathMapper);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         // PlainProp has no Path or OpcUaNode attributes, so both return null
         var property = registeredSubject.TryGetProperty("PlainProp")!;
 
-        // Act
-        var result = composite.TryGetNodeConfiguration(property);
-
-        // Assert - Both mappers return null for this property
-        Assert.Null(result);
+        // Act & Assert - Both mappers return null for this property
+        Assert.False(composite.TryGetMapping(property, out _));
     }
 
     [Fact]
@@ -122,17 +113,16 @@ public class CompositeNodeMapperTests
         var attributeMapper = new AttributeOpcUaNodeMapper();
 
         // PathMapper first, then AttributeMapper (AttributeMapper wins for overlapping)
-        var composite = new CompositeNodeMapper(pathMapper, attributeMapper);
+        var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         // MonitoredProp has both OpcUaNode with sampling settings
         var property = registeredSubject.TryGetProperty("MonitoredProp")!;
 
         // Act
-        var result = composite.TryGetNodeConfiguration(property);
+        Assert.True(composite.TryGetMapping(property, out var result));
 
         // Assert
-        Assert.NotNull(result);
         Assert.Equal("MonitoredProp", result.BrowseName);
         Assert.Equal(500, result.SamplingInterval);
         Assert.Equal(10u, result.QueueSize);
@@ -151,17 +141,16 @@ public class CompositeNodeMapperTests
         var attributeMapper = new AttributeOpcUaNodeMapper();
 
         // Three mappers: pathMapper1, pathMapper2, attributeMapper (last wins)
-        var composite = new CompositeNodeMapper(pathMapper1, pathMapper2, attributeMapper);
+        var composite = new OpcUaCompositeMapper(pathMapper1, pathMapper2, attributeMapper);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         // FilteredProp has OpcUaNode with filter settings
         var property = registeredSubject.TryGetProperty("FilteredProp")!;
 
         // Act
-        var result = composite.TryGetNodeConfiguration(property);
+        Assert.True(composite.TryGetMapping(property, out var result));
 
         // Assert - Verifies that all three mappers are processed correctly
-        Assert.NotNull(result);
         Assert.Equal("FilteredProp", result.BrowseName);
         // These come from attributeMapper (last mapper)
         Assert.Equal(DataChangeTrigger.StatusValueTimestamp, result.DataChangeTrigger);
@@ -181,7 +170,7 @@ public class CompositeNodeMapperTests
 
         var attributeMapper = new AttributeOpcUaNodeMapper();
 
-        var composite = new CompositeNodeMapper(pathMapper1, pathMapper2, attributeMapper);
+        var composite = new OpcUaCompositeMapper(pathMapper1, pathMapper2, attributeMapper);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -196,7 +185,7 @@ public class CompositeNodeMapperTests
         };
 
         // Act
-        var result = await composite.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await composite.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert - Should find the property through the composite (last matching mapper wins)
         Assert.NotNull(result);
@@ -214,7 +203,7 @@ public class CompositeNodeMapperTests
         var attributeMapper = new AttributeOpcUaNodeMapper();
 
         // AttributeMapper is last, so it wins
-        var composite = new CompositeNodeMapper(pathMapper, attributeMapper);
+        var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -231,7 +220,7 @@ public class CompositeNodeMapperTests
         };
 
         // Act
-        var result = await composite.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await composite.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert - Should find the property (last mapper that matches wins)
         Assert.NotNull(result);
@@ -246,7 +235,7 @@ public class CompositeNodeMapperTests
         var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
         var attributeMapper = new AttributeOpcUaNodeMapper();
 
-        var composite = new CompositeNodeMapper(pathMapper, attributeMapper);
+        var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -261,7 +250,7 @@ public class CompositeNodeMapperTests
         };
 
         // Act
-        var result = await composite.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await composite.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
 
         // Assert
         Assert.Null(result);

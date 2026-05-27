@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
+using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -11,9 +13,9 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// Supports instance-based configuration (different config for Motor1.Speed vs Motor2.Speed).
 /// </summary>
 /// <typeparam name="T">The root type to configure.</typeparam>
-public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
+public class FluentOpcUaNodeMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
 {
-    private readonly ConcurrentDictionary<string, OpcUaNodeConfiguration> _mappings = new();
+    private readonly ConcurrentDictionary<string, OpcUaPropertyMapping> _mappings = new();
 
     /// <summary>
     /// Maps a property with fluent configuration.
@@ -29,22 +31,29 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
     }
 
     /// <inheritdoc />
-    public OpcUaNodeConfiguration? TryGetNodeConfiguration(RegisteredSubjectProperty property)
+    public bool TryGetMapping(
+        RegisteredSubjectProperty property,
+        [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
     {
         var path = GetPropertyPath(property);
-        return _mappings.GetValueOrDefault(path);
+        if (_mappings.TryGetValue(path, out var stored))
+        {
+            mapping = stored;
+            return true;
+        }
+        mapping = null;
+        return false;
     }
 
     /// <inheritdoc />
-    public Task<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        RegisteredSubject subject,
-        ReferenceDescription nodeReference,
-        ISession session,
+    public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
+        RegisteredSubject root,
+        OpcUaLookupKey key,
         CancellationToken cancellationToken)
     {
-        var browseName = nodeReference.BrowseName.Name;
+        var browseName = key.Reference.BrowseName.Name;
 
-        foreach (var property in subject.Properties)
+        foreach (var property in root.Properties)
         {
             if (property.IsAttribute)
                 continue;
@@ -52,11 +61,11 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
             var path = GetPropertyPath(property);
             if (_mappings.TryGetValue(path, out var config) && config.BrowseName == browseName)
             {
-                return Task.FromResult<RegisteredSubjectProperty?>(property);
+                return new ValueTask<RegisteredSubjectProperty?>(property);
             }
         }
 
-        return Task.FromResult<RegisteredSubjectProperty?>(null);
+        return new ValueTask<RegisteredSubjectProperty?>(result: null);
     }
 
     private static string GetPropertyPath<TProperty>(Expression<Func<T, TProperty>> expression) =>
@@ -104,21 +113,21 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
     private class PropertyBuilder<TProp> : IPropertyBuilder<TProp>
     {
         private readonly string _basePath;
-        private readonly ConcurrentDictionary<string, OpcUaNodeConfiguration> _mappings;
-        private OpcUaNodeConfiguration _config = new();
+        private readonly ConcurrentDictionary<string, OpcUaPropertyMapping> _mappings;
+        private OpcUaPropertyMapping _config = new();
 
-        public PropertyBuilder(string basePath, ConcurrentDictionary<string, OpcUaNodeConfiguration> mappings)
+        public PropertyBuilder(string basePath, ConcurrentDictionary<string, OpcUaPropertyMapping> mappings)
         {
             _basePath = basePath;
             _mappings = mappings;
             _mappings[basePath] = _config;
         }
 
-        private IPropertyBuilder<TProp> UpdateConfig(Func<OpcUaNodeConfiguration, OpcUaNodeConfiguration> update)
+        private IPropertyBuilder<TProp> UpdateConfig(Func<OpcUaPropertyMapping, OpcUaPropertyMapping> update)
         {
             _config = _mappings.AddOrUpdate(
                 _basePath,
-                _ => update(new OpcUaNodeConfiguration()),
+                _ => update(new OpcUaPropertyMapping()),
                 (_, existing) => update(existing));
             return this;
         }

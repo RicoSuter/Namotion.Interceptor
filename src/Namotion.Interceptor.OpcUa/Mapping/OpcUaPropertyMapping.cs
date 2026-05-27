@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors.Mapping;
 using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Mapping;
@@ -6,8 +7,11 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// OPC UA node and reference configuration. All fields are nullable to support partial
 /// configuration and merge semantics.
 /// </summary>
-public record OpcUaNodeConfiguration
+public record OpcUaPropertyMapping : IPropertyMapping<OpcUaPropertyMapping>
 {
+    public static OpcUaPropertyMapping Merge(OpcUaPropertyMapping primary, OpcUaPropertyMapping fallback)
+        => primary.WithFallback(fallback);
+
     // Node identification (shared)
     /// <summary>Browse name for the node.</summary>
     public string? BrowseName { get; init; }
@@ -102,11 +106,11 @@ public record OpcUaNodeConfiguration
     /// This configuration takes priority; null fields are filled from the fallback.
     /// </summary>
     /// <param name="other">Fallback configuration to use when this has null fields.</param>
-    public OpcUaNodeConfiguration WithFallback(OpcUaNodeConfiguration? other)
+    public OpcUaPropertyMapping WithFallback(OpcUaPropertyMapping? other)
     {
         if (other is null) return this;
 
-        return new OpcUaNodeConfiguration
+        return new OpcUaPropertyMapping
         {
             BrowseName = BrowseName ?? other.BrowseName,
             BrowseNamespaceUri = BrowseNamespaceUri ?? other.BrowseNamespaceUri,

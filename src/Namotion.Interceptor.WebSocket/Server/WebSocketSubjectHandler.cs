@@ -369,7 +369,7 @@ public sealed class WebSocketSubjectHandler
         new(source: this, Context,
             propertyFilter: propertyReference =>
                 propertyReference.TryGetRegisteredProperty() is { } property &&
-                (_configuration.PathProvider?.IsPropertyIncluded(property) ?? true),
+                (_configuration.Mapper?.TryGetMapping(property, out _) ?? true),
             writeHandler: BroadcastChangesAsync, BufferTime, logger);
 
     public async ValueTask CloseAllConnectionsAsync()

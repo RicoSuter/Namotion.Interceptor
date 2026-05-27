@@ -1,6 +1,7 @@
 using System;
 using MQTTnet.Protocol;
-using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.Mqtt.Mapping;
 
 namespace Namotion.Interceptor.Mqtt.Client;
 
@@ -51,9 +52,9 @@ public class MqttClientConfiguration
     public string? TopicPrefix { get; init; }
 
     /// <summary>
-    /// Gets or sets the path provider for property-to-topic mapping.
+    /// Gets or sets the property mapper for property-to-topic mapping.
     /// </summary>
-    public required PathProviderBase PathProvider { get; init; }
+    public required IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> Mapper { get; init; }
 
     // QoS settings
 
@@ -172,9 +173,9 @@ public class MqttClientConfiguration
             throw new ArgumentException($"BrokerPort must be between 1 and 65535, got: {BrokerPort}", nameof(BrokerPort));
         }
 
-        if (PathProvider is null)
+        if (Mapper is null)
         {
-            throw new ArgumentException("PathProvider must be specified.", nameof(PathProvider));
+            throw new ArgumentException("Mapper must be specified.", nameof(Mapper));
         }
 
         if (ConnectTimeout <= TimeSpan.Zero)

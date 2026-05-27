@@ -8,6 +8,7 @@ using Namotion.Interceptor.SamplesModel;
 using Namotion.Interceptor.SamplesModel.Workers;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.WebSocket;
+using Namotion.Interceptor.WebSocket.Mapping;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -27,7 +28,7 @@ builder.Services.AddHostedService<ServerWorker>();
 builder.Services.AddWebSocketSubjectServer<Root>(configuration =>
 {
     configuration.Port = 8080;
-    configuration.PathProvider = new AttributeBasedPathProvider("ws");
+    configuration.Mapper = new WebSocketPathProviderPropertyMapper(new AttributeBasedPathProvider("ws"));
 });
 
 Console.WriteLine("Starting WebSocket server on ws://localhost:8080/ws");

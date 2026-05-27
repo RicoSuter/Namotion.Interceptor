@@ -10,6 +10,7 @@ using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
 using Opc.Ua;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.ConnectorTester.Configuration;
@@ -18,6 +19,7 @@ using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.WebSocket;
+using Namotion.Interceptor.WebSocket.Mapping;
 
 // Tick-precision timestamp serializers (not default Unix milliseconds) to ensure
 // exact timestamp convergence in snapshot comparison.
@@ -171,7 +173,7 @@ if (!skipServer)
                 _ => new MqttServerConfiguration
                 {
                     BrokerPort = 1883,
-                    PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
+                    Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/')),
                     DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                     UseRetainedMessages = true,
                     SourceTimestampSerializer = SerializeTickTimestamp,
@@ -186,7 +188,7 @@ if (!skipServer)
                 config =>
                 {
                     config.Port = serverPort;
-                    config.PathProvider = new AttributeBasedPathProvider("ws");
+                    config.Mapper = new WebSocketPathProviderPropertyMapper(new AttributeBasedPathProvider("ws"));
                 });
             break;
     }
@@ -268,7 +270,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                 {
                     BrokerHost = "localhost",
                     BrokerPort = serverPort,
-                    PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
+                    Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/')),
                     DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                     UseRetainedMessages = true,
                     SourceTimestampSerializer = SerializeTickTimestamp,
@@ -290,7 +292,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     config.ServerUri = new Uri($"ws://localhost:{serverPort}/ws");
                     config.ReconnectDelay = TimeSpan.FromSeconds(1);
                     config.MaxReconnectDelay = TimeSpan.FromSeconds(10);
-                    config.PathProvider = new AttributeBasedPathProvider("ws");
+                    config.Mapper = new WebSocketPathProviderPropertyMapper(new AttributeBasedPathProvider("ws"));
                     config.WriteRetryQueueSize = 10_000;
                 });
             break;

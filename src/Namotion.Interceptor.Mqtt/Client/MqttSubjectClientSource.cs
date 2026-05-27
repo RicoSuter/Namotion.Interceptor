@@ -9,9 +9,8 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Packets;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Connectors.Paths;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Tracking.Change;
@@ -378,7 +377,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.CanContainSubjects && _configuration.PathProvider.IsPropertyIncluded(p))
+            .Where(p => !p.CanContainSubjects && _configuration.Mapper.TryGetMapping(p, out _))
             .ToList();
 
         if (properties.Count == 0)
@@ -420,8 +419,11 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             return cachedTopic;
         }
 
-        var path = property.TryGetPath(_configuration.PathProvider, _subject);
-        var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
+        string? topic = null;
+        if (_configuration.Mapper.TryGetMapping(property, out var mapping) && mapping.Topic is not null)
+        {
+            topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
+        }
 
         // Add first, then validate (guarantees no memory leak)
         if (_propertyToTopic.TryAdd(propertyReference, topic))
@@ -444,7 +446,10 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
 
         var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
-        var (property, _) = _subject.TryGetPropertyFromPath(path, _configuration.PathProvider);
+        var registered = _subject.TryGetRegisteredSubject();
+        var property = registered is null
+            ? null
+            : _configuration.Mapper.TryGetPropertyAsync(registered, new MqttLookupKey(path), CancellationToken.None).GetAwaiter().GetResult();
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)

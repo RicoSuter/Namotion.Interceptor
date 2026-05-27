@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -120,7 +121,7 @@ internal class OpcUaSubjectLoader
                 if (property.IsSubjectReference)
                 {
                     // Check if this should be treated as a VariableNode
-                    var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
+                    _configuration.NodeMapper.TryGetMapping(property, out var nodeConfiguration);
                     if (nodeConfiguration?.NodeClass == Mapping.OpcUaNodeClass.Variable)
                     {
                         await LoadVariableNodeForSubjectAsync(property, resolvedNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
@@ -169,8 +170,7 @@ internal class OpcUaSubjectLoader
         // First pass: match known attributes from C# model
         foreach (var attribute in property.Attributes)
         {
-            var attributeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(attribute);
-            if (attributeConfiguration is null)
+            if (!_configuration.NodeMapper.TryGetMapping(attribute, out var attributeConfiguration))
                 continue;
 
             var attributeBrowseName = attributeConfiguration.BrowseName ?? attribute.BrowseName;
@@ -388,7 +388,7 @@ internal class OpcUaSubjectLoader
     {
         // Use NodeMapper for property lookup (supports attributes, path provider, and fluent config)
         return await _configuration.NodeMapper.TryGetPropertyAsync(
-            registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
+            registeredSubject, new OpcUaLookupKey(nodeReference, session), cancellationToken).ConfigureAwait(false);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)

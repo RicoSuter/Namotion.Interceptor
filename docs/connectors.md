@@ -267,7 +267,7 @@ The built-in connectors follow the same pattern:
 
 ```csharp
 // OPC UA Client Source
-builder.Services.AddOpcUaSubjectClientSource<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+builder.Services.AddOpcUaSubjectClientSource<Sensor>("opc.tcp://localhost:4840", "opc", rootPath: ["Root"]);
 
 // MQTT Client Source
 builder.Services.AddMqttSubjectClientSource<Sensor>(
@@ -465,10 +465,11 @@ builder.Services.AddOpcUaSubjectServer<Sensor>(sourceName: "opc", rootName: "Dev
 builder.Services.AddMqttSubjectServer<Sensor>(pathProviderName: "mqtt", brokerPort: 1883);
 
 // WebSocket Server (standalone)
-builder.Services.AddWebSocketSubjectServer<Sensor>(config =>
+builder.Services.AddWebSocketSubjectServer<Sensor>(configuration =>
 {
-    config.Port = 8080;
-    config.Path = "/ws";
+    configuration.Port = 8080;
+    configuration.Path = "/ws";
+    configuration.Mapper = new WebSocketPathProviderPropertyMapper(new AttributeBasedPathProvider("ws"));
 });
 ```
 
@@ -493,6 +494,69 @@ This interface is:
 - **Optional** for servers (they can implement it for type consistency)
 
 > **Note**: Path providers are implementation details. A source/server may use a path provider internally to decide which properties to include and how to map them, or it may not use one at all.
+
+### Property Mappers
+
+Connectors translate subject properties to external-system representations through the `IPropertyMapper<TMapping>` abstraction, defined in `Namotion.Interceptor.Connectors.Mapping`. Each connector defines its own `TMapping` record (e.g., `MqttPropertyMapping`, `OpcUaPropertyMapping`) that carries protocol-specific metadata such as topics, QoS levels, or OPC UA browse names.
+
+#### Core Interfaces
+
+```csharp
+public interface IPropertyMapper<TMapping>
+{
+    bool TryGetMapping(
+        RegisteredSubjectProperty property,
+        [NotNullWhen(true)] out TMapping? mapping);
+}
+
+public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMapping>
+{
+    ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
+        RegisteredSubject root,
+        TKey key,
+        CancellationToken cancellationToken);
+}
+```
+
+`IPropertyMapper<TMapping>` maps a property to its external representation (forward direction). `IReversePropertyMapper<TMapping, TKey>` adds the ability to look up a property from an external key (reverse direction), which connectors that receive inbound data need (e.g., finding the property for a received MQTT topic or OPC UA node reference).
+
+#### Built-in Generic Implementations
+
+| Class | Description |
+|-------|-------------|
+| `DelegatePropertyMapper<TMapping>` | Wraps a `Func<RegisteredSubjectProperty, TMapping?>` for simple one-off mappers |
+| `CompositePropertyMapper<TMapping>` | Combines multiple mappers with "last wins" merge semantics via `IPropertyMapping<TMapping>.Merge` |
+| `FluentPropertyMapperBase<TSubject, TMapping>` | Base class for expression-based fluent configuration (e.g., `.Map(m => m.Speed, ...)`) |
+
+`CompositePropertyMapper<TMapping>` requires the mapping record to implement `IPropertyMapping<TMapping>`, which provides the static `Merge` method for combining partial configurations.
+
+#### Default Composition
+
+Each connector defaults its `Mapper` (or `NodeMapper` for OPC UA) to a composite that chains a path-provider adapter with a protocol-specific attribute mapper. For example, the MQTT client defaults to:
+
+```csharp
+Mapper = new MqttPathProviderPropertyMapper(new AttributeBasedPathProvider("mqtt", '/'))
+```
+
+The OPC UA client defaults to:
+
+```csharp
+NodeMapper = new OpcUaCompositeMapper(
+    new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider("opc")),
+    new AttributeOpcUaNodeMapper())
+```
+
+#### Connector-Specific Wrappers
+
+Each connector ships thin wrappers that adapt generic infrastructure to protocol-specific types:
+
+| Connector | Mapper Wrappers |
+|-----------|----------------|
+| MQTT | `MqttPathProviderPropertyMapper`, `MqttCompositeMapper` |
+| WebSocket | `WebSocketPathProviderPropertyMapper` |
+| OPC UA | `PathProviderOpcUaNodeMapper`, `AttributeOpcUaNodeMapper`, `FluentOpcUaNodeMapper<T>`, `OpcUaCompositeMapper` |
+
+See the protocol-specific documentation for details on each connector's mapping types and configuration.
 
 ### Path Providers
 
