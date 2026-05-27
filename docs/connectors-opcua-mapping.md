@@ -24,8 +24,8 @@ Some configuration applies only to one side:
 ## Node Mapper Configuration
 
 The mapping is driven by the `IPropertyMapper<OpcUaPropertyMapping>` interface (or `IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>` for the client, which adds reverse lookup), configured via the `NodeMapper` property on `OpcUaClientConfiguration` and `OpcUaServerConfiguration`. This extends the general [property mapper](connectors.md#property-mappers) concept with OPC UA-specific node metadata. The default is an `OpcUaCompositeMapper` combining:
-- `PathProviderOpcUaNodeMapper` — maps `[Path("opc", "...")]` attributes (see [Path Providers](connectors.md#path-providers))
-- `AttributeOpcUaNodeMapper` — maps `[OpcUaNode]` and `[OpcUaReference]` attributes
+- `PathProviderOpcUaNodeMapper`: maps `[Path("opc", "...")]` attributes (see [Path Providers](connectors.md#path-providers))
+- `AttributeOpcUaNodeMapper`: maps `[OpcUaNode]` and `[OpcUaReference]` attributes
 
 For custom mapping, set `NodeMapper` explicitly:
 

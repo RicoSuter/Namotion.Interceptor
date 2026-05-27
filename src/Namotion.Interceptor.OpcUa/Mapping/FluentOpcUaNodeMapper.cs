@@ -69,46 +69,10 @@ public class FluentOpcUaNodeMapper<T> : IReversePropertyMapper<OpcUaPropertyMapp
     }
 
     private static string GetPropertyPath<TProperty>(Expression<Func<T, TProperty>> expression) =>
-        GetPropertyPathFromExpression(expression.Body);
+        PropertyPathHelper.GetPathFromExpression(expression.Body);
 
-    /// <summary>
-    /// Extracts property path from an expression body by traversing member access chain.
-    /// </summary>
-    private static string GetPropertyPathFromExpression(Expression expression)
-    {
-        var parts = new List<string>();
-        var current = expression;
-
-        while (current is MemberExpression member)
-        {
-            parts.Insert(0, member.Member.Name);
-            current = member.Expression;
-        }
-
-        return string.Join(".", parts);
-    }
-
-    /// <summary>
-    /// Builds the property path by traversing parent references.
-    /// When an object has multiple parents (e.g., same instance referenced from multiple properties),
-    /// the first parent registration is used to determine the path. This means fluent configuration
-    /// should use the path from the first reference point in the object graph.
-    /// </summary>
-    private static string GetPropertyPath(RegisteredSubjectProperty property)
-    {
-        var parts = new List<string> { property.Name };
-        var currentSubject = property.Parent;
-
-        while (currentSubject.Parents.Length > 0)
-        {
-            // Use first parent when multiple exist (first registration wins)
-            var parent = currentSubject.Parents[0];
-            parts.Insert(0, parent.Property.Name);
-            currentSubject = parent.Property.Parent;
-        }
-
-        return string.Join(".", parts);
-    }
+    private static string GetPropertyPath(RegisteredSubjectProperty property) =>
+        PropertyPathHelper.GetPathFromProperty(property);
 
     private class PropertyBuilder<TProp> : IPropertyBuilder<TProp>
     {
@@ -217,7 +181,7 @@ public class FluentOpcUaNodeMapper<T> : IReversePropertyMapper<OpcUaPropertyMapp
             Expression<Func<TProp, TProperty>> propertySelector,
             Action<IPropertyBuilder<TProperty>> configure)
         {
-            var relativePath = GetPropertyPathFromExpression(propertySelector.Body);
+            var relativePath = PropertyPathHelper.GetPathFromExpression(propertySelector.Body);
             var fullPath = $"{_basePath}.{relativePath}";
             var builder = new PropertyBuilder<TProperty>(fullPath, _mappings);
             configure(builder);
