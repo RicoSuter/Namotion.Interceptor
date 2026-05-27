@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mqtt.Mapping;
 
@@ -20,7 +21,7 @@ public class MqttFluentMapper<TSubject>
     {
         var builder = new MqttFluentMappingBuilder();
         configure(builder);
-        _mappings[PropertyPathHelper.GetPathFromExpression(selector.Body)] = builder.Build();
+        _mappings[ExpressionPathHelper.GetPathFromExpression(selector.Body)] = builder.Build();
         return this;
     }
 
@@ -28,7 +29,7 @@ public class MqttFluentMapper<TSubject>
         RegisteredSubjectProperty property,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)
     {
-        var path = PropertyPathHelper.GetPathFromProperty(property);
+        var path = property.GetPath();
         if (_mappings.TryGetValue(path, out var stored))
         {
             mapping = stored;

@@ -450,4 +450,53 @@ public class PathExtensionsTests
         var (property, _) = result.Value;
         Assert.Equal("Value", property.Name);
     }
+
+    [Fact]
+    public void WhenRootProperty_ThenGetPathReturnsPropertyName()
+    {
+        // Arrange
+        var context = CreateContext();
+        var container = new TestContainer(context) { Name = "Root" };
+        var property = container.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
+
+        // Act
+        var path = property.GetPath();
+
+        // Assert
+        Assert.Equal("Name", path);
+    }
+
+    [Fact]
+    public void WhenNestedSubjectProperty_ThenGetPathReturnsDottedPath()
+    {
+        // Arrange
+        var context = CreateContext();
+        var parent = new Models.Person(context) { FirstName = "Parent" };
+        var child = new Models.Person(context) { FirstName = "Child" };
+        parent.Father = child;
+        var firstNameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
+
+        // Act
+        var path = firstNameProperty.GetPath();
+
+        // Assert
+        Assert.Equal("Father.FirstName", path);
+    }
+
+    [Fact]
+    public void WhenCustomSeparator_ThenGetPathUsesSeparator()
+    {
+        // Arrange
+        var context = CreateContext();
+        var parent = new Models.Person(context) { FirstName = "Parent" };
+        var child = new Models.Person(context) { FirstName = "Child" };
+        parent.Father = child;
+        var firstNameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
+
+        // Act
+        var path = firstNameProperty.GetPath("/");
+
+        // Assert
+        Assert.Equal("Father/FirstName", path);
+    }
 }

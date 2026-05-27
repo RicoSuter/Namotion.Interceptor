@@ -198,6 +198,25 @@ public static class PathExtensions
     }
 
     /// <summary>
+    /// Gets the structural property path by walking the parent chain from root to this property,
+    /// joining property names with the given separator.
+    /// </summary>
+    public static string GetPath(this RegisteredSubjectProperty property, string separator = ".")
+    {
+        var parts = new List<string> { property.Name };
+        var currentSubject = property.Parent;
+
+        while (currentSubject.Parents.Length > 0)
+        {
+            var parent = currentSubject.Parents[0];
+            parts.Insert(0, parent.Property.Name);
+            currentSubject = parent.Property.Parent;
+        }
+
+        return string.Join(separator, parts);
+    }
+
+    /// <summary>
     /// Gets the complete path of the given property.
     /// </summary>
     /// <param name="property">The property.</param>

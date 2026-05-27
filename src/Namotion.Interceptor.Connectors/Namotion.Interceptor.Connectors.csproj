@@ -8,8 +8,6 @@
 
 	<ItemGroup>
 		<InternalsVisibleTo Include="Namotion.Interceptor.Connectors.Tests" />
-		<InternalsVisibleTo Include="Namotion.Interceptor.OpcUa" />
-		<InternalsVisibleTo Include="Namotion.Interceptor.Mqtt" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -1,7 +1,5 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Mqtt")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.OpcUa")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
 namespace Namotion.Interceptor.Connectors
 {
@@ -125,6 +123,10 @@ namespace Namotion.Interceptor.Connectors.Mapping
     {
         public DelegateMapper(System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, TMapping?> selector) { }
         public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping) { }
+    }
+    public static class ExpressionPathHelper
+    {
+        public static string GetPathFromExpression(System.Linq.Expressions.Expression expression) { }
     }
     public interface IPropertyMapper<TMapping>
     {

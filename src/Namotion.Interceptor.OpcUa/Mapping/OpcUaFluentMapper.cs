@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -69,10 +70,10 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
     }
 
     private static string GetPropertyPath<TProperty>(Expression<Func<T, TProperty>> expression) =>
-        PropertyPathHelper.GetPathFromExpression(expression.Body);
+        ExpressionPathHelper.GetPathFromExpression(expression.Body);
 
     private static string GetPropertyPath(RegisteredSubjectProperty property) =>
-        PropertyPathHelper.GetPathFromProperty(property);
+        property.GetPath();
 
     private class PropertyBuilder<TProp> : IPropertyBuilder<TProp>
     {
@@ -181,7 +182,7 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
             Expression<Func<TProp, TProperty>> propertySelector,
             Action<IPropertyBuilder<TProperty>> configure)
         {
-            var relativePath = PropertyPathHelper.GetPathFromExpression(propertySelector.Body);
+            var relativePath = ExpressionPathHelper.GetPathFromExpression(propertySelector.Body);
             var fullPath = $"{_basePath}.{relativePath}";
             var builder = new PropertyBuilder<TProperty>(fullPath, _mappings);
             configure(builder);
