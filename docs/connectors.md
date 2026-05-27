@@ -96,10 +96,10 @@ await tx.CommitAsync(ct);   // Writes to source first, then applies locally
                             // If source rejects → local model unchanged
 ```
 
-| Approach | Local update | Source guarantee | On disconnect |
-|---|---|---|---|
-| Without transactions | Immediate | Eventual (async + retry) | Optimistic re-apply or snap-back |
-| With source transactions | After source confirms | Confirmed before local apply | Commit fails, local unchanged |
+| Approach                 | Local update          | Source guarantee             | On disconnect                    |
+|--------------------------|-----------------------|------------------------------|----------------------------------|
+| Without transactions     | Immediate             | Eventual (async + retry)     | Optimistic re-apply or snap-back |
+| With source transactions | After source confirms | Confirmed before local apply | Commit fails, local unchanged    |
 
 Choose based on your consistency requirements: local-first for responsiveness, transactions for confirmed delivery.
 
@@ -128,11 +128,11 @@ This differs from outbound changes (writing from local model to external system)
 
 All sources inherit from `SubjectSourceBase`, a `BackgroundService` that owns the full pump lifecycle. You override three hooks:
 
-| Hook | Data Flow | Description |
-|------|-----------|-------------|
-| `StartListeningAsync` | External → Subject | Connect to the external system and start receiving changes via `propertyWriter.Write()` |
-| `LoadInitialStateAsync` | External → Subject | Fetch complete state snapshot for initialization |
-| `WriteChangesAsync` | Subject → External | Send local property changes to the external system |
+| Hook                    | Data Flow          | Description                                                                             |
+|-------------------------|--------------------|-----------------------------------------------------------------------------------------|
+| `StartListeningAsync`   | External → Subject | Connect to the external system and start receiving changes via `propertyWriter.Write()` |
+| `LoadInitialStateAsync` | External → Subject | Fetch complete state snapshot for initialization                                        |
+| `WriteChangesAsync`     | Subject → External | Send local property changes to the external system                                      |
 
 The base class handles everything else: retry loop with backoff, buffering during initialization, change queue processing, write batching, and the write retry queue.
 
@@ -394,12 +394,12 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 **Ownership methods:**
 
-| Method | Description |
-|--------|-------------|
-| `ClaimSource(property)` | Returns `true` if ownership was claimed, `false` if already owned by another source |
-| `ReleaseSource(property)` | Releases ownership of a single property |
-| `Properties` | Read-only collection of currently owned properties |
-| `Dispose()` | Releases all owned properties and unsubscribes from events |
+| Method                    | Description                                                                         |
+|---------------------------|-------------------------------------------------------------------------------------|
+| `ClaimSource(property)`   | Returns `true` if ownership was claimed, `false` if already owned by another source |
+| `ReleaseSource(property)` | Releases ownership of a single property                                             |
+| `Properties`              | Read-only collection of currently owned properties                                  |
+| `Dispose()`               | Releases all owned properties and unsubscribes from events                          |
 
 **Lifecycle integration:** The `SourceOwnershipManager` constructor automatically subscribes to lifecycle events from the source's context. When subjects are detached from the object graph, owned properties are automatically released. This prevents memory leaks and stale subscriptions. The context must have lifecycle tracking configured via `WithLifecycle()`. If not configured, the constructor throws `InvalidOperationException`.
 
@@ -522,11 +522,10 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
 
 #### Built-in Generic Implementations
 
-| Class | Description |
-|-------|-------------|
-| `DelegatePropertyMapper<TMapping>` | Wraps a `Func<RegisteredSubjectProperty, TMapping?>` for simple one-off mappers |
-| `CompositePropertyMapper<TMapping>` | Combines multiple mappers with "last wins" merge semantics via `IPropertyMapping<TMapping>.Merge` |
-| `FluentPropertyMapperBase<TSubject, TMapping>` | Base class for expression-based fluent configuration (e.g., `.Map(m => m.Speed, ...)`) |
+| Class                                          | Description                                                                                       |
+|------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| `DelegatePropertyMapper<TMapping>`             | Wraps a `Func<RegisteredSubjectProperty, TMapping?>` for simple one-off mappers                   |
+| `CompositePropertyMapper<TMapping>`            | Combines multiple mappers with "last wins" merge semantics via `IPropertyMapping<TMapping>.Merge` |
 
 `CompositePropertyMapper<TMapping>` requires the mapping record to implement `IPropertyMapping<TMapping>`, which provides the static `Merge` method for combining partial configurations.
 
@@ -550,11 +549,11 @@ NodeMapper = new OpcUaCompositeMapper(
 
 Each connector ships thin wrappers that adapt generic infrastructure to protocol-specific types:
 
-| Connector | Mapper Wrappers |
-|-----------|----------------|
-| MQTT | `MqttPathProviderPropertyMapper`, `MqttCompositeMapper` |
-| WebSocket | `WebSocketPathProviderPropertyMapper` |
-| OPC UA | `PathProviderOpcUaNodeMapper`, `AttributeOpcUaNodeMapper`, `FluentOpcUaNodeMapper<T>`, `OpcUaCompositeMapper` |
+| Connector | Mapper Wrappers                                                                                               |
+|-----------|---------------------------------------------------------------------------------------------------------------|
+| MQTT      | `MqttPathProviderPropertyMapper`, `MqttCompositeMapper`                                                       |
+| WebSocket | `WebSocketPathProviderPropertyMapper`                                                                         |
+| OPC UA    | `PathProviderOpcUaNodeMapper`, `AttributeOpcUaNodeMapper`, `FluentOpcUaNodeMapper<T>`, `OpcUaCompositeMapper` |
 
 See the protocol-specific documentation for details on each connector's mapping types and configuration.
 

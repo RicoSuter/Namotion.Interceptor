@@ -126,12 +126,6 @@ namespace Namotion.Interceptor.Connectors.Mapping
         public DelegatePropertyMapper(System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, TMapping?> selector) { }
         public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping) { }
     }
-    public abstract class FluentPropertyMapperBase<TSubject, TMapping> : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<TMapping>
-    {
-        protected FluentPropertyMapperBase() { }
-        protected void SetMapping<TValue>(System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> selector, TMapping mapping) { }
-        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping) { }
-    }
     public interface IPropertyMapper<TMapping>
     {
         bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping);
