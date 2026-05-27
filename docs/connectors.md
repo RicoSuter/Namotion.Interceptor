@@ -541,8 +541,8 @@ The OPC UA client defaults to:
 
 ```csharp
 NodeMapper = new OpcUaCompositeMapper(
-    new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider("opc")),
-    new AttributeOpcUaNodeMapper())
+    new OpcUaPathProviderPropertyMapper(new AttributeBasedPathProvider("opc")),
+    new OpcUaAttributePropertyMapper())
 ```
 
 #### Connector-Specific Wrappers
@@ -553,7 +553,7 @@ Each connector ships thin wrappers that adapt generic infrastructure to protocol
 |-----------|---------------------------------------------------------------------------------------------------------------|
 | MQTT      | `MqttPathProviderPropertyMapper`, `MqttCompositeMapper`                                                       |
 | WebSocket | `WebSocketPathProviderPropertyMapper`                                                                         |
-| OPC UA    | `PathProviderOpcUaNodeMapper`, `AttributeOpcUaNodeMapper`, `FluentOpcUaNodeMapper<T>`, `OpcUaCompositeMapper` |
+| OPC UA    | `OpcUaPathProviderPropertyMapper`, `OpcUaAttributePropertyMapper`, `OpcUaFluentPropertyMapper<T>`, `OpcUaCompositeMapper` |
 
 See the protocol-specific documentation for details on each connector's mapping types and configuration.
 

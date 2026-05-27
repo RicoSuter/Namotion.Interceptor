@@ -195,19 +195,6 @@ namespace Namotion.Interceptor.OpcUa.Client
 }
 namespace Namotion.Interceptor.OpcUa.Mapping
 {
-    public class AttributeOpcUaNodeMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
-    {
-        public AttributeOpcUaNodeMapper(string? defaultNamespaceUri = null) { }
-        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
-        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, System.Threading.CancellationToken cancellationToken) { }
-    }
-    public class FluentOpcUaNodeMapper<T> : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
-    {
-        public FluentOpcUaNodeMapper() { }
-        public Namotion.Interceptor.OpcUa.Mapping.FluentOpcUaNodeMapper<T> Map<TProperty>(System.Linq.Expressions.Expression<System.Func<T, TProperty>> propertySelector, System.Action<Namotion.Interceptor.OpcUa.Mapping.IPropertyBuilder<TProperty>> configure) { }
-        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
-        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, System.Threading.CancellationToken cancellationToken) { }
-    }
     public interface IPropertyBuilder<T>
     {
         Namotion.Interceptor.OpcUa.Mapping.IPropertyBuilder<T> AdditionalReference(string referenceType, string? referenceTypeNamespace, string targetNodeId, string? targetNamespaceUri = null, bool isForward = true);
@@ -251,9 +238,22 @@ namespace Namotion.Interceptor.OpcUa.Mapping
         public string? TargetNamespaceUri { get; init; }
         public required string TargetNodeId { get; init; }
     }
+    public class OpcUaAttributePropertyMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
+    {
+        public OpcUaAttributePropertyMapper(string? defaultNamespaceUri = null) { }
+        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
+        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, System.Threading.CancellationToken cancellationToken) { }
+    }
     public sealed class OpcUaCompositeMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
     {
         public OpcUaCompositeMapper(params Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>[] mappers) { }
+        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
+        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public class OpcUaFluentPropertyMapper<T> : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
+    {
+        public OpcUaFluentPropertyMapper() { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyMapper<T> Map<TProperty>(System.Linq.Expressions.Expression<System.Func<T, TProperty>> propertySelector, System.Action<Namotion.Interceptor.OpcUa.Mapping.IPropertyBuilder<TProperty>> configure) { }
         public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
         public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, System.Threading.CancellationToken cancellationToken) { }
     }
@@ -268,6 +268,12 @@ namespace Namotion.Interceptor.OpcUa.Mapping
         Auto = 0,
         Object = 1,
         Variable = 2,
+    }
+    public class OpcUaPathProviderPropertyMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
+    {
+        public OpcUaPathProviderPropertyMapper(Namotion.Interceptor.Registry.Paths.IPathProvider pathProvider) { }
+        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
+        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, System.Threading.CancellationToken cancellationToken) { }
     }
     public class OpcUaPropertyMapping : Namotion.Interceptor.Connectors.Mapping.IPropertyMapping<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, System.IEquatable<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>
     {
@@ -299,12 +305,6 @@ namespace Namotion.Interceptor.OpcUa.Mapping
         public string? TypeDefinitionNamespace { get; init; }
         public Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping WithFallback(Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? other) { }
         public static Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping Merge(Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping primary, Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping fallback) { }
-    }
-    public class PathProviderOpcUaNodeMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
-    {
-        public PathProviderOpcUaNodeMapper(Namotion.Interceptor.Registry.Paths.IPathProvider pathProvider) { }
-        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
-        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, System.Threading.CancellationToken cancellationToken) { }
     }
 }
 namespace Namotion.Interceptor.OpcUa

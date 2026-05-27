@@ -27,7 +27,7 @@ public class CompositeNodeMapperTests
     public void TryGetNodeConfiguration_WithSingleMapper_ReturnsMapperConfig()
     {
         // Arrange
-        var attributeMapper = new AttributeOpcUaNodeMapper();
+        var attributeMapper = new OpcUaAttributePropertyMapper();
         var composite = new OpcUaCompositeMapper(attributeMapper);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
@@ -46,8 +46,8 @@ public class CompositeNodeMapperTests
         // Arrange - PathProvider gives BrowseName from Path attribute, Attribute mapper gives from OpcUaNode
         // Using MonitoredProp which has [OpcUaNode("MonitoredProp", null, SamplingInterval = 500, QueueSize = 10)]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
-        var attributeMapper = new AttributeOpcUaNodeMapper();
+        var pathMapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var attributeMapper = new OpcUaAttributePropertyMapper();
 
         // Attribute mapper is second, so it wins for overlapping fields
         var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
@@ -69,8 +69,8 @@ public class CompositeNodeMapperTests
         // Arrange - Using property with both path and OpcUa attributes
         // SimpleProp: [OpcUaNode("SimpleProp", "http://test/")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
-        var attributeMapper = new AttributeOpcUaNodeMapper();
+        var pathMapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var attributeMapper = new OpcUaAttributePropertyMapper();
 
         var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
@@ -90,9 +90,9 @@ public class CompositeNodeMapperTests
     {
         // Arrange - PlainProp has no OpcUaNode attribute, so AttributeMapper returns null
         // but PathProvider should still work if we had a Path attribute
-        var attributeMapper = new AttributeOpcUaNodeMapper();
+        var attributeMapper = new OpcUaAttributePropertyMapper();
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var pathMapper = new OpcUaPathProviderPropertyMapper(pathProvider);
 
         var composite = new OpcUaCompositeMapper(attributeMapper, pathMapper);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
@@ -109,8 +109,8 @@ public class CompositeNodeMapperTests
     {
         // Arrange
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
-        var attributeMapper = new AttributeOpcUaNodeMapper();
+        var pathMapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var attributeMapper = new OpcUaAttributePropertyMapper();
 
         // PathMapper first, then AttributeMapper (AttributeMapper wins for overlapping)
         var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
@@ -133,12 +133,12 @@ public class CompositeNodeMapperTests
     {
         // Arrange - Create three mappers to verify 3+ mapper behavior
         var pathProvider1 = new AttributeBasedPathProvider("opc");
-        var pathMapper1 = new PathProviderOpcUaNodeMapper(pathProvider1);
+        var pathMapper1 = new OpcUaPathProviderPropertyMapper(pathProvider1);
 
         var pathProvider2 = new AttributeBasedPathProvider("opc");
-        var pathMapper2 = new PathProviderOpcUaNodeMapper(pathProvider2);
+        var pathMapper2 = new OpcUaPathProviderPropertyMapper(pathProvider2);
 
-        var attributeMapper = new AttributeOpcUaNodeMapper();
+        var attributeMapper = new OpcUaAttributePropertyMapper();
 
         // Three mappers: pathMapper1, pathMapper2, attributeMapper (last wins)
         var composite = new OpcUaCompositeMapper(pathMapper1, pathMapper2, attributeMapper);
@@ -163,12 +163,12 @@ public class CompositeNodeMapperTests
     {
         // Arrange - Create three mappers
         var pathProvider1 = new AttributeBasedPathProvider("opc");
-        var pathMapper1 = new PathProviderOpcUaNodeMapper(pathProvider1);
+        var pathMapper1 = new OpcUaPathProviderPropertyMapper(pathProvider1);
 
         var pathProvider2 = new AttributeBasedPathProvider("opc");
-        var pathMapper2 = new PathProviderOpcUaNodeMapper(pathProvider2);
+        var pathMapper2 = new OpcUaPathProviderPropertyMapper(pathProvider2);
 
-        var attributeMapper = new AttributeOpcUaNodeMapper();
+        var attributeMapper = new OpcUaAttributePropertyMapper();
 
         var composite = new OpcUaCompositeMapper(pathMapper1, pathMapper2, attributeMapper);
         var subject = new TestRoot(new InterceptorSubjectContext());
@@ -199,8 +199,8 @@ public class CompositeNodeMapperTests
     {
         // Arrange - Create two mappers that both match the same property
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
-        var attributeMapper = new AttributeOpcUaNodeMapper();
+        var pathMapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var attributeMapper = new OpcUaAttributePropertyMapper();
 
         // AttributeMapper is last, so it wins
         var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
@@ -232,8 +232,8 @@ public class CompositeNodeMapperTests
     {
         // Arrange
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
-        var attributeMapper = new AttributeOpcUaNodeMapper();
+        var pathMapper = new OpcUaPathProviderPropertyMapper(pathProvider);
+        var attributeMapper = new OpcUaAttributePropertyMapper();
 
         var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
         var subject = new TestRoot(new InterceptorSubjectContext());

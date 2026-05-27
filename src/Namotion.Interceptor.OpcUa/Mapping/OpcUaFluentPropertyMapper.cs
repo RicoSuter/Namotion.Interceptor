@@ -13,14 +13,14 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// Supports instance-based configuration (different config for Motor1.Speed vs Motor2.Speed).
 /// </summary>
 /// <typeparam name="T">The root type to configure.</typeparam>
-public class FluentOpcUaNodeMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
+public class OpcUaFluentPropertyMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
 {
     private readonly ConcurrentDictionary<string, OpcUaPropertyMapping> _mappings = new();
 
     /// <summary>
     /// Maps a property with fluent configuration.
     /// </summary>
-    public FluentOpcUaNodeMapper<T> Map<TProperty>(
+    public OpcUaFluentPropertyMapper<T> Map<TProperty>(
         Expression<Func<T, TProperty>> propertySelector,
         Action<IPropertyBuilder<TProperty>> configure)
     {

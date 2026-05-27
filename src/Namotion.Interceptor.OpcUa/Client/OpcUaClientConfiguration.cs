@@ -11,8 +11,8 @@ public class OpcUaClientConfiguration
 {
     private static readonly IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey> DefaultNodeMapper =
         new OpcUaCompositeMapper(
-            new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultConnectorName)),
-            new AttributeOpcUaNodeMapper());
+            new OpcUaPathProviderPropertyMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultConnectorName)),
+            new OpcUaAttributePropertyMapper());
 
     private ISessionFactory? _resolvedSessionFactory;
 
@@ -330,7 +330,7 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Maps C# properties to OPC UA nodes.
-    /// Defaults to composite of PathProviderOpcUaNodeMapper (with "opc" source) and AttributeOpcUaNodeMapper.
+    /// Defaults to composite of OpcUaPathProviderPropertyMapper (with "opc" source) and OpcUaAttributePropertyMapper.
     /// </summary>
     public IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey> NodeMapper { get; set; } = DefaultNodeMapper;
 
