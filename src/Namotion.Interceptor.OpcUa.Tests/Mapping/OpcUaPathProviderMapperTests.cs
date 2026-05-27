@@ -191,7 +191,7 @@ public class OpcUaPathProviderMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
 
         // Assert - Should be null because attributes are skipped in TryGetPropertyAsync
         Assert.Null(result);
@@ -217,7 +217,7 @@ public class OpcUaPathProviderMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -244,7 +244,7 @@ public class OpcUaPathProviderMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.Null(result);

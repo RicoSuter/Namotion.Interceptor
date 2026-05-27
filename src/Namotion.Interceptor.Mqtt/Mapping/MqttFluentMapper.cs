@@ -45,7 +45,7 @@ public class MqttFluentMapper<TSubject>
     }
 
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        RegisteredSubject root, MqttLookupKey key, CancellationToken cancellationToken)
+        MqttLookupKey key, RegisteredSubject root, CancellationToken cancellationToken)
     {
         foreach (var property in root.GetAllProperties())
         {

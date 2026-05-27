@@ -103,8 +103,8 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
 
     /// <inheritdoc />
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        RegisteredSubject root,
         OpcUaLookupKey key,
+        RegisteredSubject root,
         CancellationToken cancellationToken)
     {
         var nodeReference = key.Reference;

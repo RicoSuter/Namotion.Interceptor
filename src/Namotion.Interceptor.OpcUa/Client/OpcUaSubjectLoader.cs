@@ -391,7 +391,7 @@ internal class OpcUaSubjectLoader
     {
         // Use Mapper for property lookup (supports attributes, path provider, and fluent config)
         return await _configuration.Mapper.TryGetPropertyAsync(
-            registeredSubject, new OpcUaLookupKey(nodeReference, session), cancellationToken).ConfigureAwait(false);
+            new OpcUaLookupKey(nodeReference, session), registeredSubject, cancellationToken).ConfigureAwait(false);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)

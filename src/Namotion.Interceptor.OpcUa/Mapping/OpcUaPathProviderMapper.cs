@@ -43,8 +43,8 @@ public class OpcUaPathProviderMapper : IReversePropertyMapper<OpcUaPropertyMappi
 
     /// <inheritdoc />
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        RegisteredSubject root,
         OpcUaLookupKey key,
+        RegisteredSubject root,
         CancellationToken cancellationToken)
     {
         var browseName = key.Reference.BrowseName.Name;

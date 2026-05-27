@@ -31,11 +31,11 @@ public sealed class MqttCompositeMapper
         => _forward.TryGetMapping(property, rootSubject, out mapping);
 
     public async ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        RegisteredSubject root, MqttLookupKey key, CancellationToken cancellationToken)
+        MqttLookupKey key, RegisteredSubject root, CancellationToken cancellationToken)
     {
         for (var i = _mappers.Length - 1; i >= 0; i--)
         {
-            var found = await _mappers[i].TryGetPropertyAsync(root, key, cancellationToken)
+            var found = await _mappers[i].TryGetPropertyAsync(key, root, cancellationToken)
                 .ConfigureAwait(false);
             if (found is not null) return found;
         }

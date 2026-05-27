@@ -44,7 +44,7 @@ public class MqttPathProviderMapper
     }
 
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        RegisteredSubject root, MqttLookupKey key, CancellationToken cancellationToken)
+        MqttLookupKey key, RegisteredSubject root, CancellationToken cancellationToken)
     {
         var (result, _) = root.Subject.TryGetPropertyFromPath(key.Topic, _pathProvider);
         return new ValueTask<RegisteredSubjectProperty?>(result);

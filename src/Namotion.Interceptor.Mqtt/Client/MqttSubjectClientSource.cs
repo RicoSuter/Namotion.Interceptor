@@ -453,7 +453,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         var registered = _subject.TryGetRegisteredSubject();
         var property = registered is null
             ? null
-            : await _configuration.Mapper.TryGetPropertyAsync(registered, new MqttLookupKey(path), CancellationToken.None).ConfigureAwait(false);
+            : await _configuration.Mapper.TryGetPropertyAsync(new MqttLookupKey(path), registered, CancellationToken.None).ConfigureAwait(false);
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)

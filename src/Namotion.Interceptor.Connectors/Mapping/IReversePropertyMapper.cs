@@ -11,7 +11,7 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
     /// Attempts to resolve a registered property from an external key.
     /// </summary>
     ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        RegisteredSubject root,
         TKey key,
+        RegisteredSubject root,
         CancellationToken cancellationToken);
 }

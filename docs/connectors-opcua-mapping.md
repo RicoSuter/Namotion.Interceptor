@@ -511,7 +511,7 @@ The `AdditionalReference` method parameters:
 
 ## Composite Mappers
 
-Multiple mappers can be combined with "last wins" merge semantics. Later mappers override earlier ones. Use `OpcUaCompositeMapper` when reverse lookup is needed (client), or `CompositeMapper<OpcUaPropertyMapping>` for forward-only scenarios (server):
+Multiple mappers can be combined with "last wins" merge semantics using `OpcUaCompositeMapper`. Later mappers override earlier ones:
 
 ```csharp
 var mapper = new OpcUaCompositeMapper(
@@ -530,7 +530,7 @@ Result: { BrowseName: "Speed", SamplingInterval: 50 }
          ↑ Attribute wins (later)  ↑ Fluent wins (latest)
 ```
 
-**Note on ReferenceType defaults:** `OpcUaPathProviderMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `OpcUaAttributeMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain (`OpcUaCompositeMapper` or `CompositeMapper<OpcUaPropertyMapping>`) to resolve defaults correctly.
+**Note on ReferenceType defaults:** `OpcUaPathProviderMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `OpcUaAttributeMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain to resolve defaults correctly.
 
 > For custom value converters and type resolvers, see [Extensibility](connectors-opcua-client.md#extensibility).
 

@@ -185,7 +185,7 @@ public class OpcUaCompositeMapperTests
         };
 
         // Act
-        var result = await composite.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
+        var result = await composite.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
 
         // Assert - Should find the property through the composite (last matching mapper wins)
         Assert.NotNull(result);
@@ -220,7 +220,7 @@ public class OpcUaCompositeMapperTests
         };
 
         // Act
-        var result = await composite.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
+        var result = await composite.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
 
         // Assert - Should find the property (last mapper that matches wins)
         Assert.NotNull(result);
@@ -250,7 +250,7 @@ public class OpcUaCompositeMapperTests
         };
 
         // Act
-        var result = await composite.TryGetPropertyAsync(registeredSubject, new OpcUaLookupKey(nodeReference, mockSession.Object), CancellationToken.None);
+        var result = await composite.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.Null(result);
