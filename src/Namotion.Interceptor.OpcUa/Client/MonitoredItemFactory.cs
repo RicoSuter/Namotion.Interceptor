@@ -22,7 +22,8 @@ internal static class MonitoredItemFactory
     /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
     public static MonitoredItem Create(OpcUaClientConfiguration configuration, NodeId nodeId, RegisteredSubjectProperty property)
     {
-        configuration.NodeMapper.TryGetMapping(property, out var nodeConfiguration);
+        var hasMapping = configuration.NodeMapper.TryGetMapping(property, out var nodeConfiguration);
+        var mapping = hasMapping ? nodeConfiguration : null;
         var item = new MonitoredItem(configuration.TelemetryContext)
         {
             StartNodeId = nodeId,
@@ -32,26 +33,26 @@ internal static class MonitoredItemFactory
         };
 
         // Apply sampling/queue settings from NodeMapper configuration
-        var samplingInterval = nodeConfiguration?.SamplingInterval ?? configuration.DefaultSamplingInterval;
+        var samplingInterval = mapping?.SamplingInterval ?? configuration.DefaultSamplingInterval;
         if (samplingInterval.HasValue)
         {
             item.SamplingInterval = samplingInterval.Value;
         }
 
-        var queueSize = nodeConfiguration?.QueueSize ?? configuration.DefaultQueueSize;
+        var queueSize = mapping?.QueueSize ?? configuration.DefaultQueueSize;
         if (queueSize.HasValue)
         {
             item.QueueSize = queueSize.Value;
         }
 
-        var discardOldest = nodeConfiguration?.DiscardOldest ?? configuration.DefaultDiscardOldest;
+        var discardOldest = mapping?.DiscardOldest ?? configuration.DefaultDiscardOldest;
         if (discardOldest.HasValue)
         {
             item.DiscardOldest = discardOldest.Value;
         }
 
         // Apply filter (only if any filter option is specified)
-        var filter = CreateDataChangeFilter(configuration, nodeConfiguration);
+        var filter = CreateDataChangeFilter(configuration, mapping);
         if (filter != null)
         {
             item.Filter = filter;
@@ -64,12 +65,12 @@ internal static class MonitoredItemFactory
     /// Creates a DataChangeFilter based on the node configuration and configuration defaults.
     /// Returns null if no filter options are specified (uses OPC UA library defaults).
     /// </summary>
-    private static DataChangeFilter? CreateDataChangeFilter(OpcUaClientConfiguration configuration, OpcUaPropertyMapping? nodeConfiguration)
+    private static DataChangeFilter? CreateDataChangeFilter(OpcUaClientConfiguration configuration, OpcUaPropertyMapping? mapping)
     {
         // Apply NodeMapper configuration overrides, then configuration defaults
-        var trigger = nodeConfiguration?.DataChangeTrigger ?? configuration.DefaultDataChangeTrigger;
-        var deadbandType = nodeConfiguration?.DeadbandType ?? configuration.DefaultDeadbandType;
-        var deadbandValue = nodeConfiguration?.DeadbandValue ?? configuration.DefaultDeadbandValue;
+        var trigger = mapping?.DataChangeTrigger ?? configuration.DefaultDataChangeTrigger;
+        var deadbandType = mapping?.DeadbandType ?? configuration.DefaultDeadbandType;
+        var deadbandValue = mapping?.DeadbandValue ?? configuration.DefaultDeadbandValue;
 
         // Only create filter if at least one option is specified
         if (!trigger.HasValue && !deadbandType.HasValue && !deadbandValue.HasValue)
