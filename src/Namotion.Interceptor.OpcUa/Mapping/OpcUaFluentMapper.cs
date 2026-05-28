@@ -37,7 +37,7 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
     {
-        var path = GetPropertyPath(property);
+        var path = GetPropertyPath(property, rootSubject);
         if (_mappings.TryGetValue(path, out var stored))
         {
             mapping = stored;
@@ -60,8 +60,7 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
             if (property.IsAttribute)
                 continue;
 
-            var path = GetPropertyPath(property);
-            if (_mappings.TryGetValue(path, out var config) && config.BrowseName == browseName)
+            if (TryGetMapping(property, rootSubject.Subject, out var config) && config.BrowseName == browseName)
             {
                 return new ValueTask<RegisteredSubjectProperty?>(property);
             }
@@ -73,8 +72,8 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
     private static string GetPropertyPath<TProperty>(Expression<Func<T, TProperty>> expression) =>
         ExpressionPathHelper.GetPathFromExpression(expression.Body);
 
-    private static string GetPropertyPath(RegisteredSubjectProperty property) =>
-        property.GetPath();
+    private static string GetPropertyPath(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject = null) =>
+        property.GetPath(rootSubject: rootSubject);
 
     private class PropertyBuilder<TProp> : IPropertyBuilder<TProp>
     {

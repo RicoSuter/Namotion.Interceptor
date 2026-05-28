@@ -155,7 +155,7 @@ namespace Namotion.Interceptor.Registry.Paths
     }
     public static class PathExtensions
     {
-        public static string GetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string separator = ".") { }
+        public static string GetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string separator = ".", Namotion.Interceptor.IInterceptorSubject? rootSubject = null) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "path",
                 "property"})]

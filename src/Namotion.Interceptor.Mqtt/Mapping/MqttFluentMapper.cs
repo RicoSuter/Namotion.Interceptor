@@ -34,7 +34,7 @@ public class MqttFluentMapper<TSubject>
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)
     {
-        var path = property.GetPath();
+        var path = property.GetPath(rootSubject: rootSubject);
         if (_mappings.TryGetValue(path, out var stored))
         {
             mapping = stored;
