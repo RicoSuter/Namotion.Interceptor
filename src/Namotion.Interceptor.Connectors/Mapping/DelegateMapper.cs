@@ -7,6 +7,7 @@ namespace Namotion.Interceptor.Connectors.Mapping;
 /// Wraps a delegate for simple one-off mappers.
 /// </summary>
 public class DelegateMapper<TMapping> : IPropertyMapper<TMapping>
+    where TMapping : class
 {
     private readonly Func<RegisteredSubjectProperty, IInterceptorSubject, TMapping?> _selector;
 

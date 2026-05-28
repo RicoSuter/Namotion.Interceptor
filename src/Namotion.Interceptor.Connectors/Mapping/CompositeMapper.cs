@@ -21,6 +21,14 @@ public class CompositeMapper<TMapping> : IPropertyMapper<TMapping>
     {
         _merge = merge ?? throw new ArgumentNullException(nameof(merge));
         _mappers = mappers ?? throw new ArgumentNullException(nameof(mappers));
+
+        for (var i = 0; i < _mappers.Length; i++)
+        {
+            if (_mappers[i] is null)
+            {
+                throw new ArgumentException($"Mapper at index {i} must not be null.", nameof(mappers));
+            }
+        }
     }
 
     public bool TryGetMapping(

@@ -2,6 +2,7 @@ using MQTTnet.Protocol;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Mqtt.Attributes;
 using Namotion.Interceptor.Mqtt.Mapping;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Xunit;
 
@@ -92,6 +93,41 @@ public class MqttAttributeMapperTests
 
         // Assert
         Assert.False(result);
+    }
+
+    [Fact]
+    public async Task WhenReverseLookupWithMatchingTopic_ThenReturnsProperty()
+    {
+        // Arrange
+        var mapper = new MqttAttributeMapper();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var subject = new MqttAttributeTestSensor(context);
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var found = await mapper.TryGetPropertyAsync(
+            new MqttLookupKey("sensors/temperature"), registeredSubject, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(found);
+        Assert.Equal("Temperature", found.Name);
+    }
+
+    [Fact]
+    public async Task WhenReverseLookupWithUnknownTopic_ThenReturnsNull()
+    {
+        // Arrange
+        var mapper = new MqttAttributeMapper();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var subject = new MqttAttributeTestSensor(context);
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var found = await mapper.TryGetPropertyAsync(
+            new MqttLookupKey("nonexistent/topic"), registeredSubject, CancellationToken.None);
+
+        // Assert
+        Assert.Null(found);
     }
 }
 

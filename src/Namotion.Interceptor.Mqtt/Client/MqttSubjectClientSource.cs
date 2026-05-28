@@ -390,7 +390,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         foreach (var property in properties)
         {
-            var (topic, _) = TryGetTopicForProperty(property.Reference, property);
+            var (topic, mapping) = TryGetTopicForProperty(property.Reference, property);
             if (topic is null) continue;
 
             if (!_ownership.ClaimSource(property.Reference))
@@ -402,9 +402,10 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             }
 
             _topicToProperty[topic] = property.Reference;
+            var qos = mapping?.QualityOfService ?? _configuration.DefaultQualityOfService;
             subscribeOptionsBuilder.WithTopicFilter(f => f
                 .WithTopic(topic)
-                .WithQualityOfServiceLevel(_configuration.DefaultQualityOfService));
+                .WithQualityOfServiceLevel(qos));
         }
 
         await _client!.SubscribeAsync(subscribeOptionsBuilder.Build(), cancellationToken).ConfigureAwait(false);

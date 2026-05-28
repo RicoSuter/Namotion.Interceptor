@@ -10,8 +10,14 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
     /// <summary>
     /// Attempts to resolve a registered property from an external key.
     /// </summary>
+    /// <param name="key">The external key to resolve.</param>
+    /// <param name="subject">
+    /// The subject whose subtree to search. Connectors that browse hierarchically pass the current
+    /// subject (one level at a time); flat connectors pass the graph root.
+    /// </param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
         TKey key,
-        RegisteredSubject rootSubject,
+        RegisteredSubject subject,
         CancellationToken cancellationToken);
 }

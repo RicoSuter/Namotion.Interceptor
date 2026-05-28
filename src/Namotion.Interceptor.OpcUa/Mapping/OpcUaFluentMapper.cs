@@ -50,17 +50,17 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
     /// <inheritdoc />
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
         OpcUaLookupKey key,
-        RegisteredSubject rootSubject,
+        RegisteredSubject subject,
         CancellationToken cancellationToken)
     {
         var browseName = key.Reference.BrowseName.Name;
 
-        foreach (var property in rootSubject.Properties)
+        foreach (var property in subject.Properties)
         {
             if (property.IsAttribute)
                 continue;
 
-            if (TryGetMapping(property, rootSubject.Subject, out var config) && config.BrowseName == browseName)
+            if (TryGetMapping(property, subject.Subject, out var config) && config.BrowseName == browseName)
             {
                 return new ValueTask<RegisteredSubjectProperty?>(property);
             }

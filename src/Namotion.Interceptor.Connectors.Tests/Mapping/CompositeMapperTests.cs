@@ -56,6 +56,18 @@ public class CompositeMapperTests
     }
 
     [Fact]
+    public void WhenAnInnerMapperIsNull_ThenConstructorThrows()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new CompositeMapper<TestMapping>(
+                new DelegateMapper<TestMapping>((_, _) => null),
+                null!));
+
+        Assert.Equal("mappers", exception.ParamName);
+    }
+
+    [Fact]
     public void WhenExplicitMergerProvided_ThenItOverridesDefaultMerge()
     {
         // Arrange
