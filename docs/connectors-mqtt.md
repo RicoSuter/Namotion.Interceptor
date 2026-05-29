@@ -231,7 +231,7 @@ public partial class Sensor
 }
 ```
 
-Multi-level topics are built by annotating each level of the object graph (parent reference properties carry their own segment), the same way `[Path]` composes nested paths. Because the path is split on the topic separator for reverse lookup (inbound messages), a single `[MqttTopic]` value should be one segment without embedded separators. A flat, absolute topic that bypasses hierarchical composition is not yet supported; it is planned as a future `AbsoluteTopic` option.
+Multi-level topics are built by annotating each level of the object graph (parent reference properties carry their own segment), the same way `[Path]` composes nested paths. Because the path is split on the topic separator for reverse lookup (inbound messages), a single `[MqttTopic]` value should be one segment without embedded separators.
 
 Since `[MqttTopic]` already provides the `mqtt` `[Path]` segment for a property, use one attribute per property rather than combining `[Path]` and `[MqttTopic]` on the same property.
 
