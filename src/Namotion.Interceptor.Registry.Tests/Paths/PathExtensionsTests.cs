@@ -720,12 +720,12 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenMultiParentChainExceedsDepthBound_ThenTryGetPathReturnsNull()
+    public void WhenMultiParentChainIsVeryDeep_ThenTryGetPathResolvesWithoutStackOverflow()
     {
-        // Arrange - a parent chain deeper than the search's depth bound, with a multi-parent branch at
-        // the leaf to force the recursive search. A root beyond the bound is reported as not reachable
-        // (null); that same bound is what stops a pathologically deep graph from overflowing the stack.
-        const int depth = 400; // well beyond the 256 cycle/depth threshold
+        // Arrange - a parent chain far deeper than recursion would tolerate, with a multi-parent branch at
+        // the leaf to force the iterative search. Because the search uses an explicit stack (not the call
+        // stack) and is not depth-bounded, it resolves the full path instead of overflowing or giving up.
+        const int depth = 10_000;
         var context = CreateContext();
         var root = new Models.Person(context) { FirstName = "Root" };
         var chain = new List<Models.Person> { root };
@@ -745,7 +745,11 @@ public class PathExtensionsTests
         // Act
         var path = firstNameProperty.TryGetPath(rootSubject: root);
 
-        // Assert - reachable only beyond the depth bound, so reported as not reachable
-        Assert.Null(path);
+        // Assert - resolves to "Father" repeated for each hop up the chain, then the leaf property
+        Assert.NotNull(path);
+        var segments = path!.Split('.');
+        Assert.Equal(depth + 1, segments.Length);
+        Assert.Equal("FirstName", segments[^1]);
+        Assert.All(segments[..^1], segment => Assert.Equal("Father", segment));
     }
 }

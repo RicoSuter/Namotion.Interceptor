@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -13,9 +14,9 @@ namespace Namotion.Interceptor.Registry.Paths;
 public static class PathExtensions
 {
     /// <summary>
-    /// Depth at which the walk starts tracking visited subjects (the shallow common case stays
-    /// allocation-free) and the recursion bound for the multi-parent search. Beyond it a cycle or
-    /// pathological graph returns null instead of looping forever or overflowing the stack.
+    /// Depth at which the single-parent walk starts tracking visited subjects, keeping the shallow common
+    /// case allocation-free; past it a revisit means a cycle and the walk returns null. An allocation
+    /// threshold only, not a depth limit: acyclic chains of any length still resolve.
     /// </summary>
     private const int CycleDetectionDepthThreshold = 256;
 
@@ -357,87 +358,84 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Depth-first search across all parents for a chain from <paramref name="property"/> to
-    /// <paramref name="rootSubject"/>. Returns the leaf-first frame chain, or null when the root is not
-    /// reachable. Cycles are pruned per branch, so a cycle does not prevent finding the root through other
-    /// acyclic branches. Subjects proven unable to reach the root are memoized so a shared subject in a
-    /// wide DAG is explored once rather than once per path, and the recursion is depth-bounded so a
-    /// pathological graph returns null instead of overflowing the stack.
+    /// Iterative (explicit-stack) depth-first search for a leaf-first frame chain from
+    /// <paramref name="property"/> up to <paramref name="rootSubject"/>, or null when the root is not
+    /// reachable. Cycles are pruned per branch; unreachable owners are memoized so a shared subject in a
+    /// DAG is explored once, keeping the search linear and overflow-free for arbitrarily deep graphs.
     /// </summary>
     private static List<(RegisteredSubjectProperty Property, object? Index)>? TrySearchToRoot(
         RegisteredSubjectProperty property, object? propertyIndex, IInterceptorSubject rootSubject)
     {
         var frames = new List<(RegisteredSubjectProperty Property, object? Index)> { (property, propertyIndex) };
+        if (property.Subject == rootSubject)
+        {
+            return frames;
+        }
+
+        // visiting = owners on the current branch (cycle pruning); unreachable = owners that cannot reach
+        // the root. Memoizing unconditionally is sound: a subject reachable only via a parent already on
+        // the path is found through that parent's other branches first, returning before its memo is read.
         var visiting = new HashSet<RegisteredSubject>();
         var unreachable = new HashSet<RegisteredSubject>();
-        return SearchToRoot(property, rootSubject, frames, visiting, unreachable, depth: 0, out _) ? frames : null;
+
+        // stack mirrors frames (minus the leaf): each entry expands the owner one frame leads into.
+        var stack = new List<SearchFrame>();
+        visiting.Add(property.Parent);
+        stack.Add(new SearchFrame { Owner = property.Parent, Parents = property.Parent.Parents });
+
+        while (stack.Count > 0)
+        {
+            var topIndex = stack.Count - 1;
+            var top = stack[topIndex];
+
+            if (top.NextParentIndex < top.Parents.Length)
+            {
+                var parent = top.Parents[top.NextParentIndex];
+                top.NextParentIndex++;
+                stack[topIndex] = top; // top is a copy; write the advanced cursor back
+
+                var parentProperty = parent.Property;
+                frames.Add((parentProperty, parent.Index));
+
+                if (parentProperty.Subject == rootSubject)
+                {
+                    return frames;
+                }
+
+                var owner = parentProperty.Parent;
+                if (unreachable.Contains(owner) || !visiting.Add(owner))
+                {
+                    frames.RemoveAt(frames.Count - 1); // unreachable or a cycle here: skip this edge
+                    continue;
+                }
+
+                stack.Add(new SearchFrame { Owner = owner, Parents = owner.Parents });
+            }
+            else
+            {
+                // No parent reached the root, so this owner cannot either: memoize and backtrack.
+                visiting.Remove(top.Owner);
+                unreachable.Add(top.Owner);
+                stack.RemoveAt(topIndex);
+                if (stack.Count > 0)
+                {
+                    frames.RemoveAt(frames.Count - 1); // the leaf frame has no edge above it
+                }
+            }
+        }
+
+        return null;
     }
 
-    /// <remarks>
-    /// On a false result, <c>authoritative</c> is false when the depth bound cut the subtree off
-    /// (provisional, must not be memoized) and true otherwise. Cycle pruning stays authoritative: a
-    /// subject reachable only through a parent already on the path is resolved by that parent's own
-    /// remaining branches first, so memoizing the cycle-pruned subject never yields a wrong result.
-    /// </remarks>
-    private static bool SearchToRoot(
-        RegisteredSubjectProperty current,
-        IInterceptorSubject rootSubject,
-        List<(RegisteredSubjectProperty Property, object? Index)> frames,
-        HashSet<RegisteredSubject> visiting,
-        HashSet<RegisteredSubject> unreachable,
-        int depth,
-        out bool authoritative)
+    /// <summary>
+    /// A node of the iterative search: an owner, a snapshot of its parents taken once (so a concurrent
+    /// detach cannot race the walk), and a cursor over them.
+    /// </summary>
+    private struct SearchFrame
     {
-        authoritative = true;
-
-        if (current.Subject == rootSubject)
-        {
-            return true;
-        }
-
-        var owner = current.Parent;
-
-        if (unreachable.Contains(owner))
-        {
-            return false;
-        }
-
-        // Depth bound against a pathological graph; a truncated branch is provisional (not memoized).
-        if (depth > CycleDetectionDepthThreshold)
-        {
-            authoritative = false;
-            return false;
-        }
-
-        // Cycle on this branch (owner already on the path): prune it so other branches can still reach the root.
-        if (!visiting.Add(owner))
-        {
-            return false;
-        }
-
-        var subtreeAuthoritative = true;
-        foreach (var parent in owner.Parents)
-        {
-            frames.Add((parent.Property, parent.Index));
-            if (SearchToRoot(parent.Property, rootSubject, frames, visiting, unreachable, depth + 1, out var branchAuthoritative))
-            {
-                return true;
-            }
-
-            frames.RemoveAt(frames.Count - 1);
-            subtreeAuthoritative &= branchAuthoritative;
-        }
-
-        visiting.Remove(owner);
-
-        // Memoize only a final verdict (a depth-truncated subtree might still reach the root past the bound).
-        if (subtreeAuthoritative)
-        {
-            unreachable.Add(owner);
-        }
-
-        authoritative = subtreeAuthoritative;
-        return false;
+        public RegisteredSubject Owner;
+        public ImmutableArray<SubjectPropertyParent> Parents;
+        public int NextParentIndex;
     }
 
     /// <summary>
