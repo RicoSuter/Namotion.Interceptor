@@ -306,18 +306,18 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         foreach (var attribute in property.Attributes)
         {
-            if (!_mapper.TryGetMapping(attribute, _subject, out var attributeConfiguration))
+            if (!_mapper.TryGetMapping(attribute, _subject, out var mapping))
                 continue;
 
-            var attributeName = attributeConfiguration.BrowseName ?? attribute.BrowseName;
+            var attributeName = mapping.BrowseName ?? attribute.BrowseName;
             var attributePath = parentPath + PathDelimiter + attributeName;
-            var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, attributeConfiguration) ?? ReferenceTypeIds.HasProperty;
+            var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, mapping) ?? ReferenceTypeIds.HasProperty;
 
             // Reuse the mapping resolved above instead of resolving it again in the helper.
             var attributeNode = CreateVariableNodeForAttribute(
                 attributeName,
                 attribute,
-                attributeConfiguration,
+                mapping,
                 parentNode.NodeId,
                 attributePath,
                 referenceTypeId);
