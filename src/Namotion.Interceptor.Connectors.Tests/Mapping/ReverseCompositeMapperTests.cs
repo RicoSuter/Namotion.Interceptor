@@ -119,6 +119,29 @@ public class ReverseCompositeMapperTests
     }
 
     [Fact]
+    public void WhenThreeMappersChainMerges_ThenLastWinsAndUnsetFieldsFallThrough()
+    {
+        // Arrange - three mappers in order. Only the first sets Qos; all three set Topic.
+        // This exercises the chained accumulation (Merge over an already-merged value), which a
+        // two-mapper test does not: the second Merge receives the first Merge's result as fallback.
+        var (subject, root) = CreateSubject();
+        var property = subject.TryGetProperty("FirstName")!;
+        var first = new FakeMapper(new TestMapping(Topic: "a", Qos: 1));
+        var middle = new FakeMapper(new TestMapping(Topic: "b", Qos: null));
+        var last = new FakeMapper(new TestMapping(Topic: "c", Qos: null));
+        var composite = new TestComposite(first, middle, last);
+
+        // Act
+        var found = composite.TryGetMapping(property, root, out var mapping);
+
+        // Assert - the last mapper's Topic wins across the whole chain, while the first mapper's
+        // Qos survives both merges because neither later mapper overrides it.
+        Assert.True(found);
+        Assert.Equal("c", mapping!.Topic);
+        Assert.Equal(1, mapping.Qos);
+    }
+
+    [Fact]
     public async Task WhenTwoMappersResolveSameReverseKey_ThenLaterMapperWins()
     {
         // Arrange - both resolve "k", to different properties; later mapper should win

@@ -174,10 +174,10 @@ internal class OpcUaSubjectLoader
         // First pass: match known attributes from C# model
         foreach (var attribute in property.Attributes)
         {
-            if (!_configuration.Mapper.TryGetMapping(attribute, _subject, out var attributeConfiguration))
+            if (!_configuration.Mapper.TryGetMapping(attribute, _subject, out var mapping))
                 continue;
 
-            var attributeBrowseName = attributeConfiguration.BrowseName ?? attribute.BrowseName;
+            var attributeBrowseName = mapping.BrowseName ?? attribute.BrowseName;
             NodeId? matchingNodeId = null;
             foreach (var (childNode, childNodeId) in childNodes)
             {
