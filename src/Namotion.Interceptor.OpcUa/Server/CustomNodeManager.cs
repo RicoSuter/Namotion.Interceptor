@@ -220,7 +220,7 @@ internal class CustomNodeManager : CustomNodeManager2
         var browseName = _nodeFactory.GetBrowseName(this, propertyName, mapping, child.Index);
         var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, mapping);
 
-        CreateChildObject(property, browseName, child.Subject, path, parentNodeId, referenceTypeId);
+        CreateChildObject(property, mapping, browseName, child.Subject, path, parentNodeId, referenceTypeId);
     }
 
     private void CreateArrayObjectNode(string propertyName, RegisteredSubjectProperty property, OpcUaPropertyMapping? mapping, ICollection<SubjectPropertyChild> children, NodeId parentNodeId, string parentPath)
@@ -240,7 +240,7 @@ internal class CustomNodeManager : CustomNodeManager2
             var childBrowseName = new QualifiedName($"{propertyName}[{child.Index}]", NamespaceIndex);
             var childPath = $"{parentPath}{propertyName}[{child.Index}]";
 
-            CreateChildObject(property, childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);
+            CreateChildObject(property, mapping, childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);
         }
     }
 
@@ -269,7 +269,7 @@ internal class CustomNodeManager : CustomNodeManager2
             var childBrowseName = new QualifiedName(indexString, NamespaceIndex);
             var childPath = parentPath + propertyName + PathDelimiter + child.Index;
 
-            CreateChildObject(property, childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);
+            CreateChildObject(property, mapping, childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);
         }
     }
 
@@ -313,10 +313,11 @@ internal class CustomNodeManager : CustomNodeManager2
             var attributePath = parentPath + PathDelimiter + attributeName;
             var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, attributeConfiguration) ?? ReferenceTypeIds.HasProperty;
 
-            // Create variable node for attribute
+            // Reuse the mapping resolved above instead of resolving it again in the helper.
             var attributeNode = CreateVariableNodeForAttribute(
                 attributeName,
                 attribute,
+                attributeConfiguration,
                 parentNode.NodeId,
                 attributePath,
                 referenceTypeId);
@@ -329,11 +330,11 @@ internal class CustomNodeManager : CustomNodeManager2
     private BaseDataVariableState CreateVariableNodeForAttribute(
         string attributeName,
         RegisteredSubjectProperty attribute,
+        OpcUaPropertyMapping mapping,
         NodeId parentNodeId,
         string path,
         NodeId referenceTypeId)
     {
-        var mapping = _mapper.TryGetMapping(attribute, _subject, out var m) ? m : null;
         var nodeId = _nodeFactory.GetNodeId(this, mapping, path);
         var browseName = _nodeFactory.GetBrowseName(this, attributeName, mapping, null);
         var dataTypeOverride = _nodeFactory.GetDataTypeOverride(this, mapping);
@@ -440,7 +441,7 @@ internal class CustomNodeManager : CustomNodeManager2
         }
     }
 
-    private void CreateChildObject(RegisteredSubjectProperty property, QualifiedName browseName,
+    private void CreateChildObject(RegisteredSubjectProperty property, OpcUaPropertyMapping? mapping, QualifiedName browseName,
         IInterceptorSubject subject,
         string path,
         NodeId parentNodeId,
@@ -470,8 +471,8 @@ internal class CustomNodeManager : CustomNodeManager2
         }
         else
         {
-            // Create new node and add to dictionary (protected by _structureLock)
-            var mapping = _mapper.TryGetMapping(property, _subject, out var m) ? m : null;
+            // Create new node and add to dictionary (protected by _structureLock). `mapping` is the
+            // containing property's mapping, threaded in to avoid re-resolving it per collection child.
             var nodeId = _nodeFactory.GetNodeId(this, mapping, path);
             var typeDefinitionId = GetTypeDefinitionIdForSubject(subject);
 

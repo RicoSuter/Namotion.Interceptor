@@ -503,8 +503,9 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
         var topic = args.ApplicationMessage.Topic;
 
-        // Isolate per-message failures: a single bad message (unknown mapping, malformed payload,
-        // a cyclic/unreachable subject graph) must not escape into the broker's publish pipeline.
+        // Isolate per-message failures: a bad message (unknown mapping, malformed payload, cyclic or
+        // unreachable subject graph) must not escape into the broker's publish pipeline. No cancellation
+        // token flows in, so every failure is logged and the message skipped.
         try
         {
             var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
@@ -544,11 +545,6 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
             {
                 _logger.LogError(ex, "Failed to deserialize MQTT payload for topic {Topic}.", topic);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Shutdown in progress; let cancellation propagate rather than logging it as a failure.
-            throw;
         }
         catch (Exception ex)
         {

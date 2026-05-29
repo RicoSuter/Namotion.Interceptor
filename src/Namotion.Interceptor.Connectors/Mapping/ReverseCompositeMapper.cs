@@ -4,8 +4,11 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace Namotion.Interceptor.Connectors.Mapping;
 
 /// <summary>
-/// Combines multiple reverse-capable mappers. Forward composition merges partial mappings with
-/// "last wins" semantics; reverse lookup tries mappers in reverse order and returns the first match.
+/// Combines multiple reverse-capable mappers. Forward composition merges partial mappings field by field
+/// with "last wins" semantics (a later mapper's non-null field overrides an earlier one). Reverse lookup
+/// tries the mappers in reverse order and returns the first match; it resolves per mapper rather than
+/// inverting the merged mapping, so mappers in one composite must not override each other's reverse key
+/// field (the usual composition pairs a topic/name mapper with a metadata-only one, which never conflict).
 /// </summary>
 public class ReverseCompositeMapper<TMapping, TKey> : IReversePropertyMapper<TMapping, TKey>
     where TMapping : IPropertyMapping<TMapping>
@@ -14,7 +17,10 @@ public class ReverseCompositeMapper<TMapping, TKey> : IReversePropertyMapper<TMa
 
     protected ReverseCompositeMapper(params IReversePropertyMapper<TMapping, TKey>[] mappers)
     {
-        _mappers = mappers ?? throw new ArgumentNullException(nameof(mappers));
+        ArgumentNullException.ThrowIfNull(mappers);
+
+        // Copy so a caller's explicit array cannot be mutated after construction (the params path is already fresh).
+        _mappers = (IReversePropertyMapper<TMapping, TKey>[])mappers.Clone();
 
         for (var i = 0; i < _mappers.Length; i++)
         {

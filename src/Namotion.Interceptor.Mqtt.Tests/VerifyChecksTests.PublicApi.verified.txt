@@ -1,0 +1,158 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Mqtt.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
+namespace Microsoft.Extensions.DependencyInjection
+{
+    public static class MqttSubjectExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.Mqtt.Client.MqttClientConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, string brokerHost, string pathProviderName, int brokerPort = 1883, string? topicPrefix = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.Mqtt.Server.MqttServerConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, string pathProviderName, int brokerPort = 1883, string? brokerHost = null, string? topicPrefix = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+    }
+}
+namespace Namotion.Interceptor.Mqtt.Attributes
+{
+    [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=true, Inherited=true)]
+    public class MqttTopicAttribute : Namotion.Interceptor.Registry.Attributes.PathAttribute
+    {
+        public MqttTopicAttribute(string topic, string? connectorName = null) { }
+        public MQTTnet.Protocol.MqttQualityOfServiceLevel QualityOfService { get; set; }
+        public bool Retain { get; set; }
+        public bool RetainSet { get; set; }
+        public string Topic { get; }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping ToMapping() { }
+    }
+}
+namespace Namotion.Interceptor.Mqtt.Client
+{
+    public class MqttClientConfiguration
+    {
+        public MqttClientConfiguration() { }
+        public required string BrokerHost { get; init; }
+        public int BrokerPort { get; init; }
+        public System.TimeSpan BufferTime { get; init; }
+        public System.TimeSpan CircuitBreakerCooldown { get; init; }
+        public int CircuitBreakerFailureThreshold { get; init; }
+        public bool CleanSession { get; init; }
+        public string ClientId { get; init; }
+        public System.TimeSpan ConnectTimeout { get; init; }
+        public MQTTnet.Protocol.MqttQualityOfServiceLevel DefaultQualityOfService { get; init; }
+        public System.TimeSpan HealthCheckInterval { get; init; }
+        public System.TimeSpan KeepAliveInterval { get; init; }
+        public required Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey> Mapper { get; init; }
+        public System.TimeSpan MaximumReconnectDelay { get; init; }
+        public string? Password { get; init; }
+        public System.TimeSpan ReconnectDelay { get; init; }
+        public int ReconnectStallThreshold { get; init; }
+        public System.TimeSpan RetryTime { get; init; }
+        public System.Func<System.ReadOnlyMemory<byte>, System.DateTimeOffset?> SourceTimestampDeserializer { get; init; }
+        public string? SourceTimestampPropertyName { get; init; }
+        public System.Func<System.DateTimeOffset, byte[]> SourceTimestampSerializer { get; init; }
+        public string? TopicPrefix { get; init; }
+        public bool UseRetainedMessages { get; init; }
+        public bool UseTls { get; init; }
+        public string? Username { get; init; }
+        public Namotion.Interceptor.Mqtt.IMqttValueConverter ValueConverter { get; init; }
+        public int WriteRetryQueueSize { get; init; }
+        public void Validate() { }
+    }
+}
+namespace Namotion.Interceptor.Mqtt
+{
+    public interface IMqttValueConverter
+    {
+        object? Deserialize(System.Buffers.ReadOnlySequence<byte> payload, System.Type type);
+        byte[] Serialize(object? value, System.Type type);
+    }
+    public sealed class JsonMqttValueConverter : Namotion.Interceptor.Mqtt.IMqttValueConverter
+    {
+        public JsonMqttValueConverter() { }
+        public JsonMqttValueConverter(System.Text.Json.JsonSerializerOptions options) { }
+        public object? Deserialize(System.Buffers.ReadOnlySequence<byte> payload, System.Type type) { }
+        public byte[] Serialize(object? value, System.Type type) { }
+    }
+    public static class MqttConstants
+    {
+        public const string DefaultConnectorName = "mqtt";
+    }
+}
+namespace Namotion.Interceptor.Mqtt.Mapping
+{
+    public class MqttAttributeMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
+    {
+        public MqttAttributeMapper(string? connectorName = null) { }
+        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
+        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class MqttCompositeMapper : Namotion.Interceptor.Connectors.Mapping.ReverseCompositeMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
+    {
+        public MqttCompositeMapper(params Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>[] mappers) { }
+    }
+    public class MqttFluentMapper<TSubject> : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
+    {
+        public MqttFluentMapper() { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMapper<TSubject> Map<TValue>(System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> selector, System.Action<Namotion.Interceptor.Mqtt.Mapping.MqttFluentMappingBuilder> configure) { }
+        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
+        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class MqttFluentMappingBuilder
+    {
+        public MqttFluentMappingBuilder() { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMappingBuilder WithQualityOfService(MQTTnet.Protocol.MqttQualityOfServiceLevel qos) { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMappingBuilder WithRetain(bool retain) { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMappingBuilder WithTopic(string topic) { }
+    }
+    public readonly struct MqttLookupKey : System.IEquatable<Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
+    {
+        public MqttLookupKey(string Topic) { }
+        public string Topic { get; init; }
+    }
+    public class MqttPathProviderMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
+    {
+        public MqttPathProviderMapper(Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider) { }
+        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
+        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class MqttPropertyMapping : Namotion.Interceptor.Connectors.Mapping.IPropertyMapping<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>, System.IEquatable<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>
+    {
+        public MqttPropertyMapping(string? Topic = null, MQTTnet.Protocol.MqttQualityOfServiceLevel? QualityOfService = default, bool? Retain = default) { }
+        public MQTTnet.Protocol.MqttQualityOfServiceLevel? QualityOfService { get; init; }
+        public bool? Retain { get; init; }
+        public string? Topic { get; init; }
+        public static Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping Merge(Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping primary, Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping fallback) { }
+    }
+}
+namespace Namotion.Interceptor.Mqtt.Server
+{
+    public class MqttServerConfiguration
+    {
+        public MqttServerConfiguration() { }
+        public string? BrokerHost { get; init; }
+        public int BrokerPort { get; init; }
+        public System.TimeSpan BufferTime { get; init; }
+        public string ClientId { get; init; }
+        public MQTTnet.Protocol.MqttQualityOfServiceLevel DefaultQualityOfService { get; init; }
+        public System.TimeSpan InitialStateDelay { get; init; }
+        public required Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey> Mapper { get; init; }
+        public int MaxPendingMessagesPerClient { get; init; }
+        public System.Func<System.ReadOnlyMemory<byte>, System.DateTimeOffset?> SourceTimestampDeserializer { get; init; }
+        public string? SourceTimestampPropertyName { get; init; }
+        public System.Func<System.DateTimeOffset, byte[]> SourceTimestampSerializer { get; init; }
+        public string? TopicPrefix { get; init; }
+        public bool UseRetainedMessages { get; init; }
+        public Namotion.Interceptor.Mqtt.IMqttValueConverter ValueConverter { get; init; }
+        public void Validate() { }
+    }
+    public class MqttSubjectServer : Microsoft.Extensions.Hosting.BackgroundService, Namotion.Interceptor.Connectors.IFaultInjectable, Namotion.Interceptor.Connectors.ISubjectConnector, System.IAsyncDisposable
+    {
+        public MqttSubjectServer(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Mqtt.Server.MqttServerConfiguration configuration, Microsoft.Extensions.Logging.ILogger<Namotion.Interceptor.Mqtt.Server.MqttSubjectServer> logger) { }
+        public bool IsListening { get; }
+        public int NumberOfClients { get; }
+        public Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+    }
+}

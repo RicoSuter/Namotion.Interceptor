@@ -477,9 +477,10 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
     {
         var topic = e.ApplicationMessage.Topic;
 
-        // Isolate per-message failures: a single bad message (unknown mapping, malformed payload,
-        // a cyclic/unreachable subject graph) must not escape into the MQTT receive loop and tear
-        // down the subscription for every other topic.
+        // Isolate per-message failures: a bad message (unknown mapping, malformed payload, cyclic or
+        // unreachable subject graph) must not escape into the MQTT receive loop and tear down the
+        // subscription for other topics. No cancellation token flows in, so every failure is logged
+        // and the message skipped.
         try
         {
             if (await TryGetPropertyForTopicAsync(topic).ConfigureAwait(false) is not { } propertyReference)
@@ -522,11 +523,6 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             propertyWriter.Write(
                 (propertyReference, value, this, sourceTimestamp, receivedTimestamp),
                 static state => state.propertyReference.SetValueFromSource(state.Item3, state.sourceTimestamp, state.receivedTimestamp, state.value));
-        }
-        catch (OperationCanceledException)
-        {
-            // Shutdown in progress; let cancellation propagate rather than logging it as a failure.
-            throw;
         }
         catch (Exception ex)
         {

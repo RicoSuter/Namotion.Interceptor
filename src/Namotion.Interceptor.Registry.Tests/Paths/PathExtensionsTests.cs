@@ -614,4 +614,138 @@ public class PathExtensionsTests
         // Assert
         Assert.Null(path);
     }
+
+    [Fact]
+    public void WhenSubjectReachableFromRootViaTwoAcyclicPaths_ThenTryGetPathResolves()
+    {
+        // Arrange - a diamond: 'shared' is reachable from 'root' through both Father->A and Mother->B,
+        // so the per-branch cycle pruning must not falsely prune the shared subject.
+        var context = CreateContext();
+        var root = new Models.Person(context) { FirstName = "Root" };
+        var a = new Models.Person(context) { FirstName = "A" };
+        var b = new Models.Person(context) { FirstName = "B" };
+        var shared = new Models.Person(context) { FirstName = "Shared" };
+        root.Father = a;
+        root.Mother = b;
+        a.Father = shared; // shared's first parent
+        b.Father = shared; // shared's second parent
+        var firstNameProperty = shared.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
+
+        // Act
+        var path = firstNameProperty.TryGetPath(rootSubject: root);
+
+        // Assert - resolves via the first parent that reaches the root
+        Assert.Equal("Father.Father.FirstName", path);
+    }
+
+    [Fact]
+    public void WhenSharedDeadEndIsMemoizedDuringSearch_ThenRootStillResolvesViaAnotherBranch()
+    {
+        // Arrange - 'leaf' has three parents. The first two (p1, p2) lead only to a shared dead-end
+        // subject ('dead') that cannot reach the root, so the search explores 'dead' via p1, memoizes it
+        // as unreachable, then hits that memo when reaching 'dead' again via p2. The third parent ('good')
+        // reaches the root. This exercises the unreachable-memoization path and confirms a memoized
+        // dead-end does not prevent the root being found through another branch.
+        var context = CreateContext();
+        var root = new Models.Person(context) { FirstName = "Root" };
+        var good = new Models.Person(context) { FirstName = "Good" };
+        var p1 = new Models.Person(context) { FirstName = "P1" };
+        var p2 = new Models.Person(context) { FirstName = "P2" };
+        var dead = new Models.Person(context) { FirstName = "Dead" };
+        var leaf = new Models.Person(context) { FirstName = "Leaf" };
+
+        p1.Father = leaf;   // leaf's first parent
+        p2.Father = leaf;   // leaf's second parent
+        good.Father = leaf; // leaf's third parent (the only one reaching the root)
+        dead.Father = p1;   // p1 -> dead (dead end)
+        dead.Mother = p2;   // p2 -> the same shared dead end
+        root.Father = good; // good -> root
+        var firstNameProperty = leaf.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
+
+        // Act
+        var path = firstNameProperty.TryGetPath(rootSubject: root);
+
+        // Assert
+        Assert.Equal("Father.Father.FirstName", path);
+    }
+
+    [Fact]
+    public void WhenParentChainHasCycleButRootReachableViaOtherBranch_ThenTryGetPathResolves()
+    {
+        // Arrange - 'shared' has a cyclic first parent (cyclicX <-> cyclicY) that never reaches the root,
+        // and a second parent 'good' that does. The cycle on the first branch must not prevent the search
+        // from finding the root through the acyclic branch.
+        var context = CreateContext();
+        var root = new Models.Person(context) { FirstName = "Root" };
+        var good = new Models.Person(context) { FirstName = "Good" };
+        var cyclicX = new Models.Person(context) { FirstName = "X" };
+        var cyclicY = new Models.Person(context) { FirstName = "Y" };
+        var shared = new Models.Person(context) { FirstName = "Shared" };
+
+        cyclicX.Mother = shared;  // shared's first parent (leads into a cycle)
+        good.Father = shared;     // shared's second parent (reaches the root)
+        cyclicX.Father = cyclicY;
+        cyclicY.Father = cyclicX; // cyclicX <-> cyclicY cycle
+        root.Father = good;       // good is reachable from root
+        var firstNameProperty = shared.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
+
+        // Act
+        var path = firstNameProperty.TryGetPath(rootSubject: root);
+
+        // Assert
+        Assert.Equal("Father.Father.FirstName", path);
+    }
+
+    [Fact]
+    public void WhenMultiParentChainIsCyclicAndRootUnreachable_ThenTryGetPathReturnsNull()
+    {
+        // Arrange - 'leaf' has two parents (forcing the multi-parent search): one into a cycle, one a
+        // dead end. The provided root is reachable from neither, so the result is null (not a throw).
+        var context = CreateContext();
+        var unrelated = new Models.Person(context) { FirstName = "Unrelated" };
+        var leaf = new Models.Person(context) { FirstName = "Leaf" };
+        var cyclic = new Models.Person(context) { FirstName = "Cyclic" };
+        var deadEnd = new Models.Person(context) { FirstName = "DeadEnd" };
+
+        cyclic.Father = leaf;     // leaf's first parent
+        deadEnd.Mother = leaf;    // leaf's second parent (forces the multi-parent search)
+        leaf.Father = cyclic;     // leaf <-> cyclic cycle on the first branch
+        var firstNameProperty = leaf.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
+
+        // Act
+        var path = firstNameProperty.TryGetPath(rootSubject: unrelated);
+
+        // Assert
+        Assert.Null(path);
+    }
+
+    [Fact]
+    public void WhenMultiParentChainExceedsDepthBound_ThenTryGetPathReturnsNull()
+    {
+        // Arrange - a parent chain deeper than the search's depth bound, with a multi-parent branch at
+        // the leaf to force the recursive search. A root beyond the bound is reported as not reachable
+        // (null); that same bound is what stops a pathologically deep graph from overflowing the stack.
+        const int depth = 400; // well beyond the 256 cycle/depth threshold
+        var context = CreateContext();
+        var root = new Models.Person(context) { FirstName = "Root" };
+        var chain = new List<Models.Person> { root };
+        for (var i = 0; i < depth; i++)
+        {
+            var next = new Models.Person(context) { FirstName = $"P{i}" };
+            chain[^1].Father = next; // chain[i] is the parent of chain[i+1]
+            chain.Add(next);
+        }
+
+        var leaf = chain[^1];
+        var extra = new Models.Person(context) { FirstName = "Extra" };
+        extra.Mother = leaf; // second parent for the leaf forces the multi-parent search
+
+        var firstNameProperty = leaf.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
+
+        // Act
+        var path = firstNameProperty.TryGetPath(rootSubject: root);
+
+        // Assert - reachable only beyond the depth bound, so reported as not reachable
+        Assert.Null(path);
+    }
 }

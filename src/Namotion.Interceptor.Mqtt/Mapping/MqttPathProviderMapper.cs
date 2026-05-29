@@ -26,12 +26,7 @@ public class MqttPathProviderMapper
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)
     {
-        if (!_pathProvider.IsPropertyIncluded(property))
-        {
-            mapping = null;
-            return false;
-        }
-
+        // TryGetPath already applies IsPropertyIncluded and returns null when excluded or unreachable.
         var topic = property.TryGetPath(_pathProvider, rootSubject);
         if (topic is null)
         {

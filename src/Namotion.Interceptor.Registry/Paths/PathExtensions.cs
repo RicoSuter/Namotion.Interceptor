@@ -15,7 +15,9 @@ public static class PathExtensions
     /// Depth past which path walking starts tracking visited subjects to detect cycles. Real object
     /// graphs are far shallower than this, so the common case stays allocation-free; only an
     /// unexpectedly deep walk (i.e. a cycle in the parent chain) pays for a visited set, which then
-    /// throws on the actual revisit instead of looping forever.
+    /// returns null on the actual revisit instead of looping forever. The multi-parent search uses
+    /// the same value as a recursion-depth bound so a pathological graph returns null rather than
+    /// overflowing the stack.
     /// </summary>
     private const int CycleDetectionDepthThreshold = 256;
 
@@ -265,7 +267,7 @@ public static class PathExtensions
             return null;
         }
 
-        var sb = new StringBuilder();
+        var builder = new StringBuilder();
         for (var i = frames.Count - 1; i >= 0; i--)
         {
             var (prop, index) = frames[i];
@@ -278,29 +280,29 @@ public static class PathExtensions
                 InlinePathsAttribute.IsInlinePathsProperty(
                     prop.Subject.GetType(), prop.Name))
             {
-                if (sb.Length > 0)
+                if (builder.Length > 0)
                 {
-                    sb.Append(pathProvider.PathSeparator);
+                    builder.Append(pathProvider.PathSeparator);
                 }
 
-                sb.Append(index);
+                builder.Append(index);
                 continue;
             }
 
             var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
-            if (sb.Length > 0)
+            if (builder.Length > 0)
             {
-                sb.Append(pathProvider.PathSeparator);
+                builder.Append(pathProvider.PathSeparator);
             }
 
-            sb.Append(segment);
+            builder.Append(segment);
             if (index is not null)
             {
-                sb.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
+                builder.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
             }
         }
 
-        return sb.Length > 0 ? sb.ToString() : null;
+        return builder.Length > 0 ? builder.ToString() : null;
     }
 
     /// <summary>
@@ -366,46 +368,85 @@ public static class PathExtensions
     /// Depth-first search across all parents for a chain from <paramref name="property"/> to
     /// <paramref name="rootSubject"/>. Returns the leaf-first frame chain, or null when the root is not
     /// reachable. Cycles are pruned per branch, so a cycle does not prevent finding the root through other
-    /// acyclic branches.
+    /// acyclic branches. Subjects proven unable to reach the root are memoized so a shared subject in a
+    /// wide DAG is explored once rather than once per path, and the recursion is depth-bounded so a
+    /// pathological graph returns null instead of overflowing the stack.
     /// </summary>
     private static List<(RegisteredSubjectProperty Property, object? Index)>? TrySearchToRoot(
         RegisteredSubjectProperty property, object? propertyIndex, IInterceptorSubject rootSubject)
     {
         var frames = new List<(RegisteredSubjectProperty Property, object? Index)> { (property, propertyIndex) };
         var visiting = new HashSet<RegisteredSubject>();
-        return SearchToRoot(property, rootSubject, frames, visiting) ? frames : null;
+        var unreachable = new HashSet<RegisteredSubject>();
+        return SearchToRoot(property, rootSubject, frames, visiting, unreachable, depth: 0, out _) ? frames : null;
     }
 
+    /// <remarks>
+    /// On a false result, <c>authoritative</c> is false when the depth bound cut the subtree off
+    /// (provisional, must not be memoized) and true otherwise. Cycle pruning stays authoritative: a
+    /// subject reachable only through a parent already on the path is resolved by that parent's own
+    /// remaining branches first, so memoizing the cycle-pruned subject never yields a wrong result.
+    /// </remarks>
     private static bool SearchToRoot(
         RegisteredSubjectProperty current,
         IInterceptorSubject rootSubject,
         List<(RegisteredSubjectProperty Property, object? Index)> frames,
-        HashSet<RegisteredSubject> visiting)
+        HashSet<RegisteredSubject> visiting,
+        HashSet<RegisteredSubject> unreachable,
+        int depth,
+        out bool authoritative)
     {
+        authoritative = true;
+
         if (current.Subject == rootSubject)
         {
             return true;
         }
 
-        // A subject already on the current path means a cycle on this branch: prune it (treat as a dead
-        // end) so the search can still reach the root through other, acyclic branches.
-        if (!visiting.Add(current.Parent))
+        var owner = current.Parent;
+
+        // Already proven unreachable in this search.
+        if (unreachable.Contains(owner))
         {
             return false;
         }
 
-        foreach (var parent in current.Parent.Parents)
+        // Bound the recursion so a pathologically deep graph returns "not reachable" instead of
+        // overflowing the stack. The truncated branch is provisional, so it is not memoized.
+        if (depth > CycleDetectionDepthThreshold)
+        {
+            authoritative = false;
+            return false;
+        }
+
+        // Cycle on this branch (owner already on the path): prune it so other branches can still reach the root.
+        if (!visiting.Add(owner))
+        {
+            return false;
+        }
+
+        var subtreeAuthoritative = true;
+        foreach (var parent in owner.Parents)
         {
             frames.Add((parent.Property, parent.Index));
-            if (SearchToRoot(parent.Property, rootSubject, frames, visiting))
+            if (SearchToRoot(parent.Property, rootSubject, frames, visiting, unreachable, depth + 1, out var branchAuthoritative))
             {
                 return true;
             }
 
             frames.RemoveAt(frames.Count - 1);
+            subtreeAuthoritative &= branchAuthoritative;
         }
 
-        visiting.Remove(current.Parent);
+        visiting.Remove(owner);
+
+        // Memoize only a final verdict (a depth-truncated subtree might still reach the root past the bound).
+        if (subtreeAuthoritative)
+        {
+            unreachable.Add(owner);
+        }
+
+        authoritative = subtreeAuthoritative;
         return false;
     }
 

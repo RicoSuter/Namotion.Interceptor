@@ -24,15 +24,18 @@ public static class ExpressionPathHelper
             current = member.Expression;
         }
 
-        // A valid path is a chain of member accesses rooted at the lambda parameter (e.g., x => x.A.B).
-        // If the walk terminates on anything else - an empty chain, a mid-chain indexer or method call,
-        // a static member, or a captured variable - the expression is not representable as a dotted path,
-        // so fail fast rather than silently return a partial or wrong path. `current` is the node where
-        // the walk stopped, so it names what actually failed.
+        // A valid path is a member-access chain rooted at the lambda parameter (e.g. x => x.A.B). Anything
+        // else (empty chain, mid-chain indexer or method call, static member, captured variable) cannot be
+        // a dotted path, so fail fast instead of returning a partial or wrong one.
         if (parts.Count == 0 || current is not ParameterExpression)
         {
-            // `current` is the node where the walk stopped (null for a static member access).
-            var stopNode = current is null ? "a static or empty expression" : current.NodeType.ToString();
+            var stopNode = current switch
+            {
+                null => "a static or empty expression",
+                ParameterExpression => "the lambda parameter itself", // parts is empty, e.g. x => x
+                _ => current.NodeType.ToString()
+            };
+
             throw new ArgumentException(
                 $"Expression must be a simple member access chain rooted at the lambda parameter " +
                 $"(e.g., x => x.Property), but got {stopNode}.",

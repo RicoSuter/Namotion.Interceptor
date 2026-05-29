@@ -513,8 +513,8 @@ public interface IPropertyMapper<TMapping>
 public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMapping>
 {
     ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        RegisteredSubject root,
         TKey key,
+        RegisteredSubject subject,
         CancellationToken cancellationToken);
 }
 ```
@@ -525,17 +525,19 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
 
 | Class                                          | Description                                                                                       |
 |------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| `DelegateMapper<TMapping>`             | Wraps a `Func<RegisteredSubjectProperty, TMapping?>` for simple one-off mappers                   |
-| `CompositeMapper<TMapping>`            | Combines multiple mappers with "last wins" merge semantics via `IPropertyMapping<TMapping>.Merge` |
+| `DelegateMapper<TMapping>`             | Wraps a `Func<RegisteredSubjectProperty, IInterceptorSubject, TMapping?>` for simple one-off mappers |
+| `ReverseCompositeMapper<TMapping, TKey>` | Combines multiple reverse-capable mappers with "last wins" merge semantics via `IPropertyMapping<TMapping>.Merge` |
 
-`CompositeMapper<TMapping>` requires the mapping record to implement `IPropertyMapping<TMapping>`, which provides the static `Merge` method for combining partial configurations.
+`ReverseCompositeMapper<TMapping, TKey>` requires the mapping record to implement `IPropertyMapping<TMapping>`, which provides the static `Merge` method for combining partial configurations. Its constructor is `protected`, so each connector exposes a thin subclass (for example `MqttCompositeMapper` and `OpcUaCompositeMapper`) rather than using it directly.
 
 #### Default Composition
 
 Each connector defaults its `Mapper` to a composite that chains a path-provider adapter with a protocol-specific attribute mapper. For example, the MQTT client defaults to:
 
 ```csharp
-Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/'))
+Mapper = new MqttCompositeMapper(
+    new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
+    new MqttAttributeMapper("mqtt"))
 ```
 
 The OPC UA client defaults to:
@@ -552,7 +554,7 @@ Each connector ships thin wrappers that adapt generic infrastructure to protocol
 
 | Connector | Mapper Wrappers                                                                                               |
 |-----------|---------------------------------------------------------------------------------------------------------------|
-| MQTT      | `MqttPathProviderMapper`, `MqttAttributeMapper`, `MqttFluentMapper<T>`, `MqttCompositeMapper` |
+| MQTT      | `MqttPathProviderMapper`, `MqttAttributeMapper`, `MqttFluentMapper<TSubject>`, `MqttCompositeMapper` |
 | WebSocket | Uses `PathProviderBase` directly (no mapper abstraction)                                               |
 | OPC UA    | `OpcUaPathProviderMapper`, `OpcUaAttributeMapper`, `OpcUaFluentMapper<T>`, `OpcUaCompositeMapper` |
 

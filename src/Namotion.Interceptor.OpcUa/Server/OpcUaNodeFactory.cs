@@ -48,20 +48,31 @@ internal sealed class OpcUaNodeFactory
 
         if (mapping.BrowseNamespaceUri is not null)
         {
-            // GetIndex returns -1 for an unregistered URI, which casts to ushort 65535 and would
-            // silently place the node in the wrong namespace. Fail fast on the misconfiguration.
-            var browseNamespaceIndex = manager.GetSystemContext().NamespaceUris.GetIndex(mapping.BrowseNamespaceUri);
-            if (browseNamespaceIndex < 0)
-            {
-                throw new InvalidOperationException(
-                    $"BrowseName namespace URI '{mapping.BrowseNamespaceUri}' for node '{mapping.BrowseName}' " +
-                    $"is not registered in the server's namespace table.");
-            }
-
-            return new QualifiedName(mapping.BrowseName, (ushort)browseNamespaceIndex);
+            var browseNamespaceIndex = ResolveBrowseNamespaceIndex(
+                manager.GetSystemContext().NamespaceUris, mapping.BrowseNamespaceUri, mapping.BrowseName);
+            
+            return new QualifiedName(mapping.BrowseName, browseNamespaceIndex);
         }
 
         return new QualifiedName(mapping.BrowseName, namespaceIndex);
+    }
+
+    /// <summary>
+    /// Resolves the namespace index for a BrowseName namespace URI, failing fast when it is not
+    /// registered. GetIndex returns -1 for an unregistered URI; without this guard the -1 would cast to
+    /// ushort 65535 and silently place the node in the wrong namespace.
+    /// </summary>
+    internal static ushort ResolveBrowseNamespaceIndex(NamespaceTable namespaceUris, string browseNamespaceUri, string? browseName)
+    {
+        var browseNamespaceIndex = namespaceUris.GetIndex(browseNamespaceUri);
+        if (browseNamespaceIndex < 0)
+        {
+            throw new InvalidOperationException(
+                $"BrowseName namespace URI '{browseNamespaceUri}' for node '{browseName}' " +
+                $"is not registered in the server's namespace table.");
+        }
+
+        return (ushort)browseNamespaceIndex;
     }
 
     public NodeId? GetReferenceTypeId(CustomNodeManager manager, OpcUaPropertyMapping? mapping)

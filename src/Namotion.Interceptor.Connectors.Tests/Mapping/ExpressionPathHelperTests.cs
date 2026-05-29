@@ -10,6 +10,7 @@ public class ExpressionPathHelperTests
         public string Name { get; set; } = "";
         public double Value { get; set; }
         public TestChild Child { get; set; } = new();
+        public TestChild[] Items { get; set; } = [new()];
 
         public TestChild GetChild() => Child;
     }
@@ -108,5 +109,40 @@ public class ExpressionPathHelperTests
         // Act & Assert
         Assert.Throws<ArgumentException>(() =>
             ExpressionPathHelper.GetPathFromExpression(expression.Body));
+    }
+
+    [Fact]
+    public void WhenIndexerExpression_ThenThrowsArgumentException()
+    {
+        // Arrange - an indexer (array index) mid-chain cannot be represented as a dotted path
+        Expression<Func<TestSubject, int>> expression = s => s.Items[0].Temperature;
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() =>
+            ExpressionPathHelper.GetPathFromExpression(expression.Body));
+    }
+
+    [Fact]
+    public void WhenCapturedVariableExpression_ThenThrowsArgumentException()
+    {
+        // Arrange - the chain is rooted at a captured variable, not the lambda parameter
+        var captured = new TestSubject();
+        Expression<Func<TestSubject, string>> expression = s => captured.Name;
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() =>
+            ExpressionPathHelper.GetPathFromExpression(expression.Body));
+    }
+
+    [Fact]
+    public void WhenIdentityExpression_ThenThrowsWithClearMessage()
+    {
+        // Arrange - the expression selects the parameter itself, not a property
+        Expression<Func<TestSubject, TestSubject>> expression = s => s;
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() =>
+            ExpressionPathHelper.GetPathFromExpression(expression.Body));
+        Assert.Contains("the lambda parameter itself", exception.Message);
     }
 }

@@ -183,7 +183,7 @@ The built-in mapper types:
 |----------------------------------|-----------------------------------------------------------------------|
 | `MqttPathProviderMapper` | Wraps a `PathProviderBase` to produce topics from `[Path]` attributes |
 | `MqttAttributeMapper`    | Layers per-topic QoS and Retain from `[MqttTopic]` attributes onto the mapping (the topic segment itself is resolved by the path provider) |
-| `MqttFluentMapper<T>`    | Code-based per-property configuration via lambda expressions          |
+| `MqttFluentMapper<TSubject>` | Code-based per-property configuration via lambda expressions      |
 | `MqttCompositeMapper`            | Combines multiple mappers with merge semantics                        |
 
 The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, pathProviderName)`) default to a composite of `MqttPathProviderMapper` and `MqttAttributeMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
@@ -237,7 +237,7 @@ Since `[MqttTopic]` already provides the `mqtt` `[Path]` segment for a property,
 
 ### Fluent mapper
 
-For configuration that cannot be expressed in attributes (e.g., mapping the same model to different topics per instance), use `MqttFluentMapper<T>`:
+For configuration that cannot be expressed in attributes (e.g., mapping the same model to different topics per instance), use `MqttFluentMapper<TSubject>`:
 
 ```csharp
 var mapper = new MqttFluentMapper<Sensor>()
