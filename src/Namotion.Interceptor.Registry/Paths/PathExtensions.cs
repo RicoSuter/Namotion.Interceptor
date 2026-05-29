@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
@@ -223,24 +224,31 @@ public static class PathExtensions
     /// </returns>
     public static string? TryGetPath(this RegisteredSubjectProperty property, string separator = ".", IInterceptorSubject? rootSubject = null)
     {
-        var frames = TryBuildPathFrames(property, rootSubject, propertyIndex: null);
-        if (frames is null)
+        var frames = PooledFrames.Rent();
+        try
         {
-            return null;
-        }
-
-        var builder = new StringBuilder();
-        for (var i = frames.Count - 1; i >= 0; i--)
-        {
-            if (builder.Length > 0)
+            if (!TryBuildPathFrames(property, rootSubject, propertyIndex: null, ref frames))
             {
-                builder.Append(separator);
+                return null;
             }
 
-            builder.Append(frames[i].Property.Name);
-        }
+            var builder = new StringBuilder();
+            for (var i = frames.Count - 1; i >= 0; i--)
+            {
+                if (builder.Length > 0)
+                {
+                    builder.Append(separator);
+                }
 
-        return builder.ToString();
+                builder.Append(frames[i].Property.Name);
+            }
+
+            return builder.ToString();
+        }
+        finally
+        {
+            frames.Return();
+        }
     }
 
     /// <summary>
@@ -260,62 +268,69 @@ public static class PathExtensions
             return null;
         }
 
-        var frames = TryBuildPathFrames(property, rootSubject, propertyIndex);
-        if (frames is null)
+        var frames = PooledFrames.Rent();
+        try
         {
-            return null;
-        }
-
-        var builder = new StringBuilder();
-        for (var i = frames.Count - 1; i >= 0; i--)
-        {
-            var (prop, index) = frames[i];
-
-            // [InlinePaths] frames emit just the index; no IsPropertyIncluded check, since providers
-            // already include them and these frames are only traversed for navigation.
-            if (index is not null &&
-                InlinePathsAttribute.IsInlinePathsProperty(
-                    prop.Subject.GetType(), prop.Name))
+            if (!TryBuildPathFrames(property, rootSubject, propertyIndex, ref frames))
             {
+                return null;
+            }
+
+            var builder = new StringBuilder();
+            for (var i = frames.Count - 1; i >= 0; i--)
+            {
+                var (prop, index) = frames[i];
+
+                // [InlinePaths] frames emit just the index; no IsPropertyIncluded check, since providers
+                // already include them and these frames are only traversed for navigation.
+                if (index is not null &&
+                    InlinePathsAttribute.IsInlinePathsProperty(
+                        prop.Subject.GetType(), prop.Name))
+                {
+                    if (builder.Length > 0)
+                    {
+                        builder.Append(pathProvider.PathSeparator);
+                    }
+
+                    builder.Append(index);
+                    continue;
+                }
+
+                var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
                 if (builder.Length > 0)
                 {
                     builder.Append(pathProvider.PathSeparator);
                 }
 
-                builder.Append(index);
-                continue;
+                builder.Append(segment);
+                if (index is not null)
+                {
+                    builder.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
+                }
             }
 
-            var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
-            if (builder.Length > 0)
-            {
-                builder.Append(pathProvider.PathSeparator);
-            }
-
-            builder.Append(segment);
-            if (index is not null)
-            {
-                builder.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
-            }
+            return builder.Length > 0 ? builder.ToString() : null;
         }
-
-        return builder.Length > 0 ? builder.ToString() : null;
+        finally
+        {
+            frames.Return();
+        }
     }
 
     /// <summary>
-    /// Builds the chain of (property, index) frames from <paramref name="property"/> up to
-    /// <paramref name="rootSubject"/> (the topmost frame is the property owned by the root), or to the
-    /// absolute top when <paramref name="rootSubject"/> is null. Frames are leaf-first.
+    /// Fills <paramref name="frames"/> (leaf-first) with the chain from <paramref name="property"/> up to
+    /// <paramref name="rootSubject"/> (the topmost frame is owned by the root), or to the absolute top when
+    /// <paramref name="rootSubject"/> is null. Returns false when a root is requested but not reachable.
     /// <para>
     /// When a root is requested, the parent graph is searched across all parents so a shared subject (DAG)
-    /// resolves through whichever parent reaches the root; returns null when the root is not reachable. A
-    /// cycle in the parent chain is reported as null (no finite path) rather than throwing.
+    /// resolves through whichever parent reaches the root. A cycle is reported as false (no finite path)
+    /// rather than throwing.
     /// </para>
     /// </summary>
-    private static List<(RegisteredSubjectProperty Property, object? Index)>? TryBuildPathFrames(
-        RegisteredSubjectProperty property, IInterceptorSubject? rootSubject, object? propertyIndex)
+    private static bool TryBuildPathFrames(
+        RegisteredSubjectProperty property, IInterceptorSubject? rootSubject, object? propertyIndex, ref PooledFrames frames)
     {
-        var frames = new List<(RegisteredSubjectProperty Property, object? Index)> { (property, propertyIndex) };
+        frames.Add((property, propertyIndex));
 
         // Cheap first-parent walk for the common single-parent chain (no visited-set allocation); falls
         // back to a full multi-parent search at the first branch when a root is requested.
@@ -327,7 +342,7 @@ public static class PathExtensions
         {
             if (rootSubject is not null && current.Subject == rootSubject)
             {
-                return frames;
+                return true;
             }
 
             // Snapshot once: Parents locks and returns a fresh copy per call, so reading it twice
@@ -336,19 +351,20 @@ public static class PathExtensions
             if (parents.Length == 0)
             {
                 // Absolute top: the full path when no root was requested, else the root is unreachable.
-                return rootSubject is null ? frames : null;
+                return rootSubject is null;
             }
 
             if (rootSubject is not null && parents.Length > 1)
             {
-                // First parent may not reach the root, so search all parents.
-                return TrySearchToRoot(property, propertyIndex, rootSubject);
+                // First parent may not reach the root, so search all parents from the leaf.
+                frames.Count = 0;
+                return TrySearchToRoot(property, propertyIndex, rootSubject, ref frames);
             }
 
-            // Start tracking only past the threshold; a revisit then means a cycle (no finite path) -> null.
+            // Start tracking only past the threshold; a revisit then means a cycle (no finite path) -> false.
             if (++depth > CycleDetectionDepthThreshold && !(visited ??= []).Add(current.Parent))
             {
-                return null;
+                return false;
             }
 
             var parent = parents[0];
@@ -358,18 +374,19 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Iterative (explicit-stack) depth-first search for a leaf-first frame chain from
-    /// <paramref name="property"/> up to <paramref name="rootSubject"/>, or null when the root is not
-    /// reachable. Cycles are pruned per branch; unreachable owners are memoized so a shared subject in a
-    /// DAG is explored once, keeping the search linear and overflow-free for arbitrarily deep graphs.
+    /// Iterative (explicit-stack) depth-first search that fills <paramref name="frames"/> (leaf-first) with
+    /// a chain from <paramref name="property"/> up to <paramref name="rootSubject"/>, returning false when
+    /// the root is not reachable. Cycles are pruned per branch; unreachable owners are memoized so a shared
+    /// subject in a DAG is explored once, keeping the search linear and overflow-free for arbitrarily deep
+    /// graphs.
     /// </summary>
-    private static List<(RegisteredSubjectProperty Property, object? Index)>? TrySearchToRoot(
-        RegisteredSubjectProperty property, object? propertyIndex, IInterceptorSubject rootSubject)
+    private static bool TrySearchToRoot(
+        RegisteredSubjectProperty property, object? propertyIndex, IInterceptorSubject rootSubject, ref PooledFrames frames)
     {
-        var frames = new List<(RegisteredSubjectProperty Property, object? Index)> { (property, propertyIndex) };
+        frames.Add((property, propertyIndex));
         if (property.Subject == rootSubject)
         {
-            return frames;
+            return true;
         }
 
         // visiting = owners on the current branch (cycle pruning); unreachable = owners that cannot reach
@@ -399,13 +416,13 @@ public static class PathExtensions
 
                 if (parentProperty.Subject == rootSubject)
                 {
-                    return frames;
+                    return true;
                 }
 
                 var owner = parentProperty.Parent;
                 if (unreachable.Contains(owner) || !visiting.Add(owner))
                 {
-                    frames.RemoveAt(frames.Count - 1); // unreachable or a cycle here: skip this edge
+                    frames.RemoveLast(); // unreachable or a cycle here: skip this edge
                     continue;
                 }
 
@@ -419,12 +436,12 @@ public static class PathExtensions
                 stack.RemoveAt(topIndex);
                 if (stack.Count > 0)
                 {
-                    frames.RemoveAt(frames.Count - 1); // the leaf frame has no edge above it
+                    frames.RemoveLast(); // the leaf frame has no edge above it
                 }
             }
         }
 
-        return null;
+        return false;
     }
 
     /// <summary>
@@ -436,6 +453,40 @@ public static class PathExtensions
         public RegisteredSubject Owner;
         public ImmutableArray<SubjectPropertyParent> Parents;
         public int NextParentIndex;
+    }
+
+    /// <summary>
+    /// Growable leaf-first frame list backed by a pooled array (no per-call heap allocation). Returned arrays
+    /// are cleared because a frame pins its whole subject subtree, which would otherwise survive a detach.
+    /// </summary>
+    private struct PooledFrames
+    {
+        private static readonly ArrayPool<(RegisteredSubjectProperty Property, object? Index)> Pool = ArrayPool<(RegisteredSubjectProperty Property, object? Index)>.Shared;
+
+        private (RegisteredSubjectProperty Property, object? Index)[] _array;
+
+        public int Count;
+
+        public static PooledFrames Rent() => new() { _array = Pool.Rent(16) };
+
+        public readonly (RegisteredSubjectProperty Property, object? Index) this[int index] => _array[index];
+
+        public void Add(in (RegisteredSubjectProperty Property, object? Index) frame)
+        {
+            if (Count == _array.Length)
+            {
+                var larger = Pool.Rent(_array.Length * 2);
+                Array.Copy(_array, larger, Count);
+                Pool.Return(_array, clearArray: true);
+                _array = larger;
+            }
+
+            _array[Count++] = frame;
+        }
+
+        public void RemoveLast() => Count--;
+
+        public readonly void Return() => Pool.Return(_array, clearArray: true);
     }
 
     /// <summary>
