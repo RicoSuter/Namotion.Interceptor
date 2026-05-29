@@ -383,7 +383,7 @@ All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ### Write Retry Queue During Disconnection
 
-Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -659,7 +659,7 @@ if (source.CurrentSession is { } session)
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 
-For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires on every transition (including to/from `null`). Method-call consumers usually do not need it — they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
+For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires on every transition (including to/from `null`). Method-call consumers usually do not need it: they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
 
 ```csharp
 opcUaSource.CurrentSessionChanged += (_, args) =>
@@ -683,7 +683,7 @@ opcUaSource.CurrentSessionChanged += (_, args) =>
 };
 ```
 
-The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes — the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers — isolate exceptions in your own handler if multiple must run.
+The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes; the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers, so isolate exceptions in your own handler if multiple must run.
 
 ## Node ID Resolution
 

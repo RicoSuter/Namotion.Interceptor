@@ -10,6 +10,8 @@ public class ExpressionPathHelperTests
         public string Name { get; set; } = "";
         public double Value { get; set; }
         public TestChild Child { get; set; } = new();
+
+        public TestChild GetChild() => Child;
     }
 
     private class TestChild
@@ -91,6 +93,17 @@ public class ExpressionPathHelperTests
     {
         // Arrange
         Expression<Func<TestSubject, string>> expression = s => s.Name.ToString();
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() =>
+            ExpressionPathHelper.GetPathFromExpression(expression.Body));
+    }
+
+    [Fact]
+    public void WhenMidChainMethodCall_ThenThrowsArgumentException()
+    {
+        // Arrange - a method call mid-chain cannot be represented as a dotted path
+        Expression<Func<TestSubject, int>> expression = s => s.GetChild().Temperature;
 
         // Act & Assert
         Assert.Throws<ArgumentException>(() =>

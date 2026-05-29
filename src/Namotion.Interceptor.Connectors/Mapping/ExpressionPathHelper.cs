@@ -17,10 +17,6 @@ public static class ExpressionPathHelper
             current = unary.Operand;
         }
 
-        // Capture the (unwrapped) root node so the error message reports what actually failed,
-        // not the original outer expression.
-        var unwrapped = current;
-
         var parts = new List<string>();
         while (current is MemberExpression member)
         {
@@ -28,10 +24,18 @@ public static class ExpressionPathHelper
             current = member.Expression;
         }
 
-        if (parts.Count == 0)
+        // A valid path is a chain of member accesses rooted at the lambda parameter (e.g., x => x.A.B).
+        // If the walk terminates on anything else - an empty chain, a mid-chain indexer or method call,
+        // a static member, or a captured variable - the expression is not representable as a dotted path,
+        // so fail fast rather than silently return a partial or wrong path. `current` is the node where
+        // the walk stopped, so it names what actually failed.
+        if (parts.Count == 0 || current is not ParameterExpression)
         {
+            // `current` is the node where the walk stopped (null for a static member access).
+            var stopNode = current is null ? "a static or empty expression" : current.NodeType.ToString();
             throw new ArgumentException(
-                $"Expression must be a member access (e.g., x => x.Property), but got {unwrapped.NodeType}.",
+                $"Expression must be a simple member access chain rooted at the lambda parameter " +
+                $"(e.g., x => x.Property), but got {stopNode}.",
                 nameof(expression));
         }
 

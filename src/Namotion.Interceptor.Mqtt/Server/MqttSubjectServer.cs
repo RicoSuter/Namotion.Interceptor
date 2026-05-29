@@ -502,42 +502,57 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
         }
 
         var topic = args.ApplicationMessage.Topic;
-        var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
 
-        if (await TryGetPropertyForTopicAsync(path).ConfigureAwait(false) is not { } propertyReference)
-        {
-            return;
-        }
-
-        var registeredProperty = propertyReference.TryGetRegisteredProperty();
-        if (registeredProperty is null)
-        {
-            return;
-        }
-
-        // Server-authoritative relay: prevent the broker from distributing this client
-        // message directly to other subscribers. Instead, we apply the value locally with
-        // a non-self source (_mqttClientSource) so the server's ChangeQueueProcessor picks
-        // it up and re-publishes it to all clients via InjectApplicationMessage.
-        // This ensures consistent ordering of all values through the server.
-        args.ProcessPublish = false;
-
+        // Isolate per-message failures: a single bad message (unknown mapping, malformed payload,
+        // a cyclic/unreachable subject graph) must not escape into the broker's publish pipeline.
         try
         {
-            var payload = args.ApplicationMessage.Payload;
-            var value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
+            var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
 
-            var receivedTimestamp = DateTimeOffset.UtcNow;
-            var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
-                args.ApplicationMessage.UserProperties,
-                _configuration.SourceTimestampPropertyName,
-                _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
+            if (await TryGetPropertyForTopicAsync(path).ConfigureAwait(false) is not { } propertyReference)
+            {
+                return;
+            }
 
-            propertyReference.SetValueFromSource(_mqttClientSource, sourceTimestamp, receivedTimestamp, value);
+            var registeredProperty = propertyReference.TryGetRegisteredProperty();
+            if (registeredProperty is null)
+            {
+                return;
+            }
+
+            // Server-authoritative relay: prevent the broker from distributing this client
+            // message directly to other subscribers. Instead, we apply the value locally with
+            // a non-self source (_mqttClientSource) so the server's ChangeQueueProcessor picks
+            // it up and re-publishes it to all clients via InjectApplicationMessage.
+            // This ensures consistent ordering of all values through the server.
+            args.ProcessPublish = false;
+
+            try
+            {
+                var payload = args.ApplicationMessage.Payload;
+                var value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
+
+                var receivedTimestamp = DateTimeOffset.UtcNow;
+                var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
+                    args.ApplicationMessage.UserProperties,
+                    _configuration.SourceTimestampPropertyName,
+                    _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
+
+                propertyReference.SetValueFromSource(_mqttClientSource, sourceTimestamp, receivedTimestamp, value);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to deserialize MQTT payload for topic {Topic}.", topic);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown in progress; let cancellation propagate rather than logging it as a failure.
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to deserialize MQTT payload for topic {Topic}.", topic);
+            _logger.LogError(ex, "Failed to handle MQTT message for topic {Topic}.", topic);
         }
     }
 

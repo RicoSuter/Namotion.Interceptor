@@ -48,10 +48,12 @@ public class MqttTopicAttribute : PathAttribute
     public bool RetainSet { get; set; }
 
     /// <summary>
-    /// Converts this attribute to an <see cref="MqttPropertyMapping"/>.
+    /// Converts the QoS and Retain metadata of this attribute to an <see cref="MqttPropertyMapping"/>.
+    /// The topic itself is a relative path segment (carried by the <see cref="PathAttribute"/> base)
+    /// and is resolved hierarchically by the path-provider mapper, so it is intentionally not set here.
     /// </summary>
     public MqttPropertyMapping ToMapping() => new(
-        Topic: Topic,
+        Topic: null,
         QualityOfService: (int)QualityOfService == -1 ? null : QualityOfService,
         Retain: RetainSet ? Retain : null);
 }

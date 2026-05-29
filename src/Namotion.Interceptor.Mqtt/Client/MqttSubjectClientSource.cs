@@ -476,46 +476,62 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
     private async Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
     {
         var topic = e.ApplicationMessage.Topic;
-        if (await TryGetPropertyForTopicAsync(topic).ConfigureAwait(false) is not { } propertyReference)
-        {
-            return;
-        }
 
-        var registeredProperty = propertyReference.TryGetRegisteredProperty();
-        if (registeredProperty is null)
-        {
-            return;
-        }
-
-        object? value;
+        // Isolate per-message failures: a single bad message (unknown mapping, malformed payload,
+        // a cyclic/unreachable subject graph) must not escape into the MQTT receive loop and tear
+        // down the subscription for every other topic.
         try
         {
-            var payload = e.ApplicationMessage.Payload;
-            value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
+            if (await TryGetPropertyForTopicAsync(topic).ConfigureAwait(false) is not { } propertyReference)
+            {
+                return;
+            }
+
+            var registeredProperty = propertyReference.TryGetRegisteredProperty();
+            if (registeredProperty is null)
+            {
+                return;
+            }
+
+            object? value;
+            try
+            {
+                var payload = e.ApplicationMessage.Payload;
+                value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to deserialize MQTT message for topic {Topic}.", topic);
+                return;
+            }
+
+            var propertyWriter = _propertyWriter;
+            if (propertyWriter is null)
+            {
+                return;
+            }
+
+            // Extract timestamps
+            var receivedTimestamp = DateTimeOffset.UtcNow;
+            var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
+                e.ApplicationMessage.UserProperties,
+                _configuration.SourceTimestampPropertyName,
+                _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
+
+            // Use static delegate to avoid allocations on hot path
+            propertyWriter.Write(
+                (propertyReference, value, this, sourceTimestamp, receivedTimestamp),
+                static state => state.propertyReference.SetValueFromSource(state.Item3, state.sourceTimestamp, state.receivedTimestamp, state.value));
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown in progress; let cancellation propagate rather than logging it as a failure.
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to deserialize MQTT message for topic {Topic}.", topic);
-            return;
+            _logger.LogError(ex, "Failed to handle MQTT message for topic {Topic}.", topic);
         }
-
-        var propertyWriter = _propertyWriter;
-        if (propertyWriter is null)
-        {
-            return;
-        }
-
-        // Extract timestamps
-        var receivedTimestamp = DateTimeOffset.UtcNow;
-        var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
-            e.ApplicationMessage.UserProperties,
-            _configuration.SourceTimestampPropertyName,
-            _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
-
-        // Use static delegate to avoid allocations on hot path
-        propertyWriter.Write(
-            (propertyReference, value, this, sourceTimestamp, receivedTimestamp),
-            static state => state.propertyReference.SetValueFromSource(state.Item3, state.sourceTimestamp, state.receivedTimestamp, state.value));
     }
 
     private Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)

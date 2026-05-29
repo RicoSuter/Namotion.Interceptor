@@ -519,7 +519,7 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
 }
 ```
 
-`IPropertyMapper<TMapping>` maps a property to its external representation (forward direction). `IReversePropertyMapper<TMapping, TKey>` adds the ability to look up a property from an external key (reverse direction), which connectors that receive inbound data need (e.g., finding the property for a received MQTT topic or OPC UA node reference).
+`IPropertyMapper<TMapping>` maps a property to its external representation (forward direction). `IReversePropertyMapper<TMapping, TKey>` adds reverse lookup of a property from an external key, which connectors that receive inbound data need (e.g., finding the property for a received MQTT topic or OPC UA node reference).
 
 #### Built-in Generic Implementations
 

@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -206,36 +205,41 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Gets the structural property path by walking the parent chain from root to this property,
-    /// joining property names with the given separator.
+    /// Gets the structural property path by walking the parent chain to this property, joining property
+    /// names with the given separator.
     /// </summary>
-    public static string GetPath(this RegisteredSubjectProperty property, string separator = ".", IInterceptorSubject? rootSubject = null)
+    /// <param name="property">The property to compute the path for.</param>
+    /// <param name="separator">The separator placed between path segments.</param>
+    /// <param name="rootSubject">
+    /// Optional root to make the path relative to. When provided, the parent graph is searched across all
+    /// parents (so a shared subject in a DAG resolves through whichever parent reaches the root), and
+    /// <c>null</c> is returned when the property is not reachable from the given root. When <c>null</c>,
+    /// the canonical absolute path (following the first parent) is returned.
+    /// </param>
+    /// <returns>
+    /// The path, or <c>null</c> when a root is given and the property is not reachable from it (a cycle in
+    /// the parent chain is likewise reported as <c>null</c> rather than throwing).
+    /// </returns>
+    public static string? TryGetPath(this RegisteredSubjectProperty property, string separator = ".", IInterceptorSubject? rootSubject = null)
     {
-        var parts = new List<string> { property.Name };
-        var currentSubject = property.Parent;
-        var depth = 0;
-        HashSet<RegisteredSubject>? visited = null;
-
-        while (currentSubject.Parents.Length > 0)
+        var frames = TryBuildPathFrames(property, rootSubject, propertyIndex: null);
+        if (frames is null)
         {
-            if (rootSubject is not null && currentSubject.Subject == rootSubject)
-            {
-                break;
-            }
-
-            // Only deep walks (i.e. cycles) start tracking; shallow paths stay allocation-free.
-            if (++depth > CycleDetectionDepthThreshold && !(visited ??= []).Add(currentSubject))
-            {
-                throw new InvalidOperationException(
-                    $"Cycle detected in the subject parent chain while computing the path for property '{property.Name}'.");
-            }
-
-            var parent = currentSubject.Parents[0];
-            parts.Insert(0, parent.Property.Name);
-            currentSubject = parent.Property.Parent;
+            return null;
         }
 
-        return string.Join(separator, parts);
+        var builder = new StringBuilder();
+        for (var i = frames.Count - 1; i >= 0; i--)
+        {
+            if (builder.Length > 0)
+            {
+                builder.Append(separator);
+            }
+
+            builder.Append(frames[i].Property.Name);
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>
@@ -255,89 +259,154 @@ public static class PathExtensions
             return null;
         }
 
-        var buffer = ArrayPool<(RegisteredSubjectProperty Property, object? Index)>.Shared.Rent(16);
-        HashSet<RegisteredSubject>? visited = null;
-        try
+        var frames = TryBuildPathFrames(property, rootSubject, propertyIndex);
+        if (frames is null)
         {
-            var count = 0;
-            var current = property;
-            object? pendingIndex = propertyIndex;
+            return null;
+        }
 
-            while (current is not null)
+        var sb = new StringBuilder();
+        for (var i = frames.Count - 1; i >= 0; i--)
+        {
+            var (prop, index) = frames[i];
+
+            // [InlinePaths] properties: emit just the index as a plain segment.
+            // IsPropertyIncluded is not checked here because intermediate properties
+            // are traversed for navigation, and PathProviderBase implementations
+            // (e.g., AttributeBasedPathProvider) already include [InlinePaths] properties.
+            if (index is not null &&
+                InlinePathsAttribute.IsInlinePathsProperty(
+                    prop.Subject.GetType(), prop.Name))
             {
-                // Only deep walks (i.e. cycles) start tracking; shallow paths stay allocation-free.
-                if (count > CycleDetectionDepthThreshold && !(visited ??= []).Add(current.Parent))
-                {
-                    throw new InvalidOperationException(
-                        $"Cycle detected in the subject parent chain while computing the path for property '{property.Name}'.");
-                }
-
-                if (count == buffer.Length)
-                {
-                    var newBuffer = ArrayPool<(RegisteredSubjectProperty, object?)>.Shared.Rent(buffer.Length * 2);
-                    buffer.AsSpan(0, count).CopyTo(newBuffer);
-                    ArrayPool<(RegisteredSubjectProperty, object?)>.Shared.Return(buffer);
-                    buffer = newBuffer;
-                }
-
-                buffer[count++] = (current, pendingIndex);
-
-                if (rootSubject is not null && current.Subject == rootSubject)
-                {
-                    break;
-                }
-
-                if (current.Parent.Parents.Length == 0)
-                {
-                    break;
-                }
-
-                var parent = current.Parent.Parents[0];
-                pendingIndex = parent.Index;
-                current = parent.Property;
-            }
-
-            var sb = new StringBuilder();
-            for (var i = count - 1; i >= 0; i--)
-            {
-                var (prop, index) = buffer[i];
-
-                // [InlinePaths] properties: emit just the index as a plain segment.
-                // IsPropertyIncluded is not checked here because intermediate properties
-                // are traversed for navigation, and PathProviderBase implementations
-                // (e.g., AttributeBasedPathProvider) already include [InlinePaths] properties.
-                if (index is not null &&
-                    InlinePathsAttribute.IsInlinePathsProperty(
-                        prop.Subject.GetType(), prop.Name))
-                {
-                    if (sb.Length > 0)
-                    {
-                        sb.Append(pathProvider.PathSeparator);
-                    }
-
-                    sb.Append(index);
-                    continue;
-                }
-
-                var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
                 if (sb.Length > 0)
                 {
                     sb.Append(pathProvider.PathSeparator);
                 }
 
-                sb.Append(segment);
-                if (index is not null)
-                {
-                    sb.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
-                }
+                sb.Append(index);
+                continue;
             }
 
-            return sb.Length > 0 ? sb.ToString() : null;
+            var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
+            if (sb.Length > 0)
+            {
+                sb.Append(pathProvider.PathSeparator);
+            }
+
+            sb.Append(segment);
+            if (index is not null)
+            {
+                sb.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
+            }
         }
-        finally
+
+        return sb.Length > 0 ? sb.ToString() : null;
+    }
+
+    /// <summary>
+    /// Builds the chain of (property, index) frames from <paramref name="property"/> up to
+    /// <paramref name="rootSubject"/> (the topmost frame is the property owned by the root), or to the
+    /// absolute top when <paramref name="rootSubject"/> is null. Frames are leaf-first.
+    /// <para>
+    /// When a root is requested, the parent graph is searched across all parents so a shared subject (DAG)
+    /// resolves through whichever parent reaches the root; returns null when the root is not reachable. A
+    /// cycle in the parent chain is reported as null (no finite path) rather than throwing.
+    /// </para>
+    /// </summary>
+    private static List<(RegisteredSubjectProperty Property, object? Index)>? TryBuildPathFrames(
+        RegisteredSubjectProperty property, IInterceptorSubject? rootSubject, object? propertyIndex)
+    {
+        var frames = new List<(RegisteredSubjectProperty Property, object? Index)> { (property, propertyIndex) };
+
+        // Cheap linear walk following the first parent. Handles the common single-parent chain (and the
+        // case where the root lies on it) without allocating a visited set. Falls back to a full search at
+        // the first multi-parent branch when a root is requested.
+        var current = property;
+        HashSet<RegisteredSubject>? visited = null;
+        var depth = 0;
+
+        while (true)
         {
-            ArrayPool<(RegisteredSubjectProperty, object?)>.Shared.Return(buffer);
+            if (rootSubject is not null && current.Subject == rootSubject)
+            {
+                return frames;
+            }
+
+            // Snapshot once: Parents takes a lock and returns a fresh copy per call, so reading it
+            // twice (length check + indexer) races with a concurrent detach and can throw.
+            var parents = current.Parent.Parents;
+            if (parents.Length == 0)
+            {
+                // Reached the absolute top: the absolute path when no root is requested, or "not reachable"
+                // when a root was requested along this unique chain.
+                return rootSubject is null ? frames : null;
+            }
+
+            if (rootSubject is not null && parents.Length > 1)
+            {
+                // A branch point with a target: the first parent may not be the chain that reaches the
+                // root, so fall back to a full multi-parent search.
+                return TrySearchToRoot(property, propertyIndex, rootSubject);
+            }
+
+            // Only deep walks (i.e. cycles) start tracking; shallow paths stay allocation-free. A cycle
+            // means there is no finite path, which we report as "no path" (null) rather than throwing.
+            if (++depth > CycleDetectionDepthThreshold && !(visited ??= []).Add(current.Parent))
+            {
+                return null;
+            }
+
+            var parent = parents[0];
+            frames.Add((parent.Property, parent.Index));
+            current = parent.Property;
         }
+    }
+
+    /// <summary>
+    /// Depth-first search across all parents for a chain from <paramref name="property"/> to
+    /// <paramref name="rootSubject"/>. Returns the leaf-first frame chain, or null when the root is not
+    /// reachable. Cycles are pruned per branch, so a cycle does not prevent finding the root through other
+    /// acyclic branches.
+    /// </summary>
+    private static List<(RegisteredSubjectProperty Property, object? Index)>? TrySearchToRoot(
+        RegisteredSubjectProperty property, object? propertyIndex, IInterceptorSubject rootSubject)
+    {
+        var frames = new List<(RegisteredSubjectProperty Property, object? Index)> { (property, propertyIndex) };
+        var visiting = new HashSet<RegisteredSubject>();
+        return SearchToRoot(property, rootSubject, frames, visiting) ? frames : null;
+    }
+
+    private static bool SearchToRoot(
+        RegisteredSubjectProperty current,
+        IInterceptorSubject rootSubject,
+        List<(RegisteredSubjectProperty Property, object? Index)> frames,
+        HashSet<RegisteredSubject> visiting)
+    {
+        if (current.Subject == rootSubject)
+        {
+            return true;
+        }
+
+        // A subject already on the current path means a cycle on this branch: prune it (treat as a dead
+        // end) so the search can still reach the root through other, acyclic branches.
+        if (!visiting.Add(current.Parent))
+        {
+            return false;
+        }
+
+        foreach (var parent in current.Parent.Parents)
+        {
+            frames.Add((parent.Property, parent.Index));
+            if (SearchToRoot(parent.Property, rootSubject, frames, visiting))
+            {
+                return true;
+            }
+
+            frames.RemoveAt(frames.Count - 1);
+        }
+
+        visiting.Remove(current.Parent);
+        return false;
     }
 
     /// <summary>

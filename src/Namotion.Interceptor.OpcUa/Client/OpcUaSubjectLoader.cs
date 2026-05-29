@@ -118,14 +118,15 @@ internal class OpcUaSubjectLoader
                     _configuration.TypeResolver.GetDynamicPropertyAttributes(nodeReference, session));
             }
 
-            var propertyName = property.ResolvePropertyName(_configuration.Mapper, _subject);
-            if (propertyName is not null)
+            // Resolve the mapping once; a null mapping means the property is not exposed (the old
+            // ResolvePropertyName returned null in exactly that case). The reference branch reuses
+            // it for the NodeClass check instead of resolving the same property a second time.
+            if (_configuration.Mapper.TryGetMapping(property, _subject, out var mapping))
             {
                 if (property.IsSubjectReference)
                 {
                     // Check if this should be treated as a VariableNode
-                    var mapping = _configuration.Mapper.TryGetMapping(property, _subject, out var m) ? m : null;
-                    if (mapping?.NodeClass == Mapping.OpcUaNodeClass.Variable)
+                    if (mapping.NodeClass == Mapping.OpcUaNodeClass.Variable)
                     {
                         await LoadVariableNodeForSubjectAsync(property, resolvedNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
                     }

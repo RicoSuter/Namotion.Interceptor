@@ -155,7 +155,6 @@ namespace Namotion.Interceptor.Registry.Paths
     }
     public static class PathExtensions
     {
-        public static string GetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string separator = ".", Namotion.Interceptor.IInterceptorSubject? rootSubject = null) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "path",
                 "property"})]
@@ -172,6 +171,7 @@ namespace Namotion.Interceptor.Registry.Paths
                 "segment",
                 "index"})]
         public static System.Collections.Generic.List<System.ValueTuple<string, object?>> ParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path) { }
+        public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string separator = ".", Namotion.Interceptor.IInterceptorSubject? rootSubject = null) { }
         public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.IInterceptorSubject? rootSubject, object? propertyIndex = null) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "Property",

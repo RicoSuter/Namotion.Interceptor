@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Mqtt.Tests.Mapping;
 public class MqttAttributeMapperTests
 {
     [Fact]
-    public void WhenPropertyHasMqttTopicAttribute_ThenReturnsMappingWithTopic()
+    public void WhenPropertyHasMqttTopicAttribute_ThenReturnsMetadataMappingWithoutTopic()
     {
         // Arrange
         var mapper = new MqttAttributeMapper();
@@ -22,9 +22,10 @@ public class MqttAttributeMapperTests
         // Act
         var result = mapper.TryGetMapping(property, subject, out var mapping);
 
-        // Assert
+        // Assert - the attribute mapper contributes only metadata; the topic is a path segment
+        // resolved by the path-provider mapper.
         Assert.True(result);
-        Assert.Equal("sensors/temperature", mapping!.Topic);
+        Assert.Null(mapping!.Topic);
     }
 
     [Fact]
@@ -55,9 +56,9 @@ public class MqttAttributeMapperTests
         // Act
         var result = mapper.TryGetMapping(property, subject, out var mapping);
 
-        // Assert
+        // Assert - topic is delegated to the path provider; only QoS/Retain come from the attribute
         Assert.True(result);
-        Assert.Equal("sensors/humidity", mapping!.Topic);
+        Assert.Null(mapping!.Topic);
         Assert.Equal(MqttQualityOfServiceLevel.ExactlyOnce, mapping.QualityOfService);
         Assert.True(mapping.Retain);
     }
@@ -96,7 +97,7 @@ public class MqttAttributeMapperTests
     }
 
     [Fact]
-    public async Task WhenReverseLookupWithMatchingTopic_ThenReturnsProperty()
+    public async Task WhenReverseLookup_ThenReturnsNullBecausePathProviderOwnsReverse()
     {
         // Arrange
         var mapper = new MqttAttributeMapper();
@@ -108,9 +109,8 @@ public class MqttAttributeMapperTests
         var found = await mapper.TryGetPropertyAsync(
             new MqttLookupKey("sensors/temperature"), registeredSubject, CancellationToken.None);
 
-        // Assert
-        Assert.NotNull(found);
-        Assert.Equal("Temperature", found.Name);
+        // Assert - reverse lookup is delegated to the path-provider mapper
+        Assert.Null(found);
     }
 
     [Fact]

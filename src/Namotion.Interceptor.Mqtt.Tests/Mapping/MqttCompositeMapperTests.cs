@@ -3,18 +3,22 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Mqtt.Attributes;
 using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
 namespace Namotion.Interceptor.Mqtt.Tests.Mapping;
 
 public class MqttCompositeMapperTests
 {
+    private static MqttCompositeMapper CreateDefaultMapper() => new(
+        new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
+        new MqttAttributeMapper());
+
     [Fact]
     public void WhenNoMappersMatch_ThenReturnsFalse()
     {
         // Arrange
-        var mapper = new MqttCompositeMapper(
-            new MqttAttributeMapper("nonexistent"));
+        var mapper = CreateDefaultMapper();
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var subject = new MqttCompositeTestSensor(context);
@@ -29,11 +33,10 @@ public class MqttCompositeMapperTests
     }
 
     [Fact]
-    public void WhenSingleMapperMatches_ThenReturnsItsMapping()
+    public void WhenComposite_ThenTopicComesFromPathProviderAndMetadataFromAttribute()
     {
         // Arrange
-        var mapper = new MqttCompositeMapper(
-            new MqttAttributeMapper());
+        var mapper = CreateDefaultMapper();
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var subject = new MqttCompositeTestSensor(context);
@@ -43,19 +46,20 @@ public class MqttCompositeMapperTests
         // Act
         var found = mapper.TryGetMapping(property, subject, out var mapping);
 
-        // Assert
+        // Assert - the topic is the path-provider-resolved segment; QoS/Retain come from the attribute
         Assert.True(found);
-        Assert.Equal("sensors/temp", mapping!.Topic);
+        Assert.Equal("temp", mapping!.Topic);
+        Assert.Equal(MqttQualityOfServiceLevel.ExactlyOnce, mapping.QualityOfService);
+        Assert.True(mapping.Retain);
     }
 
     [Fact]
-    public void WhenMappersMatch_ThenLaterTopicWinsAndUnsetFieldsFallThrough()
+    public void WhenFluentTopicAndAttributeMetadata_ThenAttributeMetadataLayersOntoFluentTopic()
     {
         // Arrange
         var fluent = new MqttFluentMapper<MqttCompositeTestSensor>()
             .Map(s => s.Temperature, b => b
-                .WithTopic("fluent/temp")
-                .WithQualityOfService(MqttQualityOfServiceLevel.ExactlyOnce));
+                .WithTopic("fluent/temp"));
 
         var mapper = new MqttCompositeMapper(
             fluent,
@@ -69,17 +73,18 @@ public class MqttCompositeMapperTests
         // Act
         mapper.TryGetMapping(property, subject, out var mapping);
 
-        // Assert
-        Assert.Equal("sensors/temp", mapping!.Topic);
+        // Assert - the attribute contributes no topic, so the fluent topic falls through;
+        // the attribute's QoS/Retain layer on top.
+        Assert.Equal("fluent/temp", mapping!.Topic);
         Assert.Equal(MqttQualityOfServiceLevel.ExactlyOnce, mapping.QualityOfService);
+        Assert.True(mapping.Retain);
     }
 
     [Fact]
-    public async Task WhenReverseLookup_ThenLastMapperWins()
+    public async Task WhenReverseLookup_ThenResolvedViaPathProvider()
     {
         // Arrange
-        var mapper = new MqttCompositeMapper(
-            new MqttAttributeMapper());
+        var mapper = CreateDefaultMapper();
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var subject = new MqttCompositeTestSensor(context);
@@ -87,7 +92,7 @@ public class MqttCompositeMapperTests
 
         // Act
         var found = await mapper.TryGetPropertyAsync(
-            new MqttLookupKey("sensors/temp"), registeredSubject, CancellationToken.None);
+            new MqttLookupKey("temp"), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.NotNull(found);
@@ -98,8 +103,7 @@ public class MqttCompositeMapperTests
     public async Task WhenReverseLookupNoMatch_ThenReturnsNull()
     {
         // Arrange
-        var mapper = new MqttCompositeMapper(
-            new MqttAttributeMapper());
+        var mapper = CreateDefaultMapper();
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var subject = new MqttCompositeTestSensor(context);
@@ -117,7 +121,7 @@ public class MqttCompositeMapperTests
 [InterceptorSubject]
 public partial class MqttCompositeTestSensor
 {
-    [MqttTopic("sensors/temp")]
+    [MqttTopic("temp", QualityOfService = MqttQualityOfServiceLevel.ExactlyOnce, Retain = true, RetainSet = true)]
     public partial double Temperature { get; set; }
 
     public partial double Unmapped { get; set; }

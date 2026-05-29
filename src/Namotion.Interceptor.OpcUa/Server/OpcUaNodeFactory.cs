@@ -48,7 +48,17 @@ internal sealed class OpcUaNodeFactory
 
         if (mapping.BrowseNamespaceUri is not null)
         {
-            return new QualifiedName(mapping.BrowseName, (ushort)manager.GetSystemContext().NamespaceUris.GetIndex(mapping.BrowseNamespaceUri));
+            // GetIndex returns -1 for an unregistered URI, which casts to ushort 65535 and would
+            // silently place the node in the wrong namespace. Fail fast on the misconfiguration.
+            var browseNamespaceIndex = manager.GetSystemContext().NamespaceUris.GetIndex(mapping.BrowseNamespaceUri);
+            if (browseNamespaceIndex < 0)
+            {
+                throw new InvalidOperationException(
+                    $"BrowseName namespace URI '{mapping.BrowseNamespaceUri}' for node '{mapping.BrowseName}' " +
+                    $"is not registered in the server's namespace table.");
+            }
+
+            return new QualifiedName(mapping.BrowseName, (ushort)browseNamespaceIndex);
         }
 
         return new QualifiedName(mapping.BrowseName, namespaceIndex);

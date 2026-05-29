@@ -3,14 +3,21 @@ using System.Threading;
 using System.Threading.Tasks;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Mqtt.Attributes;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Mqtt.Mapping;
 
 /// <summary>
-/// Maps properties to MQTT topics using <see cref="MqttTopicAttribute"/> annotations.
-/// Supports both forward mapping (property to topic) and reverse lookup (topic to property).
+/// Layers MQTT metadata (QoS, Retain) from <see cref="MqttTopicAttribute"/> annotations onto the
+/// mapping. The topic itself is a relative path segment resolved by the path-provider mapper, so this
+/// mapper neither sets the topic on forward mapping nor performs reverse lookup.
+/// <para>
+/// Because of that, this mapper must be combined with an <see cref="MqttPathProviderMapper"/> (as the
+/// default composite does). On its own it contributes only QoS and Retain and resolves no topics. This
+/// differs from the OPC UA attribute mapper, which is self-sufficient: OPC UA browses hierarchically and
+/// matches each node against a single level, while MQTT resolves a flat topic that requires full-path
+/// composition by the path provider.
+/// </para>
 /// </summary>
 public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
 {
@@ -26,7 +33,8 @@ public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, M
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)
     {
-        // Single-pass lookup to avoid LINQ allocation
+        // Single-pass lookup to avoid LINQ allocation. ToMapping() contributes QoS/Retain only;
+        // the topic is the path segment resolved by the path-provider mapper.
         foreach (var attribute in property.ReflectionAttributes)
         {
             if (attribute is MqttTopicAttribute mqttTopic && mqttTopic.Name == _connectorName)
@@ -42,19 +50,8 @@ public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, M
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
         MqttLookupKey key, RegisteredSubject subject, CancellationToken cancellationToken)
     {
-        var topic = key.Topic;
-        foreach (var property in subject.GetAllProperties())
-        {
-            foreach (var attribute in property.ReflectionAttributes)
-            {
-                if (attribute is MqttTopicAttribute mqttTopic &&
-                    mqttTopic.Name == _connectorName &&
-                    mqttTopic.Topic == topic)
-                {
-                    return new ValueTask<RegisteredSubjectProperty?>(property);
-                }
-            }
-        }
-        return new ValueTask<RegisteredSubjectProperty?>((RegisteredSubjectProperty?)null);
+        // Reverse lookup (topic -> property) is owned by the path-provider mapper, which resolves the
+        // composed hierarchical topic. This mapper only contributes forward QoS/Retain metadata.
+        return new ValueTask<RegisteredSubjectProperty?>(result: null);
     }
 }

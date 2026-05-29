@@ -182,11 +182,13 @@ The built-in mapper types:
 | Mapper                           | Purpose                                                               |
 |----------------------------------|-----------------------------------------------------------------------|
 | `MqttPathProviderMapper` | Wraps a `PathProviderBase` to produce topics from `[Path]` attributes |
-| `MqttAttributeMapper`    | Reads `[MqttTopic]` attributes for per-topic QoS and Retain overrides |
+| `MqttAttributeMapper`    | Layers per-topic QoS and Retain from `[MqttTopic]` attributes onto the mapping (the topic segment itself is resolved by the path provider) |
 | `MqttFluentMapper<T>`    | Code-based per-property configuration via lambda expressions          |
 | `MqttCompositeMapper`            | Combines multiple mappers with merge semantics                        |
 
-The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, pathProviderName)`) default to a composite of `MqttPathProviderMapper` + `MqttAttributeMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
+The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, pathProviderName)`) default to a composite of `MqttPathProviderMapper` and `MqttAttributeMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
+
+`MqttAttributeMapper` contributes only QoS and Retain; it relies on `MqttPathProviderMapper` to resolve the topic in both directions, so it must always be paired with one (the default composite does this). On its own it resolves no topics. This differs from the OPC UA attribute mapper, which is self-sufficient because OPC UA browses hierarchically and matches each node against a single level, whereas MQTT resolves a flat topic that needs full-path composition by the path provider.
 
 ## Topic Mapping
 
@@ -212,22 +214,26 @@ public partial class Sensor
 
 ### [MqttTopic] attribute
 
-For per-topic QoS and Retain overrides, use `[MqttTopic]` instead of (or alongside) `[Path]`:
+`[MqttTopic]` is a `[Path]` for the `mqtt` context plus optional per-topic QoS and Retain metadata. The string is a single relative path segment composed hierarchically with parent property segments (and the optional `TopicPrefix`), exactly like `[Path]`. The QoS and Retain values are layered on top by the `MqttAttributeMapper`.
 
 ```csharp
 [InterceptorSubject]
 public partial class Sensor
 {
-    [MqttTopic("sensors/temperature")]
+    // With TopicPrefix = "home/living-room":
+    // Topic: home/living-room/temperature
+    [MqttTopic("temperature")]
     public partial decimal Temperature { get; set; }
 
-    [MqttTopic("alerts/critical", QualityOfService = MqttQualityOfServiceLevel.ExactlyOnce,
+    [MqttTopic("critical", QualityOfService = MqttQualityOfServiceLevel.ExactlyOnce,
         Retain = true, RetainSet = true)]
     public partial string CriticalAlert { get; set; }
 }
 ```
 
-When both `[Path]` and `[MqttTopic]` are present on the same property, `[MqttTopic]` fields take priority (it runs later in the composite chain).
+Multi-level topics are built by annotating each level of the object graph (parent reference properties carry their own segment), the same way `[Path]` composes nested paths. Because the path is split on the topic separator for reverse lookup (inbound messages), a single `[MqttTopic]` value should be one segment without embedded separators. A flat, absolute topic that bypasses hierarchical composition is not yet supported; it is planned as a future `AbsoluteTopic` option.
+
+Since `[MqttTopic]` already provides the `mqtt` `[Path]` segment for a property, use one attribute per property rather than combining `[Path]` and `[MqttTopic]` on the same property.
 
 ### Fluent mapper
 
@@ -267,7 +273,7 @@ public class CustomMqttValueConverter : IMqttValueConverter
 
 ### Write Retry Queue
 
-Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 new MqttClientConfiguration

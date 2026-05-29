@@ -38,7 +38,7 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
         [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
     {
         var path = GetPropertyPath(property, rootSubject);
-        if (_mappings.TryGetValue(path, out var stored))
+        if (path is not null && _mappings.TryGetValue(path, out var stored))
         {
             mapping = stored;
             return true;
@@ -55,6 +55,10 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
     {
         var browseName = key.Reference.BrowseName.Name;
 
+        // TODO(perf): this is an O(n) scan over the subject's properties with a GetPath walk per
+        // property on every reverse lookup. Callers cache the result per node, so steady state is fine,
+        // but a browseName -> property index built from _mappings would remove the first-hit cost if
+        // profiling shows it matters.
         foreach (var property in subject.Properties)
         {
             if (property.IsAttribute)
@@ -66,7 +70,7 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
             // (e.g. "City" vs stored "Person.Address.City"). Using the connected root also keeps the result
             // correct when that root is itself nested inside a larger object graph.
             var path = GetPropertyPath(property, key.RootSubject);
-            if (_mappings.TryGetValue(path, out var config) && config.BrowseName == browseName)
+            if (path is not null && _mappings.TryGetValue(path, out var config) && config.BrowseName == browseName)
             {
                 return new ValueTask<RegisteredSubjectProperty?>(property);
             }
@@ -78,8 +82,8 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
     private static string GetPropertyPath<TProperty>(Expression<Func<T, TProperty>> expression) =>
         ExpressionPathHelper.GetPathFromExpression(expression.Body);
 
-    private static string GetPropertyPath(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject = null) =>
-        property.GetPath(rootSubject: rootSubject);
+    private static string? GetPropertyPath(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject = null) =>
+        property.TryGetPath(rootSubject: rootSubject);
 
     private class PropertyBuilder<TProp> : IPropertyBuilder<TProp>
     {

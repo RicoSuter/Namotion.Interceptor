@@ -34,8 +34,8 @@ public class MqttFluentMapper<TSubject>
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)
     {
-        var path = property.GetPath(rootSubject: rootSubject);
-        if (_mappings.TryGetValue(path, out var stored))
+        var path = property.TryGetPath(rootSubject: rootSubject);
+        if (path is not null && _mappings.TryGetValue(path, out var stored))
         {
             mapping = stored;
             return true;
@@ -51,6 +51,11 @@ public class MqttFluentMapper<TSubject>
         // root subject here (not a per-level subject). The stored keys are full paths from the root, so
         // resolving each property's path relative to subject.Subject (== the root) yields matching keys.
         // Unlike OPC UA, there is no hierarchical browse, so no separate root needs to be threaded in.
+        //
+        // TODO(perf): this is an O(n) scan over all properties (with a HashSet allocation in
+        // GetAllProperties and a GetPath walk per property) on every reverse lookup. Callers cache the
+        // result per topic, so steady state is fine, but a topic -> property index built from _mappings
+        // would remove the first-hit cost if profiling shows it matters.
         foreach (var property in subject.GetAllProperties())
         {
             if (property.IsAttribute)
