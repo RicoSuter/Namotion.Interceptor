@@ -60,7 +60,11 @@ public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping,
             if (property.IsAttribute)
                 continue;
 
-            if (TryGetMapping(property, subject.Subject, out var config) && config.BrowseName == browseName)
+            // Resolve the absolute path from the graph root (rootSubject: null) to match the keys stored by
+            // Map<T>(), which are full paths from T. Hierarchical browsing passes the per-level subject here,
+            // so a relative path would never match a nested mapping (e.g. "City" vs stored "Person.Address.City").
+            var path = GetPropertyPath(property);
+            if (_mappings.TryGetValue(path, out var config) && config.BrowseName == browseName)
             {
                 return new ValueTask<RegisteredSubjectProperty?>(property);
             }

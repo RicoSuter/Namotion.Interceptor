@@ -431,5 +431,53 @@ public class OpcUaFluentMapperTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public async Task WhenMatchingBrowseNameOnNestedSubject_ThenReturnsProperty()
+    {
+        // Arrange - nested structure (TestRoot -> Person -> Address) configured with a nested fluent mapper,
+        // exercising reverse lookup at the nested Address level as the hierarchical loader browses it.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var root = new TestRoot(context)
+        {
+            Person = new TestPerson(context)
+            {
+                Address = new TestAddress(context)
+            }
+        };
+
+        var mapper = new OpcUaFluentMapper<TestRoot>()
+            .Map(r => r.Person, person => person
+                .BrowseName("MainPerson")
+                .Map(p => p.Address!, address => address
+                    .BrowseName("HomeAddress")
+                    .Map(a => a.City, city => city.BrowseName("CityNode"))));
+
+        // Resolve the Address-level registered subject (the per-level subject the loader browses).
+        var registeredSubject = root.TryGetRegisteredSubject()!;
+        var personProperty = registeredSubject.Properties.First(p => p.Name == "Person");
+        var personSubject = personProperty.Children.Single().Subject!.TryGetRegisteredSubject()!;
+        var addressProperty = personSubject.Properties.First(p => p.Name == "Address");
+        var addressSubject = addressProperty.Children.Single().Subject!.TryGetRegisteredSubject()!;
+
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(new NamespaceTable());
+
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("CityNodeId", 0),
+            BrowseName = new QualifiedName("CityNode", 0)
+        };
+
+        // Act - reverse lookup at the nested Address level
+        var result = await mapper.TryGetPropertyAsync(
+            new OpcUaLookupKey(nodeReference, mockSession.Object), addressSubject, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("City", result.Name);
+    }
+
     #endregion
 }
