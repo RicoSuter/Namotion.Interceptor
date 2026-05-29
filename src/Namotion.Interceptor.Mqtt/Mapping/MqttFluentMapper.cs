@@ -47,6 +47,10 @@ public class MqttFluentMapper<TSubject>
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
         MqttLookupKey key, RegisteredSubject subject, CancellationToken cancellationToken)
     {
+        // MQTT is a flat connector: per the IReversePropertyMapper contract, callers pass the connected
+        // root subject here (not a per-level subject). The stored keys are full paths from the root, so
+        // resolving each property's path relative to subject.Subject (== the root) yields matching keys.
+        // Unlike OPC UA, there is no hierarchical browse, so no separate root needs to be threaded in.
         foreach (var property in subject.GetAllProperties())
         {
             if (property.IsAttribute)

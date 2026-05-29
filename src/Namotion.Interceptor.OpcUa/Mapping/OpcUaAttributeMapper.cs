@@ -104,7 +104,7 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
     /// <inheritdoc />
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
         OpcUaLookupKey key,
-        RegisteredSubject rootSubject,
+        RegisteredSubject subject,
         CancellationToken cancellationToken)
     {
         var nodeReference = key.Reference;
@@ -118,14 +118,21 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
         var browseNamespaceIndex = nodeReference.BrowseName.NamespaceIndex;
 
         RegisteredSubjectProperty? browseNameMatch = null;
-        foreach (var property in rootSubject.Properties)
+        foreach (var property in subject.Properties)
         {
             if (property.IsAttribute)
                 continue;
 
-            var attribute = property.ReflectionAttributes
-                .OfType<OpcUaNodeAttribute>()
-                .FirstOrDefault();
+            // Single-pass lookup of the first OpcUaNode attribute (avoids a LINQ iterator allocation per property)
+            OpcUaNodeAttribute? attribute = null;
+            foreach (var candidate in property.ReflectionAttributes)
+            {
+                if (candidate is OpcUaNodeAttribute node)
+                {
+                    attribute = node;
+                    break;
+                }
+            }
 
             if (attribute is null)
                 continue;

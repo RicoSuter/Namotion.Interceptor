@@ -539,4 +539,36 @@ public class PathExtensionsTests
         // Assert
         Assert.Equal("FirstName", path);
     }
+
+    [Fact]
+    public void WhenSubjectParentChainHasCycle_ThenGetPathThrows()
+    {
+        // Arrange - mutual Father references form a cycle in the parent chain
+        var context = CreateContext();
+        var a = new Models.Person(context) { FirstName = "A" };
+        var b = new Models.Person(context) { FirstName = "B" };
+        a.Father = b;
+        b.Father = a;
+        var firstNameProperty = a.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => firstNameProperty.GetPath());
+        Assert.Contains("Cycle", exception.Message);
+    }
+
+    [Fact]
+    public void WhenSubjectParentChainHasCycle_ThenTryGetPathThrows()
+    {
+        // Arrange - mutual Father references form a cycle in the parent chain
+        var context = CreateContext();
+        var a = new Models.Person(context) { FirstName = "A" };
+        var b = new Models.Person(context) { FirstName = "B" };
+        a.Father = b;
+        b.Father = a;
+        var firstNameProperty = a.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(
+            () => firstNameProperty.TryGetPath(DefaultPathProvider.Instance, rootSubject: null));
+    }
 }
