@@ -177,8 +177,7 @@ internal class CustomNodeManager : CustomNodeManager2
             if (property.IsAttribute)
                 continue;
 
-            // Resolve the mapping once per property; the branch helpers reuse it instead of
-            // re-resolving the same property through the full composite mapper several times.
+            // Resolve each property's mapping once; the branch helpers reuse it.
             if (!_mapper.TryGetMapping(property, _subject, out var mapping))
                 continue;
 

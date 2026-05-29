@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -12,12 +13,9 @@ namespace Namotion.Interceptor.Registry.Paths;
 public static class PathExtensions
 {
     /// <summary>
-    /// Depth past which path walking starts tracking visited subjects to detect cycles. Real object
-    /// graphs are far shallower than this, so the common case stays allocation-free; only an
-    /// unexpectedly deep walk (i.e. a cycle in the parent chain) pays for a visited set, which then
-    /// returns null on the actual revisit instead of looping forever. The multi-parent search uses
-    /// the same value as a recursion-depth bound so a pathological graph returns null rather than
-    /// overflowing the stack.
+    /// Depth at which the walk starts tracking visited subjects (the shallow common case stays
+    /// allocation-free) and the recursion bound for the multi-parent search. Beyond it a cycle or
+    /// pathological graph returns null instead of looping forever or overflowing the stack.
     /// </summary>
     private const int CycleDetectionDepthThreshold = 256;
 
@@ -62,7 +60,6 @@ public static class PathExtensions
 
         var name = span[..bracketIndex].ToString();
 
-        // Search for closing bracket after the opening bracket
         var afterOpen = span[(bracketIndex + 1)..];
         var closeBracket = afterOpen.IndexOf(indexClose);
         if (closeBracket <= 0)
@@ -71,7 +68,9 @@ public static class PathExtensions
         }
 
         var indexSpan = afterOpen[..closeBracket];
-        object? index = int.TryParse(indexSpan, out var intIndex) ? intIndex : indexSpan.ToString();
+        object? index = int.TryParse(indexSpan, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intIndex)
+            ? intIndex
+            : indexSpan.ToString();
         return (name, index);
     }
 
@@ -107,8 +106,7 @@ public static class PathExtensions
                 return null;
             }
 
-            // When the property is an [InlinePaths] dictionary and no bracket index
-            // was provided, the segment name itself is the dictionary key.
+            // [InlinePaths] dictionary with no bracket index: the segment name is the dictionary key.
             var effectiveIndex = index;
             if (effectiveIndex is null &&
                 InlinePathsAttribute.IsInlinePathsProperty(
@@ -119,7 +117,6 @@ public static class PathExtensions
 
             lastIndex = effectiveIndex;
 
-            // If not the last segment, navigate to the child subject
             if (i < segments.Count - 1)
             {
                 var childSubject = GetChildSubject(currentProperty, effectiveIndex);
@@ -133,7 +130,8 @@ public static class PathExtensions
             }
         }
 
-        return currentProperty is not null ? (currentProperty, lastIndex) : null;
+        // Non-null: segments is non-empty, so the loop ran and returned early on any failed segment.
+        return (currentProperty!, lastIndex);
     }
 
     /// <summary>
@@ -272,10 +270,8 @@ public static class PathExtensions
         {
             var (prop, index) = frames[i];
 
-            // [InlinePaths] properties: emit just the index as a plain segment.
-            // IsPropertyIncluded is not checked here because intermediate properties
-            // are traversed for navigation, and PathProviderBase implementations
-            // (e.g., AttributeBasedPathProvider) already include [InlinePaths] properties.
+            // [InlinePaths] frames emit just the index; no IsPropertyIncluded check, since providers
+            // already include them and these frames are only traversed for navigation.
             if (index is not null &&
                 InlinePathsAttribute.IsInlinePathsProperty(
                     prop.Subject.GetType(), prop.Name))
@@ -320,9 +316,8 @@ public static class PathExtensions
     {
         var frames = new List<(RegisteredSubjectProperty Property, object? Index)> { (property, propertyIndex) };
 
-        // Cheap linear walk following the first parent. Handles the common single-parent chain (and the
-        // case where the root lies on it) without allocating a visited set. Falls back to a full search at
-        // the first multi-parent branch when a root is requested.
+        // Cheap first-parent walk for the common single-parent chain (no visited-set allocation); falls
+        // back to a full multi-parent search at the first branch when a root is requested.
         var current = property;
         HashSet<RegisteredSubject>? visited = null;
         var depth = 0;
@@ -334,25 +329,22 @@ public static class PathExtensions
                 return frames;
             }
 
-            // Snapshot once: Parents takes a lock and returns a fresh copy per call, so reading it
-            // twice (length check + indexer) races with a concurrent detach and can throw.
+            // Snapshot once: Parents locks and returns a fresh copy per call, so reading it twice
+            // (length + indexer) would race a concurrent detach.
             var parents = current.Parent.Parents;
             if (parents.Length == 0)
             {
-                // Reached the absolute top: the absolute path when no root is requested, or "not reachable"
-                // when a root was requested along this unique chain.
+                // Absolute top: the full path when no root was requested, else the root is unreachable.
                 return rootSubject is null ? frames : null;
             }
 
             if (rootSubject is not null && parents.Length > 1)
             {
-                // A branch point with a target: the first parent may not be the chain that reaches the
-                // root, so fall back to a full multi-parent search.
+                // First parent may not reach the root, so search all parents.
                 return TrySearchToRoot(property, propertyIndex, rootSubject);
             }
 
-            // Only deep walks (i.e. cycles) start tracking; shallow paths stay allocation-free. A cycle
-            // means there is no finite path, which we report as "no path" (null) rather than throwing.
+            // Start tracking only past the threshold; a revisit then means a cycle (no finite path) -> null.
             if (++depth > CycleDetectionDepthThreshold && !(visited ??= []).Add(current.Parent))
             {
                 return null;
@@ -405,14 +397,12 @@ public static class PathExtensions
 
         var owner = current.Parent;
 
-        // Already proven unreachable in this search.
         if (unreachable.Contains(owner))
         {
             return false;
         }
 
-        // Bound the recursion so a pathologically deep graph returns "not reachable" instead of
-        // overflowing the stack. The truncated branch is provisional, so it is not memoized.
+        // Depth bound against a pathological graph; a truncated branch is provisional (not memoized).
         if (depth > CycleDetectionDepthThreshold)
         {
             authoritative = false;

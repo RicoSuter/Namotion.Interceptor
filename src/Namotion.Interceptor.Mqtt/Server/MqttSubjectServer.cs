@@ -503,9 +503,8 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
         var topic = args.ApplicationMessage.Topic;
 
-        // Isolate per-message failures: a bad message (unknown mapping, malformed payload, cyclic or
-        // unreachable subject graph) must not escape into the broker's publish pipeline. No cancellation
-        // token flows in, so every failure is logged and the message skipped.
+        // Isolate per-message failures: a bad message must not escape into the broker's publish pipeline.
+        // No cancellation token flows in, so every failure is logged and skipped.
         try
         {
             var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
