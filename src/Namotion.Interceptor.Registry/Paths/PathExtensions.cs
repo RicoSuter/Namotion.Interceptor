@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -12,6 +13,12 @@ namespace Namotion.Interceptor.Registry.Paths;
 /// </summary>
 public static class PathExtensions
 {
+    /// <summary>
+    /// Pooled sets used to detect cycles in the subject parent chain while walking paths,
+    /// avoiding a per-call allocation on the hot path.
+    /// </summary>
+    private static readonly ObjectPool<HashSet<RegisteredSubject>> VisitedSubjectsPool = new(() => []);
+
     /// <summary>
     /// Parses a path string into segments with their indices.
     /// </summary>
@@ -206,19 +213,36 @@ public static class PathExtensions
         var parts = new List<string> { property.Name };
         var currentSubject = property.Parent;
 
-        while (currentSubject.Parents.Length > 0)
+        var visited = VisitedSubjectsPool.Rent();
+        try
         {
-            if (rootSubject is not null && currentSubject.Subject == rootSubject)
+            visited.Add(currentSubject);
+
+            while (currentSubject.Parents.Length > 0)
             {
-                break;
+                if (rootSubject is not null && currentSubject.Subject == rootSubject)
+                {
+                    break;
+                }
+
+                var parent = currentSubject.Parents[0];
+                parts.Insert(0, parent.Property.Name);
+                currentSubject = parent.Property.Parent;
+
+                if (!visited.Add(currentSubject))
+                {
+                    throw new InvalidOperationException(
+                        $"Cycle detected in the subject parent chain while computing the path for property '{property.Name}'.");
+                }
             }
 
-            var parent = currentSubject.Parents[0];
-            parts.Insert(0, parent.Property.Name);
-            currentSubject = parent.Property.Parent;
+            return string.Join(separator, parts);
         }
-
-        return string.Join(separator, parts);
+        finally
+        {
+            visited.Clear();
+            VisitedSubjectsPool.Return(visited);
+        }
     }
 
     /// <summary>
@@ -239,6 +263,7 @@ public static class PathExtensions
         }
 
         var buffer = ArrayPool<(RegisteredSubjectProperty Property, object? Index)>.Shared.Rent(16);
+        var visited = VisitedSubjectsPool.Rent();
         try
         {
             var count = 0;
@@ -247,6 +272,12 @@ public static class PathExtensions
 
             while (current is not null)
             {
+                if (!visited.Add(current.Parent))
+                {
+                    throw new InvalidOperationException(
+                        $"Cycle detected in the subject parent chain while computing the path for property '{property.Name}'.");
+                }
+
                 if (count == buffer.Length)
                 {
                     var newBuffer = ArrayPool<(RegisteredSubjectProperty, object?)>.Shared.Rent(buffer.Length * 2);
@@ -312,6 +343,8 @@ public static class PathExtensions
         finally
         {
             ArrayPool<(RegisteredSubjectProperty, object?)>.Shared.Return(buffer);
+            visited.Clear();
+            VisitedSubjectsPool.Return(visited);
         }
     }
 

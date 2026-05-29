@@ -289,7 +289,7 @@ public class OpcUaAttributeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object, registeredSubject.Subject), registeredSubject, CancellationToken.None);
 
         // Assert - Should match via NodeIdentifier (Priority 1), not BrowseName (Priority 2)
         Assert.NotNull(result);
@@ -316,7 +316,7 @@ public class OpcUaAttributeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object, registeredSubject.Subject), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -344,7 +344,7 @@ public class OpcUaAttributeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object, registeredSubject.Subject), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.Null(result);
@@ -369,7 +369,7 @@ public class OpcUaAttributeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object, registeredSubject.Subject), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.Null(result);
@@ -396,7 +396,7 @@ public class OpcUaAttributeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object, registeredSubject.Subject), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);

@@ -259,8 +259,9 @@ namespace Namotion.Interceptor.OpcUa.Mapping
     }
     public readonly struct OpcUaLookupKey : System.IEquatable<Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
     {
-        public OpcUaLookupKey(Opc.Ua.ReferenceDescription Reference, Opc.Ua.Client.ISession Session) { }
+        public OpcUaLookupKey(Opc.Ua.ReferenceDescription Reference, Opc.Ua.Client.ISession Session, Namotion.Interceptor.IInterceptorSubject RootSubject) { }
         public Opc.Ua.ReferenceDescription Reference { get; init; }
+        public Namotion.Interceptor.IInterceptorSubject RootSubject { get; init; }
         public Opc.Ua.Client.ISession Session { get; init; }
     }
     public enum OpcUaNodeClass

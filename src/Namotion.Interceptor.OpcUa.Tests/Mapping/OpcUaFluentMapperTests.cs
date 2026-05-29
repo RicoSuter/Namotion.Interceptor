@@ -396,7 +396,7 @@ public class OpcUaFluentMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object, registeredSubject.Subject), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -425,7 +425,7 @@ public class OpcUaFluentMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object), registeredSubject, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object, registeredSubject.Subject), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.Null(result);
@@ -472,7 +472,53 @@ public class OpcUaFluentMapperTests
 
         // Act - reverse lookup at the nested Address level
         var result = await mapper.TryGetPropertyAsync(
-            new OpcUaLookupKey(nodeReference, mockSession.Object), addressSubject, CancellationToken.None);
+            new OpcUaLookupKey(nodeReference, mockSession.Object, root), addressSubject, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("City", result.Name);
+    }
+
+    [Fact]
+    public async Task WhenConnectedRootIsNestedInLargerGraph_ThenReverseLookupResolvesRelativeToConnectedRoot()
+    {
+        // Arrange - the connected root (TestPerson) is itself nested under TestRoot in the object graph.
+        // The fluent mapper stores keys relative to TestPerson ("Address", "Address.City"), so reverse
+        // lookup must resolve paths relative to the connected root, not the absolute graph root.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var root = new TestRoot(context)
+        {
+            Person = new TestPerson(context)
+            {
+                Address = new TestAddress(context)
+            }
+        };
+
+        var mapper = new OpcUaFluentMapper<TestPerson>()
+            .Map(p => p.Address!, address => address
+                .Map(a => a.City, city => city.BrowseName("CityNode")));
+
+        var rootSubject = root.TryGetRegisteredSubject()!;
+        var personProperty = rootSubject.Properties.First(p => p.Name == "Person");
+        var personSubject = personProperty.Children.Single().Subject!;
+        var registeredPerson = personSubject.TryGetRegisteredSubject()!;
+        var addressProperty = registeredPerson.Properties.First(p => p.Name == "Address");
+        var addressSubject = addressProperty.Children.Single().Subject!.TryGetRegisteredSubject()!;
+
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(new NamespaceTable());
+
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("CityNodeId", 0),
+            BrowseName = new QualifiedName("CityNode", 0)
+        };
+
+        // Act - reverse lookup at the nested Address level with the connected root (Person), not the graph root
+        var result = await mapper.TryGetPropertyAsync(
+            new OpcUaLookupKey(nodeReference, mockSession.Object, personSubject), addressSubject, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);

@@ -389,9 +389,11 @@ internal class OpcUaSubjectLoader
         ISession session,
         CancellationToken cancellationToken)
     {
-        // Use Mapper for property lookup (supports attributes, path provider, and fluent config)
+        // Use Mapper for property lookup (supports attributes, path provider, and fluent config).
+        // _subject is the connected root, so path-based mappers resolve paths consistently with the
+        // forward direction (which also resolves relative to _subject).
         return await _configuration.Mapper.TryGetPropertyAsync(
-            new OpcUaLookupKey(nodeReference, session), registeredSubject, cancellationToken).ConfigureAwait(false);
+            new OpcUaLookupKey(nodeReference, session, _subject), registeredSubject, cancellationToken).ConfigureAwait(false);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
