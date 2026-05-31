@@ -183,7 +183,7 @@ The built-in mapper types:
 |---|---|
 | `MqttPathProviderMapper` | Wraps a `PathProviderBase` to produce topics from `[Path]` attributes |
 | `MqttAttributeMapper` | Layers per-topic QoS and Retain from `[MqttTopic]` attributes onto the mapping (the topic segment itself is resolved by the path provider) |
-| `MqttFluentMapper<TSubject>` | Code-based per-property configuration via lambda expressions |
+| `MqttFluentMapping<TRoot>` | Code-based type-level configuration via `ForType<T>().Map(...)` |
 | `MqttCompositeMapper` | Combines multiple mappers with merge semantics |
 
 The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, connectorName)`) default to a composite of `MqttPathProviderMapper` and `MqttAttributeMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
@@ -235,17 +235,48 @@ Multi-level topics are built by annotating each level of the object graph (paren
 
 Since `[MqttTopic]` already provides the `mqtt` `[Path]` segment for a property, use one attribute per property rather than combining `[Path]` and `[MqttTopic]` on the same property.
 
-### Fluent mapper
+### Code-based (fluent) mapping
 
-For configuration that cannot be expressed in attributes (e.g., mapping the same model to different topics per instance), use `MqttFluentMapper<TSubject>`:
+`MqttFluentMapping<TRoot>` is a complete, code-based alternative to attribute mapping. Configure a type once with `ForType<T>().Map(...)` and the mapping resolves everywhere that type appears in the object graph, including collection and dictionary elements (which get bracket indices such as `motors[1]/speed`). Fluent is layered after attributes in the composite, so fluent wins on conflicts. Omit fluent for attribute-only setups.
+
+`WithSegment(...)` sets the topic level for the property. `WithQualityOfService(...)` and `WithRetain(...)` set per-property protocol metadata.
 
 ```csharp
-var mapper = new MqttFluentMapper<Sensor>()
-    .Map(s => s.Temperature, b => b
-        .WithTopic("line1/sensors/temp")
-        .WithQualityOfService(MqttQualityOfServiceLevel.ExactlyOnce)
-        .WithRetain(true));
+var fluent = new MqttFluentMapping<Plant>();
+
+fluent
+    .ForType<Motor>()
+        .Map(m => m.Speed,  b => b.WithSegment("speed").WithQualityOfService(MqttQualityOfServiceLevel.AtLeastOnce))
+        .Map(m => m.Torque, b => b.WithSegment("torque"))
+    .ForType<Pump>()
+        .Map(p => p.Motor,  b => b.WithSegment("motor"))
+    .ForType<Plant>()
+        .Map(p => p.Motors,  b => b.WithSegment("motors"))
+        .Map(p => p.Sensors, b => b.WithSegment("sensors"));
 ```
+
+Because `Motor` is configured once at the type level, all motors in the graph (direct properties, collection elements, nested references) resolve the same topic segments without repeating configuration.
+
+`ForType<T>()` registrations apply to all types derived from `T` and all types implementing `T` when `T` is an interface. The most specific registration wins.
+
+#### DI Registration
+
+The `AddMqttSubjectServer<T>` and `AddMqttSubjectClientSource<T>` overloads accept an optional `configureFluent` callback:
+
+```csharp
+services.AddMqttSubjectServer<Plant>(
+    connectorName: "mqtt",
+    brokerPort: 1883,
+    configureFluent: fluent =>
+        fluent
+            .ForType<Motor>()
+                .Map(m => m.Speed,  b => b.WithSegment("speed").WithQualityOfService(MqttQualityOfServiceLevel.AtLeastOnce))
+                .Map(m => m.Torque, b => b.WithSegment("torque"))
+            .ForType<Pump>()
+                .Map(p => p.Motor, b => b.WithSegment("motor")));
+```
+
+Omit `configureFluent` to keep the default attribute-only mapping.
 
 ## Serialization
 
