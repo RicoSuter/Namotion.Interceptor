@@ -179,12 +179,12 @@ The `Mapper` property accepts any `IReversePropertyMapper<MqttPropertyMapping, M
 
 The built-in mapper types:
 
-| Mapper                           | Purpose                                                               |
-|----------------------------------|-----------------------------------------------------------------------|
+| Mapper | Purpose |
+|---|---|
 | `MqttPathProviderMapper` | Wraps a `PathProviderBase` to produce topics from `[Path]` attributes |
-| `MqttAttributeMapper`    | Layers per-topic QoS and Retain from `[MqttTopic]` attributes onto the mapping (the topic segment itself is resolved by the path provider) |
-| `MqttFluentMapper<TSubject>` | Code-based per-property configuration via lambda expressions      |
-| `MqttCompositeMapper`            | Combines multiple mappers with merge semantics                        |
+| `MqttAttributeMapper` | Layers per-topic QoS and Retain from `[MqttTopic]` attributes onto the mapping (the topic segment itself is resolved by the path provider) |
+| `MqttFluentMapper<TSubject>` | Code-based per-property configuration via lambda expressions |
+| `MqttCompositeMapper` | Combines multiple mappers with merge semantics |
 
 The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, pathProviderName)`) default to a composite of `MqttPathProviderMapper` and `MqttAttributeMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
 
