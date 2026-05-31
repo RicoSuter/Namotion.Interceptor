@@ -7,10 +7,12 @@ using Opc.Ua.Client;
 namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
-/// Per-load transactional context. All claims and root mutations are queued during
+/// Per-load staged context. All claims and root mutations are queued during
 /// discovery and committed via <see cref="Apply"/> on success. If <see cref="Dispose"/>
 /// runs before <see cref="Apply"/>, the rollback path detaches staged subjects from
 /// the root context so the registry sheds them and the next load starts on a clean slate.
+/// Unrelated to <c>Namotion.Interceptor.Tracking.Transactions.SubjectTransaction</c>,
+/// which captures property-change scopes for the tracking layer.
 /// </summary>
 internal sealed class OpcUaLoadContext : IDisposable
 {

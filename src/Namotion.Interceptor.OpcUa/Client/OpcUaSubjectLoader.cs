@@ -98,14 +98,14 @@ internal sealed class OpcUaSubjectLoader
             return;
         }
 
-        // Step 1: Filter valid subjects, batch-browse
+        // Phase 1: Filter valid subjects, batch-browse
         var (validSubjects, allBrowseResults) = await FilterAndBrowseSubjectsAsync(subjects, context).ConfigureAwait(false);
         if (validSubjects.Count == 0)
         {
             return;
         }
 
-        // Step 2: Classify children, collect dynamic nodes
+        // Phase 2: Classify children, collect dynamic nodes
         var allDynamicObjectNodeIds = new HashSet<NodeId>();
         var allDynamicVariableNodes = new Dictionary<NodeId, ReferenceDescription>();
         var subjectStates = new List<SubjectState>(validSubjects.Count);
@@ -125,14 +125,14 @@ internal sealed class OpcUaSubjectLoader
             subjectStates.Add(new SubjectState(subject, registeredSubject, childEntries));
         }
 
-        // Step 3: Batch resolve types (populates the context's browse cache for reuse by Collections and next-level Subjects)
+        // Phase 3: Batch resolve types (populates the context's browse cache for reuse by Collections and next-level Subjects)
         var objectTypeMap = await ResolveObjectTypesAsync(allDynamicObjectNodeIds, context).ConfigureAwait(false);
 
         var variableTypeMap = allDynamicVariableNodes.Count > 0
             ? await _configuration.TypeResolver.ResolveVariableTypesAsync(context.Session, allDynamicVariableNodes.Values.ToList(), context.CancellationToken).ConfigureAwait(false)
             : new Dictionary<NodeId, Type?>();
 
-        // Step 4: Dispatch properties and load children
+        // Phase 4: Dispatch properties and load children (Phase 5 attribute discovery runs at the end of LoadChildPropertiesAsync)
         await LoadChildPropertiesAsync(subjectStates, objectTypeMap, variableTypeMap, context).ConfigureAwait(false);
     }
 
@@ -160,6 +160,12 @@ internal sealed class OpcUaSubjectLoader
             }
 
             var resolved = context.ResolveNodeId(node.NodeId);
+            if (resolved is null)
+            {
+                _logger.LogWarning(
+                    "Could not resolve NodeId '{NodeId}' for subject '{Subject}': the namespace URI is not registered in the session's NamespaceTable. The subject will be loaded with no children.",
+                    node.NodeId, subject.GetType().Name);
+            }
             validSubjects.Add((subject, registeredSubject, resolved));
             if (resolved is not null)
             {
@@ -205,6 +211,9 @@ internal sealed class OpcUaSubjectLoader
 
             if (registeredSubject.TryGetProperty(nodeReference.BrowseName.Name) is not null)
             {
+                _logger.LogDebug(
+                    "Skipping OPC UA child '{BrowseName}' (NodeId: {NodeId}): a property with this name is already declared on the registered subject but the mapper returned no mapping (likely a BrowseName collision with an unmapped property, or a mapping that targets a different NodeId).",
+                    nodeReference.BrowseName.Name, nodeReference.NodeId);
                 continue;
             }
 
@@ -261,7 +270,7 @@ internal sealed class OpcUaSubjectLoader
     {
         var allAttributeVariableNodes = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
         var allPendingSubjectRefs = new List<PendingSubjectRef>();
-        var pendingVariableNodes = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
+        var pendingVariableSubjects = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
         var pendingCollections = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
         var pendingDictionaries = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
 
@@ -294,7 +303,7 @@ internal sealed class OpcUaSubjectLoader
                 {
                     if (nodeConfiguration.NodeClass == Mapping.OpcUaNodeClass.Variable)
                     {
-                        pendingVariableNodes.Add((property, resolvedNodeId));
+                        pendingVariableSubjects.Add((property, resolvedNodeId));
                     }
                     else
                     {
@@ -325,7 +334,7 @@ internal sealed class OpcUaSubjectLoader
             }
         }
 
-        await BatchLoadVariableNodesAsync(pendingVariableNodes, context).ConfigureAwait(false);
+        await BatchLoadVariableNodesAsync(pendingVariableSubjects, context).ConfigureAwait(false);
         await BatchLoadCollectionsAndDictionariesAsync(pendingCollections, pendingDictionaries, context).ConfigureAwait(false);
         await LoadPendingSubjectReferencesAsync(allPendingSubjectRefs, context).ConfigureAwait(false);
         await _attributeLoader.LoadAttributesAsync(allAttributeVariableNodes, context).ConfigureAwait(false);
@@ -393,6 +402,11 @@ internal sealed class OpcUaSubjectLoader
         return (subjectToLoad, existingSubject is null);
     }
 
+    // Variable subjects' value properties intentionally don't enter `_attributeLoader.LoadAttributesAsync`.
+    // OPC UA Variable attributes (DataType, ValueRank, AccessLevel, etc.) should be modeled as peer
+    // properties of the Variable subject, which the child-name match below handles. C# `.Attributes`
+    // declared on the Value property are not discovered here, by design, to avoid the model-vs-protocol
+    // ambiguity when a browse-child matches both a peer property and an attribute name.
     private async Task BatchLoadVariableNodesAsync(
         List<(RegisteredSubjectProperty Property, NodeId NodeId)> variableNodes,
         OpcUaLoadContext context)
@@ -402,13 +416,11 @@ internal sealed class OpcUaSubjectLoader
             return;
         }
 
-        var nodesToBrowse = new List<(NodeId NodeId, RegisteredSubject ChildSubject, RegisteredSubjectProperty? ValueProperty)>();
-        var nodeIds = new HashSet<NodeId>(variableNodes.Count);
-
         // Dedup by childSubject: when two parent properties reference the same Variable
-        // subject (graph-shaped address space, not tree), the second pass would re-claim
-        // the same value + sub-attribute references and log a spurious ownership error.
-        var processedChildSubjects = new HashSet<RegisteredSubject>(variableNodes.Count);
+        // subject (graph-shaped address space, not tree), pick the smaller NodeId so the
+        // outcome is reproducible across loads regardless of browse order, matching
+        // OpcUaLoadContext.QueueClaim's tie-break.
+        var nodeByChildSubject = new Dictionary<RegisteredSubject, NodeId>();
 
         foreach (var (property, nodeId) in variableNodes)
         {
@@ -422,24 +434,28 @@ internal sealed class OpcUaSubjectLoader
                 continue;
             }
 
-            if (!processedChildSubjects.Add(childSubject))
+            if (!nodeByChildSubject.TryGetValue(childSubject, out var existing) || nodeId.CompareTo(existing) < 0)
             {
-                continue;
+                nodeByChildSubject[childSubject] = nodeId;
             }
+        }
 
+        if (nodeByChildSubject.Count == 0)
+        {
+            return;
+        }
+
+        var nodesToBrowse = new List<(NodeId NodeId, RegisteredSubject ChildSubject, RegisteredSubjectProperty? ValueProperty)>(nodeByChildSubject.Count);
+        var nodeIds = new HashSet<NodeId>(nodeByChildSubject.Count);
+        foreach (var (childSubject, nodeId) in nodeByChildSubject)
+        {
             var valueProperty = childSubject.TryGetValueProperty(_configuration.Mapper, _subject)?.Property;
             if (valueProperty is not null)
             {
                 MonitorValueNode(nodeId, valueProperty, context);
             }
-
             nodesToBrowse.Add((nodeId, childSubject, valueProperty));
             nodeIds.Add(nodeId);
-        }
-
-        if (nodeIds.Count == 0)
-        {
-            return;
         }
 
         var browseResults = await context.BrowseAsync(nodeIds).ConfigureAwait(false);
@@ -452,21 +468,27 @@ internal sealed class OpcUaSubjectLoader
             }
 
             var childNodes = context.DistinctByResolvedNodeId(rawChildren);
+
+            // Pre-compute name lookup once per childSubject so child-to-property matching is O(C+P), not O(C*P).
+            var propertiesByName = new Dictionary<string, RegisteredSubjectProperty>(childSubject.Properties.Length);
+            foreach (var childProperty in childSubject.Properties)
+            {
+                if (childProperty == valueProperty)
+                {
+                    continue;
+                }
+                var name = childProperty.ResolvePropertyName(_configuration.Mapper, _subject);
+                if (name is not null)
+                {
+                    propertiesByName.TryAdd(name, childProperty);
+                }
+            }
+
             foreach (var (childNode, childNodeId) in childNodes)
             {
-                foreach (var childProperty in childSubject.Properties)
+                if (propertiesByName.TryGetValue(childNode.BrowseName.Name, out var match))
                 {
-                    if (childProperty == valueProperty)
-                    {
-                        continue;
-                    }
-
-                    var childPropertyName = childProperty.ResolvePropertyName(_configuration.Mapper, _subject);
-                    if (childPropertyName == childNode.BrowseName.Name)
-                    {
-                        MonitorValueNode(childNodeId, childProperty, context);
-                        break;
-                    }
+                    MonitorValueNode(childNodeId, match, context);
                 }
             }
         }
