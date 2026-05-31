@@ -415,6 +415,7 @@ public class OpcUaSubjectLoaderFailureTests
         var subject = new DynamicSubject(subjectContext);
 
         var loader = new OpcUaSubjectLoader(
+            subject,
             config,
             source.Ownership,
             source,

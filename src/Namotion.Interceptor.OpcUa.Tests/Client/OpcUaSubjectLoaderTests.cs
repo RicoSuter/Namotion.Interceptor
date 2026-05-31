@@ -224,8 +224,10 @@ public class OpcUaSubjectLoaderTests
         };
 
         var context = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
-        var source = new OpcUaSubjectClientSource(new DynamicSubject(context), config, NullLogger<OpcUaSubjectClientSource>.Instance);
+        var subject = new DynamicSubject(context);
+        var source = new OpcUaSubjectClientSource(subject, config, NullLogger<OpcUaSubjectClientSource>.Instance);
         var loader = new OpcUaSubjectLoader(
+            subject,
             config,
             source.Ownership,
             source,
@@ -759,7 +761,7 @@ public class OpcUaSubjectLoaderTests
             });
 
         // Pre-register a "State" attribute via a path other than OPC UA browse (no OpcUaNode-
-        // Attribute) so the loader's pass 1 cannot match it via the NodeMapper.
+        // Attribute) so the loader's pass 1 cannot match it via the Mapper.
         object? stateValue = null;
         var preRegisteredState = serverStatus.AddAttribute(
             "State",

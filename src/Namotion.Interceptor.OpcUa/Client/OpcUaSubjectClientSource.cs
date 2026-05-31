@@ -85,7 +85,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             },
             onSubjectDetaching: OnSubjectDetaching);
 
-        _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
+        _subjectLoader = new OpcUaSubjectLoader(subject, configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
 
         Diagnostics = new OpcUaClientDiagnostics(this);
@@ -281,7 +281,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         foreach (var (property, nodeId) in ownedProperties)
         {
-            var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
+            var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property, _subject);
             monitoredItems.Add(monitoredItem);
         }
 

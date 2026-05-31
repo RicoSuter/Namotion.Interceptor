@@ -6,7 +6,26 @@ using Opc.Ua;
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
 /// <summary>
-/// Test model for AttributeOpcUaNodeMapper unit tests.
+/// Test model exercising connector-name filtering: two properties tagged with different connector names.
+/// </summary>
+[InterceptorSubject]
+public partial class ConnectorNameFilterModel
+{
+    [OpcUaNode("Foo", connectorName: "opc")]
+    public partial string Foo { get; set; }
+
+    [OpcUaNode("Bar", connectorName: "other")]
+    public partial string Bar { get; set; }
+
+    public ConnectorNameFilterModel()
+    {
+        Foo = "";
+        Bar = "";
+    }
+}
+
+/// <summary>
+/// Test model for OpcUaAttributeMapper unit tests.
 /// </summary>
 [InterceptorSubject]
 public partial class AttributeMapperTestModel

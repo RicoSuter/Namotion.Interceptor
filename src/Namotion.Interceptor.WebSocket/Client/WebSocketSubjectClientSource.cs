@@ -316,7 +316,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             return;
         }
 
-        // Get all leaf properties, filtered by PathProvider if configured
         var properties = registeredSubject
             .GetAllProperties()
             .Where(p => !p.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(p)))

@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
+using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -11,14 +14,14 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// Supports instance-based configuration (different config for Motor1.Speed vs Motor2.Speed).
 /// </summary>
 /// <typeparam name="T">The root type to configure.</typeparam>
-public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
+public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
 {
-    private readonly ConcurrentDictionary<string, OpcUaNodeConfiguration> _mappings = new();
+    private readonly ConcurrentDictionary<string, OpcUaPropertyMapping> _mappings = new();
 
     /// <summary>
     /// Maps a property with fluent configuration.
     /// </summary>
-    public FluentOpcUaNodeMapper<T> Map<TProperty>(
+    public OpcUaFluentMapper<T> Map<TProperty>(
         Expression<Func<T, TProperty>> propertySelector,
         Action<IPropertyBuilder<TProperty>> configure)
     {
@@ -29,96 +32,77 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
     }
 
     /// <inheritdoc />
-    public OpcUaNodeConfiguration? TryGetNodeConfiguration(RegisteredSubjectProperty property)
+    public bool TryGetMapping(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
+        [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
     {
-        var path = GetPropertyPath(property);
-        return _mappings.GetValueOrDefault(path);
+        var path = GetPropertyPath(property, rootSubject);
+        if (path is not null && _mappings.TryGetValue(path, out var stored))
+        {
+            mapping = stored;
+            return true;
+        }
+        mapping = null;
+        return false;
     }
 
     /// <inheritdoc />
-    public Task<RegisteredSubjectProperty?> TryGetPropertyAsync(
+    public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
+        OpcUaLookupKey key,
         RegisteredSubject subject,
-        ReferenceDescription nodeReference,
-        ISession session,
         CancellationToken cancellationToken)
     {
-        var browseName = nodeReference.BrowseName.Name;
+        var browseName = key.Reference.BrowseName.Name;
 
+        // TODO(perf): this is an O(n) scan over the subject's properties with a GetPath walk per
+        // property on every reverse lookup. Callers cache the result per node, so steady state is fine,
+        // but a browseName -> property index built from _mappings would remove the first-hit cost if
+        // profiling shows it matters.
         foreach (var property in subject.Properties)
         {
             if (property.IsAttribute)
                 continue;
 
-            var path = GetPropertyPath(property);
-            if (_mappings.TryGetValue(path, out var config) && config.BrowseName == browseName)
+            // Resolve the path relative to the connected root subject to match the keys stored by Map<T>(),
+            // which are full paths from T. Hierarchical browsing passes the per-level subject as "subject",
+            // so resolving from it would yield a relative path that never matches a nested mapping
+            // (e.g. "City" vs stored "Person.Address.City"). Using the connected root also keeps the result
+            // correct when that root is itself nested inside a larger object graph.
+            var path = GetPropertyPath(property, key.RootSubject);
+            if (path is not null && _mappings.TryGetValue(path, out var config) && config.BrowseName == browseName)
             {
-                return Task.FromResult<RegisteredSubjectProperty?>(property);
+                return new ValueTask<RegisteredSubjectProperty?>(property);
             }
         }
 
-        return Task.FromResult<RegisteredSubjectProperty?>(null);
+        return new ValueTask<RegisteredSubjectProperty?>(result: null);
     }
 
     private static string GetPropertyPath<TProperty>(Expression<Func<T, TProperty>> expression) =>
-        GetPropertyPathFromExpression(expression.Body);
+        ExpressionPathHelper.GetPathFromExpression(expression.Body);
 
-    /// <summary>
-    /// Extracts property path from an expression body by traversing member access chain.
-    /// </summary>
-    private static string GetPropertyPathFromExpression(Expression expression)
-    {
-        var parts = new List<string>();
-        var current = expression;
-
-        while (current is MemberExpression member)
-        {
-            parts.Insert(0, member.Member.Name);
-            current = member.Expression;
-        }
-
-        return string.Join(".", parts);
-    }
-
-    /// <summary>
-    /// Builds the property path by traversing parent references.
-    /// When an object has multiple parents (e.g., same instance referenced from multiple properties),
-    /// the first parent registration is used to determine the path. This means fluent configuration
-    /// should use the path from the first reference point in the object graph.
-    /// </summary>
-    private static string GetPropertyPath(RegisteredSubjectProperty property)
-    {
-        var parts = new List<string> { property.Name };
-        var currentSubject = property.Parent;
-
-        while (currentSubject.Parents.Length > 0)
-        {
-            // Use first parent when multiple exist (first registration wins)
-            var parent = currentSubject.Parents[0];
-            parts.Insert(0, parent.Property.Name);
-            currentSubject = parent.Property.Parent;
-        }
-
-        return string.Join(".", parts);
-    }
+    private static string? GetPropertyPath(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject = null) =>
+        property.TryGetPath(rootSubject: rootSubject);
 
     private class PropertyBuilder<TProp> : IPropertyBuilder<TProp>
     {
         private readonly string _basePath;
-        private readonly ConcurrentDictionary<string, OpcUaNodeConfiguration> _mappings;
-        private OpcUaNodeConfiguration _config = new();
+        private readonly ConcurrentDictionary<string, OpcUaPropertyMapping> _mappings;
+        private OpcUaPropertyMapping _config = new();
 
-        public PropertyBuilder(string basePath, ConcurrentDictionary<string, OpcUaNodeConfiguration> mappings)
+        public PropertyBuilder(string basePath, ConcurrentDictionary<string, OpcUaPropertyMapping> mappings)
         {
             _basePath = basePath;
             _mappings = mappings;
             _mappings[basePath] = _config;
         }
 
-        private IPropertyBuilder<TProp> UpdateConfig(Func<OpcUaNodeConfiguration, OpcUaNodeConfiguration> update)
+        private IPropertyBuilder<TProp> UpdateConfig(Func<OpcUaPropertyMapping, OpcUaPropertyMapping> update)
         {
             _config = _mappings.AddOrUpdate(
                 _basePath,
-                _ => update(new OpcUaNodeConfiguration()),
+                _ => update(new OpcUaPropertyMapping()),
                 (_, existing) => update(existing));
             return this;
         }
@@ -208,7 +192,7 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
             Expression<Func<TProp, TProperty>> propertySelector,
             Action<IPropertyBuilder<TProperty>> configure)
         {
-            var relativePath = GetPropertyPathFromExpression(propertySelector.Body);
+            var relativePath = ExpressionPathHelper.GetPathFromExpression(propertySelector.Body);
             var fullPath = $"{_basePath}.{relativePath}";
             var builder = new PropertyBuilder<TProperty>(fullPath, _mappings);
             configure(builder);

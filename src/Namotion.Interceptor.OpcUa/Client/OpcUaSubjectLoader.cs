@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -9,17 +10,20 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubjectLoader
 {
+    private readonly IInterceptorSubject _subject;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly SourceOwnershipManager _ownership;
     private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
 
     public OpcUaSubjectLoader(
+        IInterceptorSubject subject,
         OpcUaClientConfiguration configuration,
         SourceOwnershipManager ownership,
         OpcUaSubjectClientSource source,
         ILogger logger)
     {
+        _subject = subject;
         _configuration = configuration;
         _ownership = ownership;
         _source = source;
@@ -174,8 +178,8 @@ internal class OpcUaSubjectLoader
                 continue;
             }
 
-            var property = await _configuration.NodeMapper
-                .TryGetPropertyAsync(registeredSubject, nodeReference, session, cancellationToken)
+            var property = await _configuration.Mapper
+                .TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, session, _subject), registeredSubject, cancellationToken)
                 .ConfigureAwait(false);
 
             if (property is not null)
@@ -266,16 +270,14 @@ internal class OpcUaSubjectLoader
                     continue;
                 }
 
-                var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
-                if (propertyName is null)
+                if (!_configuration.Mapper.TryGetMapping(property, _subject, out var nodeConfiguration))
                 {
                     continue;
                 }
 
                 if (property.IsSubjectReference)
                 {
-                    var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
-                    if (nodeConfiguration?.NodeClass == Mapping.OpcUaNodeClass.Variable)
+                    if (nodeConfiguration.NodeClass == Mapping.OpcUaNodeClass.Variable)
                     {
                         pendingVariableNodes.Add((property, resolvedNodeId));
                     }
@@ -410,7 +412,7 @@ internal class OpcUaSubjectLoader
                 continue;
             }
 
-            var valueProperty = childSubject.TryGetValueProperty(_configuration.NodeMapper);
+            var valueProperty = childSubject.TryGetValueProperty(_configuration.Mapper, _subject)?.Property;
             if (valueProperty is not null)
             {
                 MonitorValueNode(nodeId, valueProperty, context);
@@ -444,7 +446,7 @@ internal class OpcUaSubjectLoader
                         continue;
                     }
 
-                    var childPropertyName = childProperty.ResolvePropertyName(_configuration.NodeMapper);
+                    var childPropertyName = childProperty.ResolvePropertyName(_configuration.Mapper, _subject);
                     if (childPropertyName == childNode.BrowseName.Name)
                     {
                         MonitorValueNode(childNodeId, childProperty, context);
@@ -672,8 +674,7 @@ internal class OpcUaSubjectLoader
         var processedBrowseNames = new HashSet<string>();
         foreach (var attribute in property.Attributes)
         {
-            var attributeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(attribute);
-            if (attributeConfiguration is null)
+            if (!_configuration.Mapper.TryGetMapping(attribute, _subject, out var attributeConfiguration))
             {
                 continue;
             }
@@ -815,7 +816,7 @@ internal class OpcUaSubjectLoader
             return;
         }
 
-        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
+        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property, _subject);
         context.QueueClaim(property.Reference, nodeId, monitoredItem);
     }
 
