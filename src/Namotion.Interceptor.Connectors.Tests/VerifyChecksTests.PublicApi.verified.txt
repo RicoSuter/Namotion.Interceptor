@@ -112,12 +112,6 @@ namespace Namotion.Interceptor.Connectors
 }
 namespace Namotion.Interceptor.Connectors.Mapping
 {
-    public class DelegateMapper<TMapping> : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<TMapping>
-        where TMapping :  class
-    {
-        public DelegateMapper(System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.IInterceptorSubject, TMapping?> selector) { }
-        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping) { }
-    }
     public static class ExpressionPathHelper
     {
         public static string GetPathFromExpression(System.Linq.Expressions.Expression expression) { }
@@ -136,9 +130,9 @@ namespace Namotion.Interceptor.Connectors.Mapping
         System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(TKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken);
     }
     public class ReverseCompositeMapper<TMapping, TKey> : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<TMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<TMapping, TKey>
-        where TMapping : Namotion.Interceptor.Connectors.Mapping.IPropertyMapping<TMapping>
+        where TMapping :  class, Namotion.Interceptor.Connectors.Mapping.IPropertyMapping<TMapping>
     {
-        protected ReverseCompositeMapper(params Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<TMapping, TKey>[] mappers) { }
+        public ReverseCompositeMapper(params Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<TMapping, TKey>[] mappers) { }
         public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMapping? mapping) { }
         public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(TKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }

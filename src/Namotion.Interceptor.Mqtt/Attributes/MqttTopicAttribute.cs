@@ -6,6 +6,21 @@ using Namotion.Interceptor.Registry.Attributes;
 namespace Namotion.Interceptor.Mqtt.Attributes;
 
 /// <summary>
+/// Tri-state Retain override, used because C# attributes do not support nullable bool.
+/// </summary>
+public enum MqttRetainMode
+{
+    /// <summary>Not set: uses the configuration default.</summary>
+    Unset = -1,
+
+    /// <summary>Override to false: do not retain messages on this topic.</summary>
+    False = 0,
+
+    /// <summary>Override to true: retain messages on this topic.</summary>
+    True = 1
+}
+
+/// <summary>
 /// Maps a property to an MQTT topic with optional per-topic QoS and Retain overrides.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = true, Inherited = true)]
@@ -36,16 +51,12 @@ public class MqttTopicAttribute : PathAttribute
     public MqttQualityOfServiceLevel QualityOfService { get; set; } = (MqttQualityOfServiceLevel)(-1);
 
     /// <summary>
-    /// Gets or sets whether messages on this topic should be retained by the broker.
-    /// Must be used together with <see cref="RetainSet"/> to distinguish "not set" from "false".
+    /// Gets or sets whether messages on this topic should be retained by the broker. When set to
+    /// <see cref="MqttRetainMode.True"/> or <see cref="MqttRetainMode.False"/>, overrides
+    /// <c>UseRetainedMessages</c> on the client/server configuration for this topic.
+    /// Default is <see cref="MqttRetainMode.Unset"/>, which uses the configuration default.
     /// </summary>
-    public bool Retain { get; set; }
-
-    /// <summary>
-    /// Gets or sets whether <see cref="Retain"/> has been explicitly set.
-    /// Required because C# attributes do not support nullable bool.
-    /// </summary>
-    public bool RetainSet { get; set; }
+    public MqttRetainMode Retain { get; set; } = MqttRetainMode.Unset;
 
     /// <summary>
     /// Converts the QoS and Retain metadata of this attribute to an <see cref="MqttPropertyMapping"/>.
@@ -55,5 +66,10 @@ public class MqttTopicAttribute : PathAttribute
     public MqttPropertyMapping ToMapping() => new(
         Topic: null,
         QualityOfService: (int)QualityOfService == -1 ? null : QualityOfService,
-        Retain: RetainSet ? Retain : null);
+        Retain: Retain switch
+        {
+            MqttRetainMode.True => true,
+            MqttRetainMode.False => false,
+            _ => null
+        });
 }

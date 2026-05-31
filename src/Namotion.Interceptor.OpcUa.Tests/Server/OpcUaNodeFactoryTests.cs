@@ -6,32 +6,33 @@ namespace Namotion.Interceptor.OpcUa.Tests.Server;
 public class OpcUaNodeFactoryTests
 {
     [Fact]
-    public void WhenBrowseNamespaceUriIsRegistered_ThenResolveBrowseNamespaceIndexReturnsIndex()
+    public void WhenNamespaceUriIsRegistered_ThenResolveNamespaceIndexReturnsIndex()
     {
         // Arrange
         var namespaceUris = new NamespaceTable();
         var expectedIndex = (ushort)namespaceUris.GetIndexOrAppend("http://example.com/UA/");
 
         // Act
-        var index = OpcUaNodeFactory.ResolveBrowseNamespaceIndex(
-            namespaceUris, "http://example.com/UA/", "MyNode");
+        var index = OpcUaNodeFactory.ResolveNamespaceIndex(
+            namespaceUris, "http://example.com/UA/", "BrowseName namespace URI", "MyNode");
 
         // Assert
         Assert.Equal(expectedIndex, index);
     }
 
     [Fact]
-    public void WhenBrowseNamespaceUriIsNotRegistered_ThenResolveBrowseNamespaceIndexThrows()
+    public void WhenNamespaceUriIsNotRegistered_ThenResolveNamespaceIndexThrows()
     {
         // Arrange - the URI is never appended to the namespace table
         var namespaceUris = new NamespaceTable();
 
         // Act & Assert
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            OpcUaNodeFactory.ResolveBrowseNamespaceIndex(
-                namespaceUris, "http://unregistered.example/", "MyNode"));
+            OpcUaNodeFactory.ResolveNamespaceIndex(
+                namespaceUris, "http://unregistered.example/", "BrowseName namespace URI", "MyNode"));
 
         Assert.Contains("http://unregistered.example/", exception.Message);
         Assert.Contains("MyNode", exception.Message);
+        Assert.Contains("BrowseName namespace URI", exception.Message);
     }
 }

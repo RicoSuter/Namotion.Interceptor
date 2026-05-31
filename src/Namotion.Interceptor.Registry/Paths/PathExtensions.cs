@@ -219,8 +219,8 @@ public static class PathExtensions
     /// the canonical absolute path (following the first parent) is returned.
     /// </param>
     /// <returns>
-    /// The path, or <c>null</c> when a root is given and the property is not reachable from it (a cycle in
-    /// the parent chain is likewise reported as <c>null</c> rather than throwing).
+    /// The path, or <c>null</c> when a root is given and the property is not reachable from it.
+    /// A cycle in the parent chain is also reported as <c>null</c> (never throws), with or without a root.
     /// </returns>
     public static string? TryGetPath(this RegisteredSubjectProperty property, string separator = ".", IInterceptorSubject? rootSubject = null)
     {
@@ -357,7 +357,7 @@ public static class PathExtensions
             if (rootSubject is not null && parents.Length > 1)
             {
                 // First parent may not reach the root, so search all parents from the leaf.
-                frames.Count = 0;
+                frames.Reset();
                 return TrySearchToRoot(property, propertyIndex, rootSubject, ref frames);
             }
 
@@ -465,7 +465,7 @@ public static class PathExtensions
 
         private (RegisteredSubjectProperty Property, object? Index)[] _array;
 
-        public int Count;
+        public int Count { get; private set; }
 
         public static PooledFrames Rent() => new() { _array = Pool.Rent(16) };
 
@@ -484,7 +484,16 @@ public static class PathExtensions
             _array[Count++] = frame;
         }
 
-        public void RemoveLast() => Count--;
+        public void RemoveLast() => _array[--Count] = default;
+
+        public void Reset()
+        {
+            if (Count > 0)
+            {
+                Array.Clear(_array, 0, Count);
+                Count = 0;
+            }
+        }
 
         public readonly void Return() => Pool.Return(_array, clearArray: true);
     }

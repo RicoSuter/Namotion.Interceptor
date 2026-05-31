@@ -141,7 +141,8 @@ public record OpcUaPropertyMapping : IPropertyMapping<OpcUaPropertyMapping>
     }
 
     /// <summary>
-    /// Merges two AdditionalReferences lists. When both are non-null, combines them.
+    /// Merges two AdditionalReferences lists. When both are non-null, concatenates them additively
+    /// (no deduplication). Callers that compose mappers contributing the same reference will emit it twice.
     /// </summary>
     private static IReadOnlyList<OpcUaAdditionalReference>? MergeAdditionalReferences(
         IReadOnlyList<OpcUaAdditionalReference>? primary,
@@ -152,7 +153,6 @@ public record OpcUaPropertyMapping : IPropertyMapping<OpcUaPropertyMapping>
         if (fallback is null)
             return primary;
 
-        // Both are non-null, merge them
         return [.. primary, .. fallback];
     }
 }

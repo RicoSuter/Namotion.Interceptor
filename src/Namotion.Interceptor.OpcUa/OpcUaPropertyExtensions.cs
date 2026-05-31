@@ -19,13 +19,14 @@ internal static class OpcUaPropertyExtensions
         return nodeMapper.TryGetMapping(property, rootSubject, out _);
     }
 
-    public static RegisteredSubjectProperty? TryGetValueProperty(this RegisteredSubject subject, IPropertyMapper<OpcUaPropertyMapping> nodeMapper, IInterceptorSubject rootSubject)
+    public static (RegisteredSubjectProperty Property, OpcUaPropertyMapping Mapping)? TryGetValueProperty(
+        this RegisteredSubject subject, IPropertyMapper<OpcUaPropertyMapping> nodeMapper, IInterceptorSubject rootSubject)
     {
         foreach (var property in subject.Properties)
         {
             if (nodeMapper.TryGetMapping(property, rootSubject, out var mapping) && mapping.IsValue == true)
             {
-                return property;
+                return (property, mapping);
             }
         }
 

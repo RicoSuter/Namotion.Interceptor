@@ -428,7 +428,8 @@ internal class OpcUaSubjectLoader
         }
 
         // Find [OpcUaValue] property and monitor the node for it
-        var valueProperty = childSubject.TryGetValueProperty(_configuration.Mapper, _subject);
+        var valuePropertyResult = childSubject.TryGetValueProperty(_configuration.Mapper, _subject);
+        var valueProperty = valuePropertyResult?.Property;
         if (valueProperty != null)
         {
             MonitorValueNode(nodeId, valueProperty, monitoredItems);

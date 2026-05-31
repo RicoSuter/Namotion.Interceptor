@@ -137,7 +137,7 @@ public partial class MqttAttributeTestSensor
     [MqttTopic("sensors/temperature")]
     public partial double Temperature { get; set; }
 
-    [MqttTopic("sensors/humidity", QualityOfService = MqttQualityOfServiceLevel.ExactlyOnce, Retain = true, RetainSet = true)]
+    [MqttTopic("humidity", QualityOfService = MqttQualityOfServiceLevel.ExactlyOnce, Retain = MqttRetainMode.True)]
     public partial double Humidity { get; set; }
 
     public partial double Unmapped { get; set; }

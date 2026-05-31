@@ -278,19 +278,19 @@ internal class CustomNodeManager : CustomNodeManager2
         OpcUaPropertyMapping? mapping,
         NodeId parentNodeId,
         string parentPath,
-        RegisteredSubjectProperty? configurationProperty = null)
+        RegisteredSubjectProperty? configurationProperty = null,
+        OpcUaPropertyMapping? valuePropertyMapping = null)
     {
         // `mapping` is the mapping for the configuration property: the containing property when a
-        // separate configurationProperty is supplied, otherwise `property` itself.
+        // separate configurationProperty is supplied, otherwise `property` itself. When a separate
+        // configurationProperty is supplied, the caller passes the already-resolved value-property
+        // mapping via valuePropertyMapping so it is not resolved a second time; the two parameters
+        // must be paired (both null or both non-null).
         var nodeId = _nodeFactory.GetNodeId(this, mapping, parentPath + propertyName);
         var browseName = _nodeFactory.GetBrowseName(this, propertyName, mapping, null);
         var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, mapping);
 
-        // The DataType override comes from the value property's own mapping. When there is no
-        // separate configuration property, that is the same mapping we already resolved.
-        var dataTypeMapping = configurationProperty is null
-            ? mapping
-            : (_mapper.TryGetMapping(property, _subject, out var propertyMapping) ? propertyMapping : null);
+        var dataTypeMapping = configurationProperty is null ? mapping : valuePropertyMapping;
         var dataTypeOverride = _nodeFactory.GetDataTypeOverride(this, dataTypeMapping);
 
         var variableNode = ConfigureVariableNode(property, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, mapping);
@@ -416,14 +416,18 @@ internal class CustomNodeManager : CustomNodeManager2
         }
 
         // Find the [OpcUaValue] property
-        var valueProperty = childSubject.TryGetValueProperty(_mapper, _subject);
-        if (valueProperty is null)
+        var valuePropertyResult = childSubject.TryGetValueProperty(_mapper, _subject);
+        if (valuePropertyResult is null)
         {
             return;
         }
 
+        var (valueProperty, valuePropertyMapping) = valuePropertyResult.Value;
+
         // Create the variable node: value from valueProperty, config (and its mapping) from the containing property
-        var variableNode = CreateVariableNode(propertyName, valueProperty, mapping, parentNodeId, parentPath, configurationProperty: property);
+        var variableNode = CreateVariableNode(
+            propertyName, valueProperty, mapping, parentNodeId, parentPath,
+            configurationProperty: property, valuePropertyMapping: valuePropertyMapping);
 
         // Create child properties of the VariableNode (excluding the value property)
         var path = parentPath + propertyName;

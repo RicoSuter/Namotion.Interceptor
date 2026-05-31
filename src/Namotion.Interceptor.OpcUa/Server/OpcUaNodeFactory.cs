@@ -29,9 +29,13 @@ internal sealed class OpcUaNodeFactory
 
         if (mapping is { NodeIdentifier: not null })
         {
-            return mapping.NodeNamespaceUri is not null ?
-                NodeId.Create(mapping.NodeIdentifier, mapping.NodeNamespaceUri, manager.GetSystemContext().NamespaceUris) :
-                new NodeId(mapping.NodeIdentifier, namespaceIndex);
+            if (mapping.NodeNamespaceUri is null)
+                return new NodeId(mapping.NodeIdentifier, namespaceIndex);
+
+            var nodeNamespaceIndex = ResolveNamespaceIndex(
+                manager.GetSystemContext().NamespaceUris, mapping.NodeNamespaceUri,
+                "NodeIdentifier namespace URI", mapping.NodeIdentifier);
+            return new NodeId(mapping.NodeIdentifier, nodeNamespaceIndex);
         }
 
         return new NodeId(fullPath, namespaceIndex);
@@ -48,9 +52,9 @@ internal sealed class OpcUaNodeFactory
 
         if (mapping.BrowseNamespaceUri is not null)
         {
-            var browseNamespaceIndex = ResolveBrowseNamespaceIndex(
-                manager.GetSystemContext().NamespaceUris, mapping.BrowseNamespaceUri, mapping.BrowseName);
-            
+            var browseNamespaceIndex = ResolveNamespaceIndex(
+                manager.GetSystemContext().NamespaceUris, mapping.BrowseNamespaceUri,
+                "BrowseName namespace URI", mapping.BrowseName);
             return new QualifiedName(mapping.BrowseName, browseNamespaceIndex);
         }
 
@@ -58,21 +62,27 @@ internal sealed class OpcUaNodeFactory
     }
 
     /// <summary>
-    /// Resolves the namespace index for a BrowseName namespace URI, failing fast when it is not
-    /// registered. GetIndex returns -1 for an unregistered URI; without this guard the -1 would cast to
-    /// ushort 65535 and silently place the node in the wrong namespace.
+    /// Resolves an OPC UA namespace URI to its registered index, failing fast with an actionable diagnostic
+    /// when the URI is not in the namespace table. <c>NamespaceTable.GetIndex</c> returns -1 for an
+    /// unregistered URI; without this guard a downstream cast or SDK call would either silently place the
+    /// node in the wrong namespace or surface a generic error that does not name the offending node.
     /// </summary>
-    internal static ushort ResolveBrowseNamespaceIndex(NamespaceTable namespaceUris, string browseNamespaceUri, string? browseName)
+    /// <param name="namespaceUris">The server's namespace table.</param>
+    /// <param name="namespaceUri">The URI to look up.</param>
+    /// <param name="contextLabel">A short label describing the URI's role (e.g. "BrowseName namespace URI").</param>
+    /// <param name="nodeLabel">The name or identifier of the node the URI belongs to, used in the error.</param>
+    internal static ushort ResolveNamespaceIndex(
+        NamespaceTable namespaceUris, string namespaceUri, string contextLabel, string nodeLabel)
     {
-        var browseNamespaceIndex = namespaceUris.GetIndex(browseNamespaceUri);
-        if (browseNamespaceIndex < 0)
+        var namespaceIndex = namespaceUris.GetIndex(namespaceUri);
+        if (namespaceIndex < 0)
         {
             throw new InvalidOperationException(
-                $"BrowseName namespace URI '{browseNamespaceUri}' for node '{browseName}' " +
+                $"{contextLabel} '{namespaceUri}' for node '{nodeLabel}' " +
                 $"is not registered in the server's namespace table.");
         }
 
-        return (ushort)browseNamespaceIndex;
+        return (ushort)namespaceIndex;
     }
 
     public NodeId? GetReferenceTypeId(CustomNodeManager manager, OpcUaPropertyMapping? mapping)
@@ -270,9 +280,18 @@ internal sealed class OpcUaNodeFactory
                 continue;
             }
 
-            var targetNodeId = reference.TargetNamespaceUri is not null
-                ? NodeId.Create(reference.TargetNodeId, reference.TargetNamespaceUri, manager.GetSystemContext().NamespaceUris)
-                : new NodeId(reference.TargetNodeId, namespaceIndex);
+            NodeId targetNodeId;
+            if (reference.TargetNamespaceUri is not null)
+            {
+                var targetNamespaceIndex = ResolveNamespaceIndex(
+                    manager.GetSystemContext().NamespaceUris, reference.TargetNamespaceUri,
+                    "AdditionalReference target namespace URI", reference.TargetNodeId);
+                targetNodeId = new NodeId(reference.TargetNodeId, targetNamespaceIndex);
+            }
+            else
+            {
+                targetNodeId = new NodeId(reference.TargetNodeId, namespaceIndex);
+            }
 
             node.AddReference(referenceTypeId, reference.IsForward, targetNodeId);
         }

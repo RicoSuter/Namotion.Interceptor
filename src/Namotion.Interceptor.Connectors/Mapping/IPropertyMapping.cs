@@ -6,10 +6,10 @@ namespace Namotion.Interceptor.Connectors.Mapping;
 public interface IPropertyMapping<TSelf> where TSelf : IPropertyMapping<TSelf>
 {
     /// <summary>
-    /// Merges two mappings: every non-null field of <paramref name="primary"/> wins, and where a field
-    /// on <paramref name="primary"/> is null the value from <paramref name="fallback"/> is used. The
-    /// caller decides which mapping is primary (see <see cref="ReverseCompositeMapper{TMapping,TKey}"/>,
-    /// where the later mapper is primary so it wins).
+    /// Combines two mappings into one where <paramref name="primary"/> takes precedence over
+    /// <paramref name="fallback"/> on field-level conflicts. See
+    /// <see cref="ReverseCompositeMapper{TMapping,TKey}"/> for the composite case where the later mapper
+    /// is primary.
     /// </summary>
     static abstract TSelf Merge(TSelf primary, TSelf fallback);
 }

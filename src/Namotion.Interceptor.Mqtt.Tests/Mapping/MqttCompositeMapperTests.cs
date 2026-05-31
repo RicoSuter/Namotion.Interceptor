@@ -121,7 +121,7 @@ public class MqttCompositeMapperTests
 [InterceptorSubject]
 public partial class MqttCompositeTestSensor
 {
-    [MqttTopic("temp", QualityOfService = MqttQualityOfServiceLevel.ExactlyOnce, Retain = true, RetainSet = true)]
+    [MqttTopic("temp", QualityOfService = MqttQualityOfServiceLevel.ExactlyOnce, Retain = MqttRetainMode.True)]
     public partial double Temperature { get; set; }
 
     public partial double Unmapped { get; set; }

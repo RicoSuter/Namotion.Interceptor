@@ -93,13 +93,39 @@ public class MqttServerConfiguration
     public Func<ReadOnlyMemory<byte>, DateTimeOffset?> SourceTimestampDeserializer { get; init; } = MqttHelper.DefaultDeserializeTimestamp;
 
     /// <summary>
-    /// Validates the configuration.
+    /// Validates the configuration and throws if invalid.
     /// </summary>
+    /// <exception cref="ArgumentException">Thrown when configuration is invalid.</exception>
     public void Validate()
     {
         if (Mapper is null)
         {
             throw new ArgumentException("Mapper must be specified.", nameof(Mapper));
+        }
+
+        if (ValueConverter is null)
+        {
+            throw new ArgumentException("ValueConverter must be specified.", nameof(ValueConverter));
+        }
+
+        if (BrokerPort is < 1 or > 65535)
+        {
+            throw new ArgumentException($"BrokerPort must be between 1 and 65535, got: {BrokerPort}", nameof(BrokerPort));
+        }
+
+        if (MaxPendingMessagesPerClient < 0)
+        {
+            throw new ArgumentException($"MaxPendingMessagesPerClient must be non-negative, got: {MaxPendingMessagesPerClient}", nameof(MaxPendingMessagesPerClient));
+        }
+
+        if (BufferTime < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"BufferTime must be non-negative, got: {BufferTime}", nameof(BufferTime));
+        }
+
+        if (InitialStateDelay < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"InitialStateDelay must be non-negative, got: {InitialStateDelay}", nameof(InitialStateDelay));
         }
     }
 }

@@ -11,11 +11,11 @@ namespace Namotion.Interceptor.Connectors.Mapping;
 /// field (the usual composition pairs a topic/name mapper with a metadata-only one, which never conflict).
 /// </summary>
 public class ReverseCompositeMapper<TMapping, TKey> : IReversePropertyMapper<TMapping, TKey>
-    where TMapping : IPropertyMapping<TMapping>
+    where TMapping : class, IPropertyMapping<TMapping>
 {
     private readonly IReversePropertyMapper<TMapping, TKey>[] _mappers;
 
-    protected ReverseCompositeMapper(params IReversePropertyMapper<TMapping, TKey>[] mappers)
+    public ReverseCompositeMapper(params IReversePropertyMapper<TMapping, TKey>[] mappers)
     {
         ArgumentNullException.ThrowIfNull(mappers);
 

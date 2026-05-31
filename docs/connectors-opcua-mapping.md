@@ -33,10 +33,10 @@ For custom mapping, set `Mapper` explicitly:
 var config = new OpcUaClientConfiguration
 {
     Mapper = new OpcUaCompositeMapper(
-        new OpcUaFluentMapper<Machine>(),        // Instance overrides (see Fluent Configuration)
-        new OpcUaAttributeMapper(),               // Attribute defaults
         new OpcUaPathProviderMapper(
-            new AttributeBasedPathProvider("opc"))),  // Path fallback
+            new AttributeBasedPathProvider("opc")),  // Base: path fallback
+        new OpcUaAttributeMapper(),                  // Attribute defaults
+        new OpcUaFluentMapper<Machine>()),           // Instance overrides win (see Fluent Configuration)
     // ... other settings
 };
 ```
@@ -416,12 +416,12 @@ var mapper = new OpcUaFluentMapper<Machine>()
     .Map(m => m.Motor1, m => m.BrowseName("MainMotor").SamplingInterval(50))
     .Map(m => m.Motor2, m => m.BrowseName("AuxMotor").SamplingInterval(100));
 
-// Combine both: Fluent overrides, attributes provide defaults
+// Combine both: attributes provide defaults, fluent overrides
 var config = new OpcUaClientConfiguration
 {
     Mapper = new OpcUaCompositeMapper(
-        mapper,                          // Instance overrides
-        new OpcUaAttributeMapper())  // Class-level defaults
+        new OpcUaAttributeMapper(),  // Class-level defaults
+        mapper)                      // Instance overrides win
 };
 ```
 
@@ -447,9 +447,9 @@ var config = new OpcUaClientConfiguration
 {
     ServerUrl = "opc.tcp://localhost:4840",
     Mapper = new OpcUaCompositeMapper(
-        mapper,                              // Fluent config takes priority
-        new OpcUaAttributeMapper(),      // Then attributes
-        new OpcUaPathProviderMapper(DefaultPathProvider.Instance))  // Fallback
+        new OpcUaPathProviderMapper(DefaultPathProvider.Instance),  // Base fallback
+        new OpcUaAttributeMapper(),                                 // Then attributes
+        mapper)                                                     // Fluent config wins
 };
 ```
 
