@@ -752,4 +752,42 @@ public class PathExtensionsTests
         Assert.Equal("FirstName", segments[^1]);
         Assert.All(segments[..^1], segment => Assert.Equal("Father", segment));
     }
+
+    [Fact]
+    public void WhenPropertyIsCollectionElement_ThenPlainTryGetPathIncludesBracketIndex()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = new TryGetPathIndexRoot(context);
+        root.Items = [new TryGetPathIndexChild(context), new TryGetPathIndexChild(context)];
+        var nameProperty = root.Items[1].TryGetRegisteredSubject()!.TryGetProperty("Name")!;
+
+        // Act
+        var path = nameProperty.TryGetPath(rootSubject: root);
+
+        // Assert
+        Assert.Equal("Items[1].Name", path);
+    }
+}
+
+[Namotion.Interceptor.Attributes.InterceptorSubject]
+public partial class TryGetPathIndexRoot
+{
+    public partial TryGetPathIndexChild[] Items { get; set; }
+
+    public TryGetPathIndexRoot()
+    {
+        Items = [];
+    }
+}
+
+[Namotion.Interceptor.Attributes.InterceptorSubject]
+public partial class TryGetPathIndexChild
+{
+    public partial string Name { get; set; }
+
+    public TryGetPathIndexChild()
+    {
+        Name = "";
+    }
 }

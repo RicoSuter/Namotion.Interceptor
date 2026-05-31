@@ -207,48 +207,37 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Gets the structural property path by walking the parent chain to this property, joining property
-    /// names with the given separator.
+    /// Gets the structural property path by walking the parent chain to this property, joining BrowseName
+    /// segments with the given separator. Indices (e.g. <c>Items[1]</c>) and [InlinePaths] keys are
+    /// included, matching the provider overload.
     /// </summary>
     /// <param name="property">The property to compute the path for.</param>
     /// <param name="separator">The separator placed between path segments.</param>
     /// <param name="rootSubject">
     /// Optional root to make the path relative to. When provided, the parent graph is searched across all
-    /// parents (so a shared subject in a DAG resolves through whichever parent reaches the root), and
-    /// <c>null</c> is returned when the property is not reachable from the given root. When <c>null</c>,
-    /// the canonical absolute path (following the first parent) is returned.
+    /// parents and <c>null</c> is returned when the property is not reachable from the given root. When
+    /// <c>null</c>, the canonical absolute path (following the first parent) is returned.
     /// </param>
     /// <returns>
-    /// The path, or <c>null</c> when a root is given and the property is not reachable from it.
-    /// A cycle in the parent chain is also reported as <c>null</c> (never throws), with or without a root.
+    /// The path, or <c>null</c> when a root is given and the property is not reachable from it. A cycle in
+    /// the parent chain is also reported as <c>null</c> (never throws), with or without a root.
     /// </returns>
     public static string? TryGetPath(this RegisteredSubjectProperty property, string separator = ".", IInterceptorSubject? rootSubject = null)
     {
-        var frames = PooledFrames.Rent();
-        try
+        if (separator.Length == 1)
         {
-            if (!TryBuildPathFrames(property, rootSubject, propertyIndex: null, ref frames))
-            {
-                return null;
-            }
+            var pathProvider = separator[0] == '.'
+                ? DefaultPathProvider.Instance
+                : new DefaultPathProvider(separator[0]);
 
-            var builder = new StringBuilder();
-            for (var i = frames.Count - 1; i >= 0; i--)
-            {
-                if (builder.Length > 0)
-                {
-                    builder.Append(separator);
-                }
-
-                builder.Append(frames[i].Property.Name);
-            }
-
-            return builder.ToString();
+            return property.TryGetPath(pathProvider, rootSubject);
         }
-        finally
-        {
-            frames.Return();
-        }
+
+        // Multi-character separators: delegate to the provider overload using '.' as the internal separator,
+        // then replace each '.' separator with the requested multi-character string. This is safe because
+        // BrowseNames in well-formed models do not contain '.'.
+        var dotPath = property.TryGetPath(DefaultPathProvider.Instance, rootSubject);
+        return dotPath?.Replace(".", separator);
     }
 
     /// <summary>

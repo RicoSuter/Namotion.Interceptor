@@ -115,6 +115,25 @@ namespace Namotion.Interceptor.Connectors.Mapping
     public static class ExpressionPathHelper
     {
         public static string GetPathFromExpression(System.Linq.Expressions.Expression expression) { }
+        public static string GetSingleMemberName(System.Linq.Expressions.Expression expression) { }
+    }
+    public sealed class FluentMappingRegistry<TMetadata> : Namotion.Interceptor.Registry.Paths.IFluentSegmentSource
+        where TMetadata :  class
+    {
+        public FluentMappingRegistry() { }
+        public void AddType(System.Type declaringType, string member, string? segment, TMetadata metadata) { }
+        public void AddTypeSelf(System.Type type, TMetadata metadata) { }
+        public bool TryGetSegment(System.Type subjectType, string member, out string? segment) { }
+        public bool TryGetTypeMetadata(System.Type subjectType, string member, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMetadata? metadata) { }
+        public bool TryGetTypeSelfMetadata(System.Type type, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMetadata? metadata) { }
+    }
+    public class FluentMetadataMapper<TMetadata, TKey> : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<TMetadata>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<TMetadata, TKey>
+        where TMetadata :  class, Namotion.Interceptor.Connectors.Mapping.IPropertyMapping<TMetadata>
+    {
+        public FluentMetadataMapper(Namotion.Interceptor.Connectors.Mapping.FluentMappingRegistry<TMetadata> registry) { }
+        protected Namotion.Interceptor.Connectors.Mapping.FluentMappingRegistry<TMetadata> Registry { get; }
+        public virtual bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMetadata? mapping) { }
+        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(TKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
     public interface IPropertyMapper<TMapping>
     {
