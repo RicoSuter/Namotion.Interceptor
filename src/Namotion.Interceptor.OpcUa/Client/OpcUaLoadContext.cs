@@ -112,19 +112,26 @@ internal sealed class OpcUaLoadContext : IDisposable
     /// to <see cref="MonitoredItems"/> on successful claim, so a property that's owned
     /// by a different source by the time Apply runs never gets monitored. Duplicate
     /// claims for the same property (graph-shaped address spaces where the same
-    /// PropertyReference is reached via multiple paths) are deduped silently so a
-    /// property never gets monitored twice. On rollback, the entry is discarded.
+    /// PropertyReference is reached via multiple paths) are deduped so a property
+    /// never gets monitored twice; when the duplicate carries a different NodeId,
+    /// the smaller NodeId wins so the outcome is reproducible across loads regardless
+    /// of browse order. On rollback, the entry is discarded.
     /// </summary>
     public void QueueClaim(PropertyReference property, NodeId nodeId, MonitoredItem monitoredItem)
     {
         if (!_queuedClaimProperties.Add(property))
         {
-            var existing = _pendingClaims.Find(c => PropertyReference.Comparer.Equals(c.Property, property));
+            var index = _pendingClaims.FindIndex(c => PropertyReference.Comparer.Equals(c.Property, property));
+            var existing = _pendingClaims[index];
             if (existing.NodeId != nodeId)
             {
                 _logger.LogWarning(
-                    "Duplicate claim for {Subject}.{Property} with different NodeId (existing: {ExistingNodeId}, new: {NewNodeId}). Keeping first claim.",
+                    "Duplicate claim for {Subject}.{Property} with different NodeId (existing: {ExistingNodeId}, new: {NewNodeId}). Keeping the smaller NodeId for deterministic outcome.",
                     property.Subject.GetType().Name, property.Name, existing.NodeId, nodeId);
+                if (nodeId.CompareTo(existing.NodeId) < 0)
+                {
+                    _pendingClaims[index] = (property, nodeId, monitoredItem);
+                }
             }
             return;
         }

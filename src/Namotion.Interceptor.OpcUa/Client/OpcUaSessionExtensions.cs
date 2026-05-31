@@ -254,6 +254,13 @@ internal static class OpcUaSessionExtensions
         {
             while (current.Count > 0)
             {
+                // One round drains every currently-pending continuation point, possibly
+                // in multiple BrowseNextAsync calls (the inner loop batches by
+                // GetMaxNodesPerBrowse). The cap therefore bounds pagination *depth*,
+                // i.e. how many times the server can keep handing out fresh continuation
+                // points before we give up. It does not bound BrowseNext call count,
+                // which legitimately scales with the number of in-flight continuation
+                // points per round.
                 if (++round > maxContinuationRounds)
                 {
                     logger.LogWarning(

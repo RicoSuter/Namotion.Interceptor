@@ -23,7 +23,7 @@ internal sealed class SubscriptionHealthMonitor
         {
             foreach (var subscription in subscriptions)
             {
-                var unhealthyCount = GetTransientErrorCount(subscription);
+                var unhealthyCount = GetUnhealthyCount(subscription);
                 if (unhealthyCount == 0)
                 {
                     continue;
@@ -34,7 +34,7 @@ internal sealed class SubscriptionHealthMonitor
                     // Try to heal failed monitored items by reapplying the subscription changes
                     await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
 
-                    var stillUnhealthyCount = GetTransientErrorCount(subscription);
+                    var stillUnhealthyCount = GetUnhealthyCount(subscription);
                     if (stillUnhealthyCount == 0)
                     {
                         _logger.LogInformation(
@@ -64,17 +64,28 @@ internal sealed class SubscriptionHealthMonitor
         }
     }
 
-    private static int GetTransientErrorCount(Subscription subscription)
+    private static int GetUnhealthyCount(Subscription subscription)
     {
         var count = 0;
         foreach (var item in subscription.MonitoredItems)
         {
-            var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
-            if (OpcUaStatusCodeClassifier.IsTransient(statusCode))
+            if (IsUnhealthy(item) && IsRetryable(item))
             {
                 count++;
             }
         }
         return count;
+    }
+
+    internal static bool IsUnhealthy(MonitoredItem item)
+    {
+        var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
+        return !item.Created || StatusCode.IsBad(statusCode);
+    }
+
+    internal static bool IsRetryable(MonitoredItem item)
+    {
+        var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
+        return OpcUaStatusCodeClassifier.IsTransient(statusCode);
     }
 }
