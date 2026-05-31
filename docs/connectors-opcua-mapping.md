@@ -33,10 +33,12 @@ For custom mapping, set `Mapper` explicitly:
 var config = new OpcUaClientConfiguration
 {
     Mapper = new OpcUaCompositeMapper(
+    [
         new OpcUaPathProviderMapper(
             new AttributeBasedPathProvider("opc")),  // Base: path fallback
         new OpcUaAttributeMapper(),                  // Attribute defaults
-        fluent.Build()),                             // Fluent wins (see Code-Based Mapping)
+        .. fluent.CreateMappers()                    // Fluent wins (see Code-Based Mapping)
+    ]),
     // ... other settings
 };
 ```
@@ -458,9 +460,11 @@ Fluent and attribute sources are layered in composite order: attributes first, f
 var config = new OpcUaClientConfiguration
 {
     Mapper = new OpcUaCompositeMapper(
+    [
         new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
         new OpcUaAttributeMapper(),
-        fluent.Build())
+        .. fluent.CreateMappers()
+    ])
 };
 ```
 
