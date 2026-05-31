@@ -2,6 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Mapping;
@@ -50,12 +51,14 @@ public static class OpcUaSubjectExtensions
         this IServiceCollection services,
         string serverUrl,
         string connectorName,
-        string[]? rootPath = null)
+        string[]? rootPath = null,
+        Action<OpcUaFluentMapping<TSubject>>? configureFluent = null)
         where TSubject : IInterceptorSubject
     {
+        var mapper = BuildOpcUaMapper(connectorName, configureFluent);
         return services.AddOpcUaSubjectClientSource(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultClientConfiguration(sp, serverUrl, connectorName, rootPath));
+            sp => CreateDefaultClientConfiguration(sp, serverUrl, rootPath, mapper));
     }
 
     public static IServiceCollection AddOpcUaSubjectClientSource(
@@ -76,13 +79,15 @@ public static class OpcUaSubjectExtensions
         string name,
         string serverUrl,
         string connectorName,
-        string[]? rootPath = null)
+        string[]? rootPath = null,
+        Action<OpcUaFluentMapping<TSubject>>? configureFluent = null)
         where TSubject : IInterceptorSubject
     {
+        var mapper = BuildOpcUaMapper(connectorName, configureFluent);
         return services.AddKeyedOpcUaSubjectClientSource(
             name,
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultClientConfiguration(sp, serverUrl, connectorName, rootPath));
+            sp => CreateDefaultClientConfiguration(sp, serverUrl, rootPath, mapper));
     }
 
     public static IServiceCollection AddKeyedOpcUaSubjectClientSource(
@@ -102,12 +107,14 @@ public static class OpcUaSubjectExtensions
     public static IServiceCollection AddOpcUaSubjectServer<TSubject>(
         this IServiceCollection services,
         string connectorName,
-        string? rootName = null)
+        string? rootName = null,
+        Action<OpcUaFluentMapping<TSubject>>? configureFluent = null)
         where TSubject : IInterceptorSubject
     {
+        var mapper = BuildOpcUaMapper(connectorName, configureFluent);
         return services.AddOpcUaSubjectServer(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultServerConfiguration(sp, connectorName, rootName));
+            sp => CreateDefaultServerConfiguration(sp, rootName, mapper));
     }
 
     public static IServiceCollection AddOpcUaSubjectServer(
@@ -127,13 +134,15 @@ public static class OpcUaSubjectExtensions
         this IServiceCollection services,
         string name,
         string connectorName,
-        string? rootName = null)
+        string? rootName = null,
+        Action<OpcUaFluentMapping<TSubject>>? configureFluent = null)
         where TSubject : IInterceptorSubject
     {
+        var mapper = BuildOpcUaMapper(connectorName, configureFluent);
         return services.AddKeyedOpcUaSubjectServer(
             name,
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultServerConfiguration(sp, connectorName, rootName));
+            sp => CreateDefaultServerConfiguration(sp, rootName, mapper));
     }
 
     public static IServiceCollection AddKeyedOpcUaSubjectServer(
@@ -191,7 +200,7 @@ public static class OpcUaSubjectExtensions
     }
 
     private static OpcUaClientConfiguration CreateDefaultClientConfiguration(
-        IServiceProvider sp, string serverUrl, string connectorName, string[]? rootPath)
+        IServiceProvider sp, string serverUrl, string[]? rootPath, OpcUaCompositeMapper mapper)
     {
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
         var telemetryContext = DefaultTelemetry.Create(builder =>
@@ -205,14 +214,12 @@ public static class OpcUaSubjectExtensions
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
             TelemetryContext = telemetryContext,
-            Mapper = new OpcUaCompositeMapper(
-                new OpcUaPathProviderMapper(new AttributeBasedPathProvider(connectorName)),
-                new OpcUaAttributeMapper(connectorName))
+            Mapper = mapper
         };
     }
 
     private static OpcUaServerConfiguration CreateDefaultServerConfiguration(
-        IServiceProvider sp, string connectorName, string? rootName)
+        IServiceProvider sp, string? rootName, OpcUaCompositeMapper mapper)
     {
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
         var telemetryContext = DefaultTelemetry.Create(builder =>
@@ -223,10 +230,30 @@ public static class OpcUaSubjectExtensions
             RootName = rootName,
             ValueConverter = new OpcUaValueConverter(),
             TelemetryContext = telemetryContext,
-            Mapper = new OpcUaCompositeMapper(
-                new OpcUaPathProviderMapper(new AttributeBasedPathProvider(connectorName)),
-                new OpcUaAttributeMapper(connectorName))
+            Mapper = mapper
         };
+    }
+
+    private static OpcUaCompositeMapper BuildOpcUaMapper<TSubject>(
+        string connectorName,
+        Action<OpcUaFluentMapping<TSubject>>? configureFluent)
+        where TSubject : IInterceptorSubject
+    {
+        var mappers = new List<IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>>
+        {
+            new OpcUaPathProviderMapper(new AttributeBasedPathProvider(connectorName)),
+            new OpcUaAttributeMapper(connectorName)
+        };
+
+        if (configureFluent is not null)
+        {
+            var fluent = new OpcUaFluentMapping<TSubject>();
+            configureFluent(fluent);
+            // Fluent is layered after attributes so it wins on conflicts; omit configureFluent for attribute-only.
+            mappers.AddRange(fluent.CreateMappers());
+        }
+
+        return new OpcUaCompositeMapper(mappers.ToArray());
     }
 
     private static void GuardDuplicateUnkeyed<TService>(IServiceCollection services)
