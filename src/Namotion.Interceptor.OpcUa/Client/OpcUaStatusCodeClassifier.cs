@@ -32,7 +32,7 @@ internal static class OpcUaStatusCodeClassifier
     /// retry (e.g. transport glitch, server-side resource exhaustion). Returns false
     /// for good and uncertain statuses, and for permanent design-time errors.
     /// </summary>
-    public static bool IsTransient(StatusCode statusCode)
+    public static bool IsTransientError(StatusCode statusCode)
     {
         return StatusCode.IsBad(statusCode) && !PermanentCodes.Contains(statusCode.Code);
     }
@@ -41,7 +41,7 @@ internal static class OpcUaStatusCodeClassifier
     /// True iff <paramref name="statusCode"/> is a bad status that will not recover on retry.
     /// Returns false for good and uncertain statuses.
     /// </summary>
-    public static bool IsPermanent(StatusCode statusCode)
+    public static bool IsPermanentError(StatusCode statusCode)
     {
         return StatusCode.IsBad(statusCode) && PermanentCodes.Contains(statusCode.Code);
     }
@@ -50,9 +50,9 @@ internal static class OpcUaStatusCodeClassifier
     /// Throws <see cref="OpcUaTransientServiceException"/> if <paramref name="statusCode"/>
     /// is a transient bad status. Permanent and non-bad statuses are ignored.
     /// </summary>
-    public static void ThrowIfTransient(StatusCode statusCode, string operation, NodeId? nodeId)
+    public static void ThrowIfTransientError(StatusCode statusCode, string operation, NodeId? nodeId)
     {
-        if (IsTransient(statusCode))
+        if (IsTransientError(statusCode))
         {
             throw new OpcUaTransientServiceException(operation, nodeId, statusCode);
         }

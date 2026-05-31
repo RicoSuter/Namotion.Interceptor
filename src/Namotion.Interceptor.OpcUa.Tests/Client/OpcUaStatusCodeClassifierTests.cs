@@ -29,8 +29,8 @@ public class OpcUaStatusCodeClassifierTests
         var status = new StatusCode(statusCode);
 
         // Act
-        var isTransient = OpcUaStatusCodeClassifier.IsTransient(status);
-        var isPermanent = OpcUaStatusCodeClassifier.IsPermanent(status);
+        var isTransient = OpcUaStatusCodeClassifier.IsTransientError(status);
+        var isPermanent = OpcUaStatusCodeClassifier.IsPermanentError(status);
 
         // Assert
         Assert.False(isTransient);
@@ -58,8 +58,8 @@ public class OpcUaStatusCodeClassifierTests
         var status = new StatusCode(statusCode);
 
         // Act
-        var isTransient = OpcUaStatusCodeClassifier.IsTransient(status);
-        var isPermanent = OpcUaStatusCodeClassifier.IsPermanent(status);
+        var isTransient = OpcUaStatusCodeClassifier.IsTransientError(status);
+        var isPermanent = OpcUaStatusCodeClassifier.IsPermanentError(status);
 
         // Assert
         Assert.True(isTransient);
@@ -73,8 +73,8 @@ public class OpcUaStatusCodeClassifierTests
         var status = new StatusCode(StatusCodes.Good);
 
         // Act & Assert
-        Assert.False(OpcUaStatusCodeClassifier.IsTransient(status));
-        Assert.False(OpcUaStatusCodeClassifier.IsPermanent(status));
+        Assert.False(OpcUaStatusCodeClassifier.IsTransientError(status));
+        Assert.False(OpcUaStatusCodeClassifier.IsPermanentError(status));
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class OpcUaStatusCodeClassifierTests
         var status = new StatusCode(StatusCodes.Uncertain);
 
         // Act & Assert
-        Assert.False(OpcUaStatusCodeClassifier.IsTransient(status));
-        Assert.False(OpcUaStatusCodeClassifier.IsPermanent(status));
+        Assert.False(OpcUaStatusCodeClassifier.IsTransientError(status));
+        Assert.False(OpcUaStatusCodeClassifier.IsPermanentError(status));
     }
 }

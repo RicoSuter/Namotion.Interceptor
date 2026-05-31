@@ -184,7 +184,7 @@ internal static class OpcUaSessionExtensions
         var process = Math.Min(actual, count);
 
         // Collect continuation points from Good-status results upfront so they
-        // can be released if ThrowIfTransient aborts during result processing.
+        // can be released if ThrowIfTransientError aborts during result processing.
         // CPs from bad-status results are released immediately: following them
         // with BrowseNext would re-add references for nodes the processing loop
         // intentionally skips.
@@ -213,7 +213,7 @@ internal static class OpcUaSessionExtensions
                 var nodeId = nodeIds[offset + i];
                 if (!StatusCode.IsGood(browseResult.StatusCode))
                 {
-                    OpcUaStatusCodeClassifier.ThrowIfTransient(browseResult.StatusCode, "Browse", nodeId);
+                    OpcUaStatusCodeClassifier.ThrowIfTransientError(browseResult.StatusCode, "Browse", nodeId);
                     logger.LogWarning(
                         "BrowseAsync returned permanent bad status for {NodeId} ({StatusCode}); skipping (this NodeId cannot be browsed).",
                         nodeId, browseResult.StatusCode);
@@ -377,7 +377,7 @@ internal static class OpcUaSessionExtensions
         var process = Math.Min(actual, count);
 
         // Collect CPs from Good-status results upfront so they're in `next`
-        // before ThrowIfTransient can abort. The caller releases `next` on
+        // before ThrowIfTransientError can abort. The caller releases `next` on
         // exception. CPs from bad-status results are released immediately to
         // avoid following pagination for nodes whose results are discarded.
         var orphanCps = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
@@ -402,7 +402,7 @@ internal static class OpcUaSessionExtensions
             var nodeId = current[offset + i].NodeId;
             if (!StatusCode.IsGood(browseResult.StatusCode))
             {
-                OpcUaStatusCodeClassifier.ThrowIfTransient(browseResult.StatusCode, "BrowseNext", nodeId);
+                OpcUaStatusCodeClassifier.ThrowIfTransientError(browseResult.StatusCode, "BrowseNext", nodeId);
                 logger.LogWarning(
                     "BrowseNextAsync returned permanent bad status for {NodeId} ({StatusCode}); the partial result so far is retained.",
                     nodeId, browseResult.StatusCode);
@@ -479,7 +479,7 @@ internal static class OpcUaSessionExtensions
         for (var i = appendStart; i < allResults.Count; i++)
         {
             var nodeId = nodesToRead[batchStart + (i - appendStart)].NodeId;
-            OpcUaStatusCodeClassifier.ThrowIfTransient(allResults[i].StatusCode, "Read", nodeId);
+            OpcUaStatusCodeClassifier.ThrowIfTransientError(allResults[i].StatusCode, "Read", nodeId);
         }
     }
 }
