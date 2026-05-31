@@ -77,12 +77,19 @@ internal sealed class SubscriptionHealthMonitor
         return count;
     }
 
+    /// <summary>
+    /// Determines if a monitored item is unhealthy (not created or has bad status).
+    /// </summary>
     internal static bool IsUnhealthy(MonitoredItem item)
     {
         var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
         return !item.Created || StatusCode.IsBad(statusCode);
     }
 
+    /// <summary>
+    /// Determines if a failed monitored item should be retried.
+    /// Returns false for permanent design-time errors, true for transient errors.
+    /// </summary>
     internal static bool IsRetryable(MonitoredItem item)
     {
         var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
