@@ -16,7 +16,6 @@ public class MqttClientConfiguration
             new MqttPathProviderMapper(new AttributeBasedPathProvider(MqttConstants.DefaultConnectorName, '/')),
             new MqttAttributeMapper(MqttConstants.DefaultConnectorName));
 
-
     /// <summary>
     /// Gets or sets the MQTT broker hostname or IP address.
     /// </summary>

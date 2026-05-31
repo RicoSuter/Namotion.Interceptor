@@ -16,7 +16,6 @@ public class MqttServerConfiguration
             new MqttPathProviderMapper(new AttributeBasedPathProvider(MqttConstants.DefaultConnectorName, '/')),
             new MqttAttributeMapper(MqttConstants.DefaultConnectorName));
 
-
     /// <summary>
     /// Gets or sets the MQTT broker hostname or IP address to bind to.
     /// Use "localhost" to bind to loopback only, or an IP address to bind to a specific interface.
