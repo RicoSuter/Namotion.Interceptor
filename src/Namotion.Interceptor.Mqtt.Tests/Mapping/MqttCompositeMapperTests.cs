@@ -54,16 +54,17 @@ public class MqttCompositeMapperTests
     }
 
     [Fact]
-    public void WhenFluentTopicAndAttributeMetadata_ThenAttributeMetadataLayersOntoFluentTopic()
+    public void WhenFluentSegmentAndAttributeMetadata_ThenAttributeMetadataLayersOntoFluentTopic()
     {
         // Arrange
-        var fluent = new MqttFluentMapper<MqttCompositeTestSensor>()
-            .Map(s => s.Temperature, b => b
-                .WithTopic("fluent/temp"));
+        var fluent = new MqttFluentMapping<MqttCompositeTestSensor>();
+        fluent.ForType<MqttCompositeTestSensor>().Map(s => s.Temperature, b => b.WithSegment("fluenttemp"));
 
         var mapper = new MqttCompositeMapper(
-            fluent,
-            new MqttAttributeMapper());
+            [
+                .. fluent.CreateMappers('/'),
+                new MqttAttributeMapper()
+            ]);
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var subject = new MqttCompositeTestSensor(context);
@@ -73,9 +74,8 @@ public class MqttCompositeMapperTests
         // Act
         mapper.TryGetMapping(property, subject, out var mapping);
 
-        // Assert - the attribute contributes no topic, so the fluent topic falls through;
-        // the attribute's QoS/Retain layer on top.
-        Assert.Equal("fluent/temp", mapping!.Topic);
+        // Assert - the fluent path provider supplies the topic; the attribute's QoS/Retain layer on top.
+        Assert.Equal("fluenttemp", mapping!.Topic);
         Assert.Equal(MqttQualityOfServiceLevel.ExactlyOnce, mapping.QualityOfService);
         Assert.True(mapping.Retain);
     }
