@@ -16,7 +16,7 @@ public partial class Sensor
 
 builder.Services.AddSingleton(sensor);
 builder.Services.AddOpcUaSubjectServer<Sensor>(
-    sourceName: "opc",
+    pathProviderName: "opc",
     rootName: "MySensor");
 
 // ...
@@ -53,7 +53,7 @@ For direct instantiation (without DI), `CreateOpcUaServer` returns `IOpcUaSubjec
 ```csharp
 builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectServer<Machine>(
-    sourceName: "opc",
+    pathProviderName: "opc",
     rootName: "MyMachine");
 ```
 
@@ -75,7 +75,7 @@ builder.Services.AddOpcUaSubjectServer(
 ```
 
 **Parameters:**
-- `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
+- `pathProviderName` - The path-provider name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
 - `rootName` - Optional root folder name under the OPC UA ObjectsFolder
 
 Multiple servers can be registered in the same DI container. Each registration uses keyed singletons internally, so they operate independently.

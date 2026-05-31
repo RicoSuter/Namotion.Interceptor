@@ -88,7 +88,7 @@ Defines node metadata. Can be applied to classes (type-level defaults) or proper
 public class OpcUaNodeAttribute : Attribute
 {
     // Constructor - BrowseName is required, namespace defaults to null
-    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null, string? connectorName = null);
+    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null, string? pathProviderName = null);
 
     // Node identification (from constructor)
     public string BrowseName { get; }

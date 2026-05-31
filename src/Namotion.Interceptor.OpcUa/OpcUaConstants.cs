@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.OpcUa;
 public static class OpcUaConstants
 {
     /// <summary>
-    /// The default connector name used for OPC UA path attributes and configuration.
+    /// The default path-provider name used for OPC UA path attributes and configuration.
     /// </summary>
-    public const string DefaultConnectorName = "opc";
+    public const string DefaultPathProviderName = "opc";
 }

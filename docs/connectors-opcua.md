@@ -34,7 +34,7 @@ public partial class Machine
 builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
-    sourceName: "opc",
+    pathProviderName: "opc",
     rootName: "MyMachine");
 
 // ...
@@ -64,7 +64,7 @@ public partial class Sensor
 
 builder.Services.AddSingleton(sensor);
 builder.Services.AddOpcUaSubjectServer<Sensor>(
-    sourceName: "opc",
+    pathProviderName: "opc",
     rootName: "MySensor");
 
 // ...

@@ -459,7 +459,7 @@ Servers follow the same registration pattern as sources: register as singleton +
 
 ```csharp
 // OPC UA Server
-builder.Services.AddOpcUaSubjectServer<Sensor>(sourceName: "opc", rootName: "Devices");
+builder.Services.AddOpcUaSubjectServer<Sensor>(pathProviderName: "opc", rootName: "Devices");
 
 // MQTT Server
 builder.Services.AddMqttSubjectServer<Sensor>(pathProviderName: "mqtt", brokerPort: 1883);

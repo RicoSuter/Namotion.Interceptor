@@ -20,7 +20,7 @@ public partial class Machine
 builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
-    sourceName: "opc",
+    pathProviderName: "opc",
     rootName: "MyMachine");
 
 // ...
@@ -34,7 +34,7 @@ For multiple client sources, use `AddKeyedOpcUaSubjectClientSource` with a name 
 
 **Parameters:**
 - `serverUrl` - The OPC UA server endpoint (e.g., `"opc.tcp://localhost:4840"`)
-- `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
+- `pathProviderName` - The path-provider name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
 - `rootName` - Optional root node name to start browsing from under the Objects folder
 
 Two DI overloads are available: the simple generic shown above and a full configuration overload (shown below).
