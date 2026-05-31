@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Mqtt.Server;
@@ -20,12 +22,14 @@ public static class MqttSubjectExtensions
     /// <param name="connectorName">The name to filter [Path] attributes by (e.g., "mqtt").</param>
     /// <param name="brokerPort">The MQTT broker port. Default is 1883.</param>
     /// <param name="topicPrefix">Optional topic prefix.</param>
+    /// <param name="configureFluent">Optional fluent mapping configuration layered after attribute mappers.</param>
     public static IServiceCollection AddMqttSubjectClientSource<TSubject>(
         this IServiceCollection serviceCollection,
         string brokerHost,
         string connectorName,
         int brokerPort = 1883,
-        string? topicPrefix = null)
+        string? topicPrefix = null,
+        Action<MqttFluentMapping<TSubject>>? configureFluent = null)
         where TSubject : IInterceptorSubject
     {
         return serviceCollection.AddMqttSubjectClientSource(
@@ -35,9 +39,7 @@ public static class MqttSubjectExtensions
                 BrokerHost = brokerHost,
                 BrokerPort = brokerPort,
                 TopicPrefix = topicPrefix,
-                Mapper = new MqttCompositeMapper(
-                    new MqttPathProviderMapper(new AttributeBasedPathProvider(connectorName, '/')),
-                    new MqttAttributeMapper(connectorName))
+                Mapper = BuildMqttMapper(connectorName, configureFluent)
             });
     }
 
@@ -72,12 +74,14 @@ public static class MqttSubjectExtensions
     /// <param name="brokerPort">The port to listen on. Default is 1883.</param>
     /// <param name="brokerHost">Optional IP address to bind to. Default binds to all interfaces.</param>
     /// <param name="topicPrefix">Optional topic prefix.</param>
+    /// <param name="configureFluent">Optional fluent mapping configuration layered after attribute mappers.</param>
     public static IServiceCollection AddMqttSubjectServer<TSubject>(
         this IServiceCollection serviceCollection,
         string connectorName,
         int brokerPort = 1883,
         string? brokerHost = null,
-        string? topicPrefix = null)
+        string? topicPrefix = null,
+        Action<MqttFluentMapping<TSubject>>? configureFluent = null)
         where TSubject : IInterceptorSubject
     {
         return serviceCollection.AddMqttSubjectServer(
@@ -87,9 +91,7 @@ public static class MqttSubjectExtensions
                 BrokerHost = brokerHost,
                 BrokerPort = brokerPort,
                 TopicPrefix = topicPrefix,
-                Mapper = new MqttCompositeMapper(
-                    new MqttPathProviderMapper(new AttributeBasedPathProvider(connectorName, '/')),
-                    new MqttAttributeMapper(connectorName))
+                Mapper = BuildMqttMapper(connectorName, configureFluent)
             });
     }
 
@@ -114,5 +116,27 @@ public static class MqttSubjectExtensions
                     sp.GetRequiredService<ILogger<MqttSubjectServer>>());
             })
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectServer>(key));
+    }
+
+    private static MqttCompositeMapper BuildMqttMapper<TSubject>(
+        string connectorName,
+        Action<MqttFluentMapping<TSubject>>? configureFluent)
+        where TSubject : IInterceptorSubject
+    {
+        var mappers = new List<IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>>
+        {
+            new MqttPathProviderMapper(new AttributeBasedPathProvider(connectorName, '/')),
+            new MqttAttributeMapper(connectorName)
+        };
+
+        if (configureFluent is not null)
+        {
+            var fluent = new MqttFluentMapping<TSubject>();
+            configureFluent(fluent);
+            // Fluent is layered after attributes so it wins on conflicts; omit configureFluent for attribute-only.
+            mappers.AddRange(fluent.CreateMappers('/'));
+        }
+
+        return new MqttCompositeMapper(mappers.ToArray());
     }
 }
