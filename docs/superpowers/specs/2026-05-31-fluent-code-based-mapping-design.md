@@ -57,8 +57,9 @@ This same property (segments are type-level and reverse-neutral) is what makes `
 
 ### New, per-connector (small)
 
+- A thin public facade `MqttFluentMapping<TRoot>` / `OpcUaFluentMapping<TRoot>`, the only class users instantiate. It owns a `FluentMappingRegistry<TMetadata>` internally (users never see the registry or generics), exposes the connector-typed `ForType<T>().Map(...)` and `.Configure(...)` chain backed by that connector's property builder, and produces the connector composite (a path-provider mapper over `FluentPathProvider` plus the fluent metadata mapper) for DI. It reuses the `*Fluent*` entry-point name of the deleted `*FluentMapper<T>`, but its role is a configuration facade, not a mapper. The shared keying, chaining, and registry stay shared, so the facade only pins the metadata type and property builder, with no per-connector duplication of keying or composition.
 - A metadata property-builder mapping fluent calls to `TMetadata` plus segment. This reuses the field-setters of the existing builders (`WithQualityOfService` / `WithRetain`; `BrowseName` / `ReferenceType` / and so on), retargeted to write into the registry instead of a path-keyed dictionary.
-- DI wiring in `MqttSubjectExtensions` / `OpcUaSubjectExtensions` (opt-in fluent configuration callback). The default wiring stays attributes-only.
+- DI wiring in `MqttSubjectExtensions` / `OpcUaSubjectExtensions`: an opt-in `configureFluent` callback that receives the facade, with an option to use fluent exclusively or to mix it with the attribute pair, plus a build method on the facade for manual wiring. The default wiring stays attributes-only.
 - OPC UA only: `OpcUaFluentMetadataMapper` overrides the shared base to merge type-self metadata for subject-typed members (references, and collection or dictionary element types). This ports `OpcUaAttributeMapper`'s existing class-level fallback to the registry, no new concept.
 
 ### Deleted
@@ -146,6 +147,8 @@ It is fixed as a standalone cleanup: de-duplicate the two overloads behind one f
 ## Coexistence and migration
 
 Attributes and the code-based source merge via the existing composite, so adoption is incremental. Using the code-based source exclusively is opt-in. The fluent API is a breaking change relative to the deleted absolute-path mappers, which is acceptable at the current early development stage.
+
+The composite accepts any number of mappers (`MqttCompositeMapper` / `OpcUaCompositeMapper` take `params`), so sources layer freely, for example a default catch-all path provider, then attributes, then fluent. Precedence follows order: forward merges field by field with later-wins, reverse tries mappers in reverse order and returns the first match. `DefaultPathProvider` includes every property by BrowseName (an expose-everything base), while `AttributeBasedPathProvider` and `FluentPathProvider` include only annotated or registered properties and override on top. Each path-provider mapper emits a complete, independently reversible path, so layering is safe: a property configured in several layers publishes via the highest-precedence layer and may also accept inbound via the lower ones, which helps incremental migration. (For MQTT's `/` separator a default provider needs to be separator-aware; the `.`-based `DefaultPathProvider` singleton works directly for OPC UA.)
 
 ## Acceptance and parity checklist
 
