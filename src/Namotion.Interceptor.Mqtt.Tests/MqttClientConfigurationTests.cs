@@ -1,4 +1,6 @@
+using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Mqtt.Client;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
@@ -6,8 +8,8 @@ namespace Namotion.Interceptor.Mqtt.Tests;
 
 public class MqttClientConfigurationTests
 {
-    private static PathProviderBase CreateTestPathProvider() =>
-        new AttributeBasedPathProvider("test", '/');
+    private static IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> CreateTestMapper() =>
+        new MqttPathProviderMapper(new AttributeBasedPathProvider("test", '/'));
 
     [Fact]
     public void Validate_ValidConfiguration_DoesNotThrow()
@@ -17,7 +19,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = "localhost",
             BrokerPort = 1883,
-            PathProvider = CreateTestPathProvider()
+            Mapper = CreateTestMapper()
         };
 
         // Act & Assert
@@ -32,7 +34,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = null!,
             BrokerPort = 1883,
-            PathProvider = CreateTestPathProvider()
+            Mapper = CreateTestMapper()
         };
 
         // Act & Assert
@@ -47,7 +49,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = "",
             BrokerPort = 1883,
-            PathProvider = CreateTestPathProvider()
+            Mapper = CreateTestMapper()
         };
 
         // Act & Assert
@@ -65,7 +67,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = "localhost",
             BrokerPort = port,
-            PathProvider = CreateTestPathProvider()
+            Mapper = CreateTestMapper()
         };
 
         // Act & Assert
@@ -73,14 +75,14 @@ public class MqttClientConfigurationTests
     }
 
     [Fact]
-    public void Validate_NullPathProvider_ThrowsArgumentException()
+    public void Validate_NullMapper_ThrowsArgumentException()
     {
         // Arrange
         var config = new MqttClientConfiguration
         {
             BrokerHost = "localhost",
             BrokerPort = 1883,
-            PathProvider = null!
+            Mapper = null!
         };
 
         // Act & Assert
@@ -95,7 +97,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = "localhost",
             BrokerPort = 1883,
-            PathProvider = CreateTestPathProvider(),
+            Mapper = CreateTestMapper(),
             WriteRetryQueueSize = -1
         };
 
@@ -111,7 +113,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = "localhost",
             BrokerPort = 1883,
-            PathProvider = CreateTestPathProvider(),
+            Mapper = CreateTestMapper(),
             ReconnectDelay = TimeSpan.FromSeconds(10),
             MaximumReconnectDelay = TimeSpan.FromSeconds(5)
         };
@@ -127,7 +129,7 @@ public class MqttClientConfigurationTests
         var config = new MqttClientConfiguration
         {
             BrokerHost = "localhost",
-            PathProvider = CreateTestPathProvider()
+            Mapper = CreateTestMapper()
         };
 
         // Assert
@@ -148,7 +150,7 @@ public class MqttClientConfigurationTests
         var config = new MqttClientConfiguration
         {
             BrokerHost = "localhost",
-            PathProvider = CreateTestPathProvider()
+            Mapper = CreateTestMapper()
         };
         var timestamp = DateTimeOffset.UtcNow;
 

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -11,17 +12,20 @@ internal class OpcUaSubjectLoader
 {
     private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
 
+    private readonly IInterceptorSubject _subject;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
     private readonly OpcUaSubjectClientSource _source;
 
     public OpcUaSubjectLoader(
+        IInterceptorSubject subject,
         OpcUaClientConfiguration configuration,
         SourceOwnershipManager ownership,
         OpcUaSubjectClientSource source,
         ILogger logger)
     {
+        _subject = subject;
         _configuration = configuration;
         _ownership = ownership;
         _source = source;
@@ -114,14 +118,15 @@ internal class OpcUaSubjectLoader
                     _configuration.TypeResolver.GetDynamicPropertyAttributes(nodeReference, session));
             }
 
-            var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
-            if (propertyName is not null)
+            // Resolve the mapping once; a null mapping means the property is not exposed (the old
+            // ResolvePropertyName returned null in exactly that case). The reference branch reuses
+            // it for the NodeClass check instead of resolving the same property a second time.
+            if (_configuration.Mapper.TryGetMapping(property, _subject, out var mapping))
             {
                 if (property.IsSubjectReference)
                 {
                     // Check if this should be treated as a VariableNode
-                    var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
-                    if (nodeConfiguration?.NodeClass == Mapping.OpcUaNodeClass.Variable)
+                    if (mapping.NodeClass == Mapping.OpcUaNodeClass.Variable)
                     {
                         await LoadVariableNodeForSubjectAsync(property, resolvedNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
                     }
@@ -169,11 +174,10 @@ internal class OpcUaSubjectLoader
         // First pass: match known attributes from C# model
         foreach (var attribute in property.Attributes)
         {
-            var attributeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(attribute);
-            if (attributeConfiguration is null)
+            if (!_configuration.Mapper.TryGetMapping(attribute, _subject, out var mapping))
                 continue;
 
-            var attributeBrowseName = attributeConfiguration.BrowseName ?? attribute.BrowseName;
+            var attributeBrowseName = mapping.BrowseName ?? attribute.BrowseName;
             NodeId? matchingNodeId = null;
             foreach (var (childNode, childNodeId) in childNodes)
             {
@@ -386,14 +390,16 @@ internal class OpcUaSubjectLoader
         ISession session,
         CancellationToken cancellationToken)
     {
-        // Use NodeMapper for property lookup (supports attributes, path provider, and fluent config)
-        return await _configuration.NodeMapper.TryGetPropertyAsync(
-            registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
+        // Use Mapper for property lookup (supports attributes, path provider, and fluent config).
+        // _subject is the connected root, so path-based mappers resolve paths consistently with the
+        // forward direction (which also resolves relative to _subject).
+        return await _configuration.Mapper.TryGetPropertyAsync(
+            new OpcUaLookupKey(nodeReference, session, _subject), registeredSubject, cancellationToken).ConfigureAwait(false);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
-        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
+        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property, _subject);
         property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
 
         if (!_ownership.ClaimSource(property.Reference))
@@ -422,7 +428,8 @@ internal class OpcUaSubjectLoader
         }
 
         // Find [OpcUaValue] property and monitor the node for it
-        var valueProperty = childSubject.TryGetValueProperty(_configuration.NodeMapper);
+        var valuePropertyResult = childSubject.TryGetValueProperty(_configuration.Mapper, _subject);
+        var valueProperty = valuePropertyResult?.Property;
         if (valueProperty != null)
         {
             MonitorValueNode(nodeId, valueProperty, monitoredItems);
@@ -441,7 +448,7 @@ internal class OpcUaSubjectLoader
                     continue; // Skip the value property
                 }
 
-                var childPropertyName = childProperty.ResolvePropertyName(_configuration.NodeMapper);
+                var childPropertyName = childProperty.ResolvePropertyName(_configuration.Mapper, _subject);
                 if (childPropertyName == childNode.BrowseName.Name)
                 {
                     MonitorValueNode(childNodeId, childProperty, monitoredItems);

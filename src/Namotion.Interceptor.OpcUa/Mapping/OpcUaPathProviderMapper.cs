@@ -1,7 +1,7 @@
+using System.Diagnostics.CodeAnalysis;
+using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Opc.Ua;
-using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Mapping;
 
@@ -9,50 +9,45 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// Maps properties using an IPathProvider for inclusion and browse names.
 /// Provides default reference type of "HasProperty".
 /// </summary>
-public class PathProviderOpcUaNodeMapper : IOpcUaNodeMapper
+public class OpcUaPathProviderMapper : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
 {
     private readonly IPathProvider _pathProvider;
 
-    /// <summary>
-    /// Creates a new path provider-based node mapper.
-    /// </summary>
-    /// <param name="pathProvider">The path provider for property inclusion and naming.</param>
-    public PathProviderOpcUaNodeMapper(IPathProvider pathProvider)
+    public OpcUaPathProviderMapper(IPathProvider pathProvider)
     {
         _pathProvider = pathProvider;
     }
 
     /// <inheritdoc />
-    public OpcUaNodeConfiguration? TryGetNodeConfiguration(RegisteredSubjectProperty property)
+    public bool TryGetMapping(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
+        [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
     {
         if (!_pathProvider.IsPropertyIncluded(property))
         {
-            return null;
+            mapping = null;
+            return false;
         }
 
-        // Use PathProvider segment, or fall back to property.BrowseName
-        // (which is AttributeName for attributes, Name for regular properties)
         var browseName = _pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-
-        // Default ReferenceType: "HasProperty" for attributes, null for others
-        // This allows CompositeNodeMapper to fill in from other sources
         var referenceType = property.IsAttribute ? "HasProperty" : null;
 
-        return new OpcUaNodeConfiguration
+        mapping = new OpcUaPropertyMapping
         {
             BrowseName = browseName,
             ReferenceType = referenceType
         };
+        return true;
     }
 
     /// <inheritdoc />
-    public Task<RegisteredSubjectProperty?> TryGetPropertyAsync(
+    public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
+        OpcUaLookupKey key,
         RegisteredSubject subject,
-        ReferenceDescription nodeReference,
-        ISession session,
         CancellationToken cancellationToken)
     {
-        var browseName = nodeReference.BrowseName.Name;
+        var browseName = key.Reference.BrowseName.Name;
 
         foreach (var property in subject.Properties)
         {
@@ -60,17 +55,15 @@ public class PathProviderOpcUaNodeMapper : IOpcUaNodeMapper
                 continue;
 
             if (!_pathProvider.IsPropertyIncluded(property))
-            {
                 continue;
-            }
 
             var segment = _pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
             if (segment == browseName)
             {
-                return Task.FromResult<RegisteredSubjectProperty?>(property);
+                return new ValueTask<RegisteredSubjectProperty?>(property);
             }
         }
 
-        return Task.FromResult<RegisteredSubjectProperty?>(null);
+        return new ValueTask<RegisteredSubjectProperty?>(result: null);
     }
 }

@@ -231,7 +231,7 @@ public partial class OpcUaRegistrationTests
         services.AddSingleton(_ => CreateSubject());
         services.AddOpcUaSubjectClientSource<RegistrationTestSubject>(
             serverUrl: "opc.tcp://localhost:4840",
-            sourceName: "opc",
+            connectorName: "opc",
             rootPath: ["Root"]);
 
         // Act
@@ -251,7 +251,7 @@ public partial class OpcUaRegistrationTests
         services.AddLogging();
         services.AddSingleton(_ => CreateSubject());
         services.AddOpcUaSubjectServer<RegistrationTestSubject>(
-            sourceName: "opc",
+            connectorName: "opc",
             rootName: "Root");
 
         // Act
@@ -272,7 +272,7 @@ public partial class OpcUaRegistrationTests
         services.AddKeyedOpcUaSubjectClientSource<RegistrationTestSubject>(
             name: "server1",
             serverUrl: "opc.tcp://localhost:4840",
-            sourceName: "opc",
+            connectorName: "opc",
             rootPath: ["Root"]);
 
         // Act
@@ -293,7 +293,7 @@ public partial class OpcUaRegistrationTests
         services.AddSingleton(_ => CreateSubject());
         services.AddKeyedOpcUaSubjectServer<RegistrationTestSubject>(
             name: "server1",
-            sourceName: "opc",
+            connectorName: "opc",
             rootName: "Root");
 
         // Act

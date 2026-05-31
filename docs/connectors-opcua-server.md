@@ -16,7 +16,7 @@ public partial class Sensor
 
 builder.Services.AddSingleton(sensor);
 builder.Services.AddOpcUaSubjectServer<Sensor>(
-    sourceName: "opc",
+    connectorName: "opc",
     rootName: "MySensor");
 
 // ...
@@ -53,7 +53,7 @@ For direct instantiation (without DI), `CreateOpcUaServer` returns `IOpcUaSubjec
 ```csharp
 builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectServer<Machine>(
-    sourceName: "opc",
+    connectorName: "opc",
     rootName: "MyMachine");
 ```
 
@@ -75,7 +75,7 @@ builder.Services.AddOpcUaSubjectServer(
 ```
 
 **Parameters:**
-- `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
+- `connectorName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
 - `rootName` - Optional root folder name under the OPC UA ObjectsFolder
 
 Multiple servers can be registered in the same DI container. Each registration uses keyed singletons internally, so they operate independently.
@@ -98,7 +98,7 @@ await server.StartAsync(cancellationToken);
 | `BaseAddress` | `string` | "opc.tcp://localhost:4840/" | Server endpoint address |
 | `NamespaceUri` | `string` | "http://namotion.com/Interceptor/" | Primary namespace URI for custom nodes |
 | `ValueConverter` | `OpcUaValueConverter` | *required* | Converts between C# properties and OPC UA values |
-| `NodeMapper` | `IOpcUaNodeMapper` | CompositeNodeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
+| `Mapper` | `IPropertyMapper<OpcUaPropertyMapping>` | OpcUaCompositeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
 | `BufferTime` | `TimeSpan?` | 8ms | Time window to buffer incoming property changes before publishing to clients |
 | `TelemetryContext` | `ITelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |
@@ -212,7 +212,7 @@ The server automatically loads embedded NodeSets for common industrial standards
 
 Reference these types with `[OpcUaNode(TypeDefinition = "...", TypeDefinitionNamespace = "...")]`.
 
-For mapping patterns with companion specs, see [OPC UA Mapping Guide -- Companion Spec Support](connectors-opcua-mapping.md#opc-ua-companion-spec-support).
+For mapping patterns with companion specs, see [OPC UA Mapping Guide: Companion Spec Support](connectors-opcua-mapping.md#opc-ua-companion-spec-support).
 
 ### Custom Namespaces
 

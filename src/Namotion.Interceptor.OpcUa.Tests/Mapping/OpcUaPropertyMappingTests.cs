@@ -3,14 +3,14 @@ using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
-public class OpcUaNodeConfigurationTests
+public class OpcUaPropertyMappingTests
 {
     [Fact]
     public void WithFallback_WhenThisHasValue_KeepsThisValue()
     {
         // Arrange
-        var config1 = new OpcUaNodeConfiguration { BrowseName = "First", SamplingInterval = 100 };
-        var config2 = new OpcUaNodeConfiguration { BrowseName = "Second", SamplingInterval = 200 };
+        var config1 = new OpcUaPropertyMapping { BrowseName = "First", SamplingInterval = 100 };
+        var config2 = new OpcUaPropertyMapping { BrowseName = "Second", SamplingInterval = 200 };
 
         // Act
         var result = config1.WithFallback(config2);
@@ -24,8 +24,8 @@ public class OpcUaNodeConfigurationTests
     public void WithFallback_WhenThisHasNull_TakesOtherValue()
     {
         // Arrange
-        var config1 = new OpcUaNodeConfiguration { BrowseName = "First" };
-        var config2 = new OpcUaNodeConfiguration { SamplingInterval = 200, QueueSize = 10 };
+        var config1 = new OpcUaPropertyMapping { BrowseName = "First" };
+        var config2 = new OpcUaPropertyMapping { SamplingInterval = 200, QueueSize = 10 };
 
         // Act
         var result = config1.WithFallback(config2);
@@ -40,7 +40,7 @@ public class OpcUaNodeConfigurationTests
     public void WithFallback_WhenOtherIsNull_ReturnsThis()
     {
         // Arrange
-        var config = new OpcUaNodeConfiguration { BrowseName = "Test" };
+        var config = new OpcUaPropertyMapping { BrowseName = "Test" };
 
         // Act
         var result = config.WithFallback(null);
@@ -53,12 +53,12 @@ public class OpcUaNodeConfigurationTests
     public void WithFallback_MergesAllFields()
     {
         // Arrange
-        var config1 = new OpcUaNodeConfiguration
+        var config1 = new OpcUaPropertyMapping
         {
             BrowseName = "Name1",
             DataChangeTrigger = DataChangeTrigger.Status
         };
-        var config2 = new OpcUaNodeConfiguration
+        var config2 = new OpcUaPropertyMapping
         {
             BrowseName = "Name2",
             BrowseNamespaceUri = "http://test/",
@@ -85,12 +85,12 @@ public class OpcUaNodeConfigurationTests
     public void WithFallback_MergesMonitoringFields()
     {
         // Arrange
-        var config1 = new OpcUaNodeConfiguration
+        var config1 = new OpcUaPropertyMapping
         {
             SamplingInterval = 100,
             DeadbandType = DeadbandType.Absolute
         };
-        var config2 = new OpcUaNodeConfiguration
+        var config2 = new OpcUaPropertyMapping
         {
             QueueSize = 5,
             DiscardOldest = false,
@@ -121,8 +121,8 @@ public class OpcUaNodeConfigurationTests
             new() { ReferenceType = "GeneratesEvent", TargetNodeId = "ns=2;s=Event" }
         };
 
-        var config1 = new OpcUaNodeConfiguration { AdditionalReferences = refs1 };
-        var config2 = new OpcUaNodeConfiguration { AdditionalReferences = refs2 };
+        var config1 = new OpcUaPropertyMapping { AdditionalReferences = refs1 };
+        var config2 = new OpcUaPropertyMapping { AdditionalReferences = refs2 };
 
         // Act
         var result = config1.WithFallback(config2);
@@ -143,8 +143,8 @@ public class OpcUaNodeConfigurationTests
             new() { ReferenceType = "HasInterface", TargetNodeId = "i=17602" }
         };
 
-        var config1 = new OpcUaNodeConfiguration { BrowseName = "Test" };
-        var config2 = new OpcUaNodeConfiguration { AdditionalReferences = refs };
+        var config1 = new OpcUaPropertyMapping { BrowseName = "Test" };
+        var config2 = new OpcUaPropertyMapping { AdditionalReferences = refs };
 
         // Act
         var result = config1.WithFallback(config2);
@@ -159,8 +159,8 @@ public class OpcUaNodeConfigurationTests
     public void WithFallback_ReferenceTypeNamespace_PrimaryTakesPriority()
     {
         // Arrange
-        var primary = new OpcUaNodeConfiguration { ReferenceTypeNamespace = "http://primary.com/" };
-        var fallback = new OpcUaNodeConfiguration { ReferenceTypeNamespace = "http://fallback.com/" };
+        var primary = new OpcUaPropertyMapping { ReferenceTypeNamespace = "http://primary.com/" };
+        var fallback = new OpcUaPropertyMapping { ReferenceTypeNamespace = "http://fallback.com/" };
 
         // Act
         var result = primary.WithFallback(fallback);
@@ -173,8 +173,8 @@ public class OpcUaNodeConfigurationTests
     public void WithFallback_ReferenceTypeNamespace_FallsBackWhenNull()
     {
         // Arrange
-        var primary = new OpcUaNodeConfiguration { ReferenceTypeNamespace = null };
-        var fallback = new OpcUaNodeConfiguration { ReferenceTypeNamespace = "http://fallback.com/" };
+        var primary = new OpcUaPropertyMapping { ReferenceTypeNamespace = null };
+        var fallback = new OpcUaPropertyMapping { ReferenceTypeNamespace = "http://fallback.com/" };
 
         // Act
         var result = primary.WithFallback(fallback);
@@ -187,8 +187,8 @@ public class OpcUaNodeConfigurationTests
     public void WithFallback_DataTypeNamespace_PrimaryTakesPriority()
     {
         // Arrange
-        var primary = new OpcUaNodeConfiguration { DataTypeNamespace = "http://primary.com/" };
-        var fallback = new OpcUaNodeConfiguration { DataTypeNamespace = "http://fallback.com/" };
+        var primary = new OpcUaPropertyMapping { DataTypeNamespace = "http://primary.com/" };
+        var fallback = new OpcUaPropertyMapping { DataTypeNamespace = "http://fallback.com/" };
 
         // Act
         var result = primary.WithFallback(fallback);
@@ -201,8 +201,8 @@ public class OpcUaNodeConfigurationTests
     public void WithFallback_DataTypeNamespace_FallsBackWhenNull()
     {
         // Arrange
-        var primary = new OpcUaNodeConfiguration { DataTypeNamespace = null };
-        var fallback = new OpcUaNodeConfiguration { DataTypeNamespace = "http://fallback.com/" };
+        var primary = new OpcUaPropertyMapping { DataTypeNamespace = null };
+        var fallback = new OpcUaPropertyMapping { DataTypeNamespace = "http://fallback.com/" };
 
         // Act
         var result = primary.WithFallback(fallback);
@@ -215,8 +215,8 @@ public class OpcUaNodeConfigurationTests
     public void WithFallback_ItemReferenceTypeNamespace_PrimaryTakesPriority()
     {
         // Arrange
-        var primary = new OpcUaNodeConfiguration { ItemReferenceTypeNamespace = "http://primary.com/" };
-        var fallback = new OpcUaNodeConfiguration { ItemReferenceTypeNamespace = "http://fallback.com/" };
+        var primary = new OpcUaPropertyMapping { ItemReferenceTypeNamespace = "http://primary.com/" };
+        var fallback = new OpcUaPropertyMapping { ItemReferenceTypeNamespace = "http://fallback.com/" };
 
         // Act
         var result = primary.WithFallback(fallback);
@@ -229,8 +229,8 @@ public class OpcUaNodeConfigurationTests
     public void WithFallback_ItemReferenceTypeNamespace_FallsBackWhenNull()
     {
         // Arrange
-        var primary = new OpcUaNodeConfiguration { ItemReferenceTypeNamespace = null };
-        var fallback = new OpcUaNodeConfiguration { ItemReferenceTypeNamespace = "http://fallback.com/" };
+        var primary = new OpcUaPropertyMapping { ItemReferenceTypeNamespace = null };
+        var fallback = new OpcUaPropertyMapping { ItemReferenceTypeNamespace = "http://fallback.com/" };
 
         // Act
         var result = primary.WithFallback(fallback);

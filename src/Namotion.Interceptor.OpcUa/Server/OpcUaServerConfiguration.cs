@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
@@ -8,9 +9,10 @@ namespace Namotion.Interceptor.OpcUa.Server;
 
 public class OpcUaServerConfiguration
 {
-    private static readonly IOpcUaNodeMapper DefaultNodeMapper = new CompositeNodeMapper(
-        new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider("opc")),
-        new AttributeOpcUaNodeMapper());
+    private static readonly IPropertyMapper<OpcUaPropertyMapping> DefaultMapper =
+        new OpcUaCompositeMapper(
+            new OpcUaPathProviderMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultConnectorName)),
+            new OpcUaAttributeMapper(OpcUaConstants.DefaultConnectorName));
 
     /// <summary>
     /// Gets the optional root folder name to create under the Objects folder for organizing server nodes.
@@ -38,9 +40,9 @@ public class OpcUaServerConfiguration
 
     /// <summary>
     /// Maps C# properties to OPC UA nodes.
-    /// Defaults to composite of PathProviderOpcUaNodeMapper (with "opc" source) and AttributeOpcUaNodeMapper.
+    /// Defaults to composite of OpcUaPathProviderMapper and OpcUaAttributeMapper, both filtered by the "opc" connector name.
     /// </summary>
-    public IOpcUaNodeMapper NodeMapper { get; init; } = DefaultNodeMapper;
+    public IPropertyMapper<OpcUaPropertyMapping> Mapper { get; set; } = DefaultMapper;
 
     /// <summary>
     /// Gets or sets a value indicating whether to clean up old certificates from the

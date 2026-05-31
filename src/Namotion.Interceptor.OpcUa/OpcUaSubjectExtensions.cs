@@ -49,13 +49,13 @@ public static class OpcUaSubjectExtensions
     public static IServiceCollection AddOpcUaSubjectClientSource<TSubject>(
         this IServiceCollection services,
         string serverUrl,
-        string sourceName,
+        string connectorName,
         string[]? rootPath = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddOpcUaSubjectClientSource(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultClientConfiguration(sp, serverUrl, sourceName, rootPath));
+            sp => CreateDefaultClientConfiguration(sp, serverUrl, connectorName, rootPath));
     }
 
     public static IServiceCollection AddOpcUaSubjectClientSource(
@@ -75,14 +75,14 @@ public static class OpcUaSubjectExtensions
         this IServiceCollection services,
         string name,
         string serverUrl,
-        string sourceName,
+        string connectorName,
         string[]? rootPath = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddKeyedOpcUaSubjectClientSource(
             name,
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultClientConfiguration(sp, serverUrl, sourceName, rootPath));
+            sp => CreateDefaultClientConfiguration(sp, serverUrl, connectorName, rootPath));
     }
 
     public static IServiceCollection AddKeyedOpcUaSubjectClientSource(
@@ -101,13 +101,13 @@ public static class OpcUaSubjectExtensions
 
     public static IServiceCollection AddOpcUaSubjectServer<TSubject>(
         this IServiceCollection services,
-        string sourceName,
+        string connectorName,
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddOpcUaSubjectServer(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultServerConfiguration(sp, sourceName, rootName));
+            sp => CreateDefaultServerConfiguration(sp, connectorName, rootName));
     }
 
     public static IServiceCollection AddOpcUaSubjectServer(
@@ -126,14 +126,14 @@ public static class OpcUaSubjectExtensions
     public static IServiceCollection AddKeyedOpcUaSubjectServer<TSubject>(
         this IServiceCollection services,
         string name,
-        string sourceName,
+        string connectorName,
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddKeyedOpcUaSubjectServer(
             name,
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultServerConfiguration(sp, sourceName, rootName));
+            sp => CreateDefaultServerConfiguration(sp, connectorName, rootName));
     }
 
     public static IServiceCollection AddKeyedOpcUaSubjectServer(
@@ -191,7 +191,7 @@ public static class OpcUaSubjectExtensions
     }
 
     private static OpcUaClientConfiguration CreateDefaultClientConfiguration(
-        IServiceProvider sp, string serverUrl, string sourceName, string[]? rootPath)
+        IServiceProvider sp, string serverUrl, string connectorName, string[]? rootPath)
     {
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
         var telemetryContext = DefaultTelemetry.Create(builder =>
@@ -205,14 +205,14 @@ public static class OpcUaSubjectExtensions
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
             TelemetryContext = telemetryContext,
-            NodeMapper = new CompositeNodeMapper(
-                new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider(sourceName)),
-                new AttributeOpcUaNodeMapper())
+            Mapper = new OpcUaCompositeMapper(
+                new OpcUaPathProviderMapper(new AttributeBasedPathProvider(connectorName)),
+                new OpcUaAttributeMapper(connectorName))
         };
     }
 
     private static OpcUaServerConfiguration CreateDefaultServerConfiguration(
-        IServiceProvider sp, string sourceName, string? rootName)
+        IServiceProvider sp, string connectorName, string? rootName)
     {
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
         var telemetryContext = DefaultTelemetry.Create(builder =>
@@ -223,9 +223,9 @@ public static class OpcUaSubjectExtensions
             RootName = rootName,
             ValueConverter = new OpcUaValueConverter(),
             TelemetryContext = telemetryContext,
-            NodeMapper = new CompositeNodeMapper(
-                new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider(sourceName)),
-                new AttributeOpcUaNodeMapper())
+            Mapper = new OpcUaCompositeMapper(
+                new OpcUaPathProviderMapper(new AttributeBasedPathProvider(connectorName)),
+                new OpcUaAttributeMapper(connectorName))
         };
     }
 
