@@ -145,4 +145,44 @@ public class ExpressionPathHelperTests
             ExpressionPathHelper.GetPathFromExpression(expression.Body));
         Assert.Contains("the lambda parameter itself", exception.Message);
     }
+
+    [Fact]
+    public void WhenSingleMember_ThenGetSingleMemberNameReturnsName()
+    {
+        // Arrange
+        System.Linq.Expressions.Expression<System.Func<SingleMemberModel, double>> selector = x => x.Speed;
+
+        // Act
+        var name = ExpressionPathHelper.GetSingleMemberName(selector.Body);
+
+        // Assert
+        Assert.Equal("Speed", name);
+    }
+
+    [Fact]
+    public void WhenMemberChain_ThenGetSingleMemberNameThrows()
+    {
+        // Arrange
+        System.Linq.Expressions.Expression<System.Func<SingleMemberModel, double>> selector = x => x.Child.Speed;
+
+        // Act & Assert
+        Assert.Throws<System.ArgumentException>(() => ExpressionPathHelper.GetSingleMemberName(selector.Body));
+    }
+
+    [Fact]
+    public void WhenIndexer_ThenGetSingleMemberNameThrows()
+    {
+        // Arrange
+        System.Linq.Expressions.Expression<System.Func<SingleMemberModel, double>> selector = x => x.Items[0];
+
+        // Act & Assert
+        Assert.Throws<System.ArgumentException>(() => ExpressionPathHelper.GetSingleMemberName(selector.Body));
+    }
+}
+
+public class SingleMemberModel
+{
+    public double Speed { get; set; }
+    public SingleMemberModel Child { get; set; } = null!;
+    public double[] Items { get; set; } = [];
 }
