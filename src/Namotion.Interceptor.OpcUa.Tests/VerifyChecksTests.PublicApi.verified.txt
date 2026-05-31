@@ -240,7 +240,7 @@ namespace Namotion.Interceptor.OpcUa.Mapping
     }
     public class OpcUaAttributeMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
     {
-        public OpcUaAttributeMapper(string? defaultNamespaceUri = null) { }
+        public OpcUaAttributeMapper(string? pathProviderName = null, string? defaultNamespaceUri = null) { }
         public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
         public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }

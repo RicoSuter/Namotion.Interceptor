@@ -21,11 +21,11 @@ namespace Namotion.Interceptor.Mqtt.Mapping;
 /// </summary>
 public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
 {
-    private readonly string _connectorName;
+    private readonly string _pathProviderName;
 
-    public MqttAttributeMapper(string? connectorName = null)
+    public MqttAttributeMapper(string? pathProviderName = null)
     {
-        _connectorName = connectorName ?? MqttConstants.DefaultConnectorName;
+        _pathProviderName = pathProviderName ?? MqttConstants.DefaultPathProviderName;
     }
 
     public bool TryGetMapping(
@@ -37,7 +37,7 @@ public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, M
         // the topic is the path segment resolved by the path-provider mapper.
         foreach (var attribute in property.ReflectionAttributes)
         {
-            if (attribute is MqttTopicAttribute mqttTopic && mqttTopic.Name == _connectorName)
+            if (attribute is MqttTopicAttribute mqttTopic && mqttTopic.Name == _pathProviderName)
             {
                 mapping = mqttTopic.ToMapping();
                 return true;

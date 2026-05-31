@@ -6,10 +6,10 @@ namespace Microsoft.Extensions.DependencyInjection
     public static class MqttSubjectExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.Mqtt.Client.MqttClientConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, string brokerHost, string connectorName, int brokerPort = 1883, string? topicPrefix = null)
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, string brokerHost, string pathProviderName, int brokerPort = 1883, string? topicPrefix = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.Mqtt.Server.MqttServerConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, string connectorName, int brokerPort = 1883, string? brokerHost = null, string? topicPrefix = null)
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, string pathProviderName, int brokerPort = 1883, string? brokerHost = null, string? topicPrefix = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
     }
 }
@@ -24,7 +24,7 @@ namespace Namotion.Interceptor.Mqtt.Attributes
     [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=true, Inherited=true)]
     public class MqttTopicAttribute : Namotion.Interceptor.Registry.Attributes.PathAttribute
     {
-        public MqttTopicAttribute(string topic, string? connectorName = null) { }
+        public MqttTopicAttribute(string topic, string? pathProviderName = null) { }
         public MQTTnet.Protocol.MqttQualityOfServiceLevel QualityOfService { get; set; }
         public Namotion.Interceptor.Mqtt.Attributes.MqttRetainMode Retain { get; set; }
         public string Topic { get; }
@@ -81,14 +81,14 @@ namespace Namotion.Interceptor.Mqtt
     }
     public static class MqttConstants
     {
-        public const string DefaultConnectorName = "mqtt";
+        public const string DefaultPathProviderName = "mqtt";
     }
 }
 namespace Namotion.Interceptor.Mqtt.Mapping
 {
     public class MqttAttributeMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
     {
-        public MqttAttributeMapper(string? connectorName = null) { }
+        public MqttAttributeMapper(string? pathProviderName = null) { }
         public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
         public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }

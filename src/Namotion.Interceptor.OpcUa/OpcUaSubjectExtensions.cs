@@ -207,7 +207,7 @@ public static class OpcUaSubjectExtensions
             TelemetryContext = telemetryContext,
             Mapper = new OpcUaCompositeMapper(
                 new OpcUaPathProviderMapper(new AttributeBasedPathProvider(sourceName)),
-                new OpcUaAttributeMapper())
+                new OpcUaAttributeMapper(sourceName))
         };
     }
 
@@ -225,7 +225,7 @@ public static class OpcUaSubjectExtensions
             TelemetryContext = telemetryContext,
             Mapper = new OpcUaCompositeMapper(
                 new OpcUaPathProviderMapper(new AttributeBasedPathProvider(sourceName)),
-                new OpcUaAttributeMapper())
+                new OpcUaAttributeMapper(sourceName))
         };
     }
 

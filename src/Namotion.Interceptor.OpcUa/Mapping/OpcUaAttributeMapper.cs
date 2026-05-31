@@ -13,14 +13,22 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// </summary>
 public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
 {
+    private readonly string? _pathProviderName;
     private readonly string? _defaultNamespaceUri;
 
     /// <summary>
     /// Creates a new attribute-based node mapper.
     /// </summary>
+    /// <param name="pathProviderName">
+    /// The path-provider name carried on <see cref="OpcUaNodeAttribute"/> (inherited from
+    /// <c>PathAttribute</c>) that this mapper filters by. When non-null, only attributes whose
+    /// <c>Name</c> matches are picked up, so multiple OPC UA mappings can coexist on the same subject.
+    /// When null, attributes are picked up regardless of name.
+    /// </param>
     /// <param name="defaultNamespaceUri">Default namespace URI for nodes without explicit namespace.</param>
-    public OpcUaAttributeMapper(string? defaultNamespaceUri = null)
+    public OpcUaAttributeMapper(string? pathProviderName = null, string? defaultNamespaceUri = null)
     {
+        _pathProviderName = pathProviderName;
         _defaultNamespaceUri = defaultNamespaceUri;
     }
 
@@ -42,7 +50,7 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
         {
             switch (attribute)
             {
-                case OpcUaNodeAttribute node when propertyAttribute is null:
+                case OpcUaNodeAttribute node when propertyAttribute is null && Matches(node):
                     propertyAttribute = node;
                     break;
                 case OpcUaReferenceAttribute reference when referenceAttribute is null:
@@ -127,7 +135,7 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
             OpcUaNodeAttribute? attribute = null;
             foreach (var candidate in property.ReflectionAttributes)
             {
-                if (candidate is OpcUaNodeAttribute node)
+                if (candidate is OpcUaNodeAttribute node && Matches(node))
                 {
                     attribute = node;
                     break;
@@ -166,15 +174,25 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
         return new ValueTask<RegisteredSubjectProperty?>(browseNameMatch);
     }
 
-    private static OpcUaNodeAttribute? GetClassLevelOpcUaNodeAttribute(RegisteredSubjectProperty property)
+    private OpcUaNodeAttribute? GetClassLevelOpcUaNodeAttribute(RegisteredSubjectProperty property)
     {
         if (property.IsSubjectReference || property.IsSubjectCollection || property.IsSubjectDictionary)
         {
             var elementType = GetElementType(property.Type);
-            return elementType?.GetCustomAttribute<OpcUaNodeAttribute>();
+            if (elementType is null)
+                return null;
+
+            foreach (var attribute in elementType.GetCustomAttributes<OpcUaNodeAttribute>(inherit: true))
+            {
+                if (Matches(attribute))
+                    return attribute;
+            }
         }
         return null;
     }
+
+    private bool Matches(OpcUaNodeAttribute attribute)
+        => _pathProviderName is null || attribute.Name == _pathProviderName;
 
     private static Type GetElementType(Type type)
     {

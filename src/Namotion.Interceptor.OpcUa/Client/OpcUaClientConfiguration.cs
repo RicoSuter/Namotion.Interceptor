@@ -12,7 +12,7 @@ public class OpcUaClientConfiguration
     private static readonly IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey> DefaultMapper =
         new OpcUaCompositeMapper(
             new OpcUaPathProviderMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultConnectorName)),
-            new OpcUaAttributeMapper());
+            new OpcUaAttributeMapper(OpcUaConstants.DefaultConnectorName));
 
     private ISessionFactory? _resolvedSessionFactory;
 
