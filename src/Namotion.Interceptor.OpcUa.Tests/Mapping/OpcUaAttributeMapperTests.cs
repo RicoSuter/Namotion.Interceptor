@@ -459,4 +459,64 @@ public class OpcUaAttributeMapperTests
     }
 
     #endregion
+
+    #region Connector-Name Filter
+
+    [Fact]
+    public void WhenMapperConnectorNameMatches_ThenMappingIsReturned()
+    {
+        // Arrange
+        var mapper = new OpcUaAttributeMapper("opc");
+        var subject = new ConnectorNameFilterModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var fooProperty = registeredSubject.TryGetProperty("Foo")!;
+
+        // Act
+        var found = mapper.TryGetMapping(fooProperty, subject, out var mapping);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal("Foo", mapping!.BrowseName);
+    }
+
+    [Fact]
+    public void WhenMapperConnectorNameDoesNotMatch_ThenMappingIsNotReturned()
+    {
+        // Arrange
+        var mapper = new OpcUaAttributeMapper("opc");
+        var subject = new ConnectorNameFilterModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var barProperty = registeredSubject.TryGetProperty("Bar")!;
+
+        // Act
+        var found = mapper.TryGetMapping(barProperty, subject, out var mapping);
+
+        // Assert
+        Assert.False(found);
+        Assert.Null(mapping);
+    }
+
+    [Fact]
+    public void WhenTwoMappersWithDifferentConnectorNames_ThenEachFiltersToOwnAttribute()
+    {
+        // Arrange
+        var opcMapper = new OpcUaAttributeMapper("opc");
+        var otherMapper = new OpcUaAttributeMapper("other");
+        var subject = new ConnectorNameFilterModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var fooProperty = registeredSubject.TryGetProperty("Foo")!;
+        var barProperty = registeredSubject.TryGetProperty("Bar")!;
+
+        // Act & Assert: opcMapper picks up Foo (connectorName: "opc") only.
+        Assert.True(opcMapper.TryGetMapping(fooProperty, subject, out var opcFooMapping));
+        Assert.Equal("Foo", opcFooMapping!.BrowseName);
+        Assert.False(opcMapper.TryGetMapping(barProperty, subject, out _));
+
+        // Act & Assert: otherMapper picks up Bar (connectorName: "other") only.
+        Assert.True(otherMapper.TryGetMapping(barProperty, subject, out var otherBarMapping));
+        Assert.Equal("Bar", otherBarMapping!.BrowseName);
+        Assert.False(otherMapper.TryGetMapping(fooProperty, subject, out _));
+    }
+
+    #endregion
 }

@@ -396,7 +396,7 @@ public static class PathExtensions
         var unreachable = new HashSet<RegisteredSubject>();
 
         // stack mirrors frames (minus the leaf): each entry expands the owner one frame leads into.
-        var stack = new List<SearchFrame>();
+        var stack = new List<SearchFrame>(8);
         visiting.Add(property.Parent);
         stack.Add(new SearchFrame { Owner = property.Parent, Parents = property.Parent.Parents });
 
@@ -488,11 +488,8 @@ public static class PathExtensions
 
         public void Reset()
         {
-            if (Count > 0)
-            {
-                Array.Clear(_array, 0, Count);
-                Count = 0;
-            }
+            Array.Clear(_array, 0, Count);
+            Count = 0;
         }
 
         public readonly void Return() => Pool.Return(_array, clearArray: true);

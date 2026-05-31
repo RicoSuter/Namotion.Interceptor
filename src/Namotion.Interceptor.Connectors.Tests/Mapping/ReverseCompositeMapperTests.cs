@@ -36,7 +36,7 @@ public class ReverseCompositeMapperTests
             => new(key == reverseKey ? reverseResult : null);
     }
 
-    // Concrete subclass to instantiate the protected-constructor composite from tests.
+    // Concrete subclass mirrors how real consumers (MqttCompositeMapper, OpcUaCompositeMapper) inherit the composite.
     private sealed class TestComposite(params IReversePropertyMapper<TestMapping, string>[] mappers)
         : ReverseCompositeMapper<TestMapping, string>(mappers);
 

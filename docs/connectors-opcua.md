@@ -35,7 +35,7 @@ builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     connectorName: "opc",
-    rootName: "MyMachine");
+    rootPath: ["MyMachine"]);
 
 // ...
 var host = builder.Build();

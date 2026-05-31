@@ -212,7 +212,7 @@ The server automatically loads embedded NodeSets for common industrial standards
 
 Reference these types with `[OpcUaNode(TypeDefinition = "...", TypeDefinitionNamespace = "...")]`.
 
-For mapping patterns with companion specs, see [OPC UA Mapping Guide -- Companion Spec Support](connectors-opcua-mapping.md#opc-ua-companion-spec-support).
+For mapping patterns with companion specs, see [OPC UA Mapping Guide: Companion Spec Support](connectors-opcua-mapping.md#opc-ua-companion-spec-support).
 
 ### Custom Namespaces
 

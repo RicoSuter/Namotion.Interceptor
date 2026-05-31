@@ -525,10 +525,9 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
 
 | Class                                          | Description                                                                                       |
 |------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| `DelegateMapper<TMapping>`             | Wraps a `Func<RegisteredSubjectProperty, IInterceptorSubject, TMapping?>` for simple one-off mappers |
 | `ReverseCompositeMapper<TMapping, TKey>` | Combines multiple reverse-capable mappers with "last wins" merge semantics via `IPropertyMapping<TMapping>.Merge` |
 
-`ReverseCompositeMapper<TMapping, TKey>` requires the mapping record to implement `IPropertyMapping<TMapping>`, which provides the static `Merge` method for combining partial configurations. Its constructor is `protected`, so each connector exposes a thin subclass (for example `MqttCompositeMapper` and `OpcUaCompositeMapper`) rather than using it directly.
+`ReverseCompositeMapper<TMapping, TKey>` requires the mapping record to implement `IPropertyMapping<TMapping>`, which provides the static `Merge` method for combining partial configurations. Each connector exposes a thin subclass (for example `MqttCompositeMapper` and `OpcUaCompositeMapper`) for type safety and naming; consumers normally use those rather than the generic base.
 
 #### Default Composition
 

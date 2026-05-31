@@ -34,7 +34,9 @@ builder.Services.AddMqttSubjectClientSource(
     {
         BrokerHost = "localhost",
         BrokerPort = 1883,
-        Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
+        Mapper = new MqttCompositeMapper(
+            new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
+            new MqttAttributeMapper("mqtt")),
         DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
         UseRetainedMessages = true
     });
