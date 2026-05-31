@@ -47,7 +47,7 @@ namespace Namotion.Interceptor.Mqtt.Client
         public MQTTnet.Protocol.MqttQualityOfServiceLevel DefaultQualityOfService { get; init; }
         public System.TimeSpan HealthCheckInterval { get; init; }
         public System.TimeSpan KeepAliveInterval { get; init; }
-        public required Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey> Mapper { get; init; }
+        public Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey> Mapper { get; init; }
         public System.TimeSpan MaximumReconnectDelay { get; init; }
         public string? Password { get; init; }
         public System.TimeSpan ReconnectDelay { get; init; }
@@ -141,7 +141,7 @@ namespace Namotion.Interceptor.Mqtt.Server
         public string ClientId { get; init; }
         public MQTTnet.Protocol.MqttQualityOfServiceLevel DefaultQualityOfService { get; init; }
         public System.TimeSpan InitialStateDelay { get; init; }
-        public required Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey> Mapper { get; init; }
+        public Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey> Mapper { get; init; }
         public int MaxPendingMessagesPerClient { get; init; }
         public System.Func<System.ReadOnlyMemory<byte>, System.DateTimeOffset?> SourceTimestampDeserializer { get; init; }
         public string? SourceTimestampPropertyName { get; init; }

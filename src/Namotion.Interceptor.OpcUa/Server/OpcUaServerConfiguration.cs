@@ -40,7 +40,7 @@ public class OpcUaServerConfiguration
 
     /// <summary>
     /// Maps C# properties to OPC UA nodes.
-    /// Defaults to composite of OpcUaPathProviderMapper (with "opc" source) and OpcUaAttributeMapper.
+    /// Defaults to composite of OpcUaPathProviderMapper and OpcUaAttributeMapper, both filtered by the "opc" connector name.
     /// </summary>
     public IPropertyMapper<OpcUaPropertyMapping> Mapper { get; set; } = DefaultMapper;
 

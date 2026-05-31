@@ -2,6 +2,7 @@ using System;
 using MQTTnet.Protocol;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Mqtt.Mapping;
+using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mqtt.Server;
 
@@ -10,6 +11,12 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// </summary>
 public class MqttServerConfiguration
 {
+    private static readonly IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> DefaultMapper =
+        new MqttCompositeMapper(
+            new MqttPathProviderMapper(new AttributeBasedPathProvider(MqttConstants.DefaultConnectorName, '/')),
+            new MqttAttributeMapper(MqttConstants.DefaultConnectorName));
+
+
     /// <summary>
     /// Gets or sets the MQTT broker hostname or IP address to bind to.
     /// Use "localhost" to bind to loopback only, or an IP address to bind to a specific interface.
@@ -34,8 +41,9 @@ public class MqttServerConfiguration
 
     /// <summary>
     /// Gets or sets the property mapper for property-to-topic mapping.
+    /// Defaults to composite of MqttPathProviderMapper and MqttAttributeMapper, both filtered by the "mqtt" connector name.
     /// </summary>
-    public required IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> Mapper { get; init; }
+    public IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> Mapper { get; init; } = DefaultMapper;
 
     /// <summary>
     /// Gets or sets the default QoS level. Default is AtLeastOnce (1) for guaranteed delivery.

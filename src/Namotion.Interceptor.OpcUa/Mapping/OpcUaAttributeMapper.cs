@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// </summary>
 public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
 {
-    private readonly string? _connectorName;
+    private readonly string _connectorName;
     private readonly string? _defaultNamespaceUri;
 
     /// <summary>
@@ -21,14 +21,14 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
     /// </summary>
     /// <param name="connectorName">
     /// The connector name carried on <see cref="OpcUaNodeAttribute"/> (as its <c>Name</c>,
-    /// inherited from the base path attribute) that this mapper filters by. When non-null, only
-    /// attributes whose <c>Name</c> matches are picked up, so multiple OPC UA mappings can coexist
-    /// on the same subject. When null, attributes are picked up regardless of name.
+    /// inherited from the base path attribute) that this mapper filters by. Only attributes whose
+    /// <c>Name</c> matches are picked up, so multiple OPC UA mappings can coexist on the same
+    /// subject. Defaults to <see cref="OpcUaConstants.DefaultConnectorName"/> ("opc").
     /// </param>
     /// <param name="defaultNamespaceUri">Default namespace URI for nodes without explicit namespace.</param>
     public OpcUaAttributeMapper(string? connectorName = null, string? defaultNamespaceUri = null)
     {
-        _connectorName = connectorName;
+        _connectorName = connectorName ?? OpcUaConstants.DefaultConnectorName;
         _defaultNamespaceUri = defaultNamespaceUri;
     }
 
@@ -191,8 +191,7 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
         return null;
     }
 
-    private bool Matches(OpcUaNodeAttribute attribute)
-        => _connectorName is null || attribute.Name == _connectorName;
+    private bool Matches(OpcUaNodeAttribute attribute) => attribute.Name == _connectorName;
 
     private static Type GetElementType(Type type)
     {
