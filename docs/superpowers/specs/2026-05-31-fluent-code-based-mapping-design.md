@@ -3,6 +3,7 @@
 Status: approved design, ready for implementation planning
 Issue: [#325](https://github.com/RicoSuter/Namotion.Interceptor/issues/325)
 Follow-up from: [#323](https://github.com/RicoSuter/Namotion.Interceptor/pull/323) (property-mapper abstraction)
+Deferred follow-up: [#328](https://github.com/RicoSuter/Namotion.Interceptor/issues/328) (instance-level `ForPath` overrides)
 
 ## Goal
 
@@ -13,12 +14,17 @@ The current fluent mappers key by absolute instance path, which prevents two thi
 1. Reuse across locations. A type used in several places (a `Motor` at `Pump.Motor` and at `Motors[2]`) must be redefined per location.
 2. Collection and dictionary elements. Selectors are member-access chains, so element properties cannot be configured fluently at all.
 
+## Scope of v1
+
+v1 delivers **type-level** fluent configuration only (`ForType<T>().Map(...)` plus `ForType<T>().Configure(...)`). That is a complete replacement for attributes, because attributes are themselves type-level only.
+
+Instance-level overrides (`ForPath`, configuring one specific location differently from the type-level default) are deferred to [#328](https://github.com/RicoSuter/Namotion.Interceptor/issues/328). The v1 design is deliberately structured so `ForPath` is a clean additive extension that changes nothing in the type-level design. See the Future extension section.
+
 ## Non-goals
 
 - No change to the canonical or wire path format. Index segments stay in bracket form (`Motors[2]`) everywhere (MQTT topics, OPC UA browse names, MCP browse paths, HomeBlaze canonical paths). Idiomatic slash topics for MQTT are a separate optional follow-up.
-- No per-instance topic or segment override. Instance-level (`ForPath`) overrides are metadata-only.
+- No instance-level (`ForPath`) overrides in v1. Tracked in [#328](https://github.com/RicoSuter/Namotion.Interceptor/issues/328).
 - No fluent `[InlinePaths]` declaration. The attribute keeps working and composes with fluent segments; declaring a container as inline stays an attribute for now.
-- No `ForPath` onto a subject (own-node config). That is covered at the type level by `ForType<T>().Map(...)` on the reference property plus `ForType<T>().Configure(...)`.
 
 ## Approach
 
@@ -26,30 +32,28 @@ Reuse the existing path engine and composite. Fluent stops being a separate mapp
 
 The reason attributes already support reuse, collections, and cheap reverse lookup is that they key segments by `(declaringType, member)` and let `PathProviderBase` plus `PathExtensions` do the hierarchical composition. Today's fluent fails only because it keys by absolute instance path. The fix replaces the source, not the engine.
 
-### The simplification that keeps complexity low
+### Why v1 stays simple
 
-`ForPath` (instance-level) overrides are metadata-only and never change the path or topic. Segments stay a type-level concern (`ForType`). Consequences:
+Type-level resolution keys on `(type, member)` directly and never needs a structural path string. Reverse lookup (incoming topic or node to property) stays entirely in the reused path-provider mapper, because the `FluentPathProvider` answers segments context-free per `(type, member)`, identical forward and reverse. The fluent metadata mapper therefore returns `null` on reverse, exactly like `MqttAttributeMapper` does today. No instance reverse index, no per-topic O(n) scan, none of the absolute-path machinery the old fluent mappers carried.
 
-- The topic or browse name is always composed from type-level segments, so it is identical forward and reverse.
-- Reverse lookup is owned entirely by the existing path-provider mappers. The fluent metadata mapper returns `null` on reverse, exactly like `MqttAttributeMapper` does today. No new reverse code, no instance reverse index, no O(n) subtree scans anywhere.
+This same property (segments are type-level and reverse-neutral) is what makes `ForPath` in #328 a clean additive layer rather than a redesign.
 
 ## Components
 
 ### Reused unchanged
 
-`MqttPathProviderMapper`, `OpcUaPathProviderMapper`, `ReverseCompositeMapper` and the connector composites, the path engine (apart from the single `TryGetPath` fix below), `IPropertyMapping<T>.Merge`, and the `MqttPropertyMapping` / `OpcUaPropertyMapping` records.
+`MqttPathProviderMapper`, `OpcUaPathProviderMapper`, `ReverseCompositeMapper` and the connector composites, the path engine, `IPropertyMapping<T>.Merge`, and the `MqttPropertyMapping` / `OpcUaPropertyMapping` records.
 
 ### New, shared
 
 - `IFluentSegmentSource` (Registry): `bool TryGetSegment(Type subjectType, string member, out string? segment)`. Small non-generic seam so Registry does not depend on connector metadata types.
 - `FluentPathProvider : PathProviderBase` (Registry): a drop-in replacement for `AttributeBasedPathProvider`. Overrides `IsPropertyIncluded` (registered, or has `[InlinePaths]`) and `TryGetPropertySegment` (the registered segment, or the member `BrowseName` when no segment was given). Inherits `[InlinePaths]`, array handling, and segment-guided reverse for free. The segment is context-free per property, so there is no recursion against `TryGetPath`.
-- `FluentMappingRegistry<TMetadata> : IFluentSegmentSource` (Connectors): the source of truth. Three maps:
+- `FluentMappingRegistry<TMetadata> : IFluentSegmentSource` (Connectors): the source of truth. Two maps:
   - `(Type, member) -> { segment, metadata }` (type-level)
-  - `instancePath -> metadata` (instance-level, metadata only)
   - `Type -> metadata` (type-self, for `Configure`)
-  Owns the inheritance walk (runtime type, then base classes, then interfaces, most-derived first, classes before interfaces).
-- `FluentMetadataMapper<TMetadata, TKey>` (Connectors): forward resolution merges instance metadata over type-level metadata, most-specific-wins via the existing `Merge`. Reverse returns `null`. MQTT uses it directly.
-- `FluentMappingBuilder<TRoot, TMetadata>` (Connectors): the `ForType` / `ForPath` API, root-scoped. Reuses `ExpressionPathHelper`.
+  Owns the inheritance walk (runtime type, then base classes, then interfaces, most-derived first, classes before interfaces). The structure leaves room for an `instancePath -> metadata` map to be added by #328 without restructuring.
+- `FluentMetadataMapper<TMetadata, TKey>` (Connectors): forward resolution returns the type-level metadata for the property's `(type, member)`. Reverse returns `null`. MQTT uses it directly.
+- `FluentMappingBuilder<TRoot, TMetadata>` (Connectors): the `ForType` API, root-scoped. Reuses `ExpressionPathHelper`.
 
 ### New, per-connector (small)
 
@@ -65,13 +69,12 @@ The reason attributes already support reuse, collections, and cheap reverse look
 
 ## Public API
 
-The configuration is root-scoped (like today's `MqttFluentMapper<T>` / `OpcUaFluentMapper<T>`). `ForType<T>()` returns a type-scoped builder whose `Map` and `Configure` return that same builder; it also carries `ForType<U>()` and `ForPath(...)` so the chain flows into the next type. Structural chaining uses no statement-body lambdas; per-member configuration is a pipe-expression lambda.
+The configuration is root-scoped (like today's `MqttFluentMapper<T>` / `OpcUaFluentMapper<T>`). `ForType<T>()` returns a type-scoped builder whose `Map` and `Configure` return that same builder; it also carries `ForType<U>()` so the chain flows into the next type. Structural chaining uses no statement-body lambdas; per-member configuration is a pipe-expression lambda.
 
-### Two entry points
+### Entry points
 
 - `ForType<T>().Map(member, configure)`: type-level. The member selector is a single member (no chain, no indexer). The member may be a value leaf or a subject / reference property. Applies everywhere the type appears, including collection and dictionary elements, with inheritance.
 - `ForType<T>().Configure(configure)`: class-level / type-self node config (the equivalent of `[OpcUaNode]` on a class). OPC UA only in practice; MQTT has no class-level config.
-- `ForPath(selector, configure)`: instance-level, metadata-only. The selector is a full absolute path from the root and may contain indexers (`Motors[2].Speed`, `Sensors["boiler"].Value`). It must resolve to a value leaf; a subject, subject-collection, or subject-dictionary target throws at registration time.
 
 ### MQTT example
 
@@ -86,8 +89,9 @@ fluent
         .Map(m => m.Torque, b => b.WithSegment("torque"))
     .ForType<Pump>()
         .Map(p => p.Motor,  b => b.WithSegment("motor"))
-    .ForPath(p => p.Motors[2].Speed,            b => b.WithQualityOfService(2))
-    .ForPath(p => p.Sensors["boiler"].Value,    b => b.WithRetain(true));
+    .ForType<Plant>()
+        .Map(p => p.Motors,  b => b.WithSegment("motors"))
+        .Map(p => p.Sensors, b => b.WithSegment("sensors"));
 ```
 
 ### OPC UA example
@@ -109,41 +113,35 @@ fluent
         .Map(p => p.Sensors, b => b.BrowseName("Sensors").ItemReferenceType("HasComponent"))
     .ForType<Sensor>()
         .Configure(b => b.NodeClass(OpcUaNodeClass.Variable))
-        .Map(s => s.Value, b => b.IsValue())
-    .ForPath(p => p.Pump.Motor.Speed,        b => b.SamplingInterval(2000))
-    .ForPath(p => p.Motors[0].Speed,         b => b.SamplingInterval(250).QueueSize(10))
-    .ForPath(p => p.Sensors["boiler"].Value, b => b.DeadbandType(DeadbandType.Absolute).DeadbandValue(0.5));
+        .Map(s => s.Value, b => b.IsValue());
 ```
 
 The OPC UA metadata builder keeps the existing `IPropertyBuilder<T>` setters verbatim (`BrowseName`, `NodeIdentifier`, `TypeDefinition`, `DataType`, `ReferenceType`, `ItemReferenceType`, `SamplingInterval`, `QueueSize`, `DiscardOldest`, `DataChangeTrigger`, `DeadbandType`, `DeadbandValue`, `ModellingRule`, `EventNotifier`, `AdditionalReference`, and so on). Only `Map<TProperty>` (the nested recursion) is dropped, replaced by independent `ForType<TProperty>()`.
 
 ## ExpressionPathHelper
 
-Two entry points:
-
-- Strict single-member extraction for `ForType.Map`: exactly one member, throws on chain or indexer.
-- Full-path-with-indexers extraction for `ForPath`: recognizes member chains, `ArrayIndex` binary nodes (arrays), and `get_Item(...)` method calls (`List`, `Dictionary`). Evaluates the index or key argument (constant or captured variable; it is a one-time config call, so compiling the sub-expression is acceptable) and emits the canonical bracket segment `Motors[2]` / `Sensors[boiler]`. The result matches the structural path that `TryGetPath` emits, so instance-registry keys and lookups agree.
-
-`ForPath` also checks the selector leaf type and throws if it is a subject, subject-collection, or subject-dictionary.
+`ForType.Map` uses strict single-member extraction: exactly one member rooted at the lambda parameter, throwing on a chain or an indexer. The current helper already walks member chains, so this adds a single-member validation. The full-path-with-indexers entry point needed by `ForPath` is deferred to #328.
 
 ## Lookup and precedence
 
-Realized by composite order plus the instance-over-type merge inside the metadata mapper. No bespoke precedence engine.
+Realized by composite order. No bespoke precedence engine.
 
 ```
 [ pathProviderMapper(AttributeBasedPathProvider) , attributeMetadataMapper ,   // attributes (optional, for mixing)
   pathProviderMapper(FluentPathProvider)         , fluentMetadataMapper ]       // fluent, later wins
 ```
 
-Effective ladder, most-specific-wins: instance fluent, then type-level fluent, then attributes. Pure code-based setups drop the attribute pair. The default wiring stays attributes-only and fluent is opt-in.
+Effective ladder: type-level fluent, then attributes. Pure code-based setups drop the attribute pair. The default wiring stays attributes-only and fluent is opt-in.
 
 ### Inheritance walk
 
 A type-level registration is keyed by the type named in `ForType<T>()` plus the member name. At lookup, given a property's runtime holder type and member name, the registry checks `(candidate, member)` over the runtime type, then its base classes, then its interfaces, most-derived first, and uses the first hit. This makes `ForType<Motor>()` cover `ServoMotor` instances and an interface registration (`ForType<IMotor>()`) apply to concrete implementers, with the most specific registration winning.
 
-## Single engine change
+## TryGetPath cleanup
 
-`PathExtensions.TryGetPath(string separator)` (the plain overload) currently drops indices and ignores `[InlinePaths]`. It is fixed to emit indices and handle `[InlinePaths]`, matching the provider overload, by sharing the frame-emit logic. Its only production callers are the two fluent mappers being deleted, so the blast radius is those plus tests. The index format stays brackets; no connector wire behavior changes.
+`PathExtensions.TryGetPath(string separator)` (the plain overload) currently drops indices and ignores `[InlinePaths]`, unlike the provider overload. After the old fluent mappers are deleted it has no production callers, but it is public API with a latent bug.
+
+It is fixed as a standalone cleanup: de-duplicate the two overloads behind one frame-emit, and make the plain one index- and `[InlinePaths]`-aware. This is not functionally required by v1 (type-level resolution never builds a path string), but it is worthwhile hygiene while we are in this code, and it is the prerequisite for #328's instance-path lookup. The method is kept (a useful structural-path helper with a custom separator), not removed. The index format stays brackets; no connector wire behavior changes.
 
 ## Coexistence and migration
 
@@ -153,17 +151,32 @@ Attributes and the code-based source merge via the existing composite, so adopti
 
 - A type used in multiple locations and in collections or dictionaries is configured once in code and resolves everywhere, forward and reverse.
 - Collection and array element properties resolve in both directions.
-- Type-level plus instance-level (metadata-only) precedence implemented and tested.
 - Polymorphic (base type and interface) registrations apply to derived and implementing types.
 - Attributes continue to work and can be mixed with the code-based source via the composite.
 - Shared implementation across MQTT and OPC UA, with no per-connector duplication of the keying, composition, or inheritance logic.
 - `ForType<T>().Configure(...)` covers class-level node config so fluent is a complete attribute replacement (modulo the `[InlinePaths]` declaration marker).
-- `ForPath` throws at registration when the target is not a value leaf.
+- `PathExtensions.TryGetPath(string separator)` emits indices and handles `[InlinePaths]`.
+
+## Future extension: instance-level overrides (#328)
+
+`ForPath(selector, configure)` adds instance-specific overrides keyed by an absolute path from the root. Decided constraints, kept here so they are not lost:
+
+- Metadata-only. Sets delivery and monitoring fields (MQTT QoS and Retain; OPC UA sampling, queue, deadband), never the path or topic segment. This keeps the segment identical forward and reverse, so reverse lookup stays in the path-provider mapper and the fluent metadata mapper still returns `null` on reverse.
+- Leaf-only. The selector must resolve to a value leaf; a subject target throws at registration.
+
+Additive implementation, touching nothing in the v1 type-level design:
+
+1. Add an `instancePath -> metadata` map to `FluentMappingRegistry`.
+2. Prepend an instance-first check in `FluentMetadataMapper.TryGetMapping` (instance metadata merged over type-level).
+3. Add a full-path-with-indexers entry point to `ExpressionPathHelper` (member chains plus `ArrayIndex` and `get_Item` for arrays, `List`, and `Dictionary`, evaluating the index or key, emitting canonical bracket segments). Relies on the `TryGetPath` fix above.
+4. Add `ForPath(...)` to the fluent builder.
+
+Per-instance addressing overrides (renaming or retyping one OPC UA node, or a per-instance MQTT topic) are reverse-coupled and would need a separate instance reverse index; they are a candidate for a later extension beyond #328.
 
 ## Testing and documentation (sketch, detailed in the plan)
 
-- Parity tests for both connectors mirroring the attribute tests: reuse across locations, collection and dictionary elements forward and reverse, inheritance (base class and interface), instance metadata override, attribute plus fluent mixing.
-- `ExpressionPathHelper` tests: single-member strictness, indexer parsing for array / `List` / `Dictionary`, leaf guard.
+- Parity tests for both connectors mirroring the attribute tests: reuse across locations, collection and dictionary elements forward and reverse, inheritance (base class and interface), attribute plus fluent mixing.
+- `ExpressionPathHelper` test: single-member strictness (rejects chain and indexer).
 - `TryGetPath(string separator)` fix tests for indices and `[InlinePaths]`.
 - Refresh public-API `.verified.txt` snapshots for changed assemblies.
 - Update connector mapping docs (`docs/connectors-opcua-mapping.md`, `docs/connectors-mqtt.md`, `docs/connectors.md`).
