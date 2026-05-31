@@ -17,13 +17,13 @@ public static class MqttSubjectExtensions
     /// </summary>
     /// <param name="serviceCollection">The service collection.</param>
     /// <param name="brokerHost">The MQTT broker hostname.</param>
-    /// <param name="pathProviderName">The name to filter [Path] attributes by (e.g., "mqtt").</param>
+    /// <param name="connectorName">The name to filter [Path] attributes by (e.g., "mqtt").</param>
     /// <param name="brokerPort">The MQTT broker port. Default is 1883.</param>
     /// <param name="topicPrefix">Optional topic prefix.</param>
     public static IServiceCollection AddMqttSubjectClientSource<TSubject>(
         this IServiceCollection serviceCollection,
         string brokerHost,
-        string pathProviderName,
+        string connectorName,
         int brokerPort = 1883,
         string? topicPrefix = null)
         where TSubject : IInterceptorSubject
@@ -36,8 +36,8 @@ public static class MqttSubjectExtensions
                 BrokerPort = brokerPort,
                 TopicPrefix = topicPrefix,
                 Mapper = new MqttCompositeMapper(
-                    new MqttPathProviderMapper(new AttributeBasedPathProvider(pathProviderName, '/')),
-                    new MqttAttributeMapper(pathProviderName))
+                    new MqttPathProviderMapper(new AttributeBasedPathProvider(connectorName, '/')),
+                    new MqttAttributeMapper(connectorName))
             });
     }
 
@@ -68,13 +68,13 @@ public static class MqttSubjectExtensions
     /// Adds an MQTT server that publishes property changes to connected MQTT clients.
     /// </summary>
     /// <param name="serviceCollection">The service collection.</param>
-    /// <param name="pathProviderName">The name to filter [Path] attributes by (e.g., "mqtt").</param>
+    /// <param name="connectorName">The name to filter [Path] attributes by (e.g., "mqtt").</param>
     /// <param name="brokerPort">The port to listen on. Default is 1883.</param>
     /// <param name="brokerHost">Optional IP address to bind to. Default binds to all interfaces.</param>
     /// <param name="topicPrefix">Optional topic prefix.</param>
     public static IServiceCollection AddMqttSubjectServer<TSubject>(
         this IServiceCollection serviceCollection,
-        string pathProviderName,
+        string connectorName,
         int brokerPort = 1883,
         string? brokerHost = null,
         string? topicPrefix = null)
@@ -88,8 +88,8 @@ public static class MqttSubjectExtensions
                 BrokerPort = brokerPort,
                 TopicPrefix = topicPrefix,
                 Mapper = new MqttCompositeMapper(
-                    new MqttPathProviderMapper(new AttributeBasedPathProvider(pathProviderName, '/')),
-                    new MqttAttributeMapper(pathProviderName))
+                    new MqttPathProviderMapper(new AttributeBasedPathProvider(connectorName, '/')),
+                    new MqttAttributeMapper(connectorName))
             });
     }
 

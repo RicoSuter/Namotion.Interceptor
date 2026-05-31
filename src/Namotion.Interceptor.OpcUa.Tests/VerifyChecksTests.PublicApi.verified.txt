@@ -6,16 +6,16 @@ namespace Microsoft.Extensions.DependencyInjection
     public static class OpcUaSubjectExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string serverUrl, string pathProviderName, string[]? rootPath = null)
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string serverUrl, string connectorName, string[]? rootPath = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string pathProviderName, string? rootName = null)
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string connectorName, string? rootName = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string serverUrl, string pathProviderName, string[]? rootPath = null)
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string serverUrl, string connectorName, string[]? rootPath = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string pathProviderName, string? rootName = null)
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string connectorName, string? rootName = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static Namotion.Interceptor.OpcUa.Client.IOpcUaSubjectClientSource CreateOpcUaClientSource(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
         public static Namotion.Interceptor.OpcUa.Server.IOpcUaSubjectServer CreateOpcUaServer(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
@@ -32,7 +32,7 @@ namespace Namotion.Interceptor.OpcUa.Attributes
     [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Property)]
     public class OpcUaNodeAttribute : Namotion.Interceptor.Registry.Attributes.PathAttribute
     {
-        public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null, string? pathProviderName = null) { }
+        public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null, string? connectorName = null) { }
         public string BrowseName { get; }
         public string? BrowseNamespaceUri { get; }
         public Opc.Ua.DataChangeTrigger DataChangeTrigger { get; init; }
@@ -240,7 +240,7 @@ namespace Namotion.Interceptor.OpcUa.Mapping
     }
     public class OpcUaAttributeMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
     {
-        public OpcUaAttributeMapper(string? pathProviderName = null, string? defaultNamespaceUri = null) { }
+        public OpcUaAttributeMapper(string? connectorName = null, string? defaultNamespaceUri = null) { }
         public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
         public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
@@ -316,7 +316,7 @@ namespace Namotion.Interceptor.OpcUa
     }
     public static class OpcUaConstants
     {
-        public const string DefaultPathProviderName = "opc";
+        public const string DefaultConnectorName = "opc";
     }
     public class OpcUaSubjectFactory
     {

@@ -2,5 +2,5 @@ namespace Namotion.Interceptor.Mqtt;
 
 public static class MqttConstants
 {
-    public const string DefaultPathProviderName = "mqtt";
+    public const string DefaultConnectorName = "mqtt";
 }

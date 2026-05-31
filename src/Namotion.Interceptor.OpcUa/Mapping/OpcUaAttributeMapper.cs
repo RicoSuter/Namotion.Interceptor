@@ -13,22 +13,22 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// </summary>
 public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
 {
-    private readonly string? _pathProviderName;
+    private readonly string? _connectorName;
     private readonly string? _defaultNamespaceUri;
 
     /// <summary>
     /// Creates a new attribute-based node mapper.
     /// </summary>
-    /// <param name="pathProviderName">
-    /// The path-provider name carried on <see cref="OpcUaNodeAttribute"/> (inherited from
-    /// <c>PathAttribute</c>) that this mapper filters by. When non-null, only attributes whose
-    /// <c>Name</c> matches are picked up, so multiple OPC UA mappings can coexist on the same subject.
-    /// When null, attributes are picked up regardless of name.
+    /// <param name="connectorName">
+    /// The connector name carried on <see cref="OpcUaNodeAttribute"/> (as its <c>Name</c>,
+    /// inherited from the base path attribute) that this mapper filters by. When non-null, only
+    /// attributes whose <c>Name</c> matches are picked up, so multiple OPC UA mappings can coexist
+    /// on the same subject. When null, attributes are picked up regardless of name.
     /// </param>
     /// <param name="defaultNamespaceUri">Default namespace URI for nodes without explicit namespace.</param>
-    public OpcUaAttributeMapper(string? pathProviderName = null, string? defaultNamespaceUri = null)
+    public OpcUaAttributeMapper(string? connectorName = null, string? defaultNamespaceUri = null)
     {
-        _pathProviderName = pathProviderName;
+        _connectorName = connectorName;
         _defaultNamespaceUri = defaultNamespaceUri;
     }
 
@@ -192,7 +192,7 @@ public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping,
     }
 
     private bool Matches(OpcUaNodeAttribute attribute)
-        => _pathProviderName is null || attribute.Name == _pathProviderName;
+        => _connectorName is null || attribute.Name == _connectorName;
 
     private static Type GetElementType(Type type)
     {

@@ -272,7 +272,7 @@ builder.Services.AddOpcUaSubjectClientSource<Sensor>("opc.tcp://localhost:4840",
 // MQTT Client Source
 builder.Services.AddMqttSubjectClientSource<Sensor>(
     brokerHost: "localhost",
-    pathProviderName: "mqtt");
+    connectorName: "mqtt");
 ```
 
 #### BackgroundTaskLifetime
@@ -459,10 +459,10 @@ Servers follow the same registration pattern as sources: register as singleton +
 
 ```csharp
 // OPC UA Server
-builder.Services.AddOpcUaSubjectServer<Sensor>(pathProviderName: "opc", rootName: "Devices");
+builder.Services.AddOpcUaSubjectServer<Sensor>(connectorName: "opc", rootName: "Devices");
 
 // MQTT Server
-builder.Services.AddMqttSubjectServer<Sensor>(pathProviderName: "mqtt", brokerPort: 1883);
+builder.Services.AddMqttSubjectServer<Sensor>(connectorName: "mqtt", brokerPort: 1883);
 
 // WebSocket Server (standalone)
 builder.Services.AddWebSocketSubjectServer<Sensor>(configuration =>

@@ -11,8 +11,8 @@ public class OpcUaServerConfiguration
 {
     private static readonly IPropertyMapper<OpcUaPropertyMapping> DefaultMapper =
         new OpcUaCompositeMapper(
-            new OpcUaPathProviderMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultPathProviderName)),
-            new OpcUaAttributeMapper(OpcUaConstants.DefaultPathProviderName));
+            new OpcUaPathProviderMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultConnectorName)),
+            new OpcUaAttributeMapper(OpcUaConstants.DefaultConnectorName));
 
     /// <summary>
     /// Gets the optional root folder name to create under the Objects folder for organizing server nodes.

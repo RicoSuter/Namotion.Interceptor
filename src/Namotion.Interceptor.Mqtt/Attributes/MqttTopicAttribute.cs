@@ -30,13 +30,13 @@ public class MqttTopicAttribute : PathAttribute
     /// Creates an MQTT topic mapping for a property.
     /// </summary>
     /// <param name="topic">The MQTT topic to map this property to.</param>
-    /// <param name="pathProviderName">
-    /// The path-provider name carried on the underlying <see cref="PathAttribute"/>, used to
-    /// filter which path provider and attribute mapper pick this attribute up.
-    /// Defaults to <see cref="MqttConstants.DefaultPathProviderName"/> ("mqtt").
+    /// <param name="connectorName">
+    /// The connector name carried on the underlying <see cref="PathAttribute"/> as its <c>Name</c>,
+    /// used to filter which path provider and attribute mapper pick this attribute up.
+    /// Defaults to <see cref="MqttConstants.DefaultConnectorName"/> ("mqtt").
     /// </param>
-    public MqttTopicAttribute(string topic, string? pathProviderName = null)
-        : base(pathProviderName ?? MqttConstants.DefaultPathProviderName, topic)
+    public MqttTopicAttribute(string topic, string? connectorName = null)
+        : base(connectorName ?? MqttConstants.DefaultConnectorName, topic)
     {
     }
 

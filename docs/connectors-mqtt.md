@@ -37,7 +37,7 @@ var context = InterceptorSubjectContext
 builder.Services.AddSingleton(new Sensor(context));
 builder.Services.AddMqttSubjectClientSource<Sensor>(
     brokerHost: "mqtt.example.com",
-    pathProviderName: "mqtt",
+    connectorName: "mqtt",
     topicPrefix: "sensors/room1");
 
 var host = builder.Build();
@@ -70,7 +70,7 @@ var context = InterceptorSubjectContext
 
 builder.Services.AddSingleton(new Device(context));
 builder.Services.AddMqttSubjectServer<Device>(
-    pathProviderName: "mqtt",
+    connectorName: "mqtt",
     brokerPort: 1883,
     topicPrefix: "devices/mydevice");
 
@@ -186,7 +186,7 @@ The built-in mapper types:
 | `MqttFluentMapper<TSubject>` | Code-based per-property configuration via lambda expressions |
 | `MqttCompositeMapper` | Combines multiple mappers with merge semantics |
 
-The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, pathProviderName)`) default to a composite of `MqttPathProviderMapper` and `MqttAttributeMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
+The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, connectorName)`) default to a composite of `MqttPathProviderMapper` and `MqttAttributeMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
 
 `MqttAttributeMapper` contributes only QoS and Retain; it relies on `MqttPathProviderMapper` to resolve the topic in both directions, so it must always be paired with one (the default composite does this). On its own it resolves no topics. This differs from the OPC UA attribute mapper, which is self-sufficient because OPC UA browses hierarchically and matches each node against a single level, whereas MQTT resolves a flat topic that needs full-path composition by the path provider.
 
