@@ -619,7 +619,7 @@ public class OpcUaSubjectLoaderTests
     {
         // Arrange: a variable's child attribute is returned twice (e.g., via HasComponent + HasProperty)
         // within a single browse call. The outer parent is referenced only once. This exercises the
-        // NodeId dedup inside LoadAttributeNodesForManyAsync.
+        // NodeId dedup inside LoadAttributesAsync.
         var statusNodeId = new NodeId(6001, 2);
         var stateNodeId = new NodeId(6002, 2);
 
@@ -726,7 +726,7 @@ public class OpcUaSubjectLoaderTests
         // another source registers a registry attribute (here: "State") on a property *before*
         // the OPC UA loader browses the server. The browse then returns a same-named dynamic
         // Variable child, which the loader's second pass would normally try to AddAttribute,
-        // throwing "duplicate key". The safety net in LoadAttributeNodesForManyAsync should detect the
+        // throwing "duplicate key". The safety net in LoadAttributesAsync should detect the
         // existing registration via TryGetAttribute and skip with a warning instead.
         var statusNodeId = new NodeId(7001, 2);
         var stateNodeId = new NodeId(7002, 2);
@@ -786,7 +786,7 @@ public class OpcUaSubjectLoaderTests
     public async Task WhenNodeCountExceedsMaxNodesPerBrowse_ThenBrowseIsChunked()
     {
         // Arrange: set MaxNodesPerBrowse = 2, tree has 4 leaf variables as dynamic properties.
-        // Phase 5 (LoadAttributeNodesForManyAsync) batch-browses all 4 variable nodes at once
+        // Phase 5 (LoadAttributesAsync) batch-browses all 4 variable nodes at once
         // via BrowseManyNodesAsync, which must chunk into multiple BrowseAsync calls.
         var rootId = new NodeId(1, 0);
         var var1Id = new NodeId(2001, 2);
@@ -1238,7 +1238,7 @@ public class OpcUaSubjectLoaderTests
     public async Task WhenBrowseNextRejectsBatch_ThenRetriesWithSmallerBatches()
     {
         // Arrange: two dynamic variable nodes each have a continuation point on initial
-        // browse (phase 5 / LoadAttributeNodesForManyAsync). The server rejects any
+        // browse (phase 5 / LoadAttributesAsync). The server rejects any
         // BrowseNextAsync call with more than 1 continuation point, forcing a split-and-retry.
         var rootId = new NodeId(1, 0);
         var var1Id = new NodeId(2001, 2);
@@ -1814,7 +1814,7 @@ public class OpcUaSubjectLoaderTests
         // VarA has a dynamic attribute "Quality" -> NodeId 999 (a leaf).
         // VarB has a dynamic attribute "Status"  -> NodeId 100 (the SAME NodeId as VarA's parent).
         //
-        // Phase 5 / LoadAttributeNodesForManyAsync runs in rounds:
+        // Phase 5 / LoadAttributesAsync runs in rounds:
         //   Round 1: browses parents [100, 200], visitedNodes = {100, 200}.
         //   Round 2: input is [(VarA.Quality, 999), (VarB.Status, 100)].
         //            visitedNodes already contains 100, so the second entry's parent isn't

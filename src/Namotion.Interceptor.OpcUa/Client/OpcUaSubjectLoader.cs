@@ -328,7 +328,7 @@ internal sealed class OpcUaSubjectLoader
         await BatchLoadVariableNodesAsync(pendingVariableNodes, context).ConfigureAwait(false);
         await BatchLoadCollectionsAndDictionariesAsync(pendingCollections, pendingDictionaries, context).ConfigureAwait(false);
         await LoadPendingSubjectReferencesAsync(allPendingSubjectRefs, context).ConfigureAwait(false);
-        await _attributeLoader.LoadAttributeNodesForManyAsync(allAttributeVariableNodes, context).ConfigureAwait(false);
+        await _attributeLoader.LoadAttributesAsync(allAttributeVariableNodes, context).ConfigureAwait(false);
     }
 
     private RegisteredSubjectProperty? TryCreateDynamicProperty(

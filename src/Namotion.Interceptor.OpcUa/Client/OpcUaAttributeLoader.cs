@@ -10,7 +10,8 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// discovered at runtime) for a batch of variable nodes. Drives the multi-round traversal that
 /// walks attributes of attributes until no new nodes appear or the configured limit is reached.
 /// Holds a back-reference to the owning <see cref="OpcUaSubjectLoader"/> so monitored-item
-/// claims go through the same ownership path as the rest of the loader.
+/// claims go through the same ownership path as the rest of the loader. Has no mutable
+/// instance state; all per-load state lives in <see cref="OpcUaLoadContext"/> or method locals.
 /// </summary>
 internal sealed class OpcUaAttributeLoader
 {
@@ -31,6 +32,10 @@ internal sealed class OpcUaAttributeLoader
         _logger = logger;
     }
 
+    /// <summary>
+    /// Candidate dynamic attribute discovered in a round, deferred until the batch
+    /// type-resolution step at the end of the round.
+    /// </summary>
     private readonly record struct DynamicAttributeNode(
         RegisteredSubjectProperty OwnerProperty,
         NodeId ChildNodeId,
@@ -44,7 +49,7 @@ internal sealed class OpcUaAttributeLoader
     /// attributes are discovered until no new nodes appear or <see cref="OpcUaClientConfiguration.MaxAttributeTraversals"/>
     /// is reached.
     /// </summary>
-    public async Task LoadAttributeNodesForManyAsync(
+    public async Task LoadAttributesAsync(
         IReadOnlyList<(RegisteredSubjectProperty Property, NodeId NodeId)> variableNodes,
         OpcUaLoadContext context)
     {
@@ -89,6 +94,13 @@ internal sealed class OpcUaAttributeLoader
 
         var browseResults = await context.BrowseAsync(parentIds).ConfigureAwait(false);
 
+        // Memoize per parent so two entries sharing a parent (alias case) don't recompute.
+        var distinctChildren = new Dictionary<NodeId, List<(ReferenceDescription Reference, NodeId NodeId)>>(browseResults.Count);
+        foreach (var (parentNodeId, rawChildren) in browseResults)
+        {
+            distinctChildren[parentNodeId] = context.DistinctByResolvedNodeId(rawChildren);
+        }
+
         var dynamicAttributeNodes = new List<DynamicAttributeNode>();
         var nextRound = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
 
@@ -99,17 +111,16 @@ internal sealed class OpcUaAttributeLoader
                 continue;
             }
 
-            if (!browseResults.TryGetValue(parentNodeId, out var rawChildren) || rawChildren.Count == 0)
+            if (!distinctChildren.TryGetValue(parentNodeId, out var childNodes) || childNodes.Count == 0)
             {
                 continue;
             }
 
-            var childNodes = context.DistinctByResolvedNodeId(rawChildren);
             var processedBrowseNames = MatchKnownAttributes(property, childNodes, nextRound, context);
             await CollectDynamicAttributesAsync(property, parentNodeId, childNodes, processedBrowseNames, dynamicAttributeNodes, context).ConfigureAwait(false);
         }
 
-        await ResolveDynamicAttributesAsync(dynamicAttributeNodes, nextRound, context).ConfigureAwait(false);
+        await CreateDynamicAttributesAsync(dynamicAttributeNodes, nextRound, context).ConfigureAwait(false);
         return nextRound;
     }
 
@@ -119,6 +130,13 @@ internal sealed class OpcUaAttributeLoader
         List<(RegisteredSubjectProperty Property, NodeId NodeId)> nextRound,
         OpcUaLoadContext context)
     {
+        // childNodes have non-null BrowseName.Name (filtered at the session boundary in DistinctByResolvedNodeId).
+        var childByBrowseName = new Dictionary<string, NodeId>(childNodes.Count);
+        foreach (var (childNode, childNodeId) in childNodes)
+        {
+            childByBrowseName.TryAdd(childNode.BrowseName.Name, childNodeId);
+        }
+
         var processedBrowseNames = new HashSet<string>();
         foreach (var attribute in property.Attributes)
         {
@@ -128,17 +146,7 @@ internal sealed class OpcUaAttributeLoader
             }
 
             var attributeBrowseName = attributeConfiguration.BrowseName ?? attribute.BrowseName;
-            NodeId? matchingNodeId = null;
-            foreach (var (childNode, childNodeId) in childNodes)
-            {
-                if (childNode.BrowseName.Name == attributeBrowseName)
-                {
-                    matchingNodeId = childNodeId;
-                    break;
-                }
-            }
-
-            if (matchingNodeId is null)
+            if (!childByBrowseName.TryGetValue(attributeBrowseName, out var matchingNodeId))
             {
                 continue;
             }
@@ -174,7 +182,7 @@ internal sealed class OpcUaAttributeLoader
             if (property.TryGetAttribute(browseName) is not null)
             {
                 _logger.LogWarning(
-                    "Skipping OPC UA child '{AttributeName}' on '{PropertyName}' (parent {ParentNodeId}, child {ChildNodeId}): an attribute with this name was already registered by another source (e.g. a lifecycle handler).",
+                    "Skipping OPC UA child '{AttributeName}' on '{PropertyName}' (parent {ParentNodeId}, child {ChildNodeId}): an attribute with this name is already declared on the property (a C# attribute without an OPC UA mapping, or registered by a lifecycle handler).",
                     browseName, property.Name, parentNodeId, childNode.NodeId);
                 continue;
             }
@@ -190,7 +198,7 @@ internal sealed class OpcUaAttributeLoader
         }
     }
 
-    private async Task ResolveDynamicAttributesAsync(
+    private async Task CreateDynamicAttributesAsync(
         List<DynamicAttributeNode> dynamicAttributeNodes,
         List<(RegisteredSubjectProperty Property, NodeId NodeId)> nextRound,
         OpcUaLoadContext context)

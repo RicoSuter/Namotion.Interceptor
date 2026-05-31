@@ -91,7 +91,8 @@ internal static class OpcUaSessionExtensions
     /// <summary>
     /// Deduplicates browse references by resolving each <see cref="ExpandedNodeId"/>
     /// to a canonical <see cref="NodeId"/> via the session's namespace table.
-    /// References with unresolvable namespace URIs are skipped.
+    /// References with unresolvable namespace URIs or missing BrowseName are skipped
+    /// so downstream consumers can safely access <c>Reference.BrowseName.Name</c>.
     /// </summary>
     public static List<(ReferenceDescription Reference, NodeId NodeId)> DistinctByResolvedNodeId(
         this ISession session,
@@ -102,12 +103,19 @@ internal static class OpcUaSessionExtensions
         var result = new List<(ReferenceDescription, NodeId)>(references.Count);
         foreach (var reference in references)
         {
+            if (string.IsNullOrEmpty(reference.BrowseName?.Name))
+            {
+                logger.LogWarning(
+                    "Skipping browse reference with missing BrowseName (NodeId '{NodeId}').",
+                    reference.NodeId);
+                continue;
+            }
             var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
             if (nodeId is null)
             {
                 logger.LogWarning(
                     "Skipping browse reference '{BrowseName}' with unresolvable NodeId '{NodeId}': namespace URI is not registered in the session's NamespaceTable.",
-                    reference.BrowseName?.Name, reference.NodeId);
+                    reference.BrowseName.Name, reference.NodeId);
                 continue;
             }
             if (!seen.Add(nodeId))
