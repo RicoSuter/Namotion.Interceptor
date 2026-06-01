@@ -71,7 +71,7 @@ public class OpcUaSubjectLoaderFailureTests
     public async Task WhenLoadFails_ThenRegistryKnownSubjectsContainsNoOrphans()
     {
         // Arrange
-        var (loader, _, subject) = CreateFixture();
+        var (loader, source, subject) = CreateFixture();
         var registry = subject.Context.TryGetService<ISubjectRegistry>()!;
         var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
 
@@ -106,6 +106,10 @@ public class OpcUaSubjectLoaderFailureTests
         var postFailureKeys = registry.KnownSubjects.Keys.ToHashSet();
         var orphans = postFailureKeys.Except(preLoadKeys).ToArray();
         Assert.Empty(orphans);
+
+        // Assert: no source-ownership claims committed (Apply never ran past
+        // discovery; rollback discarded pending claims).
+        Assert.Empty(source.Ownership.Properties);
     }
 
     [Fact]
@@ -329,7 +333,7 @@ public class OpcUaSubjectLoaderFailureTests
         // Arrange: 3-level tree Root → ParentA (staged) → ChildB (staged) → fail.
         // Both ParentA and ChildB are created during discovery as staged subjects.
         // If rollback only unregisters one level, the other becomes an orphan.
-        var (loader, _, subject) = CreateFixture();
+        var (loader, source, subject) = CreateFixture();
         var registry = subject.Context.TryGetService<ISubjectRegistry>()!;
         var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
 
@@ -391,6 +395,51 @@ public class OpcUaSubjectLoaderFailureTests
         var postFailureKeys = registry.KnownSubjects.Keys.ToHashSet();
         var orphans = postFailureKeys.Except(preLoadKeys).ToArray();
         Assert.Empty(orphans);
+
+        // Assert: no source-ownership claims committed across the multi-level rollback.
+        Assert.Empty(source.Ownership.Properties);
+    }
+
+    [Fact]
+    public async Task WhenChildBrowseReturnsPermanentBadStatus_ThenChildIsSkippedAndLoadCompletes()
+    {
+        // Arrange: a sibling Object child returns a permanent classifier code on its
+        // own browse. The loader must log + continue (no exception), drop the bad child,
+        // and complete the load for the well-formed siblings. Distinguishes the loader's
+        // permanent-vs-transient path: transient surfaces as OpcUaTransientServiceException
+        // (covered by sibling tests); permanent is silently skipped.
+        var (loader, source, subject) = CreateFixture();
+
+        var mockSession = CreateMockSession();
+        ConfigureBrowseTree(
+            mockSession,
+            failOnNodeId: SensorId,
+            failStatusCode: StatusCodes.BadNodeIdUnknown,
+            browseTree: new Dictionary<NodeId, ReferenceDescription[]>
+            {
+                [RootId] =
+                [
+                    MakeReference("Temperature", TemperatureId, NodeClass.Variable),
+                    MakeReference("Sensor", SensorId, NodeClass.Object)
+                ]
+            });
+        ConfigureReadAsync(mockSession, new Dictionary<NodeId, NodeId>
+        {
+            [TemperatureId] = DataTypeIds.Double
+        });
+
+        var rootNode = MakeReference("Root", RootId, NodeClass.Object);
+
+        // Act: must not throw; permanent bad status on Sensor browse is logged + skipped.
+        var monitoredItems = await loader.LoadSubjectAsync(
+            subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: Temperature is loaded and owned, Sensor is silently dropped.
+        Assert.Single(monitoredItems);
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        Assert.Contains(registeredSubject.Properties, p => p.Name == "Temperature");
+        Assert.DoesNotContain(registeredSubject.Properties, p => p.Name == "Sensor");
+        Assert.Single(source.Ownership.Properties);
     }
 
     private static (OpcUaSubjectLoader Loader, OpcUaSubjectClientSource Source, IInterceptorSubject Subject) CreateFixture()
@@ -438,7 +487,8 @@ public class OpcUaSubjectLoaderFailureTests
     private static void ConfigureBrowseTree(
         Mock<ISession> mockSession,
         NodeId failOnNodeId,
-        Dictionary<NodeId, ReferenceDescription[]> browseTree)
+        Dictionary<NodeId, ReferenceDescription[]> browseTree,
+        uint failStatusCode = StatusCodes.BadServerHalted)
     {
         mockSession
             .Setup(s => s.BrowseAsync(
@@ -454,10 +504,9 @@ public class OpcUaSubjectLoaderFailureTests
                 {
                     if (desc.NodeId == failOnNodeId)
                     {
-                        // Transient failure on this NodeId triggers OpcUaTransientServiceException
                         results.Add(new BrowseResult
                         {
-                            StatusCode = StatusCodes.BadServerHalted,
+                            StatusCode = failStatusCode,
                             References = []
                         });
                     }

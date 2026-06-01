@@ -258,6 +258,7 @@ public class OpcUaTypeResolverTests
         };
 
         var mockSession = CreateMockSession();
+        var readCallCount = 0;
 
         mockSession
             .Setup(s => s.ReadAsync(
@@ -268,6 +269,7 @@ public class OpcUaTypeResolverTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
             {
+                Interlocked.Increment(ref readCallCount);
                 // Reject batches larger than 2 ReadValueIds (= 1 variable with DataType + ValueRank)
                 if (nodesToRead.Count > 2)
                 {
@@ -299,6 +301,13 @@ public class OpcUaTypeResolverTests
         Assert.Equal(2, result.Count);
         Assert.Equal(typeof(float), result[node1Id]);
         Assert.Equal(typeof(int), result[node2Id]);
+
+        // Assert: split-and-retry actually invoked ReadAsync multiple times. A regression
+        // that silently dropped the batch on rejection would also produce 0 results here,
+        // but a regression that swallowed the exception and returned partial data could
+        // satisfy the Count==2 check without retrying. The call-count pin closes that gap.
+        Assert.True(readCallCount > 1,
+            $"Expected ReadAsync to be called more than once for split-and-retry, but got {readCallCount}.");
     }
 
     private static Mock<ISession> CreateMockSession()
