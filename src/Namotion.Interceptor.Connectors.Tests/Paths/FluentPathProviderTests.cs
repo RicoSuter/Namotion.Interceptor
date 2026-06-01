@@ -1,7 +1,6 @@
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.Tests.Paths;
@@ -16,7 +15,7 @@ public class FluentPathProviderTests
         // Arrange
         var registry = new FluentMappingRegistry<Meta>();
         registry.AddType(typeof(FluentPathTestSensor), "Temperature", "temp", new Meta());
-        var provider = new FluentPathProvider(registry, '/');
+        var provider = new FluentPathProvider<Meta>(registry, '/');
 
         var subject = new FluentPathTestSensor(new InterceptorSubjectContext());
         var registered = new RegisteredSubject(subject);
@@ -37,7 +36,7 @@ public class FluentPathProviderTests
         // Arrange
         var registry = new FluentMappingRegistry<Meta>();
         registry.AddType(typeof(FluentPathTestSensor), "Temperature", segment: null, new Meta());
-        var provider = new FluentPathProvider(registry);
+        var provider = new FluentPathProvider<Meta>(registry);
 
         var subject = new FluentPathTestSensor(new InterceptorSubjectContext());
         var registered = new RegisteredSubject(subject);
@@ -55,7 +54,7 @@ public class FluentPathProviderTests
     {
         // Arrange
         var registry = new FluentMappingRegistry<Meta>();
-        var provider = new FluentPathProvider(registry);
+        var provider = new FluentPathProvider<Meta>(registry);
 
         var subject = new FluentPathTestSensor(new InterceptorSubjectContext());
         var registered = new RegisteredSubject(subject);
@@ -74,7 +73,7 @@ public class FluentPathProviderTests
     public void WhenSeparatorConfigured_ThenExposed()
     {
         // Arrange
-        var provider = new FluentPathProvider(new FluentMappingRegistry<Meta>(), '/');
+        var provider = new FluentPathProvider<Meta>(new FluentMappingRegistry<Meta>(), '/');
 
         // Act & Assert
         Assert.Equal('/', provider.PathSeparator);

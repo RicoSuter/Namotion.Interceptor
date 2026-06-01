@@ -150,17 +150,6 @@ namespace Namotion.Interceptor.Registry.Paths
         public override char PathSeparator { get; }
         public static Namotion.Interceptor.Registry.Paths.DefaultPathProvider Instance { get; }
     }
-    public sealed class FluentPathProvider : Namotion.Interceptor.Registry.Paths.PathProviderBase
-    {
-        public FluentPathProvider(Namotion.Interceptor.Registry.Paths.IFluentSegmentSource source, char pathSeparator = .) { }
-        public override char PathSeparator { get; }
-        public override bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-        public override string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-    }
-    public interface IFluentSegmentSource
-    {
-        bool TryGetSegment(System.Type subjectType, string member, out string? segment);
-    }
     public interface IPathProvider
     {
         bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);

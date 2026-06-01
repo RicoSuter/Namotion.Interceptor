@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Connectors.Mapping;
 
@@ -9,7 +8,7 @@ namespace Namotion.Interceptor.Connectors.Mapping;
 /// base classes, then its interfaces, most-derived first, so a base or interface registration applies to
 /// derived and implementing types.
 /// </summary>
-public sealed class FluentMappingRegistry<TMetadata> : IFluentSegmentSource
+public sealed class FluentMappingRegistry<TMetadata>
     where TMetadata : class
 {
     private readonly Dictionary<(Type Type, string Member), Entry> _typeLevel = new();
@@ -23,7 +22,11 @@ public sealed class FluentMappingRegistry<TMetadata> : IFluentSegmentSource
     public void AddTypeSelf(Type type, TMetadata metadata)
         => _typeSelf[type] = metadata;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Returns true when a type-level registration exists for the given holder type and member, walking the
+    /// type hierarchy. <paramref name="segment"/> is the registered segment override, or null to mean "use the
+    /// member's BrowseName".
+    /// </summary>
     public bool TryGetSegment(Type subjectType, string member, out string? segment)
     {
         if (TryResolveType(subjectType, member, out var entry))

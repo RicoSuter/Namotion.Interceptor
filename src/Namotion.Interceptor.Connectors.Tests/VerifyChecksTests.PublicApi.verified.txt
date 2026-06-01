@@ -117,7 +117,7 @@ namespace Namotion.Interceptor.Connectors.Mapping
         public static string GetPathFromExpression(System.Linq.Expressions.Expression expression) { }
         public static string GetSingleMemberName(System.Linq.Expressions.Expression expression) { }
     }
-    public sealed class FluentMappingRegistry<TMetadata> : Namotion.Interceptor.Registry.Paths.IFluentSegmentSource
+    public sealed class FluentMappingRegistry<TMetadata>
         where TMetadata :  class
     {
         public FluentMappingRegistry() { }
@@ -134,6 +134,14 @@ namespace Namotion.Interceptor.Connectors.Mapping
         protected Namotion.Interceptor.Connectors.Mapping.FluentMappingRegistry<TMetadata> Registry { get; }
         public virtual bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMetadata? mapping) { }
         public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(TKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class FluentPathProvider<TMetadata> : Namotion.Interceptor.Registry.Paths.PathProviderBase
+        where TMetadata :  class
+    {
+        public FluentPathProvider(Namotion.Interceptor.Connectors.Mapping.FluentMappingRegistry<TMetadata> registry, char pathSeparator = .) { }
+        public override char PathSeparator { get; }
+        public override bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public override string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
     public interface IPropertyMapper<TMapping>
     {
