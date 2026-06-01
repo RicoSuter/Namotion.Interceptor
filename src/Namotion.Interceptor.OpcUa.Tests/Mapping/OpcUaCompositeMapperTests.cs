@@ -159,6 +159,31 @@ public class OpcUaCompositeMapperTests
     }
 
     [Fact]
+    public void WhenFluentAndAttributeBrowseNameConflict_ThenFluentWinsInProductionOrder()
+    {
+        // Arrange - production mapper order: attribute path-provider, attribute mapper, then the fluent mapper.
+        // SimpleProp has [OpcUaNode("SimpleProp", ...)] giving the attribute browse name "SimpleProp".
+        // Fluent overrides it with "FluentProp"; the fluent mapper is layered last so it wins.
+        var fluent = new OpcUaFluentMapperBuilder<TestNodeMapperModel>();
+        fluent.ForType<TestNodeMapperModel>().Map(s => s.SimpleProp, b => b.BrowseName("FluentProp"));
+
+        var composite = new OpcUaCompositeMapper(
+            new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
+            new OpcUaAttributeMapper(),
+            fluent.Build('.'));
+
+        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var property = registeredSubject.TryGetProperty("SimpleProp")!;
+
+        // Act
+        Assert.True(composite.TryGetMapping(property, subject, out var result));
+
+        // Assert - the fluent browse name wins over the attribute browse name.
+        Assert.Equal("FluentProp", result.BrowseName);
+    }
+
+    [Fact]
     public async Task WhenThreeOrMoreMappersLookupProperty_ThenLastMatchingMapperWins()
     {
         // Arrange - Create three mappers

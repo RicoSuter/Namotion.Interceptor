@@ -63,8 +63,9 @@ public class OpcUaServerConfiguration
 
     /// <summary>
     /// Gets or sets the telemetry context for OPC UA operations.
-    /// Defaults to NullTelemetryContext for minimal overhead.
-    /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
+    /// Defaults to NullTelemetryContext for minimal overhead. When registered through the AddOpcUaSubject* DI
+    /// extensions, a default (NullTelemetryContext) value is replaced with a DI-backed telemetry context; set a
+    /// non-default instance to keep your own.
     /// </summary>
     public ITelemetryContext TelemetryContext { get; set; } = NullTelemetryContext.Instance;
 

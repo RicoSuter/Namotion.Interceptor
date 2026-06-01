@@ -145,6 +145,94 @@ public class OpcUaFluentMapperBuilderTests
         // Assert - the browse name for the Speed property of a collection element resolves correctly.
         Assert.Equal("Speed", mapping!.BrowseName);
     }
+
+    [Fact]
+    public async Task WhenCollectionElementMapped_ThenReverseLookupResolvesSpeedForElement()
+    {
+        // Arrange
+        var fluent = new OpcUaFluentMapperBuilder<OpcUaFluentRoot>();
+        fluent
+            .ForType<OpcUaFluentRoot>().Map(r => r.Motors, b => b.BrowseName("Motors"))
+            .ForType<OpcUaFluentMotor>().Map(m => m.Speed, b => b.BrowseName("Speed"));
+        var mapper = fluent.Build('.');
+
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = new OpcUaFluentRoot(context)
+        {
+            Motors = [new OpcUaFluentMotor(context), new OpcUaFluentMotor(context)]
+        };
+        _ = root.TryGetRegisteredSubject()!;
+        var elementRegisteredSubject = root.Motors[1].TryGetRegisteredSubject()!;
+
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(new NamespaceTable());
+
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("Speed", 0),
+            BrowseName = new QualifiedName("Speed", 0)
+        };
+
+        // Act
+        var result = await mapper.TryGetPropertyAsync(
+            new OpcUaLookupKey(nodeReference, mockSession.Object, root),
+            elementRegisteredSubject,
+            CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("Speed", result.Name);
+    }
+
+    [Fact]
+    public void WhenBuildCalledOffTypeBuilder_ThenProducesWorkingMapper()
+    {
+        // Arrange - the single-expression form ends the chain in Build() on the type builder.
+        var mapper = new OpcUaFluentMapperBuilder<OpcUaFluentRoot>()
+            .ForType<OpcUaFluentMotor>().Map(m => m.Speed, b => b.BrowseName("Speed").SamplingInterval(250))
+            .Build('.');
+
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = new OpcUaFluentRoot(context) { Motor = new OpcUaFluentMotor(context) };
+        _ = root.TryGetRegisteredSubject()!;
+        var speed = root.Motor.TryGetRegisteredSubject()!.TryGetProperty("Speed")!;
+
+        // Act
+        var found = mapper.TryGetMapping(speed, root, out var mapping);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal("Speed", mapping!.BrowseName);
+        Assert.Equal(250, mapping.SamplingInterval);
+    }
+
+    [Fact]
+    public void WhenDataTypeAndAdditionalReferenceConfigured_ThenMetadataIsPopulated()
+    {
+        // Arrange
+        var fluent = new OpcUaFluentMapperBuilder<OpcUaFluentRoot>();
+        fluent.ForType<OpcUaFluentMotor>().Map(m => m.Speed, b => b
+            .BrowseName("Speed")
+            .DataType("Double", "http://example/types")
+            .AdditionalReference("HasInterface", null, "i=17603"));
+        var mapper = fluent.Build('.');
+
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = new OpcUaFluentRoot(context) { Motor = new OpcUaFluentMotor(context) };
+        _ = root.TryGetRegisteredSubject()!;
+        var speed = root.Motor.TryGetRegisteredSubject()!.TryGetProperty("Speed")!;
+
+        // Act
+        var found = mapper.TryGetMapping(speed, root, out var mapping);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal("Double", mapping!.DataType);
+        Assert.Equal("http://example/types", mapping.DataTypeNamespace);
+        var reference = Assert.Single(mapping.AdditionalReferences!);
+        Assert.Equal("HasInterface", reference.ReferenceType);
+        Assert.Equal("i=17603", reference.TargetNodeId);
+    }
 }
 
 [InterceptorSubject]

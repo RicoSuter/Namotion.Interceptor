@@ -20,7 +20,7 @@ public class MqttFluentMapperBuilderTests
             .ForType<MqttFluentRoot>()
                 .Map(r => r.Pump, b => b.WithSegment("pump"))
             .ForType<MqttFluentPump>()
-                .Map(p => p.Speed, b => b.WithSegment("speed").WithQualityOfService(MqttQualityOfServiceLevel.AtLeastOnce));
+                .Map(p => p.Speed, b => b.WithSegment("speed").WithQualityOfService(MqttQualityOfServiceLevel.AtLeastOnce).WithRetain(true));
         var mapper = CreateFluentMapper(fluent);
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -35,6 +35,7 @@ public class MqttFluentMapperBuilderTests
         Assert.True(found);
         Assert.Equal("pump/speed", mapping!.Topic);
         Assert.Equal(MqttQualityOfServiceLevel.AtLeastOnce, mapping.QualityOfService);
+        Assert.True(mapping.Retain);
     }
 
     [Fact]

@@ -42,7 +42,11 @@ public sealed class OpcUaFluentTypeBuilder<TRoot, T>
         return this;
     }
 
-    /// <summary>Configures class-level (type-self) node metadata for <typeparamref name="T"/>.</summary>
+    /// <summary>
+    /// Configures class-level (type-self) node metadata for <typeparamref name="T"/>. Only node metadata is
+    /// registered here; a <c>BrowseName(...)</c> call inside <paramref name="configure"/> contributes its
+    /// metadata but no path segment (type-self has no member to attach a segment to).
+    /// </summary>
     public OpcUaFluentTypeBuilder<TRoot, T> Configure(Action<OpcUaFluentPropertyBuilder> configure)
     {
         var builder = new OpcUaFluentPropertyBuilder();
