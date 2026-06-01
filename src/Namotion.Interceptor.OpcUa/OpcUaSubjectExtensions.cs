@@ -54,10 +54,14 @@ public static class OpcUaSubjectExtensions
         string[]? rootPath = null)
         where TSubject : IInterceptorSubject
     {
-        var mapper = CreateDefaultAttributeMapper(connectorName);
         return services.AddOpcUaSubjectClientSource(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultClientConfiguration(sp, serverUrl, rootPath, mapper));
+            _ => new OpcUaClientConfiguration
+            {
+                ServerUrl = serverUrl,
+                RootPath = rootPath,
+                Mapper = CreateDefaultAttributeMapper(connectorName)
+            });
     }
 
     public static IServiceCollection AddOpcUaSubjectClientSource(
@@ -81,11 +85,15 @@ public static class OpcUaSubjectExtensions
         string[]? rootPath = null)
         where TSubject : IInterceptorSubject
     {
-        var mapper = CreateDefaultAttributeMapper(connectorName);
         return services.AddKeyedOpcUaSubjectClientSource(
             name,
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultClientConfiguration(sp, serverUrl, rootPath, mapper));
+            _ => new OpcUaClientConfiguration
+            {
+                ServerUrl = serverUrl,
+                RootPath = rootPath,
+                Mapper = CreateDefaultAttributeMapper(connectorName)
+            });
     }
 
     public static IServiceCollection AddKeyedOpcUaSubjectClientSource(
@@ -108,10 +116,13 @@ public static class OpcUaSubjectExtensions
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
-        var mapper = CreateDefaultAttributeMapper(connectorName);
         return services.AddOpcUaSubjectServer(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultServerConfiguration(sp, rootName, mapper));
+            _ => new OpcUaServerConfiguration
+            {
+                RootName = rootName,
+                Mapper = CreateDefaultAttributeMapper(connectorName)
+            });
     }
 
     public static IServiceCollection AddOpcUaSubjectServer(
@@ -134,11 +145,14 @@ public static class OpcUaSubjectExtensions
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
-        var mapper = CreateDefaultAttributeMapper(connectorName);
         return services.AddKeyedOpcUaSubjectServer(
             name,
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultServerConfiguration(sp, rootName, mapper));
+            _ => new OpcUaServerConfiguration
+            {
+                RootName = rootName,
+                Mapper = CreateDefaultAttributeMapper(connectorName)
+            });
     }
 
     public static IServiceCollection AddKeyedOpcUaSubjectServer(
@@ -162,7 +176,12 @@ public static class OpcUaSubjectExtensions
         Func<IServiceProvider, OpcUaClientConfiguration> configurationProvider)
     {
         services
-            .AddKeyedSingleton(key, (sp, _) => configurationProvider(sp))
+            .AddKeyedSingleton(key, (sp, _) =>
+            {
+                var configuration = configurationProvider(sp);
+                ApplyClientDiDefaults(configuration, sp);
+                return configuration;
+            })
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
             .AddKeyedSingleton(key, (sp, _) =>
             {
@@ -182,7 +201,12 @@ public static class OpcUaSubjectExtensions
         Func<IServiceProvider, OpcUaServerConfiguration> configurationProvider)
     {
         services
-            .AddKeyedSingleton(key, (sp, _) => configurationProvider(sp))
+            .AddKeyedSingleton(key, (sp, _) =>
+            {
+                var configuration = configurationProvider(sp);
+                ApplyServerDiDefaults(configuration, sp);
+                return configuration;
+            })
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
             .AddKeyedSingleton(key, (sp, _) =>
             {
@@ -195,55 +219,27 @@ public static class OpcUaSubjectExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServer>(key));
     }
 
-    /// <summary>
-    /// Builds the default OPC UA client configuration (type resolver, value converter, subject factory,
-    /// telemetry) with a caller-supplied <paramref name="mapper"/>. Use this from the lower-level
-    /// <see cref="AddOpcUaSubjectClientSource(IServiceCollection, Func{IServiceProvider, IInterceptorSubject}, Func{IServiceProvider, OpcUaClientConfiguration})"/>
-    /// overload to keep the connector defaults while composing a custom mapper (for example an
-    /// <see cref="Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapper"/> built from
-    /// <see cref="Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapperBuilder{TRoot}"/>).
-    /// </summary>
-    public static OpcUaClientConfiguration CreateDefaultClientConfiguration(
-        IServiceProvider sp, string serverUrl, string[]? rootPath, OpcUaCompositeMapper mapper)
+    // Completes a configuration after the caller's provider runs, filling only the fields that need DI:
+    // DI-backed telemetry when left at the NullTelemetryContext default, and (client) the type resolver logger.
+    // Fields a caller set explicitly are left untouched.
+    private static void ApplyClientDiDefaults(OpcUaClientConfiguration configuration, IServiceProvider sp)
     {
-        var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-        var telemetryContext = DefaultTelemetry.Create(builder =>
-            builder.Services.AddSingleton(loggerFactory));
+        if (ReferenceEquals(configuration.TelemetryContext, NullTelemetryContext.Instance))
+            configuration.TelemetryContext = CreateDiTelemetry(sp);
 
-        return new OpcUaClientConfiguration
-        {
-            ServerUrl = serverUrl,
-            RootPath = rootPath,
-            TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
-            ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
-            TelemetryContext = telemetryContext,
-            Mapper = mapper
-        };
+        configuration.TypeResolver ??= new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>());
     }
 
-    /// <summary>
-    /// Builds the default OPC UA server configuration (value converter, telemetry) with a caller-supplied
-    /// <paramref name="mapper"/>. Use this from the lower-level
-    /// <see cref="AddOpcUaSubjectServer(IServiceCollection, Func{IServiceProvider, IInterceptorSubject}, Func{IServiceProvider, OpcUaServerConfiguration})"/>
-    /// overload to keep the connector defaults while composing a custom mapper (for example an
-    /// <see cref="Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapper"/> built from
-    /// <see cref="Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapperBuilder{TRoot}"/>).
-    /// </summary>
-    public static OpcUaServerConfiguration CreateDefaultServerConfiguration(
-        IServiceProvider sp, string? rootName, OpcUaCompositeMapper mapper)
+    private static void ApplyServerDiDefaults(OpcUaServerConfiguration configuration, IServiceProvider sp)
+    {
+        if (ReferenceEquals(configuration.TelemetryContext, NullTelemetryContext.Instance))
+            configuration.TelemetryContext = CreateDiTelemetry(sp);
+    }
+
+    private static ITelemetryContext CreateDiTelemetry(IServiceProvider sp)
     {
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-        var telemetryContext = DefaultTelemetry.Create(builder =>
-            builder.Services.AddSingleton(loggerFactory));
-
-        return new OpcUaServerConfiguration
-        {
-            RootName = rootName,
-            ValueConverter = new OpcUaValueConverter(),
-            TelemetryContext = telemetryContext,
-            Mapper = mapper
-        };
+        return DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory));
     }
 
     private static OpcUaCompositeMapper CreateDefaultAttributeMapper(string connectorName)

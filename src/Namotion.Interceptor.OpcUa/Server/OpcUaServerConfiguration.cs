@@ -36,7 +36,7 @@ public class OpcUaServerConfiguration
     /// Gets the value converter used to convert between OPC UA node values and C# property values.
     /// Handles type conversions such as decimal to double for OPC UA compatibility.
     /// </summary>
-    public required OpcUaValueConverter ValueConverter { get; set; }
+    public OpcUaValueConverter ValueConverter { get; set; } = new();
 
     /// <summary>
     /// Maps C# properties to OPC UA nodes.

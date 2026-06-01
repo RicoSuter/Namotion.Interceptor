@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Paths;
@@ -86,18 +87,18 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
     /// </summary>
-    public required OpcUaTypeResolver TypeResolver { get; set; }
+    public OpcUaTypeResolver? TypeResolver { get; set; }
     
     /// <summary>
     /// Gets the value converter used to convert between OPC UA node values and C# property values.
     /// Handles type conversions such as decimal to double for OPC UA compatibility.
     /// </summary>
-    public required OpcUaValueConverter ValueConverter { get; set; }
+    public OpcUaValueConverter ValueConverter { get; set; } = new();
     
     /// <summary>
     /// Gets the subject factory used to create interceptor subject instances for OPC UA object nodes.
     /// </summary>
-    public required OpcUaSubjectFactory SubjectFactory { get; set; }
+    public OpcUaSubjectFactory SubjectFactory { get; set; } = new(DefaultSubjectFactory.Instance);
 
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).

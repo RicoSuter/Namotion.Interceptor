@@ -17,8 +17,6 @@ namespace Microsoft.Extensions.DependencyInjection
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration> configurationProvider) { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string connectorName, string? rootName = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
-        public static Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration CreateDefaultClientConfiguration(System.IServiceProvider sp, string serverUrl, string[]? rootPath, Namotion.Interceptor.OpcUa.Mapping.OpcUaCompositeMapper mapper) { }
-        public static Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration CreateDefaultServerConfiguration(System.IServiceProvider sp, string? rootName, Namotion.Interceptor.OpcUa.Mapping.OpcUaCompositeMapper mapper) { }
         public static Namotion.Interceptor.OpcUa.Client.IOpcUaSubjectClientSource CreateOpcUaClientSource(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
         public static Namotion.Interceptor.OpcUa.Server.IOpcUaSubjectServer CreateOpcUaServer(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
     }
@@ -120,7 +118,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public System.TimeSpan SessionTimeout { get; set; }
         public System.Func<Opc.Ua.ReferenceDescription, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>>? ShouldAddDynamicAttribute { get; set; }
         public System.Func<Opc.Ua.ReferenceDescription, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>>? ShouldAddDynamicProperty { get; set; }
-        public required Namotion.Interceptor.OpcUa.OpcUaSubjectFactory SubjectFactory { get; set; }
+        public Namotion.Interceptor.OpcUa.OpcUaSubjectFactory SubjectFactory { get; set; }
         public System.TimeSpan SubscriptionHealthCheckInterval { get; set; }
         public uint SubscriptionKeepAliveCount { get; set; }
         public uint SubscriptionLifetimeCount { get; set; }
@@ -128,9 +126,9 @@ namespace Namotion.Interceptor.OpcUa.Client
         public byte SubscriptionPriority { get; set; }
         public bool SubscriptionSequentialPublishing { get; set; }
         public Opc.Ua.ITelemetryContext TelemetryContext { get; set; }
-        public required Namotion.Interceptor.OpcUa.Client.OpcUaTypeResolver TypeResolver { get; set; }
+        public Namotion.Interceptor.OpcUa.Client.OpcUaTypeResolver? TypeResolver { get; set; }
         public bool UseSecurity { get; set; }
-        public required Namotion.Interceptor.OpcUa.OpcUaValueConverter ValueConverter { get; set; }
+        public Namotion.Interceptor.OpcUa.OpcUaValueConverter ValueConverter { get; set; }
         public int WriteRetryQueueSize { get; set; }
         public virtual System.Threading.Tasks.Task<Opc.Ua.Configuration.ApplicationInstance> CreateApplicationInstanceAsync() { }
         public void Validate() { }
@@ -372,7 +370,7 @@ namespace Namotion.Interceptor.OpcUa.Server
         public string NamespaceUri { get; set; }
         public string? RootName { get; set; }
         public Opc.Ua.ITelemetryContext TelemetryContext { get; set; }
-        public required Namotion.Interceptor.OpcUa.OpcUaValueConverter ValueConverter { get; set; }
+        public Namotion.Interceptor.OpcUa.OpcUaValueConverter ValueConverter { get; set; }
         public virtual System.Threading.Tasks.Task<Opc.Ua.Configuration.ApplicationInstance> CreateApplicationInstanceAsync() { }
         public virtual string[] GetNamespaceUris() { }
         protected void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, Opc.Ua.NodeStateCollection nodes, Opc.Ua.ISystemContext context) { }

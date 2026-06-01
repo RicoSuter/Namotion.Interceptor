@@ -434,23 +434,22 @@ Because `Motor` is configured once at the type level, all motors in the graph (d
 
 ### DI Registration
 
-The simple typed overloads (`AddOpcUaSubjectServer<T>("opc")`) build the attribute-only composite. To register a fluent mapper while keeping the connector defaults, use the configuration overload together with the public `CreateDefaultServerConfiguration` / `CreateDefaultClientConfiguration` factories, supplying your own `Mapper`:
+The simple typed overloads (`AddOpcUaSubjectServer<T>("opc")`) build the attribute-only composite. To register a fluent mapper, use the configuration overload and set the `Mapper` property. The connector fills the remaining defaults (telemetry, type resolver) from DI when you leave them unset, so you only configure what you need:
 
 ```csharp
 services.AddOpcUaSubjectServer<Plant>(
     sp => sp.GetRequiredService<Plant>(),
-    sp =>
+    _ => new OpcUaServerConfiguration
     {
-        var mapper = new OpcUaCompositeMapper(
+        RootName = "Devices",
+        Mapper = new OpcUaCompositeMapper(
             new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
             new OpcUaAttributeMapper("opc"),
             new OpcUaFluentMapperBuilder<Plant>()
                 .ForType<Motor>()
                     .Configure(b => b.TypeDefinition("MotorType"))
                     .Map(m => m.Speed, b => b.SamplingInterval(500))
-                .Build('.'));
-
-        return OpcUaSubjectExtensions.CreateDefaultServerConfiguration(sp, rootName: "Devices", mapper);
+                .Build('.'))
     });
 ```
 

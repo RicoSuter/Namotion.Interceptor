@@ -99,7 +99,7 @@ internal class OpcUaSubjectLoader
                 }
 
                 // Infer CLR type from OPC UA variable metadata if possible
-                var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, nodeReference, cancellationToken).ConfigureAwait(false);
+                var inferredType = await _configuration.TypeResolver!.TryGetTypeForNodeAsync(session, nodeReference, cancellationToken).ConfigureAwait(false);
                 if (inferredType is null)
                 {
                     _logger.LogWarning(
@@ -115,7 +115,7 @@ internal class OpcUaSubjectLoader
                     inferredType,
                     _ => value,
                     (_, o) => value = o,
-                    _configuration.TypeResolver.GetDynamicPropertyAttributes(nodeReference, session));
+                    _configuration.TypeResolver!.GetDynamicPropertyAttributes(nodeReference, session));
             }
 
             // Resolve the mapping once; a null mapping means the property is not exposed (the old
@@ -225,7 +225,7 @@ internal class OpcUaSubjectLoader
             if (!addAsDynamic)
                 continue;
 
-            var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, childNode, cancellationToken).ConfigureAwait(false);
+            var inferredType = await _configuration.TypeResolver!.TryGetTypeForNodeAsync(session, childNode, cancellationToken).ConfigureAwait(false);
             if (inferredType is null)
             {
                 _logger.LogWarning(
@@ -241,7 +241,7 @@ internal class OpcUaSubjectLoader
                 inferredType,
                 _ => value,
                 (_, o) => value = o,
-                _configuration.TypeResolver.GetDynamicPropertyAttributes(childNode, session));
+                _configuration.TypeResolver!.GetDynamicPropertyAttributes(childNode, session));
 
             MonitorValueNode(childNodeId, dynamicAttribute, monitoredItems);
 
