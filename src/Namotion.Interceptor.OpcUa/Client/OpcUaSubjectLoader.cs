@@ -478,9 +478,15 @@ internal sealed class OpcUaSubjectLoader
                     continue;
                 }
                 var name = childProperty.ResolvePropertyName(_configuration.Mapper, _subject);
-                if (name is not null)
+                if (name is null)
                 {
-                    propertiesByName.TryAdd(name, childProperty);
+                    continue;
+                }
+                if (!propertiesByName.TryAdd(name, childProperty))
+                {
+                    _logger.LogWarning(
+                        "Variable subject '{Subject}' has multiple properties resolving to the OPC UA browse name '{BrowseName}'. Keeping '{KeptProperty}', dropping '{DroppedProperty}'. Check the Mapper for browse-name collisions.",
+                        childSubject.Subject.GetType().Name, name, propertiesByName[name].Name, childProperty.Name);
                 }
             }
 

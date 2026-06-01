@@ -24,7 +24,7 @@ internal sealed class OpcUaLoadContext : IDisposable
     private readonly ILogger _logger;
     private readonly Dictionary<NodeId, IReadOnlyList<ReferenceDescription>> _browseCache = new();
     private readonly List<(PropertyReference Property, NodeId NodeId, MonitoredItem MonitoredItem)> _pendingClaims = new();
-    private readonly HashSet<PropertyReference> _queuedClaimProperties = new(PropertyReference.Comparer);
+    private readonly Dictionary<PropertyReference, int> _queuedClaimIndices = new(PropertyReference.Comparer);
     private readonly List<Action> _pendingRootOps = new();
     private readonly List<(IInterceptorSubject Subject, IInterceptorSubjectContext ParentContext)> _stagedSubjects = new();
     private bool _committed;
@@ -121,9 +121,8 @@ internal sealed class OpcUaLoadContext : IDisposable
     /// </summary>
     public void QueueClaim(PropertyReference property, NodeId nodeId, MonitoredItem monitoredItem)
     {
-        if (!_queuedClaimProperties.Add(property))
+        if (_queuedClaimIndices.TryGetValue(property, out var index))
         {
-            var index = _pendingClaims.FindIndex(c => PropertyReference.Comparer.Equals(c.Property, property));
             var existing = _pendingClaims[index];
             if (existing.NodeId != nodeId)
             {
@@ -137,6 +136,7 @@ internal sealed class OpcUaLoadContext : IDisposable
             }
             return;
         }
+        _queuedClaimIndices[property] = _pendingClaims.Count;
         _pendingClaims.Add((property, nodeId, monitoredItem));
     }
 
@@ -188,6 +188,17 @@ internal sealed class OpcUaLoadContext : IDisposable
     /// runs the queued root mutations. Claims run first so an observer that sees
     /// a new root child appear finds all of the child's leaves already source-owned.
     /// </summary>
+    /// <remarks>
+    /// Atomicity is best-effort, not all-or-nothing. The catch-path releases any
+    /// source claims already committed during this Apply call, but root mutations
+    /// (<see cref="QueueOrApplySetValue"/> ops on the root subject) that ran before
+    /// the throw cannot be undone because prior values were not captured. After a
+    /// mid-Apply throw, expect: (a) ownership consistent (released for everything
+    /// not still owned by Apply), (b) some root properties may hold subject
+    /// references whose <see cref="Dispose"/> rollback then detaches their staged
+    /// subjects from the registry. A retry then re-creates fresh subjects and
+    /// re-assigns the same root properties.
+    /// </remarks>
     public void Apply()
     {
         // Best-effort atomicity: if an op throws mid-Apply, release any source claims
@@ -264,7 +275,7 @@ internal sealed class OpcUaLoadContext : IDisposable
             }
         }
         _stagedSubjects.Clear();
-        _queuedClaimProperties.Clear();
+        _queuedClaimIndices.Clear();
         _pendingClaims.Clear();
         _pendingRootOps.Clear();
     }

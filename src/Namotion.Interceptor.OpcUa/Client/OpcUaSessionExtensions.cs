@@ -470,6 +470,10 @@ internal static class OpcUaSessionExtensions
             {
                 allResults.Add(response.Results[i]);
             }
+            // BadUnexpectedError is intentionally treated as transient by the
+            // classifier (not in the permanent list), so a short server response
+            // aborts the load and triggers a fresh retry rather than letting
+            // misaligned/missing data leak downstream.
             for (var i = take; i < count; i++)
             {
                 allResults.Add(new DataValue { StatusCode = StatusCodes.BadUnexpectedError });

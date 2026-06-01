@@ -224,7 +224,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             }
         }
 
-        _logger.LogInformation("Successfully read {Count} OPC UA nodes from server.", itemCount);
+        // Transient bad statuses would have already thrown inside ReadNodesAsync, so
+        // the gap between itemCount and result.Count is exclusively permanent bad
+        // statuses (logged-and-skipped per the classifier).
+        var successCount = result.Count;
+        _logger.LogInformation(
+            "Read {Total} OPC UA nodes from server ({Successful} good, {Skipped} skipped with permanent bad status).",
+            itemCount, successCount, itemCount - successCount);
         return () =>
         {
             foreach (var (property, dataValue) in result)
@@ -233,7 +239,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
             }
 
-            _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
+            _logger.LogInformation("Updated {Count} properties with OPC UA node values.", successCount);
         };
     }
 
