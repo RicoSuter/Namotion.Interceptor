@@ -467,6 +467,26 @@ public class PathExtensionsTests
     }
 
     [Fact]
+    public void WhenUsingDefaultProviderOverload_ThenDelegatesToDefaultProvider()
+    {
+        // Arrange
+        var context = CreateContext();
+        var parent = new Models.Person(context) { FirstName = "Parent" };
+        var child = new Models.Person(context) { FirstName = "Child" };
+        parent.Father = child;
+        var firstNameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
+
+        // Act - the convenience overload uses DefaultPathProvider.Instance and threads rootSubject through
+        var absolute = firstNameProperty.TryGetPath();
+        var relative = firstNameProperty.TryGetPath(parent);
+
+        // Assert
+        Assert.Equal("Father.FirstName", absolute);
+        Assert.Equal(firstNameProperty.TryGetPath(DefaultPathProvider.Instance, null), absolute);
+        Assert.Equal(firstNameProperty.TryGetPath(DefaultPathProvider.Instance, parent), relative);
+    }
+
+    [Fact]
     public void WhenNestedSubjectProperty_ThenTryGetPathReturnsDottedPath()
     {
         // Arrange

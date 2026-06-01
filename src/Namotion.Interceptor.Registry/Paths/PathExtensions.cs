@@ -207,6 +207,19 @@ public static class PathExtensions
     }
 
     /// <summary>
+    /// Gets the structural property path using the default path provider (BrowseName segments joined with
+    /// '.'). A convenience over the path-provider overload using <see cref="DefaultPathProvider.Instance"/>.
+    /// </summary>
+    /// <param name="property">The property to compute the path for.</param>
+    /// <param name="rootSubject">
+    /// Optional root to make the path relative to. When <c>null</c>, the canonical absolute path is returned;
+    /// when provided, <c>null</c> is returned if the property is not reachable from that root.
+    /// </param>
+    /// <returns>The path, or <c>null</c> when a given root is not reachable or the parent chain has a cycle.</returns>
+    public static string? TryGetPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject = null)
+        => property.TryGetPath(DefaultPathProvider.Instance, rootSubject);
+
+    /// <summary>
     /// Gets the complete path of the given property.
     /// </summary>
     /// <param name="property">The property.</param>
