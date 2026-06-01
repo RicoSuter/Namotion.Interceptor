@@ -553,9 +553,9 @@ Each connector ships thin wrappers that adapt generic infrastructure to protocol
 
 | Connector | Mapper Wrappers                                                                                               |
 |-----------|---------------------------------------------------------------------------------------------------------------|
-| MQTT      | `MqttPathProviderMapper`, `MqttAttributeMapper`, `MqttFluentMapping<TRoot>`, `MqttCompositeMapper` |
+| MQTT      | `MqttPathProviderMapper`, `MqttAttributeMapper`, `MqttFluentMapper` (built by `MqttFluentMapperBuilder<TRoot>`), `MqttCompositeMapper` |
 | WebSocket | Uses `PathProviderBase` directly (no mapper abstraction)                                              |
-| OPC UA    | `OpcUaPathProviderMapper`, `OpcUaAttributeMapper`, `OpcUaFluentMapping<TRoot>`, `OpcUaCompositeMapper` |
+| OPC UA    | `OpcUaPathProviderMapper`, `OpcUaAttributeMapper`, `OpcUaFluentMapper` (built by `OpcUaFluentMapperBuilder<TRoot>`), `OpcUaCompositeMapper` |
 
 See the protocol-specific documentation for details on each connector's mapping types and configuration.
 

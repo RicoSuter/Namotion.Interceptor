@@ -6,16 +6,16 @@ using Xunit;
 
 namespace Namotion.Interceptor.Mqtt.Tests.Mapping;
 
-public class MqttFluentMappingTests
+public class MqttFluentMapperBuilderTests
 {
-    private static MqttCompositeMapper CreateFluentMapper(MqttFluentMapping<MqttFluentRoot> fluent)
-        => new(fluent.CreateMappers('/'));
+    private static MqttFluentMapper CreateFluentMapper(MqttFluentMapperBuilder<MqttFluentRoot> fluent)
+        => fluent.Build('/');
 
     [Fact]
     public void WhenTypeMemberMapped_ThenTopicComposesFromSegments()
     {
         // Arrange
-        var fluent = new MqttFluentMapping<MqttFluentRoot>();
+        var fluent = new MqttFluentMapperBuilder<MqttFluentRoot>();
         fluent
             .ForType<MqttFluentRoot>()
                 .Map(r => r.Pump, b => b.WithSegment("pump"))
@@ -41,7 +41,7 @@ public class MqttFluentMappingTests
     public void WhenTypeReusedAcrossLocations_ThenResolvesEverywhere()
     {
         // Arrange
-        var fluent = new MqttFluentMapping<MqttFluentRoot>();
+        var fluent = new MqttFluentMapperBuilder<MqttFluentRoot>();
         fluent
             .ForType<MqttFluentRoot>()
                 .Map(r => r.Pump, b => b.WithSegment("pump"))
@@ -71,7 +71,7 @@ public class MqttFluentMappingTests
     public async Task WhenReverseLookup_ThenResolvesViaPathProvider()
     {
         // Arrange
-        var fluent = new MqttFluentMapping<MqttFluentRoot>();
+        var fluent = new MqttFluentMapperBuilder<MqttFluentRoot>();
         fluent
             .ForType<MqttFluentRoot>().Map(r => r.Pump, b => b.WithSegment("pump"))
             .ForType<MqttFluentPump>().Map(p => p.Speed, b => b.WithSegment("speed"));
@@ -94,7 +94,7 @@ public class MqttFluentMappingTests
     public void WhenPropertyNotMapped_ThenReturnsFalse()
     {
         // Arrange
-        var fluent = new MqttFluentMapping<MqttFluentRoot>();
+        var fluent = new MqttFluentMapperBuilder<MqttFluentRoot>();
         var mapper = CreateFluentMapper(fluent);
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -113,7 +113,7 @@ public class MqttFluentMappingTests
     public async Task WhenTypeUsedInCollection_ThenElementResolvesBothDirections()
     {
         // Arrange
-        var fluent = new MqttFluentMapping<MqttFluentRoot>();
+        var fluent = new MqttFluentMapperBuilder<MqttFluentRoot>();
         fluent
             .ForType<MqttFluentRoot>().Map(r => r.Motors, b => b.WithSegment("motors"))
             .ForType<MqttFluentPump>().Map(p => p.Speed, b => b.WithSegment("speed"));

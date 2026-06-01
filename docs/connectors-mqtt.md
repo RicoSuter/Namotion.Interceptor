@@ -183,7 +183,7 @@ The built-in mapper types:
 |---|---|
 | `MqttPathProviderMapper` | Wraps a `PathProviderBase` to produce topics from `[Path]` attributes |
 | `MqttAttributeMapper` | Layers per-topic QoS and Retain from `[MqttTopic]` attributes onto the mapping (the topic segment itself is resolved by the path provider) |
-| `MqttFluentMapping<TRoot>` | Code-based type-level configuration via `ForType<T>().Map(...)` |
+| `MqttFluentMapper` | Code-based type-level mapper produced by `MqttFluentMapperBuilder<TRoot>.Build()` (see [Code-based mapping](#code-based-fluent-mapping)) |
 | `MqttCompositeMapper` | Combines multiple mappers with merge semantics |
 
 The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, connectorName)`) default to a composite of `MqttPathProviderMapper` and `MqttAttributeMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
@@ -237,14 +237,12 @@ Since `[MqttTopic]` already provides the `mqtt` `[Path]` segment for a property,
 
 ### Code-based (fluent) mapping
 
-`MqttFluentMapping<TRoot>` is a complete, code-based alternative to attribute mapping. Configure a type once with `ForType<T>().Map(...)` and the mapping resolves everywhere that type appears in the object graph, including collection and dictionary elements (which get bracket indices such as `motors[1]/speed`). Fluent is layered after attributes in the composite, so fluent wins on conflicts. Omit fluent for attribute-only setups.
+`MqttFluentMapperBuilder<TRoot>` is a complete, code-based alternative to attribute mapping. Configure a type once with `ForType<T>().Map(...)`, then call `Build(...)` to produce an `MqttFluentMapper`. The mapping resolves everywhere that type appears in the object graph, including collection and dictionary elements (which get bracket indices such as `motors[1]/speed`).
 
 `WithSegment(...)` sets the topic level for the property. `WithQualityOfService(...)` and `WithRetain(...)` set per-property protocol metadata.
 
 ```csharp
-var fluent = new MqttFluentMapping<Plant>();
-
-fluent
+var fluentMapper = new MqttFluentMapperBuilder<Plant>()
     .ForType<Motor>()
         .Map(m => m.Speed,  b => b.WithSegment("speed").WithQualityOfService(MqttQualityOfServiceLevel.AtLeastOnce))
         .Map(m => m.Torque, b => b.WithSegment("torque"))
@@ -252,31 +250,34 @@ fluent
         .Map(p => p.Motor,  b => b.WithSegment("motor"))
     .ForType<Plant>()
         .Map(p => p.Motors,  b => b.WithSegment("motors"))
-        .Map(p => p.Sensors, b => b.WithSegment("sensors"));
+        .Map(p => p.Sensors, b => b.WithSegment("sensors"))
+    .Build('/');
 ```
 
 Because `Motor` is configured once at the type level, all motors in the graph (direct properties, collection elements, nested references) resolve the same topic segments without repeating configuration.
 
 `ForType<T>()` registrations apply to all types derived from `T` and all types implementing `T` when `T` is an interface. The most specific registration wins.
 
-#### DI Registration
+#### Composing with the connector
 
-The `AddMqttSubjectServer<T>` and `AddMqttSubjectClientSource<T>` overloads accept an optional `configureFluent` callback:
+`Build()` produces a mapper you compose into the `Mapper` property through the configuration overload. Layer it after the attribute mappers (the same pair the simple overloads use) so fluent wins on conflicts and attribute and fluent mapping compose:
 
 ```csharp
 services.AddMqttSubjectServer<Plant>(
-    connectorName: "mqtt",
-    brokerPort: 1883,
-    configureFluent: fluent =>
-        fluent
-            .ForType<Motor>()
-                .Map(m => m.Speed,  b => b.WithSegment("speed").WithQualityOfService(MqttQualityOfServiceLevel.AtLeastOnce))
-                .Map(m => m.Torque, b => b.WithSegment("torque"))
-            .ForType<Pump>()
-                .Map(p => p.Motor, b => b.WithSegment("motor")));
+    sp => sp.GetRequiredService<Plant>(),
+    _ => new MqttServerConfiguration
+    {
+        BrokerPort = 1883,
+        Mapper = new MqttCompositeMapper(
+            new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
+            new MqttAttributeMapper("mqtt"),
+            new MqttFluentMapperBuilder<Plant>()
+                .ForType<Motor>().Map(m => m.Speed, b => b.WithSegment("speed"))
+                .Build('/'))
+    });
 ```
 
-Omit `configureFluent` to keep the default attribute-only mapping.
+For an attribute-only setup, use the simple `AddMqttSubjectServer<T>("mqtt")` overload, which builds the attribute composite for you.
 
 ## Serialization
 

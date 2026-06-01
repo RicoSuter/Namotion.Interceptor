@@ -6,10 +6,10 @@ namespace Microsoft.Extensions.DependencyInjection
     public static class MqttSubjectExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.Mqtt.Client.MqttClientConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, string brokerHost, string connectorName, int brokerPort = 1883, string? topicPrefix = null, System.Action<Namotion.Interceptor.Mqtt.Mapping.MqttFluentMapping<TSubject>>? configureFluent = null)
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, string brokerHost, string connectorName, int brokerPort = 1883, string? topicPrefix = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.Mqtt.Server.MqttServerConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, string connectorName, int brokerPort = 1883, string? brokerHost = null, string? topicPrefix = null, System.Action<Namotion.Interceptor.Mqtt.Mapping.MqttFluentMapping<TSubject>>? configureFluent = null)
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMqttSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, string connectorName, int brokerPort = 1883, string? brokerHost = null, string? topicPrefix = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
     }
 }
@@ -96,11 +96,15 @@ namespace Namotion.Interceptor.Mqtt.Mapping
     {
         public MqttCompositeMapper(params Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>[] mappers) { }
     }
-    public sealed class MqttFluentMapping<TRoot>
+    public sealed class MqttFluentMapper : Namotion.Interceptor.Connectors.Mapping.ReverseCompositeMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
+    {
+        public MqttFluentMapper(Namotion.Interceptor.Connectors.Mapping.FluentMappingRegistry<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping> registry, char pathSeparator = /) { }
+    }
+    public sealed class MqttFluentMapperBuilder<TRoot>
         where TRoot : Namotion.Interceptor.IInterceptorSubject
     {
-        public MqttFluentMapping() { }
-        public Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>[] CreateMappers(char pathSeparator = /) { }
+        public MqttFluentMapperBuilder() { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMapper Build(char pathSeparator = /) { }
         public Namotion.Interceptor.Mqtt.Mapping.MqttFluentTypeBuilder<TRoot, T> ForType<T>() { }
     }
     public sealed class MqttFluentPropertyBuilder
@@ -113,6 +117,7 @@ namespace Namotion.Interceptor.Mqtt.Mapping
     public sealed class MqttFluentTypeBuilder<TRoot, T>
         where TRoot : Namotion.Interceptor.IInterceptorSubject
     {
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMapper Build(char pathSeparator = /) { }
         public Namotion.Interceptor.Mqtt.Mapping.MqttFluentTypeBuilder<TRoot, TOther> ForType<TOther>() { }
         public Namotion.Interceptor.Mqtt.Mapping.MqttFluentTypeBuilder<TRoot, T> Map<TValue>(System.Linq.Expressions.Expression<System.Func<T, TValue>> selector, System.Action<Namotion.Interceptor.Mqtt.Mapping.MqttFluentPropertyBuilder> configure) { }
     }

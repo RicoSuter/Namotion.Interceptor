@@ -51,11 +51,10 @@ public static class OpcUaSubjectExtensions
         this IServiceCollection services,
         string serverUrl,
         string connectorName,
-        string[]? rootPath = null,
-        Action<OpcUaFluentMapping<TSubject>>? configureFluent = null)
+        string[]? rootPath = null)
         where TSubject : IInterceptorSubject
     {
-        var mapper = BuildOpcUaMapper(connectorName, configureFluent);
+        var mapper = CreateDefaultAttributeMapper(connectorName);
         return services.AddOpcUaSubjectClientSource(
             sp => sp.GetRequiredService<TSubject>(),
             sp => CreateDefaultClientConfiguration(sp, serverUrl, rootPath, mapper));
@@ -79,11 +78,10 @@ public static class OpcUaSubjectExtensions
         string name,
         string serverUrl,
         string connectorName,
-        string[]? rootPath = null,
-        Action<OpcUaFluentMapping<TSubject>>? configureFluent = null)
+        string[]? rootPath = null)
         where TSubject : IInterceptorSubject
     {
-        var mapper = BuildOpcUaMapper(connectorName, configureFluent);
+        var mapper = CreateDefaultAttributeMapper(connectorName);
         return services.AddKeyedOpcUaSubjectClientSource(
             name,
             sp => sp.GetRequiredService<TSubject>(),
@@ -107,11 +105,10 @@ public static class OpcUaSubjectExtensions
     public static IServiceCollection AddOpcUaSubjectServer<TSubject>(
         this IServiceCollection services,
         string connectorName,
-        string? rootName = null,
-        Action<OpcUaFluentMapping<TSubject>>? configureFluent = null)
+        string? rootName = null)
         where TSubject : IInterceptorSubject
     {
-        var mapper = BuildOpcUaMapper(connectorName, configureFluent);
+        var mapper = CreateDefaultAttributeMapper(connectorName);
         return services.AddOpcUaSubjectServer(
             sp => sp.GetRequiredService<TSubject>(),
             sp => CreateDefaultServerConfiguration(sp, rootName, mapper));
@@ -134,11 +131,10 @@ public static class OpcUaSubjectExtensions
         this IServiceCollection services,
         string name,
         string connectorName,
-        string? rootName = null,
-        Action<OpcUaFluentMapping<TSubject>>? configureFluent = null)
+        string? rootName = null)
         where TSubject : IInterceptorSubject
     {
-        var mapper = BuildOpcUaMapper(connectorName, configureFluent);
+        var mapper = CreateDefaultAttributeMapper(connectorName);
         return services.AddKeyedOpcUaSubjectServer(
             name,
             sp => sp.GetRequiredService<TSubject>(),
@@ -199,7 +195,15 @@ public static class OpcUaSubjectExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServer>(key));
     }
 
-    private static OpcUaClientConfiguration CreateDefaultClientConfiguration(
+    /// <summary>
+    /// Builds the default OPC UA client configuration (type resolver, value converter, subject factory,
+    /// telemetry) with a caller-supplied <paramref name="mapper"/>. Use this from the lower-level
+    /// <see cref="AddOpcUaSubjectClientSource(IServiceCollection, Func{IServiceProvider, IInterceptorSubject}, Func{IServiceProvider, OpcUaClientConfiguration})"/>
+    /// overload to keep the connector defaults while composing a custom mapper (for example an
+    /// <see cref="Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapper"/> built from
+    /// <see cref="Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapperBuilder{TRoot}"/>).
+    /// </summary>
+    public static OpcUaClientConfiguration CreateDefaultClientConfiguration(
         IServiceProvider sp, string serverUrl, string[]? rootPath, OpcUaCompositeMapper mapper)
     {
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
@@ -218,7 +222,15 @@ public static class OpcUaSubjectExtensions
         };
     }
 
-    private static OpcUaServerConfiguration CreateDefaultServerConfiguration(
+    /// <summary>
+    /// Builds the default OPC UA server configuration (value converter, telemetry) with a caller-supplied
+    /// <paramref name="mapper"/>. Use this from the lower-level
+    /// <see cref="AddOpcUaSubjectServer(IServiceCollection, Func{IServiceProvider, IInterceptorSubject}, Func{IServiceProvider, OpcUaServerConfiguration})"/>
+    /// overload to keep the connector defaults while composing a custom mapper (for example an
+    /// <see cref="Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapper"/> built from
+    /// <see cref="Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapperBuilder{TRoot}"/>).
+    /// </summary>
+    public static OpcUaServerConfiguration CreateDefaultServerConfiguration(
         IServiceProvider sp, string? rootName, OpcUaCompositeMapper mapper)
     {
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
@@ -234,27 +246,10 @@ public static class OpcUaSubjectExtensions
         };
     }
 
-    private static OpcUaCompositeMapper BuildOpcUaMapper<TSubject>(
-        string connectorName,
-        Action<OpcUaFluentMapping<TSubject>>? configureFluent)
-        where TSubject : IInterceptorSubject
-    {
-        var mappers = new List<IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>>
-        {
+    private static OpcUaCompositeMapper CreateDefaultAttributeMapper(string connectorName)
+        => new(
             new OpcUaPathProviderMapper(new AttributeBasedPathProvider(connectorName)),
-            new OpcUaAttributeMapper(connectorName)
-        };
-
-        if (configureFluent is not null)
-        {
-            var fluent = new OpcUaFluentMapping<TSubject>();
-            configureFluent(fluent);
-            // Fluent is layered after attributes so it wins on conflicts; omit configureFluent for attribute-only.
-            mappers.AddRange(fluent.CreateMappers());
-        }
-
-        return new OpcUaCompositeMapper(mappers.ToArray());
-    }
+            new OpcUaAttributeMapper(connectorName));
 
     private static void GuardDuplicateUnkeyed<TService>(IServiceCollection services)
     {

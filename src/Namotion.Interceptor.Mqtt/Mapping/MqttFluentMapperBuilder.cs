@@ -1,16 +1,15 @@
 using System;
 using System.Linq.Expressions;
 using Namotion.Interceptor.Connectors.Mapping;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mqtt.Mapping;
 
 /// <summary>
-/// Code-based MQTT mapping configuration, root-scoped. The public entry point for configuring MQTT topics
-/// and metadata in code instead of via attributes. Build the mapper pair with <see cref="CreateMappers"/>
-/// or use the AddMqttSubject* DI overloads' <c>configureFluent</c> callback.
+/// Builds a code-based <see cref="MqttFluentMapper"/>, root-scoped. Configure members per type with
+/// <see cref="ForType{T}"/> and <c>Map(...)</c>, then call <see cref="Build"/> to produce the mapper and
+/// compose it into an <see cref="MqttCompositeMapper"/> (typically after the attribute mappers so fluent wins).
 /// </summary>
-public sealed class MqttFluentMapping<TRoot>
+public sealed class MqttFluentMapperBuilder<TRoot>
     where TRoot : IInterceptorSubject
 {
     internal FluentMappingRegistry<MqttPropertyMapping> Registry { get; } = new();
@@ -18,25 +17,17 @@ public sealed class MqttFluentMapping<TRoot>
     /// <summary>Begins configuring members of <typeparamref name="T"/>.</summary>
     public MqttFluentTypeBuilder<TRoot, T> ForType<T>() => new(this);
 
-    /// <summary>
-    /// Builds the fluent mapper pair (a path-provider mapper over a <see cref="FluentPathProvider"/> and a
-    /// metadata mapper) to splice into an <see cref="MqttCompositeMapper"/>.
-    /// </summary>
-    public IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>[] CreateMappers(char pathSeparator = '/')
-        =>
-        [
-            new MqttPathProviderMapper(new FluentPathProvider(Registry, pathSeparator)),
-            new FluentMetadataMapper<MqttPropertyMapping, MqttLookupKey>(Registry)
-        ];
+    /// <summary>Builds the fluent mapper from the configured registrations.</summary>
+    public MqttFluentMapper Build(char pathSeparator = '/') => new(Registry, pathSeparator);
 }
 
-/// <summary>Type-scoped MQTT fluent builder; chains within a type and into the next type.</summary>
+/// <summary>Type-scoped MQTT fluent builder; chains within a type, into the next type, and into <see cref="Build"/>.</summary>
 public sealed class MqttFluentTypeBuilder<TRoot, T>
     where TRoot : IInterceptorSubject
 {
-    private readonly MqttFluentMapping<TRoot> _owner;
+    private readonly MqttFluentMapperBuilder<TRoot> _owner;
 
-    internal MqttFluentTypeBuilder(MqttFluentMapping<TRoot> owner) => _owner = owner;
+    internal MqttFluentTypeBuilder(MqttFluentMapperBuilder<TRoot> owner) => _owner = owner;
 
     /// <summary>Configures a single member of <typeparamref name="T"/>.</summary>
     public MqttFluentTypeBuilder<TRoot, T> Map<TValue>(
@@ -53,4 +44,7 @@ public sealed class MqttFluentTypeBuilder<TRoot, T>
 
     /// <summary>Switches configuration to another type.</summary>
     public MqttFluentTypeBuilder<TRoot, TOther> ForType<TOther>() => _owner.ForType<TOther>();
+
+    /// <summary>Builds the fluent mapper (delegates to the owner).</summary>
+    public MqttFluentMapper Build(char pathSeparator = '/') => _owner.Build(pathSeparator);
 }

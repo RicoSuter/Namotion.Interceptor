@@ -57,14 +57,12 @@ public class MqttCompositeMapperTests
     public void WhenFluentSegmentAndAttributeMetadata_ThenAttributeMetadataLayersOntoFluentTopic()
     {
         // Arrange
-        var fluent = new MqttFluentMapping<MqttCompositeTestSensor>();
+        var fluent = new MqttFluentMapperBuilder<MqttCompositeTestSensor>();
         fluent.ForType<MqttCompositeTestSensor>().Map(s => s.Temperature, b => b.WithSegment("fluenttemp"));
 
         var mapper = new MqttCompositeMapper(
-            [
-                .. fluent.CreateMappers('/'),
-                new MqttAttributeMapper()
-            ]);
+            fluent.Build('/'),
+            new MqttAttributeMapper());
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var subject = new MqttCompositeTestSensor(context);
@@ -123,15 +121,13 @@ public class MqttCompositeMapperTests
         // Arrange - production mapper order: attribute path-provider, attribute metadata, then fluent pair.
         // Temperature has [MqttTopic("temp")] giving the attribute-derived segment "temp".
         // Fluent overrides it with "fluent_temp"; fluent is layered last so it wins.
-        var fluent = new MqttFluentMapping<MqttCompositeTestSensor>();
+        var fluent = new MqttFluentMapperBuilder<MqttCompositeTestSensor>();
         fluent.ForType<MqttCompositeTestSensor>().Map(s => s.Temperature, b => b.WithSegment("fluent_temp"));
 
         var mapper = new MqttCompositeMapper(
-        [
             new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
             new MqttAttributeMapper("mqtt"),
-            .. fluent.CreateMappers('/')
-        ]);
+            fluent.Build('/'));
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var subject = new MqttCompositeTestSensor(context);

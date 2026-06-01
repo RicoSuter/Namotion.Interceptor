@@ -1,15 +1,15 @@
 using System.Linq.Expressions;
 using Namotion.Interceptor.Connectors.Mapping;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.OpcUa.Mapping;
 
 /// <summary>
-/// Code-based OPC UA mapping configuration, root-scoped. The public entry point for configuring OPC UA
-/// nodes and metadata in code instead of via attributes. Build the mapper pair with
-/// <see cref="CreateMappers"/> or use the AddOpcUaSubject* DI overloads' <c>configureFluent</c> callback.
+/// Builds a code-based <see cref="OpcUaFluentMapper"/>, root-scoped. Configure members per type with
+/// <see cref="ForType{T}"/> and <c>Map(...)</c>/<c>Configure(...)</c>, then call <see cref="Build"/> to
+/// produce the mapper and compose it into an <see cref="OpcUaCompositeMapper"/> (typically after the
+/// attribute mappers so fluent wins).
 /// </summary>
-public sealed class OpcUaFluentMapping<TRoot>
+public sealed class OpcUaFluentMapperBuilder<TRoot>
     where TRoot : IInterceptorSubject
 {
     internal FluentMappingRegistry<OpcUaPropertyMapping> Registry { get; } = new();
@@ -17,22 +17,17 @@ public sealed class OpcUaFluentMapping<TRoot>
     /// <summary>Begins configuring members of <typeparamref name="T"/>.</summary>
     public OpcUaFluentTypeBuilder<TRoot, T> ForType<T>() => new(this);
 
-    /// <summary>Builds the fluent mapper pair to splice into an <see cref="OpcUaCompositeMapper"/>.</summary>
-    public IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>[] CreateMappers(char pathSeparator = '.')
-        =>
-        [
-            new OpcUaPathProviderMapper(new FluentPathProvider(Registry, pathSeparator)),
-            new OpcUaFluentMetadataMapper(Registry)
-        ];
+    /// <summary>Builds the fluent mapper from the configured registrations.</summary>
+    public OpcUaFluentMapper Build(char pathSeparator = '.') => new(Registry, pathSeparator);
 }
 
-/// <summary>Type-scoped OPC UA fluent builder; chains within a type and into the next type.</summary>
+/// <summary>Type-scoped OPC UA fluent builder; chains within a type, into the next type, and into <see cref="Build"/>.</summary>
 public sealed class OpcUaFluentTypeBuilder<TRoot, T>
     where TRoot : IInterceptorSubject
 {
-    private readonly OpcUaFluentMapping<TRoot> _owner;
+    private readonly OpcUaFluentMapperBuilder<TRoot> _owner;
 
-    internal OpcUaFluentTypeBuilder(OpcUaFluentMapping<TRoot> owner) => _owner = owner;
+    internal OpcUaFluentTypeBuilder(OpcUaFluentMapperBuilder<TRoot> owner) => _owner = owner;
 
     /// <summary>Configures a single member of <typeparamref name="T"/>.</summary>
     public OpcUaFluentTypeBuilder<TRoot, T> Map<TValue>(
@@ -59,4 +54,7 @@ public sealed class OpcUaFluentTypeBuilder<TRoot, T>
 
     /// <summary>Switches configuration to another type.</summary>
     public OpcUaFluentTypeBuilder<TRoot, TOther> ForType<TOther>() => _owner.ForType<TOther>();
+
+    /// <summary>Builds the fluent mapper (delegates to the owner).</summary>
+    public OpcUaFluentMapper Build(char pathSeparator = '.') => _owner.Build(pathSeparator);
 }

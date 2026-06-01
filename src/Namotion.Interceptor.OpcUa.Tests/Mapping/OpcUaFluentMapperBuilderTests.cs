@@ -9,17 +9,15 @@ using Xunit;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
-public class OpcUaFluentMappingTests
+public class OpcUaFluentMapperBuilderTests
 {
     [Fact]
     public void WhenLeafMapped_ThenBrowseNameIsSegmentAndMetadata()
     {
         // Arrange
-        var fluent = new OpcUaFluentMapping<OpcUaFluentRoot>();
+        var fluent = new OpcUaFluentMapperBuilder<OpcUaFluentRoot>();
         fluent.ForType<OpcUaFluentMotor>().Map(m => m.Speed, b => b.BrowseName("Speed").SamplingInterval(500));
-
-        var mappers = fluent.CreateMappers('.');
-        var metadataMapper = (OpcUaFluentMetadataMapper)mappers[1];
+        var mapper = fluent.Build('.');
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var root = new OpcUaFluentRoot(context) { Motor = new OpcUaFluentMotor(context) };
@@ -27,7 +25,7 @@ public class OpcUaFluentMappingTests
         var speed = root.Motor.TryGetRegisteredSubject()!.TryGetProperty("Speed")!;
 
         // Act
-        var found = metadataMapper.TryGetMapping(speed, root, out var mapping);
+        var found = mapper.TryGetMapping(speed, root, out var mapping);
 
         // Assert
         Assert.True(found);
@@ -39,14 +37,13 @@ public class OpcUaFluentMappingTests
     public void WhenTypeReusedAcrossLocations_ThenBrowseNameResolvesEverywhere()
     {
         // Arrange
-        var fluent = new OpcUaFluentMapping<OpcUaFluentRoot>();
+        var fluent = new OpcUaFluentMapperBuilder<OpcUaFluentRoot>();
         fluent
             .ForType<OpcUaFluentRoot>()
                 .Map(r => r.Motor, b => b.BrowseName("Motor"))
             .ForType<OpcUaFluentMotor>()
                 .Map(m => m.Speed, b => b.BrowseName("Speed"));
-        var mappers = fluent.CreateMappers('.');
-        var pathMapper = (OpcUaPathProviderMapper)mappers[0];
+        var mapper = fluent.Build('.');
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var root = new OpcUaFluentRoot(context) { Motor = new OpcUaFluentMotor(context) };
@@ -55,10 +52,10 @@ public class OpcUaFluentMappingTests
         var speedProperty = root.Motor.TryGetRegisteredSubject()!.TryGetProperty("Speed")!;
 
         // Act
-        pathMapper.TryGetMapping(motorProperty, root, out var motorMapping);
-        pathMapper.TryGetMapping(speedProperty, root, out var speedMapping);
+        mapper.TryGetMapping(motorProperty, root, out var motorMapping);
+        mapper.TryGetMapping(speedProperty, root, out var speedMapping);
 
-        // Assert - the path-provider mapper supplies the browse name from the fluent segment.
+        // Assert - the fluent mapper supplies the browse name from the fluent segment.
         Assert.Equal("Motor", motorMapping!.BrowseName);
         Assert.Equal("Speed", speedMapping!.BrowseName);
     }
@@ -67,13 +64,13 @@ public class OpcUaFluentMappingTests
     public void WhenConfigureUsedForReferencedType_ThenTypeSelfMergesIntoSubjectMember()
     {
         // Arrange
-        var fluent = new OpcUaFluentMapping<OpcUaFluentRoot>();
+        var fluent = new OpcUaFluentMapperBuilder<OpcUaFluentRoot>();
         fluent
             .ForType<OpcUaFluentRoot>()
                 .Map(r => r.Motor, b => b.BrowseName("Motor"))
             .ForType<OpcUaFluentMotor>()
                 .Configure(b => b.TypeDefinition("MotorType"));
-        var metadataMapper = (OpcUaFluentMetadataMapper)fluent.CreateMappers('.')[1];
+        var mapper = fluent.Build('.');
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var root = new OpcUaFluentRoot(context) { Motor = new OpcUaFluentMotor(context) };
@@ -81,7 +78,7 @@ public class OpcUaFluentMappingTests
         var motorProperty = root.TryGetRegisteredSubject()!.TryGetProperty("Motor")!;
 
         // Act
-        var found = metadataMapper.TryGetMapping(motorProperty, root, out var mapping);
+        var found = mapper.TryGetMapping(motorProperty, root, out var mapping);
 
         // Assert - the Motor member's metadata (BrowseName) plus its type-self TypeDefinition.
         Assert.True(found);
@@ -93,12 +90,11 @@ public class OpcUaFluentMappingTests
     public async Task WhenFluentBrowseNameConfigured_ThenReverseLookupResolvesSpeedProperty()
     {
         // Arrange
-        var fluent = new OpcUaFluentMapping<OpcUaFluentRoot>();
+        var fluent = new OpcUaFluentMapperBuilder<OpcUaFluentRoot>();
         fluent
             .ForType<OpcUaFluentRoot>().Map(r => r.Motor, b => b.BrowseName("Motor"))
             .ForType<OpcUaFluentMotor>().Map(m => m.Speed, b => b.BrowseName("Speed"));
-        var mappers = fluent.CreateMappers('.');
-        var pathProviderMapper = (OpcUaPathProviderMapper)mappers[0];
+        var mapper = fluent.Build('.');
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var root = new OpcUaFluentRoot(context) { Motor = new OpcUaFluentMotor(context) };
@@ -115,7 +111,7 @@ public class OpcUaFluentMappingTests
         };
 
         // Act
-        var result = await pathProviderMapper.TryGetPropertyAsync(
+        var result = await mapper.TryGetPropertyAsync(
             new OpcUaLookupKey(nodeReference, mockSession.Object, root),
             motorRegisteredSubject,
             CancellationToken.None);
@@ -129,12 +125,11 @@ public class OpcUaFluentMappingTests
     public void WhenCollectionElementMapped_ThenForwardBrowseNameResolvesForElement()
     {
         // Arrange
-        var fluent = new OpcUaFluentMapping<OpcUaFluentRoot>();
+        var fluent = new OpcUaFluentMapperBuilder<OpcUaFluentRoot>();
         fluent
             .ForType<OpcUaFluentRoot>().Map(r => r.Motors, b => b.BrowseName("Motors"))
             .ForType<OpcUaFluentMotor>().Map(m => m.Speed, b => b.BrowseName("Speed"));
-        var mappers = fluent.CreateMappers('.');
-        var pathProviderMapper = (OpcUaPathProviderMapper)mappers[0];
+        var mapper = fluent.Build('.');
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var root = new OpcUaFluentRoot(context)
@@ -145,7 +140,7 @@ public class OpcUaFluentMappingTests
         var speedProperty = root.Motors[1].TryGetRegisteredSubject()!.TryGetProperty("Speed")!;
 
         // Act
-        pathProviderMapper.TryGetMapping(speedProperty, root, out var mapping);
+        mapper.TryGetMapping(speedProperty, root, out var mapping);
 
         // Assert - the browse name for the Speed property of a collection element resolves correctly.
         Assert.Equal("Speed", mapping!.BrowseName);

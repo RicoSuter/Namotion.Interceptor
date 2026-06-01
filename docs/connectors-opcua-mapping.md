@@ -33,12 +33,10 @@ For custom mapping, set `Mapper` explicitly:
 var config = new OpcUaClientConfiguration
 {
     Mapper = new OpcUaCompositeMapper(
-    [
         new OpcUaPathProviderMapper(
             new AttributeBasedPathProvider("opc")),  // Base: path fallback
         new OpcUaAttributeMapper(),                  // Attribute defaults
-        .. fluent.CreateMappers()                    // Fluent wins (see Code-Based Mapping)
-    ]),
+        fluentMapper),                               // Fluent wins (see Code-Based Mapping)
     // ... other settings
 };
 ```
@@ -402,7 +400,7 @@ public partial class Machine
 
 ## Code-Based (Fluent) Mapping
 
-`OpcUaFluentMapping<TRoot>` is a complete, code-based alternative to attribute mapping. Configure a type once with `ForType<T>().Map(...)` and `ForType<T>().Configure(...)`, and the mapping resolves everywhere that type appears in the object graph, including collection and dictionary elements (which get bracket indices such as `motors[1]/speed`).
+`OpcUaFluentMapperBuilder<TRoot>` is a complete, code-based alternative to attribute mapping. Configure a type once with `ForType<T>().Map(...)` and `ForType<T>().Configure(...)`, then call `Build(...)` to produce an `OpcUaFluentMapper`. The mapping resolves everywhere that type appears in the object graph, including collection and dictionary elements (which get bracket indices such as `motors[1]/speed`).
 
 Fluent mapping is layered after attributes in the composite, so fluent wins on conflicts. Omit fluent for attribute-only setups. The two sources compose freely.
 
@@ -416,9 +414,7 @@ The `BrowseName(...)` setter serves a dual role: it sets both the path segment u
 ### Example
 
 ```csharp
-var fluent = new OpcUaFluentMapping<Plant>();
-
-fluent
+var fluentMapper = new OpcUaFluentMapperBuilder<Plant>()
     .ForType<Motor>()
         .Configure(b => b.TypeDefinition("MotorType", "http://my/uri").NodeClass(OpcUaNodeClass.Object))
         .Map(m => m.Speed,  b => b.BrowseName("Speed").SamplingInterval(500))
@@ -430,27 +426,33 @@ fluent
         .Map(p => p.Sensors, b => b.BrowseName("Sensors").ItemReferenceType("HasComponent"))
     .ForType<Sensor>()
         .Configure(b => b.NodeClass(OpcUaNodeClass.Variable))
-        .Map(s => s.Value, b => b.IsValue());
+        .Map(s => s.Value, b => b.IsValue())
+    .Build('.');
 ```
 
 Because `Motor` is configured once at the type level, all motors in the graph (direct properties, collection elements, nested references) resolve the same browse names and sampling intervals without repeating configuration.
 
 ### DI Registration
 
-The `AddOpcUaSubjectClientSource<T>`, `AddKeyedOpcUaSubjectClientSource<T>`, `AddOpcUaSubjectServer<T>`, and `AddKeyedOpcUaSubjectServer<T>` overloads accept an optional `configureFluent` callback:
+The simple typed overloads (`AddOpcUaSubjectServer<T>("opc")`) build the attribute-only composite. To register a fluent mapper while keeping the connector defaults, use the configuration overload together with the public `CreateDefaultServerConfiguration` / `CreateDefaultClientConfiguration` factories, supplying your own `Mapper`:
 
 ```csharp
 services.AddOpcUaSubjectServer<Plant>(
-    connectorName: "opc",
-    rootName: "Devices",
-    configureFluent: fluent =>
-        fluent
-            .ForType<Motor>()
-                .Configure(b => b.TypeDefinition("MotorType"))
-                .Map(m => m.Speed, b => b.SamplingInterval(500)));
-```
+    sp => sp.GetRequiredService<Plant>(),
+    sp =>
+    {
+        var mapper = new OpcUaCompositeMapper(
+            new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
+            new OpcUaAttributeMapper("opc"),
+            new OpcUaFluentMapperBuilder<Plant>()
+                .ForType<Motor>()
+                    .Configure(b => b.TypeDefinition("MotorType"))
+                    .Map(m => m.Speed, b => b.SamplingInterval(500))
+                .Build('.'));
 
-Omit `configureFluent` to keep the default attribute-only mapping.
+        return OpcUaSubjectExtensions.CreateDefaultServerConfiguration(sp, rootName: "Devices", mapper);
+    });
+```
 
 ### Combining Fluent and Attributes
 
@@ -460,11 +462,9 @@ Fluent and attribute sources are layered in composite order: attributes first, f
 var config = new OpcUaClientConfiguration
 {
     Mapper = new OpcUaCompositeMapper(
-    [
         new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
         new OpcUaAttributeMapper(),
-        .. fluent.CreateMappers()
-    ])
+        fluentMapper)
 };
 ```
 
@@ -625,7 +625,7 @@ OPC UA Views (filtered address space subsets) are not supported.
 
 ### Fluent InlinePaths Declaration
 
-The `[InlinePaths]` declaration marker is not yet supported in the fluent API. Use the `[InlinePaths]` attribute directly on dictionary properties when transparent path resolution is needed. All other OPC UA node and monitoring settings are available via `OpcUaFluentMapping<TRoot>`.
+The `[InlinePaths]` declaration marker is not yet supported in the fluent API. Use the `[InlinePaths]` attribute directly on dictionary properties when transparent path resolution is needed. All other OPC UA node and monitoring settings are available via `OpcUaFluentMapperBuilder<TRoot>`.
 
 ## Future Extensibility
 
