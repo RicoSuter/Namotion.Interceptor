@@ -145,7 +145,6 @@ namespace Namotion.Interceptor.Registry.Paths
     }
     public class DefaultPathProvider : Namotion.Interceptor.Registry.Paths.PathProviderBase
     {
-        public DefaultPathProvider() { }
         public DefaultPathProvider(char pathSeparator) { }
         public override char PathSeparator { get; }
         public static Namotion.Interceptor.Registry.Paths.DefaultPathProvider Instance { get; }
@@ -174,7 +173,6 @@ namespace Namotion.Interceptor.Registry.Paths
                 "segment",
                 "index"})]
         public static System.Collections.Generic.List<System.ValueTuple<string, object?>> ParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path) { }
-        public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string separator = ".", Namotion.Interceptor.IInterceptorSubject? rootSubject = null) { }
         public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.IInterceptorSubject? rootSubject, object? propertyIndex = null) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "Property",

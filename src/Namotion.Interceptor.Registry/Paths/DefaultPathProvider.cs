@@ -12,8 +12,7 @@ public class DefaultPathProvider : PathProviderBase
     /// </summary>
     public static DefaultPathProvider Instance { get; } = new();
 
-    /// <summary>Creates a default path provider with the '.' separator.</summary>
-    public DefaultPathProvider()
+    private DefaultPathProvider()
         : this('.')
     {
     }

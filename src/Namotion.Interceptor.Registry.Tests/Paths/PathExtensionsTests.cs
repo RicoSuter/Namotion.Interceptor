@@ -460,7 +460,7 @@ public class PathExtensionsTests
         var property = container.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
 
         // Act
-        var path = property.TryGetPath();
+        var path = property.TryGetPath(DefaultPathProvider.Instance, null);
 
         // Assert
         Assert.Equal("Name", path);
@@ -477,7 +477,7 @@ public class PathExtensionsTests
         var firstNameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act
-        var path = firstNameProperty.TryGetPath();
+        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, null);
 
         // Assert
         Assert.Equal("Father.FirstName", path);
@@ -494,7 +494,7 @@ public class PathExtensionsTests
         var firstNameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act
-        var path = firstNameProperty.TryGetPath("/");
+        var path = firstNameProperty.TryGetPath(new DefaultPathProvider('/'), null);
 
         // Assert
         Assert.Equal("Father/FirstName", path);
@@ -513,9 +513,9 @@ public class PathExtensionsTests
         var firstNameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act
-        var pathFromParent = firstNameProperty.TryGetPath(rootSubject: parent);
-        var pathFromGrandparent = firstNameProperty.TryGetPath(rootSubject: grandparent);
-        var pathAbsolute = firstNameProperty.TryGetPath();
+        var pathFromParent = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, parent);
+        var pathFromGrandparent = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, grandparent);
+        var pathAbsolute = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, null);
 
         // Assert
         Assert.Equal("Father.FirstName", pathFromParent);
@@ -535,7 +535,7 @@ public class PathExtensionsTests
         var firstNameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act - the property is not reachable from 'unrelated', so there is no relative path
-        var path = firstNameProperty.TryGetPath(rootSubject: unrelated);
+        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, unrelated);
 
         // Assert
         Assert.Null(path);
@@ -556,7 +556,7 @@ public class PathExtensionsTests
         var firstNameProperty = shared.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act - the first parent ('other') does not reach 'root', so the search must use the second
-        var path = firstNameProperty.TryGetPath(rootSubject: root);
+        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, root);
 
         // Assert
         Assert.Equal("Father.FirstName", path);
@@ -573,7 +573,7 @@ public class PathExtensionsTests
         var firstNameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act
-        var path = firstNameProperty.TryGetPath(rootSubject: child);
+        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, child);
 
         // Assert
         Assert.Equal("FirstName", path);
@@ -591,25 +591,7 @@ public class PathExtensionsTests
         var firstNameProperty = a.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act - a cycle has no finite path, so it is reported as null rather than throwing
-        var path = firstNameProperty.TryGetPath();
-
-        // Assert
-        Assert.Null(path);
-    }
-
-    [Fact]
-    public void WhenSubjectParentChainHasCycle_ThenTryGetPathWithProviderReturnsNull()
-    {
-        // Arrange - mutual Father references form a cycle in the parent chain
-        var context = CreateContext();
-        var a = new Models.Person(context) { FirstName = "A" };
-        var b = new Models.Person(context) { FirstName = "B" };
-        a.Father = b;
-        b.Father = a;
-        var firstNameProperty = a.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
-
-        // Act
-        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, rootSubject: null);
+        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, null);
 
         // Assert
         Assert.Null(path);
@@ -632,7 +614,7 @@ public class PathExtensionsTests
         var firstNameProperty = shared.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act
-        var path = firstNameProperty.TryGetPath(rootSubject: root);
+        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, root);
 
         // Assert - resolves via the first parent that reaches the root
         Assert.Equal("Father.Father.FirstName", path);
@@ -663,7 +645,7 @@ public class PathExtensionsTests
         var firstNameProperty = leaf.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act
-        var path = firstNameProperty.TryGetPath(rootSubject: root);
+        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, root);
 
         // Assert
         Assert.Equal("Father.Father.FirstName", path);
@@ -690,7 +672,7 @@ public class PathExtensionsTests
         var firstNameProperty = shared.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act
-        var path = firstNameProperty.TryGetPath(rootSubject: root);
+        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, root);
 
         // Assert
         Assert.Equal("Father.Father.FirstName", path);
@@ -713,7 +695,7 @@ public class PathExtensionsTests
         var firstNameProperty = leaf.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act
-        var path = firstNameProperty.TryGetPath(rootSubject: unrelated);
+        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, unrelated);
 
         // Assert
         Assert.Null(path);
@@ -743,7 +725,7 @@ public class PathExtensionsTests
         var firstNameProperty = leaf.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
 
         // Act
-        var path = firstNameProperty.TryGetPath(rootSubject: root);
+        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, root);
 
         // Assert - resolves to "Father" repeated for each hop up the chain, then the leaf property
         Assert.NotNull(path);
@@ -754,7 +736,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenPropertyIsCollectionElement_ThenPlainTryGetPathIncludesBracketIndex()
+    public void WhenPropertyIsCollectionElement_ThenDefaultProviderPathIncludesBracketIndex()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -763,7 +745,7 @@ public class PathExtensionsTests
         var nameProperty = root.Items[1].TryGetRegisteredSubject()!.TryGetProperty("Name")!;
 
         // Act
-        var path = nameProperty.TryGetPath(rootSubject: root);
+        var path = nameProperty.TryGetPath(DefaultPathProvider.Instance, root);
 
         // Assert
         Assert.Equal("Items[1].Name", path);
