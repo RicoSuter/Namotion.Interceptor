@@ -26,7 +26,26 @@ public class OpcUaDiDefaultsTests
 
         // Assert
         Assert.NotNull(configuration.TypeResolver);
+        Assert.NotNull(configuration.TelemetryContext);
         Assert.NotSame(NullTelemetryContext.Instance, configuration.TelemetryContext);
+    }
+
+    [Fact]
+    public void WhenClientTelemetrySetToNullContext_ThenDiKeepsIt()
+    {
+        // Arrange - explicitly choosing the no-op context must be respected, not replaced by DI logging.
+        var serviceProvider = CreateServiceProvider();
+        var configuration = new OpcUaClientConfiguration
+        {
+            ServerUrl = "opc.tcp://localhost:4840",
+            TelemetryContext = NullTelemetryContext.Instance
+        };
+
+        // Act
+        OpcUaSubjectExtensions.ApplyClientDiDefaults(configuration, serviceProvider);
+
+        // Assert
+        Assert.Same(NullTelemetryContext.Instance, configuration.TelemetryContext);
     }
 
     [Fact]
@@ -62,7 +81,22 @@ public class OpcUaDiDefaultsTests
         OpcUaSubjectExtensions.ApplyServerDiDefaults(configuration, serviceProvider);
 
         // Assert
+        Assert.NotNull(configuration.TelemetryContext);
         Assert.NotSame(NullTelemetryContext.Instance, configuration.TelemetryContext);
+    }
+
+    [Fact]
+    public void WhenServerTelemetrySetToNullContext_ThenDiKeepsIt()
+    {
+        // Arrange - explicitly choosing the no-op context must be respected, not replaced by DI logging.
+        var serviceProvider = CreateServiceProvider();
+        var configuration = new OpcUaServerConfiguration { TelemetryContext = NullTelemetryContext.Instance };
+
+        // Act
+        OpcUaSubjectExtensions.ApplyServerDiDefaults(configuration, serviceProvider);
+
+        // Assert
+        Assert.Same(NullTelemetryContext.Instance, configuration.TelemetryContext);
     }
 
     [Fact]

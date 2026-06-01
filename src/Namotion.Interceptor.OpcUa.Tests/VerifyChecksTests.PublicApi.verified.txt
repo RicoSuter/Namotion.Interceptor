@@ -125,7 +125,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public uint SubscriptionMaximumNotificationsPerPublish { get; set; }
         public byte SubscriptionPriority { get; set; }
         public bool SubscriptionSequentialPublishing { get; set; }
-        public Opc.Ua.ITelemetryContext TelemetryContext { get; set; }
+        public Opc.Ua.ITelemetryContext? TelemetryContext { get; set; }
         public Namotion.Interceptor.OpcUa.Client.OpcUaTypeResolver? TypeResolver { get; set; }
         public bool UseSecurity { get; set; }
         public Namotion.Interceptor.OpcUa.OpcUaValueConverter ValueConverter { get; set; }
@@ -369,7 +369,7 @@ namespace Namotion.Interceptor.OpcUa.Server
         public Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping> Mapper { get; set; }
         public string NamespaceUri { get; set; }
         public string? RootName { get; set; }
-        public Opc.Ua.ITelemetryContext TelemetryContext { get; set; }
+        public Opc.Ua.ITelemetryContext? TelemetryContext { get; set; }
         public Namotion.Interceptor.OpcUa.OpcUaValueConverter ValueConverter { get; set; }
         public virtual System.Threading.Tasks.Task<Opc.Ua.Configuration.ApplicationInstance> CreateApplicationInstanceAsync() { }
         public virtual string[] GetNamespaceUris() { }

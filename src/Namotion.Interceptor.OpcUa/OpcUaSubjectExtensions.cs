@@ -220,20 +220,18 @@ public static class OpcUaSubjectExtensions
     }
 
     // Completes a configuration after the caller's provider runs, filling only the fields that need DI:
-    // DI-backed telemetry when left at the NullTelemetryContext default, and (client) the type resolver logger.
-    // Fields a caller set explicitly are left untouched. Internal so the behavior can be unit-tested directly.
+    // DI-backed telemetry when left null, and (client) the type resolver logger. Fields a caller set explicitly
+    // (including an explicit NullTelemetryContext) are left untouched. Internal so the behavior can be unit-tested.
     internal static void ApplyClientDiDefaults(OpcUaClientConfiguration configuration, IServiceProvider sp)
     {
-        if (ReferenceEquals(configuration.TelemetryContext, NullTelemetryContext.Instance))
-            configuration.TelemetryContext = CreateDiTelemetry(sp);
+        configuration.TelemetryContext ??= CreateDiTelemetry(sp);
 
         configuration.TypeResolver ??= new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>());
     }
 
     internal static void ApplyServerDiDefaults(OpcUaServerConfiguration configuration, IServiceProvider sp)
     {
-        if (ReferenceEquals(configuration.TelemetryContext, NullTelemetryContext.Instance))
-            configuration.TelemetryContext = CreateDiTelemetry(sp);
+        configuration.TelemetryContext ??= CreateDiTelemetry(sp);
     }
 
     private static ITelemetryContext CreateDiTelemetry(IServiceProvider sp)

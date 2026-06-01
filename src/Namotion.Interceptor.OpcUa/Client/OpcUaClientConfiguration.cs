@@ -317,12 +317,15 @@ public class OpcUaClientConfiguration
     public Func<CancellationToken, Task<UserIdentity>>? CreateUserIdentity { get; set; }
 
     /// <summary>
-    /// Gets or sets the telemetry context for OPC UA operations.
-    /// Defaults to NullTelemetryContext for minimal overhead. When registered through the AddOpcUaSubject* DI
-    /// extensions, a default (NullTelemetryContext) value is replaced with a DI-backed telemetry context, and the
-    /// type resolver is created from the DI logger when unset; set non-default instances to keep your own.
+    /// Gets or sets the telemetry context for OPC UA operations. When null and the connector is registered
+    /// through the AddOpcUaSubject* DI extensions, it is filled with a DI-backed telemetry context (and the type
+    /// resolver is created from the DI logger when unset); otherwise it falls back to NullTelemetryContext. Set a
+    /// value (including NullTelemetryContext.Instance) to keep your own.
     /// </summary>
-    public ITelemetryContext TelemetryContext { get; set; } = NullTelemetryContext.Instance;
+    public ITelemetryContext? TelemetryContext { get; set; }
+
+    // The telemetry context to use for SDK calls, never null (falls back to the no-op context when unset).
+    internal ITelemetryContext ResolvedTelemetryContext => TelemetryContext ?? NullTelemetryContext.Instance;
 
     /// <summary>
     /// Gets or sets the session factory for creating OPC UA sessions.
@@ -348,7 +351,7 @@ public class OpcUaClientConfiguration
     /// The default factory is cached after first access (thread-safe).
     /// </summary>
     public ISessionFactory ActualSessionFactory => SessionFactory ?? LazyInitializer.EnsureInitialized(
-        ref _resolvedSessionFactory, () => new DefaultSessionFactory(TelemetryContext))!;
+        ref _resolvedSessionFactory, () => new DefaultSessionFactory(ResolvedTelemetryContext))!;
 
     /// <summary>
     /// Creates and configures an OPC UA application instance for the client.
@@ -357,7 +360,7 @@ public class OpcUaClientConfiguration
     /// <returns>A configured <see cref="ApplicationInstance"/> ready for connecting to OPC UA servers.</returns>
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
-        var application = new ApplicationInstance(TelemetryContext)
+        var application = new ApplicationInstance(ResolvedTelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Client
@@ -412,7 +415,7 @@ public class OpcUaClientConfiguration
                 OutputFilePath = "Logs/UaClient.log",
                 TraceMasks = 0
             },
-            CertificateValidator = new CertificateValidator(TelemetryContext)
+            CertificateValidator = new CertificateValidator(ResolvedTelemetryContext)
         };
 
         await config.CertificateValidator.UpdateAsync(config).ConfigureAwait(false);
