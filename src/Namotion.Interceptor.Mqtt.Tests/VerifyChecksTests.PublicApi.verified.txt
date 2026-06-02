@@ -96,9 +96,10 @@ namespace Namotion.Interceptor.Mqtt.Mapping
     {
         public MqttCompositeMapper(params Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>[] mappers) { }
     }
-    public sealed class MqttFluentMapper : Namotion.Interceptor.Connectors.Mapping.ReverseCompositeMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
+    public sealed class MqttFluentMapper : Namotion.Interceptor.Mqtt.Mapping.MqttPathProviderMapper
     {
         public MqttFluentMapper(Namotion.Interceptor.Connectors.Mapping.FluentMappingRegistry<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping> registry, char pathSeparator = /) { }
+        public override bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
     }
     public sealed class MqttFluentMapperBuilder<TRoot>
         where TRoot : Namotion.Interceptor.IInterceptorSubject
@@ -129,7 +130,7 @@ namespace Namotion.Interceptor.Mqtt.Mapping
     public class MqttPathProviderMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
     {
         public MqttPathProviderMapper(Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider) { }
-        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
+        public virtual bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
         public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
     public sealed class MqttPropertyMapping : Namotion.Interceptor.Connectors.Mapping.IPropertyMapping<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>, System.IEquatable<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>
