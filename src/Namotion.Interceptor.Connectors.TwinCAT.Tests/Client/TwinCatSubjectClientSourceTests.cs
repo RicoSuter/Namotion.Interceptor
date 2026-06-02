@@ -187,8 +187,8 @@ public class TwinCatSubjectClientSourceTests
         var logger = new Mock<ILogger>().Object;
         var configuration = new AdsClientConfiguration
         {
-            Host = "127.0.0.1",
-            AmsNetId = null!, // Invalid - must be set
+            Host = null, // Invalid - with no AmsNetId the target cannot be resolved
+            AmsNetId = null,
             Mapper = AdsCompositeMapper.CreateDefault(AdsConstants.DefaultConnectorName)
         };
 

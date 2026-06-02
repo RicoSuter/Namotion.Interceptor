@@ -61,15 +61,97 @@ public class AdsClientConfigurationTests
     }
 
     [Fact]
-    public void Validate_WithNullAmsNetId_ThrowsArgumentException()
+    public void Validate_WithNoHostAndNoAmsNetId_ThrowsArgumentException()
     {
         // Arrange
         var configuration = CreateValidConfiguration();
-        configuration.AmsNetId = null!;
+        configuration.Host = null;
+        configuration.AmsNetId = null;
 
         // Act & Assert
         var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
         Assert.Contains("AmsNetId", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_WithHostnameHostAndNoAmsNetId_ThrowsArgumentException()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.Host = "plc01";
+        configuration.AmsNetId = null;
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Contains("AmsNetId", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_WithIpHostAndNoAmsNetId_DoesNotThrow()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.Host = "192.168.1.100";
+        configuration.AmsNetId = null;
+
+        // Act & Assert - the net id derives from the IP host
+        configuration.Validate();
+    }
+
+    [Fact]
+    public void GetTargetAmsNetId_WithIpHostAndNoAmsNetId_DerivesOneOne()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.Host = "192.168.1.100";
+        configuration.AmsNetId = null;
+
+        // Act
+        var amsNetId = configuration.GetTargetAmsNetId();
+
+        // Assert
+        Assert.Equal("192.168.1.100.1.1", amsNetId.ToString());
+    }
+
+    [Fact]
+    public void GetTargetAmsNetId_WithExplicitAmsNetId_ReturnsExplicitValue()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.Host = "192.168.1.100";
+        configuration.AmsNetId = AmsNetId.Parse("5.23.100.200.1.1");
+
+        // Act
+        var amsNetId = configuration.GetTargetAmsNetId();
+
+        // Assert
+        Assert.Equal("5.23.100.200.1.1", amsNetId.ToString());
+    }
+
+    [Fact]
+    public void GetTargetAmsNetId_WithHostnameHostAndNoAmsNetId_Throws()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.Host = "plc01";
+        configuration.AmsNetId = null;
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => configuration.GetTargetAmsNetId());
+    }
+
+    [Fact]
+    public void UseEmbeddedRouter_IsTrueOnlyWhenHostIsSet()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+
+        // Act & Assert
+        configuration.Host = "192.168.1.100";
+        Assert.True(configuration.UseEmbeddedRouter);
+
+        configuration.Host = null;
+        Assert.False(configuration.UseEmbeddedRouter);
     }
 
     [Theory]
@@ -83,7 +165,7 @@ public class AdsClientConfigurationTests
         configuration.AmsPort = port;
 
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => configuration.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(configuration.Validate);
     }
 
     [Theory]
@@ -97,7 +179,7 @@ public class AdsClientConfigurationTests
         configuration.MaxNotifications = maxNotifications;
 
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => configuration.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(configuration.Validate);
     }
 
     [Fact]
@@ -108,7 +190,7 @@ public class AdsClientConfigurationTests
         configuration.PollingInterval = TimeSpan.Zero;
 
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => configuration.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(configuration.Validate);
     }
 
     [Fact]
@@ -119,7 +201,7 @@ public class AdsClientConfigurationTests
         configuration.PollingInterval = TimeSpan.FromMilliseconds(-1);
 
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => configuration.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(configuration.Validate);
     }
 
     [Fact]
@@ -130,7 +212,7 @@ public class AdsClientConfigurationTests
         configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(-1);
 
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => configuration.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(configuration.Validate);
     }
 
     [Fact]
@@ -154,7 +236,7 @@ public class AdsClientConfigurationTests
         configuration.DefaultMaxDelay = defaultMaxDelay;
 
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => configuration.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(configuration.Validate);
     }
 
     [Fact]

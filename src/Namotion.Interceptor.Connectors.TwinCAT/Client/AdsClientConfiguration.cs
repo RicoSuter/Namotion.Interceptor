@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Configuration;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Connectors.TwinCAT.Attributes;
@@ -12,16 +13,37 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 public class AdsClientConfiguration
 {
     /// <summary>
-    /// Gets or sets the optional, informational PLC host IP or hostname.
-    /// Used by the simple overload to derive a default AMS Net ID; it is not used for the connection.
+    /// When set, enables embedded-router mode: the PLC IP or hostname the connector routes to via an
+    /// in-process AMS router. When null, the system AMS router is used and AmsNetId addresses the target.
     /// </summary>
     public string? Host { get; set; }
 
     /// <summary>
-    /// Gets or sets the AMS Net ID of the target.
-    /// Use <see cref="AmsNetId.Local"/> for an in-process (loopback / shared-memory) connection.
+    /// Target AMS Net ID. Optional when Host is an IP (defaults to {Host}.1.1).
+    /// Use <see cref="AmsNetId.Local"/> for a local loopback connection (with Host null).
     /// </summary>
-    public required AmsNetId AmsNetId { get; set; }
+    public AmsNetId? AmsNetId { get; set; }
+
+    /// <summary>
+    /// Embedded mode only: the local net id the in-process router presents to the PLC
+    /// (the PLC's route back must match it). Defaults to the local IP + ".1.1".
+    /// </summary>
+    public AmsNetId? LocalAmsNetId { get; set; }
+
+    /// <summary>
+    /// Gets whether embedded-router mode is enabled (true when <see cref="Host"/> is set).
+    /// </summary>
+    public bool UseEmbeddedRouter => Host is not null;
+
+    /// <summary>
+    /// Resolves the target AMS Net ID, deriving {Host}.1.1 when Host is an IP and AmsNetId is unset.
+    /// </summary>
+    public AmsNetId GetTargetAmsNetId()
+    {
+        if (AmsNetId is not null) return AmsNetId;
+        if (Host is not null && IPAddress.TryParse(Host, out _)) return global::TwinCAT.Ads.AmsNetId.Parse($"{Host}.1.1");
+        throw new InvalidOperationException("AmsNetId must be set when Host is null or a hostname.");
+    }
 
     /// <summary>
     /// Gets or sets the AMS port (default: 851 for TwinCAT3 PLC runtime).
@@ -123,10 +145,11 @@ public class AdsClientConfiguration
         if (Mapper is null)
             throw new ArgumentException("Mapper must not be null.", nameof(Mapper));
 
-        // Only a null is rejected; an empty net id (AmsNetId.Local resolves to "0.0.0.0.0.0" on a host with
-        // no local AMS router) is left to the connection layer, which retries and logs.
-        if (AmsNetId is null)
-            throw new ArgumentException("AmsNetId must be set.", nameof(AmsNetId));
+        if (Host is null && AmsNetId is null)
+            throw new ArgumentException("Either Host or AmsNetId must be set.", nameof(AmsNetId));
+
+        if (AmsNetId is null && Host is not null && !IPAddress.TryParse(Host, out _))
+            throw new ArgumentException("AmsNetId must be set when Host is a hostname (the net id cannot be derived).", nameof(AmsNetId));
 
         if (AmsPort <= 0)
             throw new ArgumentOutOfRangeException(nameof(AmsPort), "AmsPort must be positive.");

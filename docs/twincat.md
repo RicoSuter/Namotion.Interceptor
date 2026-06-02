@@ -16,7 +16,7 @@ The `Namotion.Interceptor.Connectors.TwinCAT` package provides integration betwe
 
 ## Client Setup
 
-Connect to a TwinCAT PLC by configuring a client with `AddTwinCatSubjectClientSource`. The client automatically establishes connections, subscribes to variable changes, and synchronizes values with your C# properties.
+Connect to a TwinCAT PLC by registering a client source with `AddTwinCatSubjectClientSource`. The client automatically establishes connections, subscribes to variable changes, and synchronizes values with your C# properties.
 
 ```csharp
 [InterceptorSubject]
@@ -29,9 +29,7 @@ public partial class PlcModel
     public partial int Speed { get; set; }
 }
 
-builder.Services.AddTwinCatSubjectClientSource<PlcModel>(
-    host: "192.168.1.100",
-    amsPort: 851);
+builder.Services.AddTwinCatSubjectClientSource<PlcModel>("192.168.1.100");
 
 // Use in application
 var plc = serviceProvider.GetRequiredService<PlcModel>();
@@ -40,32 +38,33 @@ Console.WriteLine(plc.Temperature); // Read property synchronized with PLC
 plc.Speed = 100; // Writes to PLC
 ```
 
-## Configuration
+### Registering a client source
 
-### Simple Configuration
+There are three overloads. The first two pick the connection mode at the call site; the third gives full control.
 
-The generic overload provides a concise way to register a client source with sensible defaults:
+**Embedded by host or IP.** Pass a `string` host. The connector runs an in-process AMS router and routes to that address, so no TwinCAT install is required:
 
 ```csharp
-builder.Services.AddTwinCatSubjectClientSource<PlcModel>(
-    host: "192.168.1.100",        // PLC IP or hostname
-    amsPort: 851,                 // AMS port (default: 851 for TwinCAT3)
-    amsNetId: "192.168.1.100.1.1",// AMS Net ID (default: "{host}.1.1")
-    connectorName: "ads"          // Connector name for [AdsVariable] mapping (default: "ads")
-);
+builder.Services.AddTwinCatSubjectClientSource<PlcModel>("192.168.1.100");
+// optional: amsPort, amsNetId (AmsNetId?), connectorName
 ```
 
-### Advanced Configuration
+**System router by net id.** Pass an `AmsNetId`. The connector connects through the machine's existing AMS router:
 
-For full control over all settings, use the advanced overload with `AdsClientConfiguration`:
+```csharp
+builder.Services.AddTwinCatSubjectClientSource<PlcModel>(AmsNetId.Local); // loopback
+builder.Services.AddTwinCatSubjectClientSource<PlcModel>(AmsNetId.Parse("5.23.45.67.1.1")); // routed target
+```
+
+**Full control.** Pass a subject selector and a configuration provider to set any field on `AdsClientConfiguration`:
 
 ```csharp
 builder.Services.AddTwinCatSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<PlcModel>(),
     configurationProvider: sp => new AdsClientConfiguration
     {
-        // Connection (Host is optional and informational; the AMS Net ID identifies the target)
-        AmsNetId = AmsNetId.Parse("192.168.1.100.1.1"), // or AmsNetId.Local for an in-process connection
+        Host = "192.168.1.100",            // embedded mode; omit to use the system router by AmsNetId
+        AmsNetId = AmsNetId.Parse("192.168.1.100.1.1"),
         AmsPort = 851,
 
         // Property mapping (optional - defaults to attribute-based)
@@ -97,28 +96,65 @@ builder.Services.AddTwinCatSubjectClientSource(
     });
 ```
 
-### Local connection (loopback / shared memory)
+## Connection Modes
 
-When the application runs on the same machine as the TwinCAT runtime, set `AmsNetId` to `AmsNetId.Local`. The local AMS router then dispatches calls through shared memory instead of TCP, with very low overhead, and `Host` is not needed:
+How the connector reaches the PLC is decided by whether `Host` is set.
+
+### Embedded router (set `Host`)
+
+The connector runs Beckhoff's in-process `AmsTcpIpRouter`, adds a route `AmsNetId -> Host`, and connects through it. This is cross-platform and needs no system TwinCAT router, so it suits hosts without TwinCAT installed. `AmsNetId` is optional: for an IP host it is derived as `{Host}.1.1`; for a hostname it is required, because a net id cannot be derived from a name.
+
+The router is process-wide and reference-counted across all embedded sources: it starts on first use and stops when the last source is disposed. Because it owns the host's AMS TCP port, it cannot run alongside a system TwinCAT router on the same host. `LocalAmsNetId` (the client net id the PLC sees) is honored only by the first source that starts the shared router; it defaults to the local IP + ".1.1". On an isolated host with no default network route, set `LocalAmsNetId` explicitly.
 
 ```csharp
-builder.Services.AddTwinCatSubjectClientSource(
-    subjectSelector: sp => sp.GetRequiredService<PlcModel>(),
-    configurationProvider: sp => new AdsClientConfiguration
-    {
-        AmsNetId = AmsNetId.Local,
-        AmsPort = 851,
-    });
+builder.Services.AddTwinCatSubjectClientSource<PlcModel>("192.168.1.100"); // embedded, AmsNetId derived
 ```
 
-The connector always connects through the local AMS router, which selects the transport by target: shared memory for a local net id, TCP for a remote one (using a route already configured in the router). The connector does not add routes itself.
+### System router (`Host` null)
 
-### Configuration Reference
+The connector connects by `AmsNetId` through the machine's existing AMS router (full TwinCAT, TwinCAT/BSD, or a router you configure via `RouterConfiguration`). No embedded router is started. `AmsNetId.Local` gives a loopback/shared-memory connection with very low overhead; a remote net id uses a route already present in that router. The connector does not add routes itself in this mode.
+
+```csharp
+builder.Services.AddTwinCatSubjectClientSource<PlcModel>(AmsNetId.Local);
+```
+
+### Setting up the route on the PLC
+
+ADS is bidirectional and trust-based. The embedded router adds the client-to-PLC route for you, but that is only half of it: the PLC must also have a route back to this client and be configured to accept the connection. This is a one-time setup on the PLC, and it applies whenever you reach a real remote PLC (embedded mode, or system-router mode with a remote net id). A loopback connection (`AmsNetId.Local`) needs no route.
+
+You need two values from the client:
+
+- **Client AMS Net ID** - the `LocalAmsNetId` the embedded router presents to the PLC. By default it is this host's IP + ".1.1" (for example `192.168.1.50.1.1`). Set `LocalAmsNetId` explicitly when you want a fixed, known value (recommended, so the PLC route stays valid if the host IP changes).
+- **Client IP** - the address the PLC can reach this host at.
+
+On the PLC, add a static route to that client, using either method:
+
+1. **TwinCAT route dialog.** On the PLC, open the TwinCAT system-tray icon and choose Router, Edit Routes, Add (or do this from TwinCAT XAE connected to the PLC). Enter:
+   - Route name: any label.
+   - AmsNetId: the client AMS Net ID.
+   - Transport type: TCP/IP.
+   - Address: the client IP.
+   - Mark it Static so it survives a reboot.
+
+   Adding the route authenticates with the PLC's credentials (its TwinCAT user and password).
+
+2. **StaticRoutes.xml.** Edit the file on the PLC (Windows: `C:\TwinCAT\3.1\Target\StaticRoutes.xml`; TwinCAT/BSD: `/usr/local/etc/TwinCAT/3.1/Target/StaticRoutes.xml`) and add a route entry with the client route name, AMS Net ID, IP address, and `TCP_IP` transport, then restart the TwinCAT system service.
+
+Also make sure:
+
+- The PLC's firewall allows inbound TCP port **48898** (the AMS/ADS port).
+- The `AmsNetId` you connect to is the PLC's actual net id. It is often the PLC IP + ".1.1", but confirm it in the PLC's TwinCAT router settings and set `AmsNetId` explicitly if it differs.
+- On TwinCAT 3.1 (build 4024 and later) ADS-Secure may apply: the route's connection mode and credentials must match what the PLC requires. Configure the route on the PLC accordingly.
+
+Once the PLC has a route to the client net id and IP and the firewall allows port 48898, the embedded client connects without any TwinCAT installation on the client host.
+
+## Configuration Reference
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `Host` | `string?` | null | Optional, informational; the simple overload derives a default AMS Net ID from it. Not used for the connection |
-| `AmsNetId` | `AmsNetId` | *required* | AMS Net ID of the target. Use `AmsNetId.Local` for an in-process (loopback / shared-memory) connection |
+| `Host` | `string?` | null | PLC IP/hostname; when set, enables the embedded router and is the route target |
+| `AmsNetId` | `AmsNetId?` | derived | Target net id; optional when Host is an IP (defaults to `{Host}.1.1`). Use `AmsNetId.Local` for an in-process connection |
+| `LocalAmsNetId` | `AmsNetId?` | null | Embedded mode only: the client net id the PLC sees; defaults to local IP + .1.1 |
 | `AmsPort` | int | 851 | AMS port for TwinCAT3 PLC runtime |
 | `Mapper` | `IPropertyMapper<AdsPropertyMapping>` | attribute-based | Resolves each property's symbol path and ADS settings |
 | `Timeout` | TimeSpan | 5s | ADS communication timeout |

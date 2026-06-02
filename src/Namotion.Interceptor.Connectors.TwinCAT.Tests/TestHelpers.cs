@@ -43,7 +43,8 @@ internal static class TestHelpers
     {
         return new AdsClientConfiguration
         {
-            Host = "127.0.0.1",
+            // System-router mode (no Host): the unit tests exercise behavior with an unreachable target,
+            // without starting the embedded router (which would bind the host's AMS TCP port).
             AmsNetId = AmsNetId.Parse("127.0.0.1.1.1"),
             AmsPort = 851,
             Mapper = AdsCompositeMapper.CreateDefault(

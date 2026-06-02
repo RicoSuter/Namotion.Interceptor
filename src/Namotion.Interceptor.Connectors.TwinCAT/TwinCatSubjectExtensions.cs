@@ -15,21 +15,21 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class TwinCatSubjectExtensions
 {
     /// <summary>
-    /// Registers a TwinCAT ADS client source for the specified subject type.
-    /// The subject is resolved from the service provider using <see cref="ServiceProviderServiceExtensions.GetRequiredService{T}"/>.
+    /// Registers a TwinCAT ADS client source that connects to a PLC by IP or hostname using an in-process AMS
+    /// router (embedded mode). No system TwinCAT router is required, so this works cross-platform. The PLC must
+    /// trust this client (a static route on the PLC, or ADS-Secure). Only one embedded router runs per process.
     /// </summary>
     /// <typeparam name="TSubject">The subject type to synchronize with the PLC.</typeparam>
     /// <param name="services">The service collection.</param>
-    /// <param name="host">The PLC host IP or hostname.</param>
-    /// <param name="amsPort">The AMS port (default: 851 for TwinCAT3 PLC runtime).</param>
-    /// <param name="amsNetId">The AMS Net ID. If null, defaults to <paramref name="host"/> + ".1.1".</param>
+    /// <param name="host">The PLC IP or hostname; the embedded router routes to it.</param>
+    /// <param name="amsPort">The AMS port (default: 851 for the TwinCAT3 PLC runtime).</param>
+    /// <param name="amsNetId">The target AMS Net ID. When null and <paramref name="host"/> is an IP, it defaults to <c>{host}.1.1</c>; required when <paramref name="host"/> is a hostname.</param>
     /// <param name="connectorName">The connector name used for attribute-based symbol mapping (default: "ads").</param>
-    /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddTwinCatSubjectClientSource<TSubject>(
         this IServiceCollection services,
         string host,
         int amsPort = 851,
-        string? amsNetId = null,
+        AmsNetId? amsNetId = null,
         string connectorName = AdsConstants.DefaultConnectorName)
         where TSubject : IInterceptorSubject
     {
@@ -38,7 +38,34 @@ public static class TwinCatSubjectExtensions
             _ => new AdsClientConfiguration
             {
                 Host = host,
-                AmsNetId = AmsNetId.Parse(amsNetId ?? $"{host}.1.1"),
+                AmsNetId = amsNetId,
+                AmsPort = amsPort,
+                Mapper = AdsCompositeMapper.CreateDefault(connectorName)
+            });
+    }
+
+    /// <summary>
+    /// Registers a TwinCAT ADS client source that connects through the machine's existing AMS router by AMS Net
+    /// ID (system-router mode). Use <see cref="AmsNetId.Local"/> for an in-process loopback connection, or a
+    /// remote PLC's net id when the system router already has a route to it. No embedded router is started.
+    /// </summary>
+    /// <typeparam name="TSubject">The subject type to synchronize with the PLC.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="amsNetId">The target AMS Net ID.</param>
+    /// <param name="amsPort">The AMS port (default: 851 for the TwinCAT3 PLC runtime).</param>
+    /// <param name="connectorName">The connector name used for attribute-based symbol mapping (default: "ads").</param>
+    public static IServiceCollection AddTwinCatSubjectClientSource<TSubject>(
+        this IServiceCollection services,
+        AmsNetId amsNetId,
+        int amsPort = 851,
+        string connectorName = AdsConstants.DefaultConnectorName)
+        where TSubject : IInterceptorSubject
+    {
+        return services.AddTwinCatSubjectClientSource(
+            serviceProvider => serviceProvider.GetRequiredService<TSubject>(),
+            _ => new AdsClientConfiguration
+            {
+                AmsNetId = amsNetId,
                 AmsPort = amsPort,
                 Mapper = AdsCompositeMapper.CreateDefault(connectorName)
             });

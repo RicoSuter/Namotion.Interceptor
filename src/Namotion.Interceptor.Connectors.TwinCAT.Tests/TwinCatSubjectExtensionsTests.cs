@@ -62,7 +62,7 @@ public class TwinCatSubjectExtensionsTests
             .Single();
 
         Assert.Equal("10.0.0.1", source.Configuration.Host);
-        Assert.Equal("10.0.0.1.1.1", source.Configuration.AmsNetId.ToString());
+        Assert.Equal("10.0.0.1.1.1", source.Configuration.GetTargetAmsNetId().ToString());
         Assert.Equal(852, source.Configuration.AmsPort);
         Assert.Equal(AdsReadMode.Polled, source.Configuration.DefaultReadMode);
     }
@@ -86,7 +86,7 @@ public class TwinCatSubjectExtensionsTests
             .OfType<TwinCatSubjectClientSource>()
             .Single();
 
-        Assert.Equal("192.168.1.100.1.1", source.Configuration.AmsNetId.ToString());
+        Assert.Equal("192.168.1.100.1.1", source.Configuration.GetTargetAmsNetId().ToString());
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public class TwinCatSubjectExtensionsTests
         // Act
         services.AddTwinCatSubjectClientSource<TestPlcModel>(
             host: "192.168.1.100",
-            amsNetId: "5.23.100.200.1.1");
+            amsNetId: AmsNetId.Parse("5.23.100.200.1.1"));
 
         // Assert
         var provider = services.BuildServiceProvider();
@@ -109,7 +109,31 @@ public class TwinCatSubjectExtensionsTests
             .OfType<TwinCatSubjectClientSource>()
             .Single();
 
-        Assert.Equal("5.23.100.200.1.1", source.Configuration.AmsNetId.ToString());
+        Assert.Equal("5.23.100.200.1.1", source.Configuration.GetTargetAmsNetId().ToString());
+    }
+
+    [Fact]
+    public void AddTwinCatSubjectClientSource_SystemRouterOverload_UsesAmsNetIdWithoutEmbedding()
+    {
+        // Arrange
+        var context = TestHelpers.CreateContext();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<TestPlcModel>(_ => new TestPlcModel(context));
+
+        // Act
+        services.AddTwinCatSubjectClientSource<TestPlcModel>(
+            amsNetId: AmsNetId.Parse("5.23.45.67.1.1"));
+
+        // Assert
+        var provider = services.BuildServiceProvider();
+        var source = provider.GetServices<IHostedService>()
+            .OfType<TwinCatSubjectClientSource>()
+            .Single();
+
+        Assert.Equal("5.23.45.67.1.1", source.Configuration.GetTargetAmsNetId().ToString());
+        Assert.Null(source.Configuration.Host);
+        Assert.False(source.Configuration.UseEmbeddedRouter);
     }
 
     [Fact]
@@ -120,7 +144,7 @@ public class TwinCatSubjectExtensionsTests
         var services = new ServiceCollection();
         services.AddLogging();
 
-        // Act — register two independent sources
+        // Act - register two independent sources
         services.AddTwinCatSubjectClientSource(
             subjectSelector: _ => new TestPlcModel(context),
             configurationProvider: _ => new AdsClientConfiguration
@@ -141,7 +165,7 @@ public class TwinCatSubjectExtensionsTests
                 Mapper = AdsCompositeMapper.CreateDefault("ads")
             });
 
-        // Assert — should have 2 hosted services (one per registration)
+        // Assert - should have 2 hosted services (one per registration)
         var provider = services.BuildServiceProvider();
         var hostedServices = provider.GetServices<IHostedService>().ToList();
 
@@ -158,7 +182,7 @@ public class TwinCatSubjectExtensionsTests
         services.AddLogging();
         services.AddSingleton<TestPlcModel>(_ => new TestPlcModel(context));
 
-        // Act — do not pass amsPort, should default to 851
+        // Act - do not pass amsPort, should default to 851
         services.AddTwinCatSubjectClientSource<TestPlcModel>(
             host: "10.0.0.1");
 

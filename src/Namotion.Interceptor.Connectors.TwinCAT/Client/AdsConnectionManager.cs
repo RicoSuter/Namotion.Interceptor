@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Resilience;
 using TwinCAT;
 using TwinCAT.Ads;
+using TwinCAT.Ads.Configuration;
 using TwinCAT.Ads.TypeSystem;
 using TwinCAT.TypeSystem;
 
@@ -18,9 +20,12 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly CircuitBreaker _circuitBreaker;
 
-    // ADS connection objects — uses AdsClient directly (not AdsSession) for reliable dispose in 7.0.x
+    // ADS connection objects - uses AdsClient directly (not AdsSession) for reliable dispose in 7.0.x
     private AdsClient? _client;
     private volatile ISymbolLoader? _symbolLoader;
+
+    // Embedded-router lease, acquired once and reused across reconnects, released on dispose.
+    private EmbeddedRouterPool.Lease? _embeddedLease;
 
     // First-occurrence logging state (Warning first, then Debug until cleared)
     private readonly ConcurrentDictionary<string, bool> _loggedErrors = new();
@@ -154,13 +159,30 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                 {
                     Interlocked.Increment(ref _totalReconnectionAttempts);
 
-                    var client = _configuration.RouterConfiguration is not null
-                        ? new AdsClient(_configuration.RouterConfiguration, null)
+                    var amsNetId = _configuration.GetTargetAmsNetId();
+
+                    var routerConfiguration = _configuration.RouterConfiguration;
+                    if (_configuration.UseEmbeddedRouter)
+                    {
+                        _embeddedLease ??= AdsEmbeddedRouter.Shared.Acquire(
+                            _configuration.LocalAmsNetId ?? AdsEmbeddedRouter.DefaultLocalNetId(),
+                            new Route("plc", amsNetId, _configuration.Host!));
+
+                        routerConfiguration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                        {
+                            ["AmsRouter:Name"] = "EmbeddedRouter",
+                            ["AmsRouter:NetId"] = _embeddedLease.LocalNetId.ToString(),
+                            ["AmsRouter:LoopbackPort"] = _embeddedLease.LoopbackPort.ToString(),
+                        }).Build();
+                    }
+
+                    var client = routerConfiguration is not null
+                        ? new AdsClient(routerConfiguration, null)
                         : new AdsClient();
 
                     try
                     {
-                        await client.ConnectAsync(_configuration.AmsNetId, _configuration.AmsPort, cancellationToken);
+                        await client.ConnectAsync(amsNetId, _configuration.AmsPort, cancellationToken);
                     }
                     catch
                     {
@@ -181,7 +203,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                     _circuitBreaker.RecordSuccess();
                     _logger.LogInformation(
                         "Connected to TwinCAT PLC at {AmsNetId}:{Port}.",
-                        _configuration.AmsNetId, _configuration.AmsPort);
+                        amsNetId, _configuration.AmsPort);
                     return;
                 }
 
@@ -295,6 +317,8 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
             DisconnectAndDisposeClient();
+            _embeddedLease?.Dispose();
+            _embeddedLease = null;
         }
 
         return ValueTask.CompletedTask;

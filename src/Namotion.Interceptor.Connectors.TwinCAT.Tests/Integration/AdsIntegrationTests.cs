@@ -49,7 +49,8 @@ public class AdsIntegrationTests
     {
         return new AdsClientConfiguration
         {
-            Host = "127.0.0.1",
+            // System-router mode (no Host): connect through the test harness's loopback router config,
+            // not the embedded router (which would bind the host's AMS TCP port and ignore RouterConfiguration).
             AmsNetId = AmsNetId.Parse(server.AmsNetIdString),
             AmsPort = server.ServerPort,
             Mapper = AdsCompositeMapper.CreateDefault(AdsConstants.DefaultConnectorName),
