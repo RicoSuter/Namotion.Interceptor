@@ -8,129 +8,118 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
-public class PathProviderOpcUaNodeMapperTests
+public class OpcUaPathProviderMapperTests
 {
     [Fact]
-    public void TryGetNodeConfiguration_WithIncludedProperty_ReturnsBrowseName()
+    public void WhenPropertyIsIncluded_ThenReturnsBrowseName()
     {
         // Arrange - TestRoot.Name has [Path("opc", "Name")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("Name", config.BrowseName);
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithExcludedProperty_ReturnsNull()
+    public void WhenPropertyIsExcluded_ThenReturnsFalse()
     {
         // Arrange - TestNodeMapperModel.PlainProp has no [Path] attribute
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("PlainProp")!;
 
-        // Act
-        var config = mapper.TryGetNodeConfiguration(property);
-
-        // Assert
-        Assert.Null(config);
+        // Act & Assert
+        Assert.False(mapper.TryGetMapping(property, subject, out _));
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithDifferentConnectorName_ReturnsNull()
+    public void WhenDifferentConnectorName_ThenReturnsFalse()
     {
         // Arrange - TestRoot.Name has [Path("opc", "Name")] but we use "mqtt" provider
         var pathProvider = new AttributeBasedPathProvider("mqtt");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Name")!;
 
-        // Act
-        var config = mapper.TryGetNodeConfiguration(property);
-
-        // Assert
-        Assert.Null(config);
+        // Act & Assert
+        Assert.False(mapper.TryGetMapping(property, subject, out _));
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_UsesPathSegmentAsBrowseName()
+    public void WhenPathSegmentExists_ThenUsesItAsBrowseName()
     {
         // Arrange - TestRoot.Connected has [Path("opc", "Connected")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Connected")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("Connected", config.BrowseName);
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithNestedProperty_ReturnsBrowseName()
+    public void WhenNestedProperty_ThenReturnsBrowseName()
     {
         // Arrange - TestRoot.Person has [Path("opc", "Person")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Person")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("Person", config.BrowseName);
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithArrayProperty_ReturnsBrowseName()
+    public void WhenArrayProperty_ThenReturnsBrowseName()
     {
         // Arrange - TestRoot.ScalarNumbers has [Path("opc", "ScalarNumbers")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("ScalarNumbers")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("ScalarNumbers", config.BrowseName);
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_DoesNotSetOtherFields()
+    public void WhenPropertyHasPathOnly_ThenDoesNotSetOtherFields()
     {
         // Arrange - PathProvider only sets BrowseName, nothing else
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert
-        Assert.NotNull(config);
         Assert.Equal("Name", config.BrowseName);
         Assert.Null(config.BrowseNamespaceUri);
         Assert.Null(config.NodeIdentifier);
@@ -140,11 +129,11 @@ public class PathProviderOpcUaNodeMapperTests
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithIsAttribute_SetsReferenceTypeHasProperty()
+    public void WhenPropertyIsAttribute_ThenSetsReferenceTypeHasProperty()
     {
         // Arrange - Number_Unit is a PropertyAttribute (IsAttribute = true)
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -154,40 +143,38 @@ public class PathProviderOpcUaNodeMapperTests
         Assert.NotNull(attributeProperty);
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(attributeProperty);
+        Assert.True(mapper.TryGetMapping(attributeProperty, subject, out var config));
 
         // Assert - Attributes get ReferenceType = "HasProperty"
-        Assert.NotNull(config);
         Assert.Equal("Unit", config.BrowseName);
         Assert.Equal("HasProperty", config.ReferenceType);
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithNonAttribute_DoesNotSetReferenceType()
+    public void WhenPropertyIsNotAttribute_ThenDoesNotSetReferenceType()
     {
         // Arrange - Name is a regular property (IsAttribute = false)
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetNodeConfiguration(property);
+        Assert.True(mapper.TryGetMapping(property, subject, out var config));
 
         // Assert - Non-attributes don't get a ReferenceType set
-        Assert.NotNull(config);
         Assert.Null(config.ReferenceType);
     }
 
     #region TryGetPropertyAsync Tests
 
     [Fact]
-    public async Task TryGetPropertyAsync_WithIsAttribute_SkipsAttributes()
+    public async Task WhenPropertyIsAttribute_ThenSkipsAttributes()
     {
         // Arrange - TryGetPropertyAsync should skip properties that are attributes
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -204,18 +191,18 @@ public class PathProviderOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object, registeredSubject.Subject), registeredSubject, CancellationToken.None);
 
         // Assert - Should be null because attributes are skipped in TryGetPropertyAsync
         Assert.Null(result);
     }
 
     [Fact]
-    public async Task TryGetPropertyAsync_WithMatchingPathSegment_ReturnsProperty()
+    public async Task WhenMatchingPathSegment_ThenReturnsProperty()
     {
         // Arrange - TestRoot.Name has [Path("opc", "Name")]
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -230,7 +217,7 @@ public class PathProviderOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object, registeredSubject.Subject), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -238,11 +225,11 @@ public class PathProviderOpcUaNodeMapperTests
     }
 
     [Fact]
-    public async Task TryGetPropertyAsync_WithExcludedProperty_ReturnsNull()
+    public async Task WhenPropertyIsExcluded_ThenReturnsNull()
     {
         // Arrange - PlainProp has no [Path] attribute, so is excluded
         var pathProvider = new AttributeBasedPathProvider("opc");
-        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
         var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
 
@@ -257,7 +244,7 @@ public class PathProviderOpcUaNodeMapperTests
         };
 
         // Act
-        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+        var result = await mapper.TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, mockSession.Object, registeredSubject.Subject), registeredSubject, CancellationToken.None);
 
         // Assert
         Assert.Null(result);

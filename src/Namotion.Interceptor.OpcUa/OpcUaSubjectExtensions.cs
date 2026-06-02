@@ -1,8 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.OpcUa.Server;
@@ -49,13 +47,18 @@ public static class OpcUaSubjectExtensions
     public static IServiceCollection AddOpcUaSubjectClientSource<TSubject>(
         this IServiceCollection services,
         string serverUrl,
-        string sourceName,
+        string connectorName,
         string[]? rootPath = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddOpcUaSubjectClientSource(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultClientConfiguration(sp, serverUrl, sourceName, rootPath));
+            _ => new OpcUaClientConfiguration
+            {
+                ServerUrl = serverUrl,
+                RootPath = rootPath,
+                Mapper = CreateDefaultAttributeMapper(connectorName)
+            });
     }
 
     public static IServiceCollection AddOpcUaSubjectClientSource(
@@ -75,14 +78,19 @@ public static class OpcUaSubjectExtensions
         this IServiceCollection services,
         string name,
         string serverUrl,
-        string sourceName,
+        string connectorName,
         string[]? rootPath = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddKeyedOpcUaSubjectClientSource(
             name,
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultClientConfiguration(sp, serverUrl, sourceName, rootPath));
+            _ => new OpcUaClientConfiguration
+            {
+                ServerUrl = serverUrl,
+                RootPath = rootPath,
+                Mapper = CreateDefaultAttributeMapper(connectorName)
+            });
     }
 
     public static IServiceCollection AddKeyedOpcUaSubjectClientSource(
@@ -101,13 +109,17 @@ public static class OpcUaSubjectExtensions
 
     public static IServiceCollection AddOpcUaSubjectServer<TSubject>(
         this IServiceCollection services,
-        string sourceName,
+        string connectorName,
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddOpcUaSubjectServer(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultServerConfiguration(sp, sourceName, rootName));
+            _ => new OpcUaServerConfiguration
+            {
+                RootName = rootName,
+                Mapper = CreateDefaultAttributeMapper(connectorName)
+            });
     }
 
     public static IServiceCollection AddOpcUaSubjectServer(
@@ -126,14 +138,18 @@ public static class OpcUaSubjectExtensions
     public static IServiceCollection AddKeyedOpcUaSubjectServer<TSubject>(
         this IServiceCollection services,
         string name,
-        string sourceName,
+        string connectorName,
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddKeyedOpcUaSubjectServer(
             name,
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultServerConfiguration(sp, sourceName, rootName));
+            _ => new OpcUaServerConfiguration
+            {
+                RootName = rootName,
+                Mapper = CreateDefaultAttributeMapper(connectorName)
+            });
     }
 
     public static IServiceCollection AddKeyedOpcUaSubjectServer(
@@ -157,7 +173,12 @@ public static class OpcUaSubjectExtensions
         Func<IServiceProvider, OpcUaClientConfiguration> configurationProvider)
     {
         services
-            .AddKeyedSingleton(key, (sp, _) => configurationProvider(sp))
+            .AddKeyedSingleton(key, (sp, _) =>
+            {
+                var configuration = configurationProvider(sp);
+                ApplyClientDefaults(configuration, sp);
+                return configuration;
+            })
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
             .AddKeyedSingleton(key, (sp, _) =>
             {
@@ -177,7 +198,12 @@ public static class OpcUaSubjectExtensions
         Func<IServiceProvider, OpcUaServerConfiguration> configurationProvider)
     {
         services
-            .AddKeyedSingleton(key, (sp, _) => configurationProvider(sp))
+            .AddKeyedSingleton(key, (sp, _) =>
+            {
+                var configuration = configurationProvider(sp);
+                ApplyServerDefaults(configuration, sp);
+                return configuration;
+            })
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
             .AddKeyedSingleton(key, (sp, _) =>
             {
@@ -190,44 +216,31 @@ public static class OpcUaSubjectExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServer>(key));
     }
 
-    private static OpcUaClientConfiguration CreateDefaultClientConfiguration(
-        IServiceProvider sp, string serverUrl, string sourceName, string[]? rootPath)
+    // Completes a configuration after the caller's provider runs, filling only the fields that need DI:
+    // DI-backed telemetry when left null, and (client) the type resolver logger. Fields a caller set explicitly
+    // (including an explicit NullTelemetryContext) are left untouched. Internal so the behavior can be unit-tested.
+    internal static void ApplyClientDefaults(OpcUaClientConfiguration configuration, IServiceProvider serviceProvider)
     {
-        var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-        var telemetryContext = DefaultTelemetry.Create(builder =>
-            builder.Services.AddSingleton(loggerFactory));
+        configuration.TelemetryContext ??= CreateLoggerTelemetry(serviceProvider);
 
-        return new OpcUaClientConfiguration
-        {
-            ServerUrl = serverUrl,
-            RootPath = rootPath,
-            TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
-            ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
-            TelemetryContext = telemetryContext,
-            NodeMapper = new CompositeNodeMapper(
-                new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider(sourceName)),
-                new AttributeOpcUaNodeMapper())
-        };
+        configuration.TypeResolver ??= new OpcUaTypeResolver(serviceProvider.GetRequiredService<ILogger<OpcUaTypeResolver>>());
     }
 
-    private static OpcUaServerConfiguration CreateDefaultServerConfiguration(
-        IServiceProvider sp, string sourceName, string? rootName)
+    internal static void ApplyServerDefaults(OpcUaServerConfiguration configuration, IServiceProvider serviceProvider)
+    {
+        configuration.TelemetryContext ??= CreateLoggerTelemetry(serviceProvider);
+    }
+
+    private static ITelemetryContext CreateLoggerTelemetry(IServiceProvider sp)
     {
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-        var telemetryContext = DefaultTelemetry.Create(builder =>
-            builder.Services.AddSingleton(loggerFactory));
-
-        return new OpcUaServerConfiguration
-        {
-            RootName = rootName,
-            ValueConverter = new OpcUaValueConverter(),
-            TelemetryContext = telemetryContext,
-            NodeMapper = new CompositeNodeMapper(
-                new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider(sourceName)),
-                new AttributeOpcUaNodeMapper())
-        };
+        return DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory));
     }
+
+    private static OpcUaCompositeMapper CreateDefaultAttributeMapper(string connectorName)
+        => new(
+            new OpcUaPathProviderMapper(new AttributeBasedPathProvider(connectorName)),
+            new OpcUaAttributeMapper(connectorName));
 
     private static void GuardDuplicateUnkeyed<TService>(IServiceCollection services)
     {

@@ -34,8 +34,8 @@ public partial class Machine
 builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
-    sourceName: "opc",
-    rootName: "MyMachine");
+    connectorName: "opc",
+    rootPath: ["MyMachine"]);
 
 // ...
 var host = builder.Build();
@@ -64,7 +64,7 @@ public partial class Sensor
 
 builder.Services.AddSingleton(sensor);
 builder.Services.AddOpcUaSubjectServer<Sensor>(
-    sourceName: "opc",
+    connectorName: "opc",
     rootName: "MySensor");
 
 // ...
@@ -80,7 +80,7 @@ See [OPC UA Server](connectors-opcua-server.md) for configuration, security, com
 
 ## Property Mapping
 
-Both client and server configurations include a `NodeMapper` property (`IOpcUaNodeMapper`) that controls how C# properties map to OPC UA nodes. The default is a `CompositeNodeMapper` combining `PathProviderOpcUaNodeMapper` (maps `[Path]` attributes) and `AttributeOpcUaNodeMapper` (maps `[OpcUaNode]` / `[OpcUaReference]` attributes). A `FluentOpcUaNodeMapper<T>` is also available for runtime code-based configuration. Custom mappers can be added to the composite chain.
+Both client and server configurations include a `Mapper` property that controls how C# properties map to OPC UA nodes. The client uses `IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>` (forward mapping plus reverse lookup from OPC UA node references), while the server uses `IPropertyMapper<OpcUaPropertyMapping>` (forward mapping only). The default for both is an `OpcUaCompositeMapper` combining `OpcUaPathProviderMapper` (maps `[Path]` attributes) and `OpcUaAttributeMapper` (maps `[OpcUaNode]` / `[OpcUaReference]` attributes). `OpcUaFluentMapperBuilder<TRoot>` is also available for code-based type-level configuration. Custom mappers can be added to the composite chain. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction that these types implement.
 
 For simple cases, use `[Path]`. For advanced OPC UA-specific configuration, use `[OpcUaNode]` and related attributes:
 

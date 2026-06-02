@@ -11,9 +11,8 @@ using MQTTnet;
 using MQTTnet.Packets;
 using MQTTnet.Server;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Connectors.Paths;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -43,7 +42,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
     // re-publishes client-originated values to all subscribers (server-authoritative relay).
     private readonly object _mqttClientSource = new();
 
-    private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
+    private readonly ConcurrentDictionary<PropertyReference, (string? Topic, MqttPropertyMapping? Mapping)> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
 
     private LifecycleInterceptor? _lifecycleInterceptor;
@@ -89,7 +88,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
     private bool IsPropertyIncluded(PropertyReference propertyReference) =>
         propertyReference.TryGetRegisteredProperty() is { } property &&
-        _configuration.PathProvider.IsPropertyIncluded(property);
+        _configuration.Mapper.TryGetMapping(property, _subject, out _);
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
@@ -243,7 +242,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
                         continue;
                     }
 
-                    var topic = TryGetTopicForProperty(change.Property, registeredProperty);
+                    var (topic, mapping) = TryGetTopicForProperty(change.Property, registeredProperty);
                     if (topic is null) continue;
 
                     byte[] payload;
@@ -263,8 +262,8 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
                     {
                         Topic = topic,
                         PayloadSegment = new ArraySegment<byte>(payload),
-                        QualityOfServiceLevel = _configuration.DefaultQualityOfService,
-                        Retain = _configuration.UseRetainedMessages
+                        QualityOfServiceLevel = mapping?.QualityOfService ?? _configuration.DefaultQualityOfService,
+                        Retain = mapping?.Retain ?? _configuration.UseRetainedMessages
                     };
 
                     if (timestampPropertyName is not null)
@@ -308,18 +307,25 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
         }
     }
 
-    private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    private (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        if (_propertyToTopic.TryGetValue(propertyReference, out var cachedTopic))
+        if (_propertyToTopic.TryGetValue(propertyReference, out var cached))
         {
-            return cachedTopic;
+            return cached;
         }
 
-        var path = property.TryGetPath(_configuration.PathProvider, _subject);
-        var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
+        string? topic = null;
+        MqttPropertyMapping? resolvedMapping = null;
+        if (_configuration.Mapper.TryGetMapping(property, _subject, out var mapping) && mapping.Topic is not null)
+        {
+            topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
+            resolvedMapping = mapping;
+        }
+
+        var entry = (topic, resolvedMapping);
 
         // Add first, then validate (guarantees no memory leak)
-        if (_propertyToTopic.TryAdd(propertyReference, topic))
+        if (_propertyToTopic.TryAdd(propertyReference, entry))
         {
             var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
             if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
@@ -328,17 +334,20 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
             }
         }
 
-        return topic;
+        return entry;
     }
 
-    private PropertyReference? TryGetPropertyForTopic(string path)
+    private async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(string path)
     {
         if (_pathToProperty.TryGetValue(path, out var cachedProperty))
         {
             return cachedProperty;
         }
 
-        var (property, _) = _subject.TryGetPropertyFromPath(path, _configuration.PathProvider);
+        var registered = _subject.TryGetRegisteredSubject();
+        var property = registered is null
+            ? null
+            : await _configuration.Mapper.TryGetPropertyAsync(new MqttLookupKey(path), registered, CancellationToken.None).ConfigureAwait(false);
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)
@@ -403,13 +412,17 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
             await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
 
-            var properties = _subject
+            var allProperties = _subject
                 .TryGetRegisteredSubject()?
                 .GetAllProperties()
-                .Where(p => !p.CanContainSubjects)
-                .GetPaths(_configuration.PathProvider, _subject);
+                .Where(p => !p.CanContainSubjects);
 
-            if (properties is null) return;
+            if (allProperties is null) return;
+
+            var properties = allProperties
+                .Select(p => (property: p, hasMapping: _configuration.Mapper.TryGetMapping(p, _subject, out var m), mapping: m))
+                .Where(x => x.hasMapping && x.mapping!.Topic is not null)
+                .Select(x => (path: x.mapping!.Topic!, property: x.property, mapping: x.mapping!));
 
             var server = _mqttServer;
             if (server is null) return;
@@ -419,7 +432,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
             {
                 var timestampPropertyName = _configuration.SourceTimestampPropertyName;
 
-                foreach (var (path, property) in properties)
+                foreach (var (path, property, mapping) in properties)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
@@ -442,8 +455,8 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
                     {
                         Topic = topic,
                         PayloadSegment = new ArraySegment<byte>(payload),
-                        QualityOfServiceLevel = _configuration.DefaultQualityOfService,
-                        Retain = _configuration.UseRetainedMessages
+                        QualityOfServiceLevel = mapping.QualityOfService ?? _configuration.DefaultQualityOfService,
+                        Retain = mapping.Retain ?? _configuration.UseRetainedMessages
                     };
 
                     if (timestampPropertyName is not null)
@@ -480,54 +493,62 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
         }
     }
 
-    private Task InterceptingPublishAsync(InterceptingPublishEventArgs args)
+    private async Task InterceptingPublishAsync(InterceptingPublishEventArgs args)
     {
         // Skip messages published by this server (injected messages may have null/empty ClientId)
         if (string.IsNullOrEmpty(args.ClientId) || args.ClientId == _serverClientId)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var topic = args.ApplicationMessage.Topic;
-        var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
 
-        if (TryGetPropertyForTopic(path) is not { } propertyReference)
-        {
-            return Task.CompletedTask;
-        }
-
-        var registeredProperty = propertyReference.TryGetRegisteredProperty();
-        if (registeredProperty is null)
-        {
-            return Task.CompletedTask;
-        }
-
-        // Server-authoritative relay: prevent the broker from distributing this client
-        // message directly to other subscribers. Instead, we apply the value locally with
-        // a non-self source (_mqttClientSource) so the server's ChangeQueueProcessor picks
-        // it up and re-publishes it to all clients via InjectApplicationMessage.
-        // This ensures consistent ordering of all values through the server.
-        args.ProcessPublish = false;
-
+        // Isolate per-message failures: a bad message must not escape into the broker's publish pipeline.
+        // No cancellation token flows in, so every failure is logged and skipped.
         try
         {
-            var payload = args.ApplicationMessage.Payload;
-            var value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
+            var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
 
-            var receivedTimestamp = DateTimeOffset.UtcNow;
-            var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
-                args.ApplicationMessage.UserProperties,
-                _configuration.SourceTimestampPropertyName,
-                _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
+            if (await TryGetPropertyForTopicAsync(path).ConfigureAwait(false) is not { } propertyReference)
+            {
+                return;
+            }
 
-            propertyReference.SetValueFromSource(_mqttClientSource, sourceTimestamp, receivedTimestamp, value);
+            var registeredProperty = propertyReference.TryGetRegisteredProperty();
+            if (registeredProperty is null)
+            {
+                return;
+            }
+
+            // Server-authoritative relay: prevent the broker from distributing this client
+            // message directly to other subscribers. Instead, we apply the value locally with
+            // a non-self source (_mqttClientSource) so the server's ChangeQueueProcessor picks
+            // it up and re-publishes it to all clients via InjectApplicationMessage.
+            // This ensures consistent ordering of all values through the server.
+            args.ProcessPublish = false;
+
+            try
+            {
+                var payload = args.ApplicationMessage.Payload;
+                var value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
+
+                var receivedTimestamp = DateTimeOffset.UtcNow;
+                var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
+                    args.ApplicationMessage.UserProperties,
+                    _configuration.SourceTimestampPropertyName,
+                    _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
+
+                propertyReference.SetValueFromSource(_mqttClientSource, sourceTimestamp, receivedTimestamp, value);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to deserialize MQTT payload for topic {Topic}.", topic);
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to deserialize MQTT payload for topic {Topic}.", topic);
+            _logger.LogError(ex, "Failed to handle MQTT message for topic {Topic}.", topic);
         }
-
-        return Task.CompletedTask;
     }
 
     private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg)

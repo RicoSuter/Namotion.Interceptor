@@ -106,7 +106,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     private bool IsPropertyIncluded(PropertyReference propertyReference)
     {
         return propertyReference.TryGetRegisteredProperty() is { } property &&
-               property.IsPropertyIncluded(_configuration.NodeMapper);
+               property.IsPropertyIncluded(_configuration.Mapper, _subject);
     }
 
     private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)

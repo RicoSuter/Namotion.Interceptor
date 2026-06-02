@@ -37,7 +37,7 @@ var context = InterceptorSubjectContext
 builder.Services.AddSingleton(new Sensor(context));
 builder.Services.AddMqttSubjectClientSource<Sensor>(
     brokerHost: "mqtt.example.com",
-    pathProviderName: "mqtt",
+    connectorName: "mqtt",
     topicPrefix: "sensors/room1");
 
 var host = builder.Build();
@@ -70,7 +70,7 @@ var context = InterceptorSubjectContext
 
 builder.Services.AddSingleton(new Device(context));
 builder.Services.AddMqttSubjectServer<Device>(
-    pathProviderName: "mqtt",
+    connectorName: "mqtt",
     brokerPort: 1883,
     topicPrefix: "devices/mydevice");
 
@@ -94,7 +94,7 @@ builder.Services.AddMqttSubjectClientSource(
     {
         BrokerHost = "mqtt.example.com",
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
+        Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
 
         // Authentication
         Username = "user",
@@ -144,7 +144,7 @@ builder.Services.AddMqttSubjectServer(
     {
         BrokerHost = "127.0.0.1", // Optional: bind to specific interface (default: all interfaces)
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
+        Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
 
         // Connection settings
         ClientId = "my-server-id",
@@ -167,9 +167,34 @@ builder.Services.AddMqttSubjectServer(
     });
 ```
 
+### Mapper Configuration
+
+The `Mapper` property accepts any `IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>`. The `MqttPropertyMapping` record carries protocol-specific fields:
+
+| Field              | Type                         | Description                          |
+|--------------------|------------------------------|--------------------------------------|
+| `Topic`            | `string?`                    | The MQTT topic path for the property |
+| `QualityOfService` | `MqttQualityOfServiceLevel?` | Per-property QoS override            |
+| `Retain`           | `bool?`                      | Per-property retain flag override    |
+
+The built-in mapper types:
+
+| Mapper | Purpose |
+|---|---|
+| `MqttPathProviderMapper` | Wraps a `PathProviderBase` to produce topics from `[Path]` attributes |
+| `MqttAttributeMapper` | Layers per-topic QoS and Retain from `[MqttTopic]` attributes onto the mapping (the topic segment itself is resolved by the path provider) |
+| `MqttFluentMapper` | Code-based type-level mapper produced by `MqttFluentMapperBuilder<TRoot>.Build()` (see [Code-based mapping](#code-based-fluent-mapping)) |
+| `MqttCompositeMapper` | Combines multiple mappers with merge semantics |
+
+The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, connectorName)`) default to a composite of `MqttPathProviderMapper` and `MqttAttributeMapper`, so both `[Path]` and `[MqttTopic]` attributes work out of the box. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction.
+
+`MqttAttributeMapper` contributes only QoS and Retain; it relies on `MqttPathProviderMapper` to resolve the topic in both directions, so it must always be paired with one (the default composite does this). On its own it resolves no topics. This differs from the OPC UA attribute mapper, which is self-sufficient because OPC UA browses hierarchically and matches each node against a single level, whereas MQTT resolves a flat topic that needs full-path composition by the path provider.
+
 ## Topic Mapping
 
-Properties are mapped to MQTT topics using the `[Path]` attribute. The topic is constructed by combining the optional `TopicPrefix` with the path specified in the attribute.
+### [Path] attribute
+
+Properties are mapped to MQTT topics using the `[Path]` attribute. The topic is constructed by combining the optional `TopicPrefix` with the path from the attribute.
 
 ```csharp
 [InterceptorSubject]
@@ -186,6 +211,73 @@ public partial class Sensor
     public partial decimal Humidity { get; set; }
 }
 ```
+
+### [MqttTopic] attribute
+
+`[MqttTopic]` is a `[Path]` for the `mqtt` context plus optional per-topic QoS and Retain metadata. The string is a single relative path segment composed hierarchically with parent property segments (and the optional `TopicPrefix`), exactly like `[Path]`. The QoS and Retain values are layered on top by the `MqttAttributeMapper`.
+
+```csharp
+[InterceptorSubject]
+public partial class Sensor
+{
+    // With TopicPrefix = "home/living-room":
+    // Topic: home/living-room/temperature
+    [MqttTopic("temperature")]
+    public partial decimal Temperature { get; set; }
+
+    [MqttTopic("critical", QualityOfService = MqttQualityOfServiceLevel.ExactlyOnce,
+        Retain = MqttRetainMode.True)]
+    public partial string CriticalAlert { get; set; }
+}
+```
+
+Multi-level topics are built by annotating each level of the object graph (parent reference properties carry their own segment), the same way `[Path]` composes nested paths. Because the path is split on the topic separator for reverse lookup (inbound messages), a single `[MqttTopic]` value should be one segment without embedded separators.
+
+Since `[MqttTopic]` already provides the `mqtt` `[Path]` segment for a property, use one attribute per property rather than combining `[Path]` and `[MqttTopic]` on the same property.
+
+### Code-based (fluent) mapping
+
+`MqttFluentMapperBuilder<TRoot>` is a complete, code-based alternative to attribute mapping. Configure a type once with `ForType<T>().Map(...)`, then call `Build(...)` to produce an `MqttFluentMapper`. The mapping resolves everywhere that type appears in the object graph, including collection and dictionary elements (which get bracket indices such as `motors[1]/speed`).
+
+`WithSegment(...)` sets the topic level for the property. `WithQualityOfService(...)` and `WithRetain(...)` set per-property protocol metadata.
+
+```csharp
+var fluentMapper = new MqttFluentMapperBuilder<Plant>()
+    .ForType<Motor>()
+        .Map(m => m.Speed,  b => b.WithSegment("speed").WithQualityOfService(MqttQualityOfServiceLevel.AtLeastOnce))
+        .Map(m => m.Torque, b => b.WithSegment("torque"))
+    .ForType<Pump>()
+        .Map(p => p.Motor,  b => b.WithSegment("motor"))
+    .ForType<Plant>()
+        .Map(p => p.Motors,  b => b.WithSegment("motors"))
+        .Map(p => p.Sensors, b => b.WithSegment("sensors"))
+    .Build('/');
+```
+
+Because `Motor` is configured once at the type level, all motors in the graph (direct properties, collection elements, nested references) resolve the same topic segments without repeating configuration.
+
+`ForType<T>()` registrations apply to all types derived from `T` and all types implementing `T` when `T` is an interface. The most specific registration wins.
+
+#### Composing with the connector
+
+`Build()` produces a mapper you compose into the `Mapper` property through the configuration overload. Layer it after the attribute mappers (the same pair the simple overloads use) so fluent wins on conflicts and attribute and fluent mapping compose:
+
+```csharp
+services.AddMqttSubjectServer<Plant>(
+    sp => sp.GetRequiredService<Plant>(),
+    _ => new MqttServerConfiguration
+    {
+        BrokerPort = 1883,
+        Mapper = new MqttCompositeMapper(
+            new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
+            new MqttAttributeMapper("mqtt"),
+            new MqttFluentMapperBuilder<Plant>()
+                .ForType<Motor>().Map(m => m.Speed, b => b.WithSegment("speed"))
+                .Build('/'))
+    });
+```
+
+For an attribute-only setup, use the simple `AddMqttSubjectServer<T>("mqtt")` overload, which builds the attribute composite for you.
 
 ## Serialization
 
@@ -213,7 +305,7 @@ public class CustomMqttValueConverter : IMqttValueConverter
 
 ### Write Retry Queue
 
-Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 new MqttClientConfiguration
