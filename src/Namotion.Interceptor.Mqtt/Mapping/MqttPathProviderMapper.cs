@@ -21,7 +21,7 @@ public class MqttPathProviderMapper
         _pathProvider = pathProvider;
     }
 
-    public bool TryGetMapping(
+    public virtual bool TryGetMapping(
         RegisteredSubjectProperty property,
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)

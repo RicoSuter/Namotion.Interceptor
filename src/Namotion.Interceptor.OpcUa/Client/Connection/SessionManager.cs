@@ -136,7 +136,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         _propertyWriter = propertyWriter;
         _logger = logger;
         _configuration = configuration;
-        _reconnectHandler = new SessionReconnectHandler(configuration.TelemetryContext, false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
+        _reconnectHandler = new SessionReconnectHandler(configuration.ResolvedTelemetryContext, false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
         if (_configuration.EnablePollingFallback)
         {
@@ -197,7 +197,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             serverUri,
             endpoints,
             useSecurity: configuration.UseSecurity,
-            configuration.TelemetryContext);
+            configuration.ResolvedTelemetryContext);
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
         var oldSession = Volatile.Read(ref _session);
@@ -478,7 +478,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 }
 
                 _reconnectHandler = new SessionReconnectHandler(
-                    _configuration.TelemetryContext,
+                    _configuration.ResolvedTelemetryContext,
                     false,
                     (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
@@ -535,7 +535,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             }
 
             _reconnectHandler = new SessionReconnectHandler(
-                _configuration.TelemetryContext,
+                _configuration.ResolvedTelemetryContext,
                 false,
                 (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 

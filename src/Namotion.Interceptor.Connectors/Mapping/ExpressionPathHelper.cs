@@ -45,4 +45,29 @@ public static class ExpressionPathHelper
         parts.Reverse();
         return string.Join(".", parts);
     }
+
+    /// <summary>
+    /// Extracts the name of a single member access on the lambda parameter (e.g. <c>x =&gt; x.Property</c>).
+    /// Used by type-level fluent mapping, where the selector must reference exactly one member of the
+    /// configured type. Throws on a member chain, an indexer, or anything else.
+    /// </summary>
+    public static string GetSingleMemberName(Expression expression)
+    {
+        var current = expression;
+
+        // Unwrap Convert/ConvertChecked (e.g. boxing to object).
+        while (current is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } unary)
+        {
+            current = unary.Operand;
+        }
+
+        if (current is MemberExpression { Expression: ParameterExpression } member)
+        {
+            return member.Member.Name;
+        }
+
+        throw new ArgumentException(
+            "Expression must be a single member access on the lambda parameter (e.g., x => x.Property).",
+            nameof(expression));
+    }
 }

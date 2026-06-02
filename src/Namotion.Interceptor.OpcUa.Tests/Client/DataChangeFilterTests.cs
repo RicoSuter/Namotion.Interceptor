@@ -3,7 +3,6 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;

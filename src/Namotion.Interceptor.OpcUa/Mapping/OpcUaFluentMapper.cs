@@ -1,202 +1,73 @@
-using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq.Expressions;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
-using Opc.Ua;
-using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Mapping;
 
 /// <summary>
-/// Maps properties using code-based fluent configuration.
-/// Supports instance-based configuration (different config for Motor1.Speed vs Motor2.Speed).
+/// Code-based OPC UA mapper produced by <see cref="OpcUaFluentMapperBuilder{TRoot}.Build"/>. Resolves browse
+/// names via a <see cref="FluentPathProvider{TMetadata}"/> (inherited from <see cref="OpcUaPathProviderMapper"/>)
+/// and layers the registered node metadata plus the class-level (type-self) fallback for subject-typed members
+/// on top, mirroring <c>OpcUaAttributeMapper</c>'s class-level fallback. Compose it into an
+/// <see cref="OpcUaCompositeMapper"/>, typically after the attribute mappers so fluent wins on conflicts.
+/// Reverse lookup is inherited from the base mapper.
 /// </summary>
-/// <typeparam name="T">The root type to configure.</typeparam>
-public class OpcUaFluentMapper<T> : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
+public sealed class OpcUaFluentMapper : OpcUaPathProviderMapper
 {
-    private readonly ConcurrentDictionary<string, OpcUaPropertyMapping> _mappings = new();
+    private readonly FluentMappingRegistry<OpcUaPropertyMapping> _registry;
 
-    /// <summary>
-    /// Maps a property with fluent configuration.
-    /// </summary>
-    public OpcUaFluentMapper<T> Map<TProperty>(
-        Expression<Func<T, TProperty>> propertySelector,
-        Action<IPropertyBuilder<TProperty>> configure)
+    public OpcUaFluentMapper(FluentMappingRegistry<OpcUaPropertyMapping> registry, char pathSeparator = '.')
+        : base(new FluentPathProvider<OpcUaPropertyMapping>(registry, pathSeparator))
     {
-        var path = GetPropertyPath(propertySelector);
-        var builder = new PropertyBuilder<TProperty>(path, _mappings);
-        configure(builder);
-        return this;
+        _registry = registry;
     }
 
     /// <inheritdoc />
-    public bool TryGetMapping(
+    public override bool TryGetMapping(
         RegisteredSubjectProperty property,
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
     {
-        var path = GetPropertyPath(property, rootSubject);
-        if (path is not null && _mappings.TryGetValue(path, out var stored))
+        if (!base.TryGetMapping(property, rootSubject, out var pathMapping))
         {
-            mapping = stored;
-            return true;
+            mapping = null;
+            return false;
         }
-        mapping = null;
-        return false;
+
+        _registry.TryGetPropertyMetadata(property.Subject.GetType(), property.Name, out var propertyMetadata);
+
+        OpcUaPropertyMapping? typeSelf = null;
+        if (property.IsSubjectReference || property.IsSubjectCollection || property.IsSubjectDictionary)
+        {
+            var elementType = GetElementType(property.Type);
+            _registry.TryGetTypeMetadata(elementType, out typeSelf);
+        }
+
+        // Property metadata wins over the element type-self; both win over the base path mapping (browse name).
+        var metadata = propertyMetadata;
+        if (typeSelf is not null)
+            metadata = metadata is null ? typeSelf : OpcUaPropertyMapping.Merge(metadata, typeSelf);
+
+        mapping = metadata is null ? pathMapping : OpcUaPropertyMapping.Merge(metadata, pathMapping);
+        return true;
     }
 
-    /// <inheritdoc />
-    public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
-        OpcUaLookupKey key,
-        RegisteredSubject subject,
-        CancellationToken cancellationToken)
+    private static Type GetElementType(Type type)
     {
-        var browseName = key.Reference.BrowseName.Name;
+        if (type.IsArray)
+            return type.GetElementType()!;
 
-        // TODO(perf): this is an O(n) scan over the subject's properties with a GetPath walk per
-        // property on every reverse lookup. Callers cache the result per node, so steady state is fine,
-        // but a browseName -> property index built from _mappings would remove the first-hit cost if
-        // profiling shows it matters.
-        foreach (var property in subject.Properties)
+        if (type.IsGenericType)
         {
-            if (property.IsAttribute)
-                continue;
-
-            // Resolve the path relative to the connected root subject to match the keys stored by Map<T>(),
-            // which are full paths from T. Hierarchical browsing passes the per-level subject as "subject",
-            // so resolving from it would yield a relative path that never matches a nested mapping
-            // (e.g. "City" vs stored "Person.Address.City"). Using the connected root also keeps the result
-            // correct when that root is itself nested inside a larger object graph.
-            var path = GetPropertyPath(property, key.RootSubject);
-            if (path is not null && _mappings.TryGetValue(path, out var config) && config.BrowseName == browseName)
+            var args = type.GetGenericArguments();
+            return args.Length switch
             {
-                return new ValueTask<RegisteredSubjectProperty?>(property);
-            }
-        }
-
-        return new ValueTask<RegisteredSubjectProperty?>(result: null);
-    }
-
-    private static string GetPropertyPath<TProperty>(Expression<Func<T, TProperty>> expression) =>
-        ExpressionPathHelper.GetPathFromExpression(expression.Body);
-
-    private static string? GetPropertyPath(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject = null) =>
-        property.TryGetPath(rootSubject: rootSubject);
-
-    private class PropertyBuilder<TProp> : IPropertyBuilder<TProp>
-    {
-        private readonly string _basePath;
-        private readonly ConcurrentDictionary<string, OpcUaPropertyMapping> _mappings;
-        private OpcUaPropertyMapping _config = new();
-
-        public PropertyBuilder(string basePath, ConcurrentDictionary<string, OpcUaPropertyMapping> mappings)
-        {
-            _basePath = basePath;
-            _mappings = mappings;
-            _mappings[basePath] = _config;
-        }
-
-        private IPropertyBuilder<TProp> UpdateConfig(Func<OpcUaPropertyMapping, OpcUaPropertyMapping> update)
-        {
-            _config = _mappings.AddOrUpdate(
-                _basePath,
-                _ => update(new OpcUaPropertyMapping()),
-                (_, existing) => update(existing));
-            return this;
-        }
-
-        public IPropertyBuilder<TProp> BrowseName(string value) =>
-            UpdateConfig(c => c with { BrowseName = value });
-
-        public IPropertyBuilder<TProp> BrowseNamespaceUri(string value) =>
-            UpdateConfig(c => c with { BrowseNamespaceUri = value });
-
-        public IPropertyBuilder<TProp> NodeIdentifier(string value) =>
-            UpdateConfig(c => c with { NodeIdentifier = value });
-
-        public IPropertyBuilder<TProp> NodeNamespaceUri(string value) =>
-            UpdateConfig(c => c with { NodeNamespaceUri = value });
-
-        public IPropertyBuilder<TProp> DisplayName(string value) =>
-            UpdateConfig(c => c with { DisplayName = value });
-
-        public IPropertyBuilder<TProp> Description(string value) =>
-            UpdateConfig(c => c with { Description = value });
-
-        public IPropertyBuilder<TProp> TypeDefinition(string identifier, string? namespaceUri = null) =>
-            UpdateConfig(c => c with { TypeDefinition = identifier, TypeDefinitionNamespace = namespaceUri });
-
-        public IPropertyBuilder<TProp> NodeClass(OpcUaNodeClass value) =>
-            UpdateConfig(c => c with { NodeClass = value });
-
-        public IPropertyBuilder<TProp> DataType(string identifier, string? namespaceUri = null) =>
-            UpdateConfig(c => c with { DataType = identifier, DataTypeNamespace = namespaceUri });
-
-        public IPropertyBuilder<TProp> IsValue(bool value = true) =>
-            UpdateConfig(c => c with { IsValue = value });
-
-        public IPropertyBuilder<TProp> ReferenceType(string identifier, string? namespaceUri = null) =>
-            UpdateConfig(c => c with { ReferenceType = identifier, ReferenceTypeNamespace = namespaceUri });
-
-        public IPropertyBuilder<TProp> ItemReferenceType(string identifier, string? namespaceUri = null) =>
-            UpdateConfig(c => c with { ItemReferenceType = identifier, ItemReferenceTypeNamespace = namespaceUri });
-
-        public IPropertyBuilder<TProp> SamplingInterval(int value) =>
-            UpdateConfig(c => c with { SamplingInterval = value });
-
-        public IPropertyBuilder<TProp> QueueSize(uint value) =>
-            UpdateConfig(c => c with { QueueSize = value });
-
-        public IPropertyBuilder<TProp> DiscardOldest(bool value) =>
-            UpdateConfig(c => c with { DiscardOldest = value });
-
-        public IPropertyBuilder<TProp> DataChangeTrigger(DataChangeTrigger value) =>
-            UpdateConfig(c => c with { DataChangeTrigger = value });
-
-        public IPropertyBuilder<TProp> DeadbandType(DeadbandType value) =>
-            UpdateConfig(c => c with { DeadbandType = value });
-
-        public IPropertyBuilder<TProp> DeadbandValue(double value) =>
-            UpdateConfig(c => c with { DeadbandValue = value });
-
-        public IPropertyBuilder<TProp> ModellingRule(ModellingRule value) =>
-            UpdateConfig(c => c with { ModellingRule = value });
-
-        public IPropertyBuilder<TProp> EventNotifier(byte value) =>
-            UpdateConfig(c => c with { EventNotifier = value });
-
-        public IPropertyBuilder<TProp> AdditionalReference(
-            string referenceType,
-            string? referenceTypeNamespace,
-            string targetNodeId,
-            string? targetNamespaceUri = null,
-            bool isForward = true)
-        {
-            var newRef = new OpcUaAdditionalReference
-            {
-                ReferenceType = referenceType,
-                ReferenceTypeNamespace = referenceTypeNamespace,
-                TargetNodeId = targetNodeId,
-                TargetNamespaceUri = targetNamespaceUri,
-                IsForward = isForward
+                2 => args[1],
+                1 => args[0],
+                _ => type
             };
-            return UpdateConfig(c => c with
-            {
-                AdditionalReferences = [.. (c.AdditionalReferences ?? []), newRef]
-            });
         }
 
-        public IPropertyBuilder<TProp> Map<TProperty>(
-            Expression<Func<TProp, TProperty>> propertySelector,
-            Action<IPropertyBuilder<TProperty>> configure)
-        {
-            var relativePath = ExpressionPathHelper.GetPathFromExpression(propertySelector.Body);
-            var fullPath = $"{_basePath}.{relativePath}";
-            var builder = new PropertyBuilder<TProperty>(fullPath, _mappings);
-            configure(builder);
-            return this;
-        }
+        return type;
     }
 }

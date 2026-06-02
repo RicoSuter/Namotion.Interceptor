@@ -129,7 +129,7 @@ internal sealed class OpcUaSubjectLoader
         var objectTypeMap = await ResolveObjectTypesAsync(allDynamicObjectNodeIds, context).ConfigureAwait(false);
 
         var variableTypeMap = allDynamicVariableNodes.Count > 0
-            ? await _configuration.TypeResolver.ResolveVariableTypesAsync(context.Session, allDynamicVariableNodes.Values.ToList(), context.CancellationToken).ConfigureAwait(false)
+            ? await _configuration.TypeResolver!.ResolveVariableTypesAsync(context.Session, allDynamicVariableNodes.Values.ToList(), context.CancellationToken).ConfigureAwait(false)
             : new Dictionary<NodeId, Type?>();
 
         // Phase 4: Dispatch properties and load children (Phase 5 attribute discovery runs at the end of LoadChildPropertiesAsync)
@@ -255,7 +255,7 @@ internal sealed class OpcUaSubjectLoader
             // logs "Could not infer type" and skips, and the next load gets to retry.
             if (objectBrowseResults.TryGetValue(nodeId, out var children))
             {
-                objectTypeMap[nodeId] = _configuration.TypeResolver.ResolveObjectNodeType(children);
+                objectTypeMap[nodeId] = _configuration.TypeResolver!.ResolveObjectNodeType(children);
             }
         }
 
@@ -372,7 +372,7 @@ internal sealed class OpcUaSubjectLoader
             inferredType,
             _ => value,
             (_, o) => value = o,
-            _configuration.TypeResolver.GetDynamicPropertyAttributes(nodeReference, session));
+            _configuration.TypeResolver!.GetDynamicPropertyAttributes(nodeReference, session));
     }
 
     private async Task<(IInterceptorSubject Subject, bool IsNew)?> PrepareSubjectReferenceAsync(

@@ -207,49 +207,17 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Gets the structural property path by walking the parent chain to this property, joining property
-    /// names with the given separator.
+    /// Gets the structural property path using the default path provider (BrowseName segments joined with
+    /// '.'). A convenience over the path-provider overload using <see cref="DefaultPathProvider.Instance"/>.
     /// </summary>
     /// <param name="property">The property to compute the path for.</param>
-    /// <param name="separator">The separator placed between path segments.</param>
     /// <param name="rootSubject">
-    /// Optional root to make the path relative to. When provided, the parent graph is searched across all
-    /// parents (so a shared subject in a DAG resolves through whichever parent reaches the root), and
-    /// <c>null</c> is returned when the property is not reachable from the given root. When <c>null</c>,
-    /// the canonical absolute path (following the first parent) is returned.
+    /// Optional root to make the path relative to. When <c>null</c>, the canonical absolute path is returned;
+    /// when provided, <c>null</c> is returned if the property is not reachable from that root.
     /// </param>
-    /// <returns>
-    /// The path, or <c>null</c> when a root is given and the property is not reachable from it.
-    /// A cycle in the parent chain is also reported as <c>null</c> (never throws), with or without a root.
-    /// </returns>
-    public static string? TryGetPath(this RegisteredSubjectProperty property, string separator = ".", IInterceptorSubject? rootSubject = null)
-    {
-        var frames = PooledFrames.Rent();
-        try
-        {
-            if (!TryBuildPathFrames(property, rootSubject, propertyIndex: null, ref frames))
-            {
-                return null;
-            }
-
-            var builder = new StringBuilder();
-            for (var i = frames.Count - 1; i >= 0; i--)
-            {
-                if (builder.Length > 0)
-                {
-                    builder.Append(separator);
-                }
-
-                builder.Append(frames[i].Property.Name);
-            }
-
-            return builder.ToString();
-        }
-        finally
-        {
-            frames.Return();
-        }
-    }
+    /// <returns>The path, or <c>null</c> when a given root is not reachable or the parent chain has a cycle.</returns>
+    public static string? TryGetPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject = null)
+        => property.TryGetPath(DefaultPathProvider.Instance, rootSubject);
 
     /// <summary>
     /// Gets the complete path of the given property.

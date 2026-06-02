@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.OpcUa.Server;
 using Opc.Ua;
-using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Server;
 

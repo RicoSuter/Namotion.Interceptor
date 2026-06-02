@@ -213,7 +213,7 @@ internal sealed class OpcUaAttributeLoader
         {
             variableReferences.Add(entry.ChildNode);
         }
-        var resolvedTypes = await _configuration.TypeResolver.ResolveVariableTypesAsync(context.Session, variableReferences, context.CancellationToken).ConfigureAwait(false);
+        var resolvedTypes = await _configuration.TypeResolver!.ResolveVariableTypesAsync(context.Session, variableReferences, context.CancellationToken).ConfigureAwait(false);
 
         foreach (var entry in dynamicAttributeNodes)
         {
@@ -232,7 +232,7 @@ internal sealed class OpcUaAttributeLoader
                 inferredType,
                 _ => value,
                 (_, o) => value = o,
-                _configuration.TypeResolver.GetDynamicPropertyAttributes(entry.ChildNode, context.Session));
+                _configuration.TypeResolver!.GetDynamicPropertyAttributes(entry.ChildNode, context.Session));
 
             _loader.MonitorValueNode(entry.ChildNodeId, dynamicAttribute, context);
             nextRound.Add((dynamicAttribute, entry.ChildNodeId));
