@@ -1,11 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
 using Opc.Ua;
-using Xunit;
 
 namespace Namotion.Interceptor.OpcUa.Tests;
 
@@ -22,7 +20,7 @@ public class OpcUaDiDefaultsTests
         var configuration = new OpcUaClientConfiguration { ServerUrl = "opc.tcp://localhost:4840" };
 
         // Act
-        OpcUaSubjectExtensions.ApplyClientDiDefaults(configuration, serviceProvider);
+        OpcUaSubjectExtensions.ApplyClientDefaults(configuration, serviceProvider);
 
         // Assert
         Assert.NotNull(configuration.TypeResolver);
@@ -42,7 +40,7 @@ public class OpcUaDiDefaultsTests
         };
 
         // Act
-        OpcUaSubjectExtensions.ApplyClientDiDefaults(configuration, serviceProvider);
+        OpcUaSubjectExtensions.ApplyClientDefaults(configuration, serviceProvider);
 
         // Assert
         Assert.Same(NullTelemetryContext.Instance, configuration.TelemetryContext);
@@ -63,7 +61,7 @@ public class OpcUaDiDefaultsTests
         };
 
         // Act
-        OpcUaSubjectExtensions.ApplyClientDiDefaults(configuration, serviceProvider);
+        OpcUaSubjectExtensions.ApplyClientDefaults(configuration, serviceProvider);
 
         // Assert
         Assert.Same(telemetry, configuration.TelemetryContext);
@@ -78,7 +76,7 @@ public class OpcUaDiDefaultsTests
         var configuration = new OpcUaServerConfiguration();
 
         // Act
-        OpcUaSubjectExtensions.ApplyServerDiDefaults(configuration, serviceProvider);
+        OpcUaSubjectExtensions.ApplyServerDefaults(configuration, serviceProvider);
 
         // Assert
         Assert.NotNull(configuration.TelemetryContext);
@@ -93,7 +91,7 @@ public class OpcUaDiDefaultsTests
         var configuration = new OpcUaServerConfiguration { TelemetryContext = NullTelemetryContext.Instance };
 
         // Act
-        OpcUaSubjectExtensions.ApplyServerDiDefaults(configuration, serviceProvider);
+        OpcUaSubjectExtensions.ApplyServerDefaults(configuration, serviceProvider);
 
         // Assert
         Assert.Same(NullTelemetryContext.Instance, configuration.TelemetryContext);
@@ -108,7 +106,7 @@ public class OpcUaDiDefaultsTests
         var configuration = new OpcUaServerConfiguration { TelemetryContext = telemetry };
 
         // Act
-        OpcUaSubjectExtensions.ApplyServerDiDefaults(configuration, serviceProvider);
+        OpcUaSubjectExtensions.ApplyServerDefaults(configuration, serviceProvider);
 
         // Assert
         Assert.Same(telemetry, configuration.TelemetryContext);

@@ -3,8 +3,6 @@ using System.Reflection;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
-using Opc.Ua;
-using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Mapping;
 

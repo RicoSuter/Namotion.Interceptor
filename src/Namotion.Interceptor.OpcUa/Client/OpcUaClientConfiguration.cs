@@ -324,9 +324,6 @@ public class OpcUaClientConfiguration
     /// </summary>
     public ITelemetryContext? TelemetryContext { get; set; }
 
-    // The telemetry context to use for SDK calls, never null (falls back to the no-op context when unset).
-    internal ITelemetryContext ResolvedTelemetryContext => TelemetryContext ?? NullTelemetryContext.Instance;
-
     /// <summary>
     /// Gets or sets the session factory for creating OPC UA sessions.
     /// If not specified, a DefaultSessionFactory using the configured TelemetryContext is created automatically.
@@ -352,6 +349,11 @@ public class OpcUaClientConfiguration
     /// </summary>
     public ISessionFactory ActualSessionFactory => SessionFactory ?? LazyInitializer.EnsureInitialized(
         ref _resolvedSessionFactory, () => new DefaultSessionFactory(ResolvedTelemetryContext))!;
+
+    /// <summary>
+    /// The telemetry context to use for SDK calls, never null (falls back to the no-op context when unset).
+    /// </summary>
+    public ITelemetryContext ResolvedTelemetryContext => TelemetryContext ?? NullTelemetryContext.Instance;
 
     /// <summary>
     /// Creates and configures an OPC UA application instance for the client.

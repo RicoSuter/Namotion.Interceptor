@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Opc.Ua;
-using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 

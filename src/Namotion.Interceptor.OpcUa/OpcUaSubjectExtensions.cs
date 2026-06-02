@@ -1,9 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Connectors.Mapping;
-using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.OpcUa.Server;
@@ -179,7 +176,7 @@ public static class OpcUaSubjectExtensions
             .AddKeyedSingleton(key, (sp, _) =>
             {
                 var configuration = configurationProvider(sp);
-                ApplyClientDiDefaults(configuration, sp);
+                ApplyClientDefaults(configuration, sp);
                 return configuration;
             })
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
@@ -204,7 +201,7 @@ public static class OpcUaSubjectExtensions
             .AddKeyedSingleton(key, (sp, _) =>
             {
                 var configuration = configurationProvider(sp);
-                ApplyServerDiDefaults(configuration, sp);
+                ApplyServerDefaults(configuration, sp);
                 return configuration;
             })
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
@@ -222,19 +219,19 @@ public static class OpcUaSubjectExtensions
     // Completes a configuration after the caller's provider runs, filling only the fields that need DI:
     // DI-backed telemetry when left null, and (client) the type resolver logger. Fields a caller set explicitly
     // (including an explicit NullTelemetryContext) are left untouched. Internal so the behavior can be unit-tested.
-    internal static void ApplyClientDiDefaults(OpcUaClientConfiguration configuration, IServiceProvider sp)
+    internal static void ApplyClientDefaults(OpcUaClientConfiguration configuration, IServiceProvider serviceProvider)
     {
-        configuration.TelemetryContext ??= CreateDiTelemetry(sp);
+        configuration.TelemetryContext ??= CreateLoggerTelemetry(serviceProvider);
 
-        configuration.TypeResolver ??= new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>());
+        configuration.TypeResolver ??= new OpcUaTypeResolver(serviceProvider.GetRequiredService<ILogger<OpcUaTypeResolver>>());
     }
 
-    internal static void ApplyServerDiDefaults(OpcUaServerConfiguration configuration, IServiceProvider sp)
+    internal static void ApplyServerDefaults(OpcUaServerConfiguration configuration, IServiceProvider serviceProvider)
     {
-        configuration.TelemetryContext ??= CreateDiTelemetry(sp);
+        configuration.TelemetryContext ??= CreateLoggerTelemetry(serviceProvider);
     }
 
-    private static ITelemetryContext CreateDiTelemetry(IServiceProvider sp)
+    private static ITelemetryContext CreateLoggerTelemetry(IServiceProvider sp)
     {
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
         return DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory));

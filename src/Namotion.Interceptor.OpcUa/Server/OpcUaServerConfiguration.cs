@@ -68,9 +68,6 @@ public class OpcUaServerConfiguration
     /// </summary>
     public ITelemetryContext? TelemetryContext { get; set; }
 
-    // The telemetry context to use for SDK calls, never null (falls back to the no-op context when unset).
-    internal ITelemetryContext ResolvedTelemetryContext => TelemetryContext ?? NullTelemetryContext.Instance;
-
     /// <summary>
     /// Gets or sets a value indicating whether to automatically accept untrusted certificates.
     /// Should only be set to true for testing or development scenarios.
@@ -83,6 +80,11 @@ public class OpcUaServerConfiguration
     /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
     /// </summary>
     public string CertificateStoreBasePath { get; set; } = "pki";
+
+    /// <summary>
+    /// The telemetry context to use for SDK calls, never null (falls back to the no-op context when unset).
+    /// </summary>
+    public ITelemetryContext ResolvedTelemetryContext => TelemetryContext ?? NullTelemetryContext.Instance;
 
     /// <summary>
     /// Creates and configures an OPC UA application instance for the server.

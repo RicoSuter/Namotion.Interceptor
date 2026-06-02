@@ -2,10 +2,8 @@ using Moq;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
 using Opc.Ua.Client;
-using Xunit;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
