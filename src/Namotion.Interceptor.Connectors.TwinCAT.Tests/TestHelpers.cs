@@ -1,5 +1,7 @@
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
+using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
@@ -43,7 +45,9 @@ internal static class TestHelpers
             Host = "127.0.0.1",
             AmsNetId = "127.0.0.1.1.1",
             AmsPort = 851,
-            PathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName, pathSeparator)
+            Mapper = AdsCompositeMapper.CreateDefault(
+                AdsConstants.DefaultConnectorName,
+                new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName, pathSeparator))
         };
     }
 
@@ -52,7 +56,16 @@ internal static class TestHelpers
     /// </summary>
     public static AdsSubjectLoader CreateLoader()
     {
-        var pathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName, '.');
-        return new AdsSubjectLoader(pathProvider);
+        return new AdsSubjectLoader(AdsCompositeMapper.CreateDefault());
+    }
+
+    /// <summary>
+    /// Resolves a registered property by name from a subject (the subject must be attached to a registry context).
+    /// </summary>
+    public static RegisteredSubjectProperty GetProperty(IInterceptorSubject subject, string propertyName)
+    {
+        var registered = subject.TryGetRegisteredSubject()
+            ?? throw new InvalidOperationException("Subject is not registered.");
+        return registered.Properties.Single(property => property.Name == propertyName);
     }
 }

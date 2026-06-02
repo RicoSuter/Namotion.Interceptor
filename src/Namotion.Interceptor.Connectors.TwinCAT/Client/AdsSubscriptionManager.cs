@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reactive.Disposables;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Connectors.TwinCAT.Attributes;
+using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
@@ -92,7 +92,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// Registers notification subscriptions and batch polling for the given property-symbol mappings.
     /// </summary>
     internal void RegisterSubscriptions(
-        IReadOnlyList<(RegisteredSubjectProperty Property, string SymbolPath)> mappings,
+        IReadOnlyList<(RegisteredSubjectProperty Property, string SymbolPath, AdsPropertyMapping Mapping)> mappings,
         IAdsConnection connection,
         ISymbolLoader? symbolLoader,
         SourceOwnershipManager ownership,
@@ -105,6 +105,12 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             _configuration.DefaultReadMode,
             _configuration.DefaultCycleTime,
             _configuration.MaxNotifications);
+
+        var mappingByReference = new Dictionary<PropertyReference, AdsPropertyMapping>(PropertyReference.Comparer);
+        foreach (var (property, _, mapping) in mappings)
+        {
+            mappingByReference[property.Reference] = mapping;
+        }
 
         foreach (var (property, symbolPath, effectiveMode) in effectiveModes)
         {
@@ -119,7 +125,8 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
             if (effectiveMode == AdsReadMode.Notification)
             {
-                RegisterNotification(property, symbolPath, connection, symbolLoader, propertyWriter, source, connectionManager);
+                var mapping = mappingByReference[property.Reference];
+                RegisterNotification(property, symbolPath, mapping, connection, symbolLoader, propertyWriter, source, connectionManager);
             }
             else
             {
@@ -244,7 +251,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// </summary>
     internal static IReadOnlyList<(RegisteredSubjectProperty Property, string SymbolPath, AdsReadMode EffectiveMode)>
         DetermineEffectiveReadModes(
-            IReadOnlyList<(RegisteredSubjectProperty Property, string SymbolPath)> mappings,
+            IReadOnlyList<(RegisteredSubjectProperty Property, string SymbolPath, AdsPropertyMapping Mapping)> mappings,
             AdsReadMode defaultReadMode,
             int defaultCycleTime,
             int maxNotifications)
@@ -257,11 +264,10 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
         for (var index = 0; index < mappings.Count; index++)
         {
-            var (property, symbolPath) = mappings[index];
-            var attribute = TryGetAdsVariableAttribute(property);
-            var readMode = GetConfiguredReadMode(attribute, defaultReadMode);
-            var cycleTime = GetConfiguredCycleTime(attribute, defaultCycleTime);
-            var priority = GetConfiguredPriority(attribute);
+            var (property, symbolPath, mapping) = mappings[index];
+            var readMode = mapping.ReadMode ?? defaultReadMode;
+            var cycleTime = mapping.CycleTime ?? defaultCycleTime;
+            var priority = mapping.Priority ?? 0;
 
             if (readMode == AdsReadMode.Notification)
             {
@@ -306,34 +312,10 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         return result;
     }
 
-    private static AdsVariableAttribute? TryGetAdsVariableAttribute(RegisteredSubjectProperty property)
-    {
-        return property.ReflectionAttributes.OfType<AdsVariableAttribute>().FirstOrDefault();
-    }
-
-    private static AdsReadMode GetConfiguredReadMode(AdsVariableAttribute? attribute, AdsReadMode defaultReadMode)
-    {
-        return attribute is { ReadMode: not AdsReadMode.Auto } ? attribute.ReadMode : defaultReadMode;
-    }
-
-    private static int GetConfiguredCycleTime(AdsVariableAttribute? attribute, int defaultCycleTime)
-    {
-        return attribute is { CycleTime: not int.MinValue } ? attribute.CycleTime : defaultCycleTime;
-    }
-
-    private static int GetConfiguredPriority(AdsVariableAttribute? attribute)
-    {
-        return attribute?.Priority ?? 0;
-    }
-
-    private static int GetConfiguredMaxDelay(AdsVariableAttribute? attribute, int defaultMaxDelay)
-    {
-        return attribute is { MaxDelay: not int.MinValue } ? attribute.MaxDelay : defaultMaxDelay;
-    }
-
     private void RegisterNotification(
         RegisteredSubjectProperty property,
         string symbolPath,
+        AdsPropertyMapping mapping,
         IAdsConnection connection,
         ISymbolLoader? symbolLoader,
         SubjectPropertyWriter? propertyWriter,
@@ -348,9 +330,8 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             return;
         }
 
-        var attribute = TryGetAdsVariableAttribute(property);
-        var cycleTime = GetConfiguredCycleTime(attribute, _configuration.DefaultCycleTime);
-        var maxDelay = GetConfiguredMaxDelay(attribute, _configuration.DefaultMaxDelay);
+        var cycleTime = mapping.CycleTime ?? _configuration.DefaultCycleTime;
+        var maxDelay = mapping.MaxDelay ?? _configuration.DefaultMaxDelay;
         var notificationSettings = new NotificationSettings(
             AdsTransMode.OnChange, cycleTime, maxDelay);
 

@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
+using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
-using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
@@ -166,8 +166,7 @@ public class AdsSubjectLoaderTests
         // Arrange - use a path provider with a different name
         var context = TestHelpers.CreateContext();
         var machine = new Machine(context);
-        var pathProvider = new AttributeBasedPathProvider("opcua", '.');
-        var loader = new AdsSubjectLoader(pathProvider);
+        var loader = new AdsSubjectLoader(AdsCompositeMapper.CreateDefault("opcua"));
 
         // Act
         var mappings = loader.LoadSubjectGraph(machine);

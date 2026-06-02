@@ -1,6 +1,4 @@
-using Moq;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
-using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
@@ -12,8 +10,7 @@ public class AdsClientConfigurationTests
         return new AdsClientConfiguration
         {
             Host = "192.168.1.100",
-            AmsNetId = "192.168.1.100.1.1",
-            PathProvider = Mock.Of<IPathProvider>()
+            AmsNetId = "192.168.1.100.1.1"
         };
     }
 
@@ -38,6 +35,7 @@ public class AdsClientConfigurationTests
         Assert.Equal(5, configuration.CircuitBreakerFailureThreshold);
         Assert.Equal(TimeSpan.FromSeconds(60), configuration.CircuitBreakerCooldown);
         Assert.NotNull(configuration.ValueConverter);
+        Assert.NotNull(configuration.Mapper);
     }
 
     [Fact]
@@ -185,7 +183,6 @@ public class AdsClientConfigurationTests
             Host = "10.0.0.1",
             AmsNetId = "10.0.0.1.1.1",
             AmsPort = 852,
-            PathProvider = Mock.Of<IPathProvider>(),
             DefaultReadMode = AdsReadMode.Polled,
             MaxNotifications = 1000,
             PollingInterval = TimeSpan.FromMilliseconds(500)

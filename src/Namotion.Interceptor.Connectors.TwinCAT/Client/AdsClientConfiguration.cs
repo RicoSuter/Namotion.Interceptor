@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
-using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.Connectors.TwinCAT.Attributes;
+using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 
@@ -29,9 +31,11 @@ public class AdsClientConfiguration
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Gets or sets the path provider for property-to-symbol mapping.
+    /// Gets or sets the property mapper that resolves each property's symbol-path segment and ADS settings.
+    /// Defaults to attribute-based mapping (<see cref="AdsVariableAttribute"/>). Compose a fluent mapper in to
+    /// add or override mappings in code.
     /// </summary>
-    public required IPathProvider PathProvider { get; set; }
+    public IPropertyMapper<AdsPropertyMapping> Mapper { get; set; } = AdsCompositeMapper.CreateDefault();
 
     /// <summary>
     /// Gets or sets the default read mode for variables without explicit configuration.
@@ -113,6 +117,9 @@ public class AdsClientConfiguration
     /// </summary>
     public void Validate()
     {
+        if (Mapper is null)
+            throw new ArgumentException("Mapper must not be null.", nameof(Mapper));
+
         if (string.IsNullOrWhiteSpace(Host))
             throw new ArgumentException("Host must not be empty.", nameof(Host));
 

@@ -56,7 +56,7 @@ internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisp
 
         _connectionManager = new AdsConnectionManager(configuration, logger);
         _subscriptionManager = new AdsSubscriptionManager(configuration, logger);
-        _subjectLoader = new AdsSubjectLoader(configuration.PathProvider);
+        _subjectLoader = new AdsSubjectLoader(configuration.Mapper);
 
         _ownership = new SourceOwnershipManager(
             this,

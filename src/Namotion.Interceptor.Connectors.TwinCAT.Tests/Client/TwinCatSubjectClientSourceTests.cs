@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Moq;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
+using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using TwinCAT;
 using TwinCAT.Ads;
@@ -189,7 +189,7 @@ public class TwinCatSubjectClientSourceTests
         {
             Host = "", // Invalid - empty
             AmsNetId = "127.0.0.1.1.1",
-            PathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName)
+            Mapper = AdsCompositeMapper.CreateDefault(AdsConstants.DefaultConnectorName)
         };
 
         // Act & Assert

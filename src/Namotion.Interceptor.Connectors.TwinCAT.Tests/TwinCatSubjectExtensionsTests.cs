@@ -3,8 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.TwinCAT;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
+using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
-using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests;
@@ -24,7 +24,6 @@ public class TwinCatSubjectExtensionsTests
         // Act
         services.AddTwinCatSubjectClientSource<TestPlcModel>(
             host: "192.168.1.100",
-            pathProviderName: "ads",
             amsPort: 851);
 
         // Assert
@@ -52,7 +51,7 @@ public class TwinCatSubjectExtensionsTests
                 AmsNetId = "10.0.0.1.1.1",
                 AmsPort = 852,
                 DefaultReadMode = AdsReadMode.Polled,
-                PathProvider = new AttributeBasedPathProvider("custom", '.')
+                Mapper = AdsCompositeMapper.CreateDefault("custom")
             });
 
         // Assert
@@ -78,8 +77,7 @@ public class TwinCatSubjectExtensionsTests
 
         // Act
         services.AddTwinCatSubjectClientSource<TestPlcModel>(
-            host: "192.168.1.100",
-            pathProviderName: "ads");
+            host: "192.168.1.100");
 
         // Assert
         var provider = services.BuildServiceProvider();
@@ -102,7 +100,6 @@ public class TwinCatSubjectExtensionsTests
         // Act
         services.AddTwinCatSubjectClientSource<TestPlcModel>(
             host: "192.168.1.100",
-            pathProviderName: "ads",
             amsNetId: "5.23.100.200.1.1");
 
         // Assert
@@ -130,7 +127,7 @@ public class TwinCatSubjectExtensionsTests
                 Host = "192.168.1.100",
                 AmsNetId = "192.168.1.100.1.1",
                 AmsPort = 851,
-                PathProvider = new AttributeBasedPathProvider("ads", '.')
+                Mapper = AdsCompositeMapper.CreateDefault("ads")
             });
 
         services.AddTwinCatSubjectClientSource(
@@ -140,7 +137,7 @@ public class TwinCatSubjectExtensionsTests
                 Host = "192.168.1.200",
                 AmsNetId = "192.168.1.200.1.1",
                 AmsPort = 852,
-                PathProvider = new AttributeBasedPathProvider("ads", '.')
+                Mapper = AdsCompositeMapper.CreateDefault("ads")
             });
 
         // Assert — should have 2 hosted services (one per registration)
@@ -162,8 +159,7 @@ public class TwinCatSubjectExtensionsTests
 
         // Act — do not pass amsPort, should default to 851
         services.AddTwinCatSubjectClientSource<TestPlcModel>(
-            host: "10.0.0.1",
-            pathProviderName: "ads");
+            host: "10.0.0.1");
 
         // Assert
         var provider = services.BuildServiceProvider();

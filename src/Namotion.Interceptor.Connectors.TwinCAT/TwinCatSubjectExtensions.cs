@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Connectors.TwinCAT;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
-using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -20,16 +20,16 @@ public static class TwinCatSubjectExtensions
     /// <typeparam name="TSubject">The subject type to synchronize with the PLC.</typeparam>
     /// <param name="services">The service collection.</param>
     /// <param name="host">The PLC host IP or hostname.</param>
-    /// <param name="pathProviderName">The name for the <see cref="AttributeBasedPathProvider"/> used for property-to-symbol mapping.</param>
     /// <param name="amsPort">The AMS port (default: 851 for TwinCAT3 PLC runtime).</param>
     /// <param name="amsNetId">The AMS Net ID. If null, defaults to <paramref name="host"/> + ".1.1".</param>
+    /// <param name="connectorName">The connector name used for attribute-based symbol mapping (default: "ads").</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddTwinCatSubjectClientSource<TSubject>(
         this IServiceCollection services,
         string host,
-        string pathProviderName,
         int amsPort = 851,
-        string? amsNetId = null)
+        string? amsNetId = null,
+        string connectorName = AdsConstants.DefaultConnectorName)
         where TSubject : IInterceptorSubject
     {
         return services.AddTwinCatSubjectClientSource(
@@ -39,7 +39,7 @@ public static class TwinCatSubjectExtensions
                 Host = host,
                 AmsNetId = amsNetId ?? $"{host}.1.1",
                 AmsPort = amsPort,
-                PathProvider = new AttributeBasedPathProvider(pathProviderName, '.')
+                Mapper = AdsCompositeMapper.CreateDefault(connectorName)
             });
     }
 

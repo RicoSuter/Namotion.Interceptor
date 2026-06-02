@@ -6,6 +6,7 @@ The `Namotion.Interceptor.Connectors.TwinCAT` package provides integration betwe
 
 - Bidirectional synchronization between C# objects and PLC variables
 - Attribute-based mapping with `[AdsVariable]` for direct symbol path control
+- Code-based fluent mapping (`AdsFluentMapperBuilder`) as a complete alternative to attributes
 - Automatic notification-to-polling demotion when notification limits are exceeded
 - Batch read/write operations via `SumSymbolRead`/`SumSymbolWrite` with individual fallback
 - Debounced rescan on connection restore, PLC state change, and symbol version change
@@ -30,7 +31,6 @@ public partial class PlcModel
 
 builder.Services.AddTwinCatSubjectClientSource<PlcModel>(
     host: "192.168.1.100",
-    pathProviderName: "ads",
     amsPort: 851);
 
 // Use in application
@@ -48,10 +48,10 @@ The generic overload provides a concise way to register a client source with sen
 
 ```csharp
 builder.Services.AddTwinCatSubjectClientSource<PlcModel>(
-    host: "192.168.1.100",       // PLC IP or hostname
-    pathProviderName: "ads",      // Name for AttributeBasedPathProvider
+    host: "192.168.1.100",        // PLC IP or hostname
     amsPort: 851,                 // AMS port (default: 851 for TwinCAT3)
-    amsNetId: "192.168.1.100.1.1" // AMS Net ID (default: "{host}.1.1")
+    amsNetId: "192.168.1.100.1.1",// AMS Net ID (default: "{host}.1.1")
+    connectorName: "ads"          // Connector name for [AdsVariable] mapping (default: "ads")
 );
 ```
 
@@ -68,7 +68,9 @@ builder.Services.AddTwinCatSubjectClientSource(
         Host = "192.168.1.100",
         AmsNetId = "192.168.1.100.1.1",
         AmsPort = 851,
-        PathProvider = new AttributeBasedPathProvider("ads", '.'),
+
+        // Property mapping (optional - defaults to attribute-based)
+        Mapper = AdsCompositeMapper.CreateDefault("ads"),
 
         // Timeouts
         Timeout = TimeSpan.FromSeconds(5),
@@ -103,7 +105,7 @@ builder.Services.AddTwinCatSubjectClientSource(
 | `Host` | string | *required* | PLC host IP or hostname |
 | `AmsNetId` | string | *required* | AMS Net ID (e.g., "192.168.1.100.1.1") |
 | `AmsPort` | int | 851 | AMS port for TwinCAT3 PLC runtime |
-| `PathProvider` | IPathProvider | *required* | Maps properties to ADS symbol paths |
+| `Mapper` | `IPropertyMapper<AdsPropertyMapping>` | attribute-based | Resolves each property's symbol path and ADS settings |
 | `Timeout` | TimeSpan | 5s | ADS communication timeout |
 | `DefaultReadMode` | AdsReadMode | Auto | Default read mode for variables without explicit config |
 | `DefaultCycleTime` | int | 100 | Default notification cycle time in ms |
@@ -169,7 +171,40 @@ public partial class PlcModel
 | `ReadMode` | AdsReadMode | Auto | How this variable is read from the PLC |
 | `CycleTime` | int | *global default* | Notification cycle time in ms |
 | `MaxDelay` | int | *global default* | Max delay for notification batching in ms |
-| `Priority` | int | 0 | Demotion priority — higher values are demoted first |
+| `Priority` | int | 0 | Demotion priority; higher values are demoted first |
+
+### Code-based (fluent) mapping
+
+`AdsFluentMapperBuilder<TRoot>` is a complete, code-based alternative to `[AdsVariable]` attributes. Configure a type once with `ForType<T>().Map(...)`, then call `Build(...)` to produce an `AdsFluentMapper`. The mapping resolves everywhere that type appears in the object graph, including collection and dictionary elements.
+
+`WithSymbolPath(...)` sets the relative symbol-path segment for the property (composed with parent segments into the full PLC symbol path, exactly like `[AdsVariable]`). `WithReadMode(...)`, `WithCycleTime(...)`, `WithMaxDelay(...)`, and `WithPriority(...)` set the per-property ADS settings.
+
+```csharp
+var fluentMapper = new AdsFluentMapperBuilder<PlcModel>()
+    .ForType<PlcModel>()
+        .Map(m => m.Temperature, b => b.WithSymbolPath("GVL.Temperature"))
+        .Map(m => m.Speed,       b => b.WithSymbolPath("GVL.Speed").WithReadMode(AdsReadMode.Notification).WithCycleTime(50))
+    .Build();
+```
+
+#### Composing with the connector
+
+`Build()` produces a mapper you set on the `Mapper` property through the configuration overload. Layer it after the default attribute composite (`AdsCompositeMapper.CreateDefault()`) so fluent wins on conflicts and attribute and fluent mapping compose:
+
+```csharp
+builder.Services.AddTwinCatSubjectClientSource(
+    subjectSelector: sp => sp.GetRequiredService<PlcModel>(),
+    configurationProvider: sp => new AdsClientConfiguration
+    {
+        Host = "192.168.1.100",
+        AmsNetId = "192.168.1.100.1.1",
+        Mapper = new AdsCompositeMapper(
+            AdsCompositeMapper.CreateDefault(),
+            new AdsFluentMapperBuilder<PlcModel>()
+                .ForType<PlcModel>().Map(m => m.Speed, b => b.WithSymbolPath("GVL.Speed"))
+                .Build())
+    });
+```
 
 ### Complex Hierarchies
 
@@ -246,7 +281,7 @@ When the total number of notification-mode variables exceeds `MaxNotifications`,
    - Tiebreaker: **CycleTime** descending (slower cycle times demoted first)
    - Demote until the notification count is within the limit
 
-**Notification-mode properties are never demoted** — only Auto-mode properties participate in demotion. Polled-mode properties are never promoted.
+**Notification-mode properties are never demoted**: only Auto-mode properties participate in demotion. Polled-mode properties are never promoted.
 
 **Example**: With `MaxNotifications = 500` and 600 Auto-mode variables, the 100 variables with the highest Priority (then slowest CycleTime) are demoted to polling.
 
@@ -350,7 +385,7 @@ When a rescan is in progress (triggered by connection restore, PLC state change,
 
 - **Unresolved symbol paths** (cache temporarily cleared): Treated as transient failures and queued for retry. After the rescan completes and the symbol cache is rebuilt, the retry succeeds.
 - **Transient ADS errors** (timeout, busy, port not found): Queued for retry via the write retry queue.
-- **Permanent ADS errors** (symbol not found, invalid size/data): Logged at Warning level and dropped — not retried. This prevents indefinite retry of writes for symbols that no longer exist on the PLC (e.g., after a PLC program update).
+- **Permanent ADS errors** (symbol not found, invalid size/data): Logged at Warning level and dropped, not retried. This prevents indefinite retry of writes for symbols that no longer exist on the PLC (e.g., after a PLC program update).
 
 This ensures that configuration changes and command triggers are not silently lost during brief rescan windows, while writes to permanently removed symbols are cleaned up automatically.
 

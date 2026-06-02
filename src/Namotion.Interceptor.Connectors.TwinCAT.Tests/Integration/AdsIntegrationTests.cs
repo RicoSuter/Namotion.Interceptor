@@ -2,10 +2,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
+using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Integration.Models;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -51,7 +51,7 @@ public class AdsIntegrationTests
             Host = "127.0.0.1",
             AmsNetId = server.AmsNetIdString,
             AmsPort = server.ServerPort,
-            PathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName, '.'),
+            Mapper = AdsCompositeMapper.CreateDefault(AdsConstants.DefaultConnectorName),
             HealthCheckInterval = TimeSpan.FromSeconds(1),
             RouterConfiguration = server.RouterConfiguration,
         };

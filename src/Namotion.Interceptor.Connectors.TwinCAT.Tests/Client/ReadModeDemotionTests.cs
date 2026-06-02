@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
+using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
 using Namotion.Interceptor.Registry.Abstractions;
 using Xunit;
@@ -251,7 +252,7 @@ public class ReadModeDemotionTests
     public void EmptyMappings_ShouldReturnEmptyResult()
     {
         // Arrange
-        var mappings = Array.Empty<(RegisteredSubjectProperty, string)>();
+        var mappings = Array.Empty<(RegisteredSubjectProperty, string, AdsPropertyMapping)>();
 
         // Act
         var result = AdsSubscriptionManager.DetermineEffectiveReadModes(

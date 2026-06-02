@@ -530,35 +530,7 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
 
 `ReverseCompositeMapper<TMapping, TKey>` requires the mapping record to implement `IPropertyMapping<TMapping>`, which provides the static `Merge` method for combining partial configurations. Each connector exposes a thin subclass (for example `MqttCompositeMapper` and `OpcUaCompositeMapper`) for type safety and naming; consumers normally use those rather than the generic base.
 
-#### Default Composition
-
-Each connector defaults its `Mapper` to a composite that chains a path-provider adapter with a protocol-specific attribute mapper. For example, the MQTT client defaults to:
-
-```csharp
-Mapper = new MqttCompositeMapper(
-    new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
-    new MqttAttributeMapper("mqtt"))
-```
-
-The OPC UA client defaults to:
-
-```csharp
-Mapper = new OpcUaCompositeMapper(
-    new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
-    new OpcUaAttributeMapper())
-```
-
-#### Connector-Specific Wrappers
-
-Each connector ships thin wrappers that adapt generic infrastructure to protocol-specific types:
-
-| Connector | Mapper Wrappers                                                                                               |
-|-----------|---------------------------------------------------------------------------------------------------------------|
-| MQTT      | `MqttPathProviderMapper`, `MqttAttributeMapper`, `MqttFluentMapper` (built by `MqttFluentMapperBuilder<TRoot>`), `MqttCompositeMapper` |
-| WebSocket | Uses `PathProviderBase` directly (no mapper abstraction)                                              |
-| OPC UA    | `OpcUaPathProviderMapper`, `OpcUaAttributeMapper`, `OpcUaFluentMapper` (built by `OpcUaFluentMapperBuilder<TRoot>`), `OpcUaCompositeMapper` |
-
-See the protocol-specific documentation for details on each connector's mapping types and configuration.
+Connectors that push data outward and resolve inbound updates by other means need no reverse lookup.
 
 ### Path Providers
 
