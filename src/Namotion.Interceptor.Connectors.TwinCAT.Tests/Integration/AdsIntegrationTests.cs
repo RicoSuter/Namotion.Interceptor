@@ -8,6 +8,7 @@ using Namotion.Interceptor.Connectors.TwinCAT.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using TwinCAT.Ads;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -49,7 +50,7 @@ public class AdsIntegrationTests
         return new AdsClientConfiguration
         {
             Host = "127.0.0.1",
-            AmsNetId = server.AmsNetIdString,
+            AmsNetId = AmsNetId.Parse(server.AmsNetIdString),
             AmsPort = server.ServerPort,
             Mapper = AdsCompositeMapper.CreateDefault(AdsConstants.DefaultConnectorName),
             HealthCheckInterval = TimeSpan.FromSeconds(1),

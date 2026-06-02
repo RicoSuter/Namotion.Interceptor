@@ -5,6 +5,7 @@ using Namotion.Interceptor.Connectors.TwinCAT;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
+using TwinCAT.Ads;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests;
@@ -48,7 +49,7 @@ public class TwinCatSubjectExtensionsTests
             configurationProvider: _ => new AdsClientConfiguration
             {
                 Host = "10.0.0.1",
-                AmsNetId = "10.0.0.1.1.1",
+                AmsNetId = AmsNetId.Parse("10.0.0.1.1.1"),
                 AmsPort = 852,
                 DefaultReadMode = AdsReadMode.Polled,
                 Mapper = AdsCompositeMapper.CreateDefault("custom")
@@ -61,7 +62,7 @@ public class TwinCatSubjectExtensionsTests
             .Single();
 
         Assert.Equal("10.0.0.1", source.Configuration.Host);
-        Assert.Equal("10.0.0.1.1.1", source.Configuration.AmsNetId);
+        Assert.Equal("10.0.0.1.1.1", source.Configuration.AmsNetId.ToString());
         Assert.Equal(852, source.Configuration.AmsPort);
         Assert.Equal(AdsReadMode.Polled, source.Configuration.DefaultReadMode);
     }
@@ -85,7 +86,7 @@ public class TwinCatSubjectExtensionsTests
             .OfType<TwinCatSubjectClientSource>()
             .Single();
 
-        Assert.Equal("192.168.1.100.1.1", source.Configuration.AmsNetId);
+        Assert.Equal("192.168.1.100.1.1", source.Configuration.AmsNetId.ToString());
     }
 
     [Fact]
@@ -108,7 +109,7 @@ public class TwinCatSubjectExtensionsTests
             .OfType<TwinCatSubjectClientSource>()
             .Single();
 
-        Assert.Equal("5.23.100.200.1.1", source.Configuration.AmsNetId);
+        Assert.Equal("5.23.100.200.1.1", source.Configuration.AmsNetId.ToString());
     }
 
     [Fact]
@@ -125,7 +126,7 @@ public class TwinCatSubjectExtensionsTests
             configurationProvider: _ => new AdsClientConfiguration
             {
                 Host = "192.168.1.100",
-                AmsNetId = "192.168.1.100.1.1",
+                AmsNetId = AmsNetId.Parse("192.168.1.100.1.1"),
                 AmsPort = 851,
                 Mapper = AdsCompositeMapper.CreateDefault("ads")
             });
@@ -135,7 +136,7 @@ public class TwinCatSubjectExtensionsTests
             configurationProvider: _ => new AdsClientConfiguration
             {
                 Host = "192.168.1.200",
-                AmsNetId = "192.168.1.200.1.1",
+                AmsNetId = AmsNetId.Parse("192.168.1.200.1.1"),
                 AmsPort = 852,
                 Mapper = AdsCompositeMapper.CreateDefault("ads")
             });

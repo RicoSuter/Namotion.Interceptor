@@ -4,6 +4,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Connectors.TwinCAT;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
+using TwinCAT.Ads;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -37,7 +38,7 @@ public static class TwinCatSubjectExtensions
             _ => new AdsClientConfiguration
             {
                 Host = host,
-                AmsNetId = amsNetId ?? $"{host}.1.1",
+                AmsNetId = AmsNetId.Parse(amsNetId ?? $"{host}.1.1"),
                 AmsPort = amsPort,
                 Mapper = AdsCompositeMapper.CreateDefault(connectorName)
             });

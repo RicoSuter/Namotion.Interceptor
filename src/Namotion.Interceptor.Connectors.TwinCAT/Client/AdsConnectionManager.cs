@@ -146,8 +146,6 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         // Dispose stale client before creating a new one
         DisconnectAndDisposeClient();
 
-        var amsNetId = AmsNetId.Parse(_configuration.AmsNetId);
-
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -162,7 +160,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
 
                     try
                     {
-                        await client.ConnectAsync(amsNetId, _configuration.AmsPort, cancellationToken);
+                        await client.ConnectAsync(_configuration.AmsNetId, _configuration.AmsPort, cancellationToken);
                     }
                     catch
                     {

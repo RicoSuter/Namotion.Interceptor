@@ -64,9 +64,8 @@ builder.Services.AddTwinCatSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<PlcModel>(),
     configurationProvider: sp => new AdsClientConfiguration
     {
-        // Connection (required)
-        Host = "192.168.1.100",
-        AmsNetId = "192.168.1.100.1.1",
+        // Connection (Host is optional and informational; the AMS Net ID identifies the target)
+        AmsNetId = AmsNetId.Parse("192.168.1.100.1.1"), // or AmsNetId.Local for an in-process connection
         AmsPort = 851,
 
         // Property mapping (optional - defaults to attribute-based)
@@ -98,12 +97,28 @@ builder.Services.AddTwinCatSubjectClientSource(
     });
 ```
 
+### Local connection (loopback / shared memory)
+
+When the application runs on the same machine as the TwinCAT runtime, set `AmsNetId` to `AmsNetId.Local`. The local AMS router then dispatches calls through shared memory instead of TCP, with very low overhead, and `Host` is not needed:
+
+```csharp
+builder.Services.AddTwinCatSubjectClientSource(
+    subjectSelector: sp => sp.GetRequiredService<PlcModel>(),
+    configurationProvider: sp => new AdsClientConfiguration
+    {
+        AmsNetId = AmsNetId.Local,
+        AmsPort = 851,
+    });
+```
+
+The connector always connects through the local AMS router, which selects the transport by target: shared memory for a local net id, TCP for a remote one (using a route already configured in the router). The connector does not add routes itself.
+
 ### Configuration Reference
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `Host` | string | *required* | PLC host IP or hostname |
-| `AmsNetId` | string | *required* | AMS Net ID (e.g., "192.168.1.100.1.1") |
+| `Host` | `string?` | null | Optional, informational; the simple overload derives a default AMS Net ID from it. Not used for the connection |
+| `AmsNetId` | `AmsNetId` | *required* | AMS Net ID of the target. Use `AmsNetId.Local` for an in-process (loopback / shared-memory) connection |
 | `AmsPort` | int | 851 | AMS port for TwinCAT3 PLC runtime |
 | `Mapper` | `IPropertyMapper<AdsPropertyMapping>` | attribute-based | Resolves each property's symbol path and ADS settings |
 | `Timeout` | TimeSpan | 5s | ADS communication timeout |
@@ -196,8 +211,7 @@ builder.Services.AddTwinCatSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<PlcModel>(),
     configurationProvider: sp => new AdsClientConfiguration
     {
-        Host = "192.168.1.100",
-        AmsNetId = "192.168.1.100.1.1",
+        AmsNetId = AmsNetId.Parse("192.168.1.100.1.1"),
         Mapper = new AdsCompositeMapper(
             AdsCompositeMapper.CreateDefault(),
             new AdsFluentMapperBuilder<PlcModel>()

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Connectors.TwinCAT.Attributes;
 using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
+using TwinCAT.Ads;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 
@@ -11,14 +12,16 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 public class AdsClientConfiguration
 {
     /// <summary>
-    /// Gets or sets the PLC host IP or hostname.
+    /// Gets or sets the optional, informational PLC host IP or hostname.
+    /// Used by the simple overload to derive a default AMS Net ID; it is not used for the connection.
     /// </summary>
-    public required string Host { get; set; }
+    public string? Host { get; set; }
 
     /// <summary>
-    /// Gets or sets the AMS Net ID of the PLC (e.g., "192.168.1.100.1.1").
+    /// Gets or sets the AMS Net ID of the target.
+    /// Use <see cref="AmsNetId.Local"/> for an in-process (loopback / shared-memory) connection.
     /// </summary>
-    public required string AmsNetId { get; set; }
+    public required AmsNetId AmsNetId { get; set; }
 
     /// <summary>
     /// Gets or sets the AMS port (default: 851 for TwinCAT3 PLC runtime).
@@ -120,11 +123,10 @@ public class AdsClientConfiguration
         if (Mapper is null)
             throw new ArgumentException("Mapper must not be null.", nameof(Mapper));
 
-        if (string.IsNullOrWhiteSpace(Host))
-            throw new ArgumentException("Host must not be empty.", nameof(Host));
-
-        if (string.IsNullOrWhiteSpace(AmsNetId))
-            throw new ArgumentException("AmsNetId must not be empty.", nameof(AmsNetId));
+        // Only a null is rejected; an empty net id (AmsNetId.Local resolves to "0.0.0.0.0.0" on a host with
+        // no local AMS router) is left to the connection layer, which retries and logs.
+        if (AmsNetId is null)
+            throw new ArgumentException("AmsNetId must be set.", nameof(AmsNetId));
 
         if (AmsPort <= 0)
             throw new ArgumentOutOfRangeException(nameof(AmsPort), "AmsPort must be positive.");

@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
+using TwinCAT.Ads;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
@@ -10,7 +11,7 @@ public class AdsClientConfigurationTests
         return new AdsClientConfiguration
         {
             Host = "192.168.1.100",
-            AmsNetId = "192.168.1.100.1.1"
+            AmsNetId = AmsNetId.Parse("192.168.1.100.1.1")
         };
     }
 
@@ -48,30 +49,23 @@ public class AdsClientConfigurationTests
         configuration.Validate();
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("  ")]
-    [InlineData(null)]
-    public void Validate_WithInvalidHost_ThrowsArgumentException(string? host)
+    [Fact]
+    public void Validate_WithNullHost_DoesNotThrow()
     {
         // Arrange
         var configuration = CreateValidConfiguration();
-        configuration.Host = host!;
+        configuration.Host = null;
 
-        // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
-        Assert.Contains("Host", exception.Message);
+        // Act & Assert - Host is optional; only AmsNetId is required for the connection
+        configuration.Validate();
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("  ")]
-    [InlineData(null)]
-    public void Validate_WithInvalidAmsNetId_ThrowsArgumentException(string? amsNetId)
+    [Fact]
+    public void Validate_WithNullAmsNetId_ThrowsArgumentException()
     {
         // Arrange
         var configuration = CreateValidConfiguration();
-        configuration.AmsNetId = amsNetId!;
+        configuration.AmsNetId = null!;
 
         // Act & Assert
         var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
@@ -181,7 +175,7 @@ public class AdsClientConfigurationTests
         var configuration = new AdsClientConfiguration
         {
             Host = "10.0.0.1",
-            AmsNetId = "10.0.0.1.1.1",
+            AmsNetId = AmsNetId.Parse("10.0.0.1.1.1"),
             AmsPort = 852,
             DefaultReadMode = AdsReadMode.Polled,
             MaxNotifications = 1000,

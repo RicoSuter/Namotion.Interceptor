@@ -4,6 +4,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
+using TwinCAT.Ads;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests;
 
@@ -43,7 +44,7 @@ internal static class TestHelpers
         return new AdsClientConfiguration
         {
             Host = "127.0.0.1",
-            AmsNetId = "127.0.0.1.1.1",
+            AmsNetId = AmsNetId.Parse("127.0.0.1.1.1"),
             AmsPort = 851,
             Mapper = AdsCompositeMapper.CreateDefault(
                 AdsConstants.DefaultConnectorName,
