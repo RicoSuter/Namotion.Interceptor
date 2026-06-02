@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Paths;
@@ -86,18 +87,18 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
     /// </summary>
-    public required OpcUaTypeResolver TypeResolver { get; set; }
+    public OpcUaTypeResolver? TypeResolver { get; set; }
     
     /// <summary>
     /// Gets the value converter used to convert between OPC UA node values and C# property values.
     /// Handles type conversions such as decimal to double for OPC UA compatibility.
     /// </summary>
-    public required OpcUaValueConverter ValueConverter { get; set; }
+    public OpcUaValueConverter ValueConverter { get; set; } = new();
     
     /// <summary>
     /// Gets the subject factory used to create interceptor subject instances for OPC UA object nodes.
     /// </summary>
-    public required OpcUaSubjectFactory SubjectFactory { get; set; }
+    public OpcUaSubjectFactory SubjectFactory { get; set; } = new(DefaultSubjectFactory.Instance);
 
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
@@ -316,11 +317,12 @@ public class OpcUaClientConfiguration
     public Func<CancellationToken, Task<UserIdentity>>? CreateUserIdentity { get; set; }
 
     /// <summary>
-    /// Gets or sets the telemetry context for OPC UA operations.
-    /// Defaults to NullTelemetryContext for minimal overhead.
-    /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
+    /// Gets or sets the telemetry context for OPC UA operations. When null and the connector is registered
+    /// through the AddOpcUaSubject* DI extensions, it is filled with a DI-backed telemetry context (and the type
+    /// resolver is created from the DI logger when unset); otherwise it falls back to NullTelemetryContext. Set a
+    /// value (including NullTelemetryContext.Instance) to keep your own.
     /// </summary>
-    public ITelemetryContext TelemetryContext { get; set; } = NullTelemetryContext.Instance;
+    public ITelemetryContext? TelemetryContext { get; set; }
 
     /// <summary>
     /// Gets or sets the session factory for creating OPC UA sessions.
@@ -346,7 +348,12 @@ public class OpcUaClientConfiguration
     /// The default factory is cached after first access (thread-safe).
     /// </summary>
     public ISessionFactory ActualSessionFactory => SessionFactory ?? LazyInitializer.EnsureInitialized(
-        ref _resolvedSessionFactory, () => new DefaultSessionFactory(TelemetryContext))!;
+        ref _resolvedSessionFactory, () => new DefaultSessionFactory(ResolvedTelemetryContext))!;
+
+    /// <summary>
+    /// The telemetry context to use for SDK calls, never null (falls back to the no-op context when unset).
+    /// </summary>
+    public ITelemetryContext ResolvedTelemetryContext => TelemetryContext ?? NullTelemetryContext.Instance;
 
     /// <summary>
     /// Creates and configures an OPC UA application instance for the client.
@@ -355,7 +362,7 @@ public class OpcUaClientConfiguration
     /// <returns>A configured <see cref="ApplicationInstance"/> ready for connecting to OPC UA servers.</returns>
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
-        var application = new ApplicationInstance(TelemetryContext)
+        var application = new ApplicationInstance(ResolvedTelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Client
@@ -410,7 +417,7 @@ public class OpcUaClientConfiguration
                 OutputFilePath = "Logs/UaClient.log",
                 TraceMasks = 0
             },
-            CertificateValidator = new CertificateValidator(TelemetryContext)
+            CertificateValidator = new CertificateValidator(ResolvedTelemetryContext)
         };
 
         await config.CertificateValidator.UpdateAsync(config).ConfigureAwait(false);

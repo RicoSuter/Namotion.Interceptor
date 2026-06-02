@@ -19,7 +19,7 @@ public class OpcUaPathProviderMapper : IReversePropertyMapper<OpcUaPropertyMappi
     }
 
     /// <inheritdoc />
-    public bool TryGetMapping(
+    public virtual bool TryGetMapping(
         RegisteredSubjectProperty property,
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)

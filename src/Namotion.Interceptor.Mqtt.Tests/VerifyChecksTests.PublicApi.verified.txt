@@ -96,19 +96,31 @@ namespace Namotion.Interceptor.Mqtt.Mapping
     {
         public MqttCompositeMapper(params Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>[] mappers) { }
     }
-    public class MqttFluentMapper<TSubject> : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
+    public sealed class MqttFluentMapper : Namotion.Interceptor.Mqtt.Mapping.MqttPathProviderMapper
     {
-        public MqttFluentMapper() { }
-        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMapper<TSubject> Map<TValue>(System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> selector, System.Action<Namotion.Interceptor.Mqtt.Mapping.MqttFluentMappingBuilder> configure) { }
-        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
-        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        public MqttFluentMapper(Namotion.Interceptor.Connectors.Mapping.FluentMappingRegistry<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping> registry, char pathSeparator = /) { }
+        public override bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
     }
-    public sealed class MqttFluentMappingBuilder
+    public sealed class MqttFluentMapperBuilder<TRoot>
+        where TRoot : Namotion.Interceptor.IInterceptorSubject
     {
-        public MqttFluentMappingBuilder() { }
-        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMappingBuilder WithQualityOfService(MQTTnet.Protocol.MqttQualityOfServiceLevel qos) { }
-        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMappingBuilder WithRetain(bool retain) { }
-        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMappingBuilder WithTopic(string topic) { }
+        public MqttFluentMapperBuilder() { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMapper Build(char pathSeparator = /) { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentTypeBuilder<TRoot, T> ForType<T>() { }
+    }
+    public sealed class MqttFluentPropertyBuilder
+    {
+        public MqttFluentPropertyBuilder() { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentPropertyBuilder WithQualityOfService(MQTTnet.Protocol.MqttQualityOfServiceLevel qualityOfService) { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentPropertyBuilder WithRetain(bool retain) { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentPropertyBuilder WithSegment(string segment) { }
+    }
+    public sealed class MqttFluentTypeBuilder<TRoot, TSubject>
+        where TRoot : Namotion.Interceptor.IInterceptorSubject
+    {
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMapper Build(char pathSeparator = /) { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentTypeBuilder<TRoot, TOther> ForType<TOther>() { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentTypeBuilder<TRoot, TSubject> Map<TValue>(System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> selector, System.Action<Namotion.Interceptor.Mqtt.Mapping.MqttFluentPropertyBuilder> configure) { }
     }
     public readonly struct MqttLookupKey : System.IEquatable<Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
     {
@@ -118,7 +130,7 @@ namespace Namotion.Interceptor.Mqtt.Mapping
     public class MqttPathProviderMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping, Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
     {
         public MqttPathProviderMapper(Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider) { }
-        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
+        public virtual bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping? mapping) { }
         public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
     public sealed class MqttPropertyMapping : Namotion.Interceptor.Connectors.Mapping.IPropertyMapping<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>, System.IEquatable<Namotion.Interceptor.Mqtt.Mapping.MqttPropertyMapping>

@@ -24,7 +24,7 @@ internal static class MonitoredItemFactory
     public static MonitoredItem Create(OpcUaClientConfiguration configuration, NodeId nodeId, RegisteredSubjectProperty property, IInterceptorSubject rootSubject)
     {
         var mapping = configuration.Mapper.TryGetMapping(property, rootSubject, out var m) ? m : null;
-        var item = new MonitoredItem(configuration.TelemetryContext)
+        var item = new MonitoredItem(configuration.ResolvedTelemetryContext)
         {
             StartNodeId = nodeId,
             AttributeId = Opc.Ua.Attributes.Value,

@@ -115,6 +115,25 @@ namespace Namotion.Interceptor.Connectors.Mapping
     public static class ExpressionPathHelper
     {
         public static string GetPathFromExpression(System.Linq.Expressions.Expression expression) { }
+        public static string GetSingleMemberName(System.Linq.Expressions.Expression expression) { }
+    }
+    public sealed class FluentMappingRegistry<TMetadata>
+        where TMetadata :  class
+    {
+        public FluentMappingRegistry() { }
+        public void AddPropertyMetadata(System.Type declaringType, string member, string? segment, TMetadata metadata) { }
+        public void AddTypeMetadata(System.Type type, TMetadata metadata) { }
+        public bool TryGetPropertyMetadata(System.Type subjectType, string member, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMetadata? metadata) { }
+        public bool TryGetSegment(System.Type subjectType, string member, out string? segment) { }
+        public bool TryGetTypeMetadata(System.Type type, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMetadata? metadata) { }
+    }
+    public sealed class FluentPathProvider<TMetadata> : Namotion.Interceptor.Registry.Paths.PathProviderBase
+        where TMetadata :  class
+    {
+        public FluentPathProvider(Namotion.Interceptor.Connectors.Mapping.FluentMappingRegistry<TMetadata> registry, char pathSeparator = .) { }
+        public override char PathSeparator { get; }
+        public override bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public override string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
     public interface IPropertyMapper<TMapping>
     {

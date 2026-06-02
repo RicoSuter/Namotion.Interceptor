@@ -1,5 +1,3 @@
-using Namotion.Interceptor.OpcUa;
-
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 public class ThroughputCounterTests

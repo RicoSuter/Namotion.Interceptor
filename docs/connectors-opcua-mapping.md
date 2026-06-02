@@ -36,12 +36,12 @@ var config = new OpcUaClientConfiguration
         new OpcUaPathProviderMapper(
             new AttributeBasedPathProvider("opc")),  // Base: path fallback
         new OpcUaAttributeMapper(),                  // Attribute defaults
-        new OpcUaFluentMapper<Machine>()),           // Instance overrides win (see Fluent Configuration)
+        fluentMapper),                               // Fluent wins (see Code-Based Mapping)
     // ... other settings
 };
 ```
 
-See [Composite Mappers](#composite-mappers) for merge semantics and [Fluent Configuration](#fluent-configuration) for code-based mapping.
+See [Composite Mappers](#composite-mappers) for merge semantics and [Code-Based (Fluent) Mapping](#code-based-fluent-mapping) for code-based mapping.
 
 ## Scope and Limitations
 
@@ -398,114 +398,89 @@ public partial class Machine
 }
 ```
 
-## Fluent Configuration
+## Code-Based (Fluent) Mapping
 
-For runtime configuration without attributes.
+`OpcUaFluentMapperBuilder<TRoot>` is a complete, code-based alternative to attribute mapping. Configure a type once with `ForType<T>().Map(...)` and `ForType<T>().Configure(...)`, then call `Build(...)` to produce an `OpcUaFluentMapper`. The mapping resolves everywhere that type appears in the object graph, including collection and dictionary elements (which get bracket indices such as `motors[1]/speed`).
 
-**Important:** Fluent configuration is **property-level only**. It configures specific property instances (e.g., `Motor1.Speed` vs `Motor2.Speed`), not type-level defaults.
+Fluent mapping is layered after attributes in the composite, so fluent wins on conflicts. Omit fluent for attribute-only setups. The two sources compose freely.
 
-For **class-level configuration** (TypeDefinition, NodeClass that applies to all instances of a type), use `[OpcUaNode]` attributes on the class with `OpcUaAttributeMapper` in a composite mapper to pick them up.
+### Entry Points
+
+- `ForType<T>().Map(member, configure)`: registers a property. The member selector must be a single member of `T` (not a chain). Applies everywhere `T` appears, including derived types (see Inheritance below).
+- `ForType<T>().Configure(configure)`: registers class-level (type-self) node metadata for `T`, equivalent to `[OpcUaNode]` on the class. Merges into every subject member of that type.
+
+The `BrowseName(...)` setter serves a dual role: it sets both the path segment used for node browse-name and reverse navigation, and the node BrowseName metadata. Omit it and both default to the member name, so most leaves need no explicit `BrowseName` call.
+
+### Example
 
 ```csharp
-// Class-level: Use attributes (applies to ALL Motor instances)
-[OpcUaNode("Motor", TypeDefinition = "MotorType")]
-public partial class Motor { ... }
-
-// Instance-level: Use fluent (different config per instance)
-var mapper = new OpcUaFluentMapper<Machine>()
-    .Map(m => m.Motor1, m => m.BrowseName("MainMotor").SamplingInterval(50))
-    .Map(m => m.Motor2, m => m.BrowseName("AuxMotor").SamplingInterval(100));
-
-// Combine both: attributes provide defaults, fluent overrides
-var config = new OpcUaClientConfiguration
-{
-    Mapper = new OpcUaCompositeMapper(
-        new OpcUaAttributeMapper(),  // Class-level defaults
-        mapper)                      // Instance overrides win
-};
+var fluentMapper = new OpcUaFluentMapperBuilder<Plant>()
+    .ForType<Motor>()
+        .Configure(b => b.TypeDefinition("MotorType", "http://my/uri").NodeClass(OpcUaNodeClass.Object))
+        .Map(m => m.Speed,  b => b.BrowseName("Speed").SamplingInterval(500))
+        .Map(m => m.Torque, b => b.BrowseName("Torque").DataType("Double"))
+    .ForType<Pump>()
+        .Map(p => p.Motor,  b => b.BrowseName("Motor").ReferenceType("HasComponent"))
+    .ForType<Plant>()
+        .Map(p => p.Motors,  b => b.BrowseName("Motors").ItemReferenceType("HasComponent"))
+        .Map(p => p.Sensors, b => b.BrowseName("Sensors").ItemReferenceType("HasComponent"))
+    .ForType<Sensor>()
+        .Configure(b => b.NodeClass(OpcUaNodeClass.Variable))
+        .Map(s => s.Value, b => b.IsValue())
+    .Build('.');
 ```
 
-### Basic Fluent Example
+Because `Motor` is configured once at the type level, all motors in the graph (direct properties, collection elements, nested references) resolve the same browse names and sampling intervals without repeating configuration.
+
+### DI Registration
+
+The simple typed overloads (`AddOpcUaSubjectServer<T>("opc")`) build the attribute-only composite. To register a fluent mapper, use the configuration overload and set the `Mapper` property. The connector fills the remaining defaults (telemetry, type resolver) from DI when you leave them unset, so you only configure what you need:
 
 ```csharp
-var mapper = new OpcUaFluentMapper<Machine>()
-    .Map(m => m.Motor1, motor => motor
-        .BrowseName("MainDriveMotor")
-        .ReferenceType("HasComponent")
-        .Map(m => m.Speed, speed => speed
-            .BrowseName("Speed")
-            .SamplingInterval(50))
-        .Map(m => m.Temperature, temp => temp
-            .SamplingInterval(500)))
-    .Map(m => m.Motor2, motor => motor
-        .BrowseName("AuxMotor")
-        .ReferenceType("HasComponent")
-        .Map(m => m.Speed, speed => speed
-            .SamplingInterval(100)));
-
-var config = new OpcUaClientConfiguration
-{
-    ServerUrl = "opc.tcp://localhost:4840",
-    Mapper = new OpcUaCompositeMapper(
-        new OpcUaPathProviderMapper(DefaultPathProvider.Instance),  // Base fallback
-        new OpcUaAttributeMapper(),                                 // Then attributes
-        mapper)                                                     // Fluent config wins
-};
-```
-
-### Reusable Configuration
-
-```csharp
-public static class MotorMappingExtensions
-{
-    public static IPropertyBuilder<Motor> ConfigureMotor<TBuilder>(
-        this IPropertyBuilder<Motor> builder)
+services.AddOpcUaSubjectServer<Plant>(
+    sp => sp.GetRequiredService<Plant>(),
+    _ => new OpcUaServerConfiguration
     {
-        return builder
-            .ReferenceType("HasComponent")
-            .Map(m => m.Speed, s => s.SamplingInterval(50))
-            .Map(m => m.Temperature, t => t.SamplingInterval(500));
-    }
-}
-
-// Usage
-var mapper = new OpcUaFluentMapper<Machine>()
-    .Map(m => m.Motor1, motor => motor
-        .BrowseName("MainMotor")
-        .ConfigureMotor())
-    .Map(m => m.Motor2, motor => motor
-        .BrowseName("AuxMotor")
-        .ConfigureMotor());
+        RootName = "Devices",
+        Mapper = new OpcUaCompositeMapper(
+            new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
+            new OpcUaAttributeMapper("opc"),
+            new OpcUaFluentMapperBuilder<Plant>()
+                .ForType<Motor>()
+                    .Configure(b => b.TypeDefinition("MotorType"))
+                    .Map(m => m.Speed, b => b.SamplingInterval(500))
+                .Build('.'))
+    });
 ```
 
-### Additional References
+### Combining Fluent and Attributes
 
-Add non-hierarchical references (e.g., `HasInterface`) using `.AdditionalReference()`:
+Fluent and attribute sources are layered in composite order: attributes first, fluent last (fluent wins on field conflicts). This allows incremental migration: start with attributes and override specific properties or types in code without changing the annotated types.
 
 ```csharp
-var mapper = new OpcUaFluentMapper<Machine>()
-    .Map(m => m.Motor1, motor => motor
-        .BrowseName("MainMotor")
-        .ReferenceType("HasComponent")
-        // Add HasInterface reference to IVendorNameplateType
-        .AdditionalReference(
-            referenceType: "HasInterface",
-            referenceTypeNamespace: null,
-            targetNodeId: "IVendorNameplateType",
-            targetNamespaceUri: "http://opcfoundation.org/UA/DI/",
-            isForward: true)
-        // Multiple additional references can be added
-        .AdditionalReference(
-            referenceType: "HasTypeDefinition",
-            referenceTypeNamespace: null,
-            targetNodeId: "MotorType",
-            targetNamespaceUri: "http://example.org/Machinery/"));
+var config = new OpcUaClientConfiguration
+{
+    Mapper = new OpcUaCompositeMapper(
+        new OpcUaPathProviderMapper(new AttributeBasedPathProvider("opc")),
+        new OpcUaAttributeMapper(),
+        fluentMapper)
+};
 ```
 
-The `AdditionalReference` method parameters:
-- `referenceType`: The reference type name (e.g., "HasInterface", "Organizes")
+### Inheritance
+
+A `ForType<T>()` registration applies to all types derived from `T` and all types implementing `T` (when `T` is an interface). The most specific registration wins. For example, `ForType<Motor>()` covers `ServoMotor` instances, and `ForType<IMotor>()` covers all concrete implementers, with a concrete-type registration taking precedence over an interface registration.
+
+### Property Builder Setters
+
+All the following setters are available on the property builder passed to `Map(...)` and `Configure(...)`:
+
+`BrowseName`, `DisplayName`, `Description`, `TypeDefinition`, `NodeClass`, `DataType`, `IsValue`, `ReferenceType`, `ItemReferenceType`, `SamplingInterval`, `QueueSize`, `DiscardOldest`, `DataChangeTrigger`, `DeadbandType`, `DeadbandValue`, `ModellingRule`, `EventNotifier`, `AdditionalReference`, `NodeIdentifier`, `NodeNamespaceUri`, `BrowseNamespaceUri`.
+
+`AdditionalReference` adds a non-hierarchical reference (e.g., `HasInterface`) to the node. Parameters:
+- `referenceType`: Reference type name (e.g., `"HasInterface"`, `"Organizes"`)
 - `referenceTypeNamespace`: Optional namespace URI for the reference type (uses default namespace if null)
-- `targetNodeId`: The identifier of the target node
+- `targetNodeId`: Identifier of the target node
 - `targetNamespaceUri`: Optional namespace URI for the target node (uses default namespace if null)
 - `isForward`: Direction of the reference (default: `true`)
 
@@ -647,9 +622,9 @@ The following security-related attributes are not supported:
 
 OPC UA Views (filtered address space subsets) are not supported.
 
-### Fluent Class-Level Configuration
+### Fluent InlinePaths Declaration
 
-The fluent mapper only supports property-level configuration. See [Fluent Configuration](#fluent-configuration) for details on combining with attributes for class-level defaults.
+The `[InlinePaths]` declaration marker is not yet supported in the fluent API. Use the `[InlinePaths]` attribute directly on dictionary properties when transparent path resolution is needed. All other OPC UA node and monitoring settings are available via `OpcUaFluentMapperBuilder<TRoot>`.
 
 ## Future Extensibility
 
