@@ -22,23 +22,23 @@ public sealed class MqttFluentMapperBuilder<TRoot>
 }
 
 /// <summary>Type-scoped MQTT fluent builder; chains within a type, into the next type, and into <see cref="Build"/>.</summary>
-public sealed class MqttFluentTypeBuilder<TRoot, T>
+public sealed class MqttFluentTypeBuilder<TRoot, TSubject>
     where TRoot : IInterceptorSubject
 {
     private readonly MqttFluentMapperBuilder<TRoot> _owner;
 
     internal MqttFluentTypeBuilder(MqttFluentMapperBuilder<TRoot> owner) => _owner = owner;
 
-    /// <summary>Configures a single member of <typeparamref name="T"/>.</summary>
-    public MqttFluentTypeBuilder<TRoot, T> Map<TValue>(
-        Expression<Func<T, TValue>> selector,
+    /// <summary>Configures a single member of <typeparamref name="TSubject"/>.</summary>
+    public MqttFluentTypeBuilder<TRoot, TSubject> Map<TValue>(
+        Expression<Func<TSubject, TValue>> selector,
         Action<MqttFluentPropertyBuilder> configure)
     {
         var member = ExpressionPathHelper.GetSingleMemberName(selector.Body);
         var builder = new MqttFluentPropertyBuilder();
         configure(builder);
         var (segment, metadata) = builder.Build();
-        _owner.Registry.AddType(typeof(T), member, segment, metadata);
+        _owner.Registry.AddType(typeof(TSubject), member, segment, metadata);
         return this;
     }
 

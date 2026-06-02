@@ -36,6 +36,7 @@ public sealed class MqttFluentMapper : MqttPathProviderMapper
         mapping = _registry.TryGetTypeMetadata(property.Subject.GetType(), property.Name, out var metadata)
             ? MqttPropertyMapping.Merge(metadata, pathMapping)
             : pathMapping;
+       
         return true;
     }
 }
