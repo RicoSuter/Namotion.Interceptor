@@ -40,7 +40,7 @@ public class OpcUaTypeResolver
             if (name is not null)
             {
                 var bracketStart = name.LastIndexOf('[');
-                if (bracketStart >= 0 && name.EndsWith("]"))
+                if (bracketStart >= 0 && name.EndsWith(']'))
                 {
                     var content = name.AsSpan(bracketStart + 1, name.Length - bracketStart - 2);
                     if (content.Length == 0)

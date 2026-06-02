@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Updates.Internal;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -561,6 +562,7 @@ internal sealed class OpcUaSubjectLoader
     {
         var existingChildren = property.Children;
         var existingByKey = new Dictionary<object, IInterceptorSubject?>(isDictionary ? existingChildren.Length : 0);
+        var dictionaryKeyType = isDictionary ? property.Type.GenericTypeArguments[0] : null;
         if (isDictionary)
         {
             foreach (var existing in existingChildren)
@@ -584,7 +586,11 @@ internal sealed class OpcUaSubjectLoader
             if (isDictionary)
             {
                 var key = ExtractDictionaryKey(childNode.BrowseName.Name);
-                existingByKey.TryGetValue(key, out childSubject);
+                // Existing children are keyed by their converted dictionary key (e.g. an int for
+                // IReadOnlyDictionary<int, T>), so the string browse-name key has to be converted the
+                // same way CreateSubjectDictionary does before probing for a reusable instance.
+                var lookupKey = DictionaryKeyConverter.Convert(key, dictionaryKeyType!);
+                existingByKey.TryGetValue(lookupKey, out childSubject);
                 factoryIndex = key;
             }
             else
@@ -642,7 +648,7 @@ internal sealed class OpcUaSubjectLoader
     private static string ExtractDictionaryKey(string browseName)
     {
         var bracketStart = browseName.LastIndexOf('[');
-        if (bracketStart >= 0 && browseName.EndsWith("]"))
+        if (bracketStart >= 0 && browseName.EndsWith(']'))
         {
             var contentLength = browseName.Length - bracketStart - 2;
             if (contentLength > 0)

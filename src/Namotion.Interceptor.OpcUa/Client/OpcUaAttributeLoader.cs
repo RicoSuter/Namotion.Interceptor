@@ -69,6 +69,10 @@ internal sealed class OpcUaAttributeLoader
         var traversal = 0;
         while (currentRound.Count > 0)
         {
+            // A round served entirely from the browse cache awaits no I/O, so check here to stay
+            // responsive to cancellation between rounds.
+            context.CancellationToken.ThrowIfCancellationRequested();
+
             if (++traversal > _configuration.MaxAttributeTraversals)
             {
                 _logger.LogWarning(
