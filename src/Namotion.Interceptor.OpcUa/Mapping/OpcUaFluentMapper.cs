@@ -34,13 +34,13 @@ public sealed class OpcUaFluentMapper : OpcUaPathProviderMapper
             return false;
         }
 
-        _registry.TryGetTypeMetadata(property.Subject.GetType(), property.Name, out var propertyMetadata);
+        _registry.TryGetPropertyMetadata(property.Subject.GetType(), property.Name, out var propertyMetadata);
 
         OpcUaPropertyMapping? typeSelf = null;
         if (property.IsSubjectReference || property.IsSubjectCollection || property.IsSubjectDictionary)
         {
             var elementType = GetElementType(property.Type);
-            _registry.TryGetTypeSelfMetadata(elementType, out typeSelf);
+            _registry.TryGetTypeMetadata(elementType, out typeSelf);
         }
 
         // Property metadata wins over the element type-self; both win over the base path mapping (browse name).

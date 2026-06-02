@@ -38,7 +38,7 @@ public sealed class MqttFluentTypeBuilder<TRoot, TSubject>
         var builder = new MqttFluentPropertyBuilder();
         configure(builder);
         var (segment, metadata) = builder.Build();
-        _owner.Registry.AddType(typeof(TSubject), member, segment, metadata);
+        _owner.Registry.AddPropertyMetadata(typeof(TSubject), member, segment, metadata);
         return this;
     }
 

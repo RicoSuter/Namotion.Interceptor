@@ -260,13 +260,13 @@ namespace Namotion.Interceptor.OpcUa.Mapping
         public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder SamplingInterval(int value) { }
         public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder TypeDefinition(string identifier, string? namespaceUri = null) { }
     }
-    public sealed class OpcUaFluentTypeBuilder<TRoot, T>
+    public sealed class OpcUaFluentTypeBuilder<TRoot, TSubject>
         where TRoot : Namotion.Interceptor.IInterceptorSubject
     {
         public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapper Build(char pathSeparator = .) { }
-        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentTypeBuilder<TRoot, T> Configure(System.Action<Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder> configure) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentTypeBuilder<TRoot, TSubject> Configure(System.Action<Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder> configure) { }
         public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentTypeBuilder<TRoot, TOther> ForType<TOther>() { }
-        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentTypeBuilder<TRoot, T> Map<TValue>(System.Linq.Expressions.Expression<System.Func<T, TValue>> selector, System.Action<Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder> configure) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentTypeBuilder<TRoot, TSubject> Map<TValue>(System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> selector, System.Action<Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder> configure) { }
     }
     public readonly struct OpcUaLookupKey : System.IEquatable<Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
     {

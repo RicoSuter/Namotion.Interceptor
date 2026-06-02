@@ -115,12 +115,12 @@ namespace Namotion.Interceptor.Mqtt.Mapping
         public Namotion.Interceptor.Mqtt.Mapping.MqttFluentPropertyBuilder WithRetain(bool retain) { }
         public Namotion.Interceptor.Mqtt.Mapping.MqttFluentPropertyBuilder WithSegment(string segment) { }
     }
-    public sealed class MqttFluentTypeBuilder<TRoot, T>
+    public sealed class MqttFluentTypeBuilder<TRoot, TSubject>
         where TRoot : Namotion.Interceptor.IInterceptorSubject
     {
         public Namotion.Interceptor.Mqtt.Mapping.MqttFluentMapper Build(char pathSeparator = /) { }
         public Namotion.Interceptor.Mqtt.Mapping.MqttFluentTypeBuilder<TRoot, TOther> ForType<TOther>() { }
-        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentTypeBuilder<TRoot, T> Map<TValue>(System.Linq.Expressions.Expression<System.Func<T, TValue>> selector, System.Action<Namotion.Interceptor.Mqtt.Mapping.MqttFluentPropertyBuilder> configure) { }
+        public Namotion.Interceptor.Mqtt.Mapping.MqttFluentTypeBuilder<TRoot, TSubject> Map<TValue>(System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> selector, System.Action<Namotion.Interceptor.Mqtt.Mapping.MqttFluentPropertyBuilder> configure) { }
     }
     public readonly struct MqttLookupKey : System.IEquatable<Namotion.Interceptor.Mqtt.Mapping.MqttLookupKey>
     {

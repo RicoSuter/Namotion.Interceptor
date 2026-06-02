@@ -12,15 +12,15 @@ public class FluentMappingRegistryTests
     private sealed class ServoMotor : Motor { }
 
     [Fact]
-    public void WhenTypeAndMemberRegistered_ThenResolvesSegmentAndMetadata()
+    public void WhenPropertyRegistered_ThenResolvesSegmentAndMetadata()
     {
         // Arrange
         var registry = new FluentMappingRegistry<Meta>();
-        registry.AddType(typeof(Motor), "Speed", "speed", new Meta("m"));
+        registry.AddPropertyMetadata(typeof(Motor), "Speed", "speed", new Meta("m"));
 
         // Act
         var hasSegment = registry.TryGetSegment(typeof(Motor), "Speed", out var segment);
-        var hasMeta = registry.TryGetTypeMetadata(typeof(Motor), "Speed", out var meta);
+        var hasMeta = registry.TryGetPropertyMetadata(typeof(Motor), "Speed", out var meta);
 
         // Assert
         Assert.True(hasSegment);
@@ -34,7 +34,7 @@ public class FluentMappingRegistryTests
     {
         // Arrange
         var registry = new FluentMappingRegistry<Meta>();
-        registry.AddType(typeof(Motor), "Speed", "speed", new Meta("m"));
+        registry.AddPropertyMetadata(typeof(Motor), "Speed", "speed", new Meta("m"));
 
         // Act
         var found = registry.TryGetSegment(typeof(ServoMotor), "Speed", out var segment);
@@ -49,7 +49,7 @@ public class FluentMappingRegistryTests
     {
         // Arrange
         var registry = new FluentMappingRegistry<Meta>();
-        registry.AddType(typeof(IMotor), "Speed", "rpm", new Meta("i"));
+        registry.AddPropertyMetadata(typeof(IMotor), "Speed", "rpm", new Meta("i"));
 
         // Act
         var found = registry.TryGetSegment(typeof(Motor), "Speed", out var segment);
@@ -64,8 +64,8 @@ public class FluentMappingRegistryTests
     {
         // Arrange
         var registry = new FluentMappingRegistry<Meta>();
-        registry.AddType(typeof(Motor), "Speed", "base", new Meta("base"));
-        registry.AddType(typeof(ServoMotor), "Speed", "derived", new Meta("derived"));
+        registry.AddPropertyMetadata(typeof(Motor), "Speed", "base", new Meta("base"));
+        registry.AddPropertyMetadata(typeof(ServoMotor), "Speed", "derived", new Meta("derived"));
 
         // Act
         registry.TryGetSegment(typeof(ServoMotor), "Speed", out var segment);
@@ -92,7 +92,7 @@ public class FluentMappingRegistryTests
     {
         // Arrange
         var registry = new FluentMappingRegistry<Meta>();
-        registry.AddType(typeof(Motor), "Speed", segment: null, new Meta("m"));
+        registry.AddPropertyMetadata(typeof(Motor), "Speed", segment: null, new Meta("m"));
 
         // Act
         var found = registry.TryGetSegment(typeof(Motor), "Speed", out var segment);
@@ -103,14 +103,14 @@ public class FluentMappingRegistryTests
     }
 
     [Fact]
-    public void WhenTypeSelfRegistered_ThenResolvesWithInheritance()
+    public void WhenTypeMetadataRegistered_ThenResolvesWithInheritance()
     {
         // Arrange
         var registry = new FluentMappingRegistry<Meta>();
-        registry.AddTypeSelf(typeof(Motor), new Meta("self"));
+        registry.AddTypeMetadata(typeof(Motor), new Meta("self"));
 
         // Act
-        var found = registry.TryGetTypeSelfMetadata(typeof(ServoMotor), out var meta);
+        var found = registry.TryGetTypeMetadata(typeof(ServoMotor), out var meta);
 
         // Assert
         Assert.True(found);

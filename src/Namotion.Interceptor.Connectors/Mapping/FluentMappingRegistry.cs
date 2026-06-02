@@ -3,33 +3,33 @@ using System.Diagnostics.CodeAnalysis;
 namespace Namotion.Interceptor.Connectors.Mapping;
 
 /// <summary>
-/// Source of truth for code-based (fluent) mapping. Holds type-level segment plus metadata keyed by
-/// (declaring type, member) and type-self metadata keyed by type. Resolution walks the runtime type, its
-/// base classes, then its interfaces, most-derived first, so a base or interface registration applies to
+/// Source of truth for code-based (fluent) mapping. Holds per-property segment plus metadata keyed by
+/// (declaring type, member) and class-level (type) metadata keyed by type. Resolution walks the runtime type,
+/// its base classes, then its interfaces, most-derived first, so a base or interface registration applies to
 /// derived and implementing types.
 /// </summary>
 public sealed class FluentMappingRegistry<TMetadata>
     where TMetadata : class
 {
-    private readonly Dictionary<(Type Type, string Member), Entry> _typeLevel = new();
-    private readonly Dictionary<Type, TMetadata> _typeSelf = new();
+    private readonly Dictionary<(Type Type, string Member), Entry> _propertyMetadata = new();
+    private readonly Dictionary<Type, TMetadata> _typeMetadata = new();
 
-    /// <summary>Registers a type-level mapping for a member. A null segment means "use the BrowseName".</summary>
-    public void AddType(Type declaringType, string member, string? segment, TMetadata metadata)
-        => _typeLevel[(declaringType, member)] = new Entry(segment, metadata);
+    /// <summary>Registers a per-property mapping (segment plus metadata). A null segment means "use the BrowseName".</summary>
+    public void AddPropertyMetadata(Type declaringType, string member, string? segment, TMetadata metadata)
+        => _propertyMetadata[(declaringType, member)] = new Entry(segment, metadata);
 
-    /// <summary>Registers type-self (class-level) metadata for a type.</summary>
-    public void AddTypeSelf(Type type, TMetadata metadata)
-        => _typeSelf[type] = metadata;
+    /// <summary>Registers class-level (type) metadata for a type.</summary>
+    public void AddTypeMetadata(Type type, TMetadata metadata)
+        => _typeMetadata[type] = metadata;
 
     /// <summary>
-    /// Returns true when a type-level registration exists for the given holder type and member, walking the
+    /// Returns true when a per-property registration exists for the given holder type and member, walking the
     /// type hierarchy. <paramref name="segment"/> is the registered segment override, or null to mean "use the
     /// member's BrowseName".
     /// </summary>
     public bool TryGetSegment(Type subjectType, string member, out string? segment)
     {
-        if (TryResolveType(subjectType, member, out var entry))
+        if (TryResolveProperty(subjectType, member, out var entry))
         {
             segment = entry.Segment;
             return true;
@@ -39,10 +39,10 @@ public sealed class FluentMappingRegistry<TMetadata>
         return false;
     }
 
-    /// <summary>Resolves the type-level metadata for a member, walking the type hierarchy.</summary>
-    public bool TryGetTypeMetadata(Type subjectType, string member, [NotNullWhen(true)] out TMetadata? metadata)
+    /// <summary>Resolves the per-property metadata for a member, walking the type hierarchy.</summary>
+    public bool TryGetPropertyMetadata(Type subjectType, string member, [NotNullWhen(true)] out TMetadata? metadata)
     {
-        if (TryResolveType(subjectType, member, out var entry))
+        if (TryResolveProperty(subjectType, member, out var entry))
         {
             metadata = entry.Metadata;
             return true;
@@ -52,12 +52,12 @@ public sealed class FluentMappingRegistry<TMetadata>
         return false;
     }
 
-    /// <summary>Resolves type-self metadata for a type, walking the type hierarchy.</summary>
-    public bool TryGetTypeSelfMetadata(Type type, [NotNullWhen(true)] out TMetadata? metadata)
+    /// <summary>Resolves class-level (type) metadata for a type, walking the type hierarchy.</summary>
+    public bool TryGetTypeMetadata(Type type, [NotNullWhen(true)] out TMetadata? metadata)
     {
         foreach (var candidate in WalkTypeHierarchy(type))
         {
-            if (_typeSelf.TryGetValue(candidate, out metadata))
+            if (_typeMetadata.TryGetValue(candidate, out metadata))
                 return true;
         }
 
@@ -65,11 +65,11 @@ public sealed class FluentMappingRegistry<TMetadata>
         return false;
     }
 
-    private bool TryResolveType(Type subjectType, string member, out Entry entry)
+    private bool TryResolveProperty(Type subjectType, string member, out Entry entry)
     {
         foreach (var candidate in WalkTypeHierarchy(subjectType))
         {
-            if (_typeLevel.TryGetValue((candidate, member), out entry))
+            if (_propertyMetadata.TryGetValue((candidate, member), out entry))
                 return true;
         }
 

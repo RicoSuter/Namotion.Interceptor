@@ -33,7 +33,7 @@ public sealed class MqttFluentMapper : MqttPathProviderMapper
         }
 
         // The base mapper supplies the topic; the registry supplies QoS/retain (which win on overlap).
-        mapping = _registry.TryGetTypeMetadata(property.Subject.GetType(), property.Name, out var metadata)
+        mapping = _registry.TryGetPropertyMetadata(property.Subject.GetType(), property.Name, out var metadata)
             ? MqttPropertyMapping.Merge(metadata, pathMapping)
             : pathMapping;
        

@@ -121,11 +121,11 @@ namespace Namotion.Interceptor.Connectors.Mapping
         where TMetadata :  class
     {
         public FluentMappingRegistry() { }
-        public void AddType(System.Type declaringType, string member, string? segment, TMetadata metadata) { }
-        public void AddTypeSelf(System.Type type, TMetadata metadata) { }
+        public void AddPropertyMetadata(System.Type declaringType, string member, string? segment, TMetadata metadata) { }
+        public void AddTypeMetadata(System.Type type, TMetadata metadata) { }
+        public bool TryGetPropertyMetadata(System.Type subjectType, string member, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMetadata? metadata) { }
         public bool TryGetSegment(System.Type subjectType, string member, out string? segment) { }
-        public bool TryGetTypeMetadata(System.Type subjectType, string member, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMetadata? metadata) { }
-        public bool TryGetTypeSelfMetadata(System.Type type, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMetadata? metadata) { }
+        public bool TryGetTypeMetadata(System.Type type, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TMetadata? metadata) { }
     }
     public sealed class FluentPathProvider<TMetadata> : Namotion.Interceptor.Registry.Paths.PathProviderBase
         where TMetadata :  class

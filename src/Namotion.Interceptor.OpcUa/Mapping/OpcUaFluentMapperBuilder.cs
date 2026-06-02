@@ -38,7 +38,7 @@ public sealed class OpcUaFluentTypeBuilder<TRoot, TSubject>
         var builder = new OpcUaFluentPropertyBuilder();
         configure(builder);
         var (segment, metadata) = builder.Build();
-        _owner.Registry.AddType(typeof(TSubject), member, segment, metadata);
+        _owner.Registry.AddPropertyMetadata(typeof(TSubject), member, segment, metadata);
         return this;
     }
 
@@ -52,7 +52,7 @@ public sealed class OpcUaFluentTypeBuilder<TRoot, TSubject>
         var builder = new OpcUaFluentPropertyBuilder();
         configure(builder);
         var (_, metadata) = builder.Build();
-        _owner.Registry.AddTypeSelf(typeof(TSubject), metadata);
+        _owner.Registry.AddTypeMetadata(typeof(TSubject), metadata);
         return this;
     }
 
