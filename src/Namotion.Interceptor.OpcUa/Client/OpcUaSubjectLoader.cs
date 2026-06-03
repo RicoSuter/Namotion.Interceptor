@@ -1,6 +1,6 @@
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Connectors.Updates.Internal;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -561,15 +561,18 @@ internal sealed class OpcUaSubjectLoader
         OpcUaLoadContext context)
     {
         var existingChildren = property.Children;
-        var existingByKey = new Dictionary<object, IInterceptorSubject?>(isDictionary ? existingChildren.Length : 0);
-        var dictionaryKeyType = isDictionary ? property.Type.GenericTypeArguments[0] : null;
+        var existingByKey = new Dictionary<string, IInterceptorSubject?>(isDictionary ? existingChildren.Length : 0);
         if (isDictionary)
         {
             foreach (var existing in existingChildren)
             {
-                if (existing.Index is { } index)
+                // Key by the invariant string form of the dictionary key so it matches the bracket
+                // key parsed from the browse name (ExtractDictionaryKey), regardless of the key type
+                // (e.g. an int key 1 and the browse name "Items[1]" both reduce to "1").
+                if (existing.Index is { } index &&
+                    Convert.ToString(index, CultureInfo.InvariantCulture) is { } existingKey)
                 {
-                    existingByKey[index] = existing.Subject;
+                    existingByKey[existingKey] = existing.Subject;
                 }
             }
         }
@@ -586,11 +589,7 @@ internal sealed class OpcUaSubjectLoader
             if (isDictionary)
             {
                 var key = ExtractDictionaryKey(childNode.BrowseName.Name);
-                // Existing children are keyed by their converted dictionary key (e.g. an int for
-                // IReadOnlyDictionary<int, T>), so the string browse-name key has to be converted the
-                // same way CreateSubjectDictionary does before probing for a reusable instance.
-                var lookupKey = DictionaryKeyConverter.Convert(key, dictionaryKeyType!);
-                existingByKey.TryGetValue(lookupKey, out childSubject);
+                existingByKey.TryGetValue(key, out childSubject);
                 factoryIndex = key;
             }
             else
