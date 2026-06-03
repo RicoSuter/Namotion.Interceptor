@@ -72,4 +72,53 @@ public class WriteErrorClassificationTests
         // Assert
         Assert.False(result); // Uncertain is not "bad"
     }
+
+    [Theory]
+    [InlineData(StatusCodes.BadAttributeIdInvalid)]
+    [InlineData(StatusCodes.BadTypeMismatch)]
+    [InlineData(StatusCodes.BadWriteNotSupported)]
+    public void IsStructurallyPermanentError_WithSchemaLevelCode_ReturnsTrue(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act
+        var result = OpcUaSubjectClientSource.IsStructurallyPermanentError(status);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.BadNodeIdUnknown)]     // address space can change
+    [InlineData(StatusCodes.BadUserAccessDenied)]  // permissions can change
+    [InlineData(StatusCodes.BadNotWritable)]       // AccessLevel can be flipped
+    public void IsStructurallyPermanentError_WithStateDependentCode_ReturnsFalse(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act
+        var result = OpcUaSubjectClientSource.IsStructurallyPermanentError(status);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.BadTimeout)]
+    [InlineData(StatusCodes.BadServerNotConnected)]
+    [InlineData(StatusCodes.Good)]
+    [InlineData(StatusCodes.Uncertain)]
+    public void IsStructurallyPermanentError_WithTransientOrNonBadCode_ReturnsFalse(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act
+        var result = OpcUaSubjectClientSource.IsStructurallyPermanentError(status);
+
+        // Assert
+        Assert.False(result);
+    }
 }

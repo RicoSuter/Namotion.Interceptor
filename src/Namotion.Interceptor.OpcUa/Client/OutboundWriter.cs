@@ -49,14 +49,7 @@ internal sealed class OutboundWriter
             }
 
             var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
-            var result = ProcessWriteResults(writeResponse.Results, changes);
-            if (result.IsFullySuccessful || result.IsPartialFailure)
-            {
-                _outgoingThroughput.Add(writeValues.Count - (result.FailedChanges.IsDefault ? 0 : result.FailedChanges.Length));
-                NotifyPropertiesWritten(changes);
-            }
-
-            return result;
+            return ProcessWriteResults(writeResponse.Results, changes);
         }
         catch (InvalidCastException ex)
         {
@@ -84,6 +77,14 @@ internal sealed class OutboundWriter
         return StatusCode.IsBad(statusCode);
     }
 
+    // Schema-level codes only. State-dependent codes (BadNodeIdUnknown, BadUserAccessDenied, BadNotWritable) can flip at runtime and stay in the retry queue.
+    internal static bool IsStructurallyPermanentError(StatusCode statusCode)
+    {
+        return statusCode == StatusCodes.BadAttributeIdInvalid ||
+               statusCode == StatusCodes.BadTypeMismatch ||
+               statusCode == StatusCodes.BadWriteNotSupported;
+    }
+
     private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
     {
         var failureCount = 0;
@@ -97,39 +98,65 @@ internal sealed class OutboundWriter
 
         if (failureCount == 0)
         {
+            _outgoingThroughput.Add(results.Count);
+            NotifyPropertiesWritten(allChanges);
             return WriteResult.Success;
         }
 
-        var failedChanges = new List<SubjectPropertyChange>(failureCount);
+        var retryableFailures = new List<SubjectPropertyChange>(failureCount);
+        List<NodeId>? droppedPermanentNodeIds = null;
         var transientCount = 0;
         var resultIndex = 0;
         var span = allChanges.Span;
         for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
         {
             var change = span[i];
-            if (!TryGetWritableNodeId(change, out _, out _))
+            if (!TryGetWritableNodeId(change, out var nodeId, out _))
                 continue;
 
-            if (!StatusCode.IsGood(results[resultIndex]))
+            var status = results[resultIndex];
+            if (!StatusCode.IsGood(status))
             {
-                failedChanges.Add(change);
-                if (IsTransientWriteError(results[resultIndex]))
-                    transientCount++;
+                if (IsStructurallyPermanentError(status))
+                {
+                    droppedPermanentNodeIds ??= [];
+                    droppedPermanentNodeIds.Add(nodeId);
+                }
+                else
+                {
+                    retryableFailures.Add(change);
+                    if (IsTransientWriteError(status))
+                        transientCount++;
+                }
             }
             resultIndex++;
         }
 
-        var successCount = results.Count - failedChanges.Count;
-        var permanentCount = failedChanges.Count - transientCount;
+        var droppedPermanentCount = droppedPermanentNodeIds?.Count ?? 0;
+        var permanentCount = retryableFailures.Count - transientCount + droppedPermanentCount;
+        var successCount = results.Count - (retryableFailures.Count + droppedPermanentCount);
+
+        if (droppedPermanentNodeIds is not null)
+        {
+            _logger.LogWarning(
+                "OPC UA write: dropping {Count} structurally-permanent failures from retry queue. NodeIds: {NodeIds}.",
+                droppedPermanentCount, droppedPermanentNodeIds);
+        }
 
         _logger.LogWarning(
             "OPC UA write batch partial failure: {SuccessCount} succeeded, {TransientCount} transient, {PermanentCount} permanent out of {TotalCount}.",
             successCount, transientCount, permanentCount, results.Count);
 
+        if (successCount > 0)
+        {
+            _outgoingThroughput.Add(successCount);
+            NotifyPropertiesWritten(allChanges);
+        }
+
         var error = new OpcUaWriteException(transientCount, permanentCount, results.Count);
         return successCount > 0
-            ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
-            : WriteResult.Failure(failedChanges.ToArray(), error);
+            ? WriteResult.PartialFailure(retryableFailures.ToArray(), error)
+            : WriteResult.Failure(retryableFailures.ToArray(), error);
     }
 
     private bool TryGetWritableNodeId(SubjectPropertyChange change, out NodeId nodeId, out RegisteredSubjectProperty registeredProperty)

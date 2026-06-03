@@ -583,6 +583,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     internal static bool IsTransientWriteError(StatusCode statusCode) => OutboundWriter.IsTransientWriteError(statusCode);
 
+    internal static bool IsStructurallyPermanentError(StatusCode statusCode) => OutboundWriter.IsStructurallyPermanentError(statusCode);
+
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
     {
