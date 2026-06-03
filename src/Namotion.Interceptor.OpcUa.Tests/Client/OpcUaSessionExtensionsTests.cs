@@ -254,6 +254,41 @@ public class OpcUaSessionExtensionsTests
         Assert.Equal(StatusCodes.BadUserAccessDenied, results[0].StatusCode);
     }
 
+    [Fact]
+    public async Task WhenBrowseReturnsFewerResultsThanRequested_ThenThrowsTransientServiceException()
+    {
+        // Arrange: two nodes requested but the server returns only one BrowseResult. The missing
+        // node must surface as a transient failure so the load retries, rather than silently
+        // loading that subject with zero children.
+        var returnedNodeId = new NodeId(1001, 2);
+        var missingNodeId = new NodeId(1002, 2);
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseResponse
+            {
+                Results = [new BrowseResult { References = [] }],
+                DiagnosticInfos = []
+            });
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<OpcUaTransientServiceException>(() =>
+            mockSession.Object.BrowseNodesAsync(
+                [returnedNodeId, missingNodeId],
+                maxReferencesPerNode: 1000,
+                maxContinuationRounds: 100,
+                NullLogger<OpcUaSessionExtensionsTests>.Instance,
+                CancellationToken.None));
+
+        Assert.Equal("Browse", exception.Operation);
+        Assert.Equal(missingNodeId, exception.NodeId);
+    }
+
     private static Mock<ISession> CreateMockSession()
     {
         var mockSession = new Mock<ISession>();

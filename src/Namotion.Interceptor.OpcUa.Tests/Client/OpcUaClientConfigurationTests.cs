@@ -141,4 +141,32 @@ public class OpcUaClientConfigurationTests
         // Act & Assert - Should not throw
         config.Validate();
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Validate_WithNonPositiveMaxBrowseContinuations_ThrowsArgumentException(int value)
+    {
+        // Arrange
+        var config = CreateValidConfiguration();
+        config.MaxBrowseContinuations = value;
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => config.Validate());
+        Assert.Contains("MaxBrowseContinuations", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Validate_WithNonPositiveMaxAttributeTraversals_ThrowsArgumentException(int value)
+    {
+        // Arrange
+        var config = CreateValidConfiguration();
+        config.MaxAttributeTraversals = value;
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => config.Validate());
+        Assert.Contains("MaxAttributeTraversals", exception.Message);
+    }
 }

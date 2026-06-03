@@ -554,5 +554,19 @@ public class OpcUaClientConfiguration
                 $"ReadAfterWriteBuffer must be non-negative, got: {ReadAfterWriteBuffer}",
                 nameof(ReadAfterWriteBuffer));
         }
+
+        if (MaxBrowseContinuations <= 0)
+        {
+            throw new ArgumentException(
+                $"MaxBrowseContinuations must be positive, got: {MaxBrowseContinuations}",
+                nameof(MaxBrowseContinuations));
+        }
+
+        if (MaxAttributeTraversals <= 0)
+        {
+            throw new ArgumentException(
+                $"MaxAttributeTraversals must be positive, got: {MaxAttributeTraversals}",
+                nameof(MaxAttributeTraversals));
+        }
     }
 }

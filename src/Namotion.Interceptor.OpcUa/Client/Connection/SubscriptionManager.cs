@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
+using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Tracking.Change;
@@ -252,7 +253,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
         foreach (var monitoredItem in subscription.MonitoredItems)
         {
-            if (!monitoredItem.Created || StatusCode.IsBad(monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good))
+            if (SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
             {
                 failedItems ??= [];
                 failedItems.Add(monitoredItem);

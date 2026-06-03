@@ -207,10 +207,19 @@ internal static class OpcUaSessionExtensions
 
         try
         {
-            for (var i = 0; i < process; i++)
+            for (var i = 0; i < count; i++)
             {
-                var browseResult = response.Results[i];
                 var nodeId = nodeIds[offset + i];
+                if (i >= actual)
+                {
+                    // Missing result for a requested node: treat as transient (the read path pads
+                    // short responses the same way) so the load aborts and retries instead of
+                    // loading the subject with zero children.
+                    OpcUaStatusCodeClassifier.ThrowIfTransientError(StatusCodes.BadUnexpectedError, "Browse", nodeId);
+                    continue;
+                }
+
+                var browseResult = response.Results[i];
                 if (!StatusCode.IsGood(browseResult.StatusCode))
                 {
                     OpcUaStatusCodeClassifier.ThrowIfTransientError(browseResult.StatusCode, "Browse", nodeId);

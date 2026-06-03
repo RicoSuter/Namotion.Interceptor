@@ -526,7 +526,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             for (var i = 0; i < rootPath.Length; i++)
             {
                 var references = await BrowseNodeAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
-                var match = references.FirstOrDefault(reference => reference.BrowseName.Name == rootPath[i]);
+                var match = FindChildByBrowseName(references, rootPath[i]);
                 if (match is null)
                 {
                     return null;
@@ -663,6 +663,12 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             cancellationToken).ConfigureAwait(false);
 
         return results.TryGetValue(nodeId, out var refs) ? refs : new ReferenceDescriptionCollection();
+    }
+
+    internal static ReferenceDescription? FindChildByBrowseName(ReferenceDescriptionCollection references, string browseName)
+    {
+        // These raw references bypass DistinctByResolvedNodeId, so BrowseName may be null.
+        return references.FirstOrDefault(reference => reference.BrowseName?.Name == browseName);
     }
 
     private void Reset()
