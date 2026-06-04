@@ -16,6 +16,12 @@ internal sealed class OutboundWriter
     private readonly ThroughputCounter _outgoingThroughput;
     private readonly ILogger _logger;
 
+    // Tracks NodeIds already reported as permanently dropped so the warning fires once per node per session.
+    // Cleared on session change via ClearReportedDroppedNodes; lock protects the rare write-path Add against
+    // the session-change clear, which runs from the SessionManager drain loop on a different task.
+    private readonly Lock _reportedDroppedNodeIdsLock = new();
+    private readonly HashSet<NodeId> _reportedDroppedNodeIds = [];
+
     public OutboundWriter(
         SessionManager sessionManager,
         OpcUaClientConfiguration configuration,
@@ -31,6 +37,17 @@ internal sealed class OutboundWriter
     }
 
     public int WriteBatchSize => (int)(_sessionManager.CurrentSession?.OperationLimits?.MaxNodesPerWrite ?? 0);
+
+    // Called by OpcUaSubjectClientSource.OnCurrentSessionChanged. A new session can have different permissions,
+    // address-space membership, and AccessLevel attributes, so previously-dropped NodeIds may now write
+    // successfully (or still fail and deserve a fresh log line for operator visibility).
+    internal void ClearReportedDroppedNodes()
+    {
+        lock (_reportedDroppedNodeIdsLock)
+        {
+            _reportedDroppedNodeIds.Clear();
+        }
+    }
 
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
@@ -77,13 +94,14 @@ internal sealed class OutboundWriter
         return StatusCode.IsBad(statusCode);
     }
 
-    // Schema-level codes only. State-dependent codes (BadNodeIdUnknown, BadUserAccessDenied, BadNotWritable) can flip at runtime and stay in the retry queue.
-    internal static bool IsStructurallyPermanentError(StatusCode statusCode)
-    {
-        return statusCode == StatusCodes.BadAttributeIdInvalid ||
-               statusCode == StatusCodes.BadTypeMismatch ||
-               statusCode == StatusCodes.BadWriteNotSupported;
-    }
+    // Permanent within a session per OPC UA spec for schema/type codes; spec-allowed but rare in practice
+    // for the state-dependent codes (BadNodeIdUnknown, BadUserAccessDenied, BadNotWritable). All six are
+    // dropped by default; OpcUaClientConfiguration.DropPermanentWriteFailures lets users opt back into retry.
+    internal static bool IsPermanentWriteError(StatusCode statusCode)
+        => StatusCode.IsBad(statusCode) && !IsTransientWriteError(statusCode);
+
+    internal static bool ShouldDropFailedWrite(StatusCode statusCode, bool dropPermanentWriteFailures)
+        => dropPermanentWriteFailures && IsPermanentWriteError(statusCode);
 
     private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
     {
@@ -103,8 +121,10 @@ internal sealed class OutboundWriter
             return WriteResult.Success;
         }
 
+        var dropPermanent = _configuration.DropPermanentWriteFailures;
         var retryableFailures = new List<SubjectPropertyChange>(failureCount);
-        List<NodeId>? droppedPermanentNodeIds = null;
+        List<NodeId>? newlyDroppedNodeIds = null;
+        var droppedPermanentCount = 0;
         var transientCount = 0;
         var resultIndex = 0;
         var span = allChanges.Span;
@@ -117,10 +137,19 @@ internal sealed class OutboundWriter
             var status = results[resultIndex];
             if (!StatusCode.IsGood(status))
             {
-                if (IsStructurallyPermanentError(status))
+                if (ShouldDropFailedWrite(status, dropPermanent))
                 {
-                    droppedPermanentNodeIds ??= [];
-                    droppedPermanentNodeIds.Add(nodeId);
+                    droppedPermanentCount++;
+                    bool isFirstOccurrence;
+                    lock (_reportedDroppedNodeIdsLock)
+                    {
+                        isFirstOccurrence = _reportedDroppedNodeIds.Add(nodeId);
+                    }
+                    if (isFirstOccurrence)
+                    {
+                        newlyDroppedNodeIds ??= [];
+                        newlyDroppedNodeIds.Add(nodeId);
+                    }
                 }
                 else
                 {
@@ -132,15 +161,14 @@ internal sealed class OutboundWriter
             resultIndex++;
         }
 
-        var droppedPermanentCount = droppedPermanentNodeIds?.Count ?? 0;
         var permanentCount = retryableFailures.Count - transientCount + droppedPermanentCount;
         var successCount = results.Count - (retryableFailures.Count + droppedPermanentCount);
 
-        if (droppedPermanentNodeIds is not null)
+        if (newlyDroppedNodeIds is not null)
         {
             _logger.LogWarning(
-                "OPC UA write: dropping {Count} structurally-permanent failures from retry queue. NodeIds: {NodeIds}.",
-                droppedPermanentCount, droppedPermanentNodeIds);
+                "OPC UA write: dropping {Count} permanently-failing write(s) from retry queue (first occurrence for these NodeIds). NodeIds: {NodeIds}.",
+                newlyDroppedNodeIds.Count, newlyDroppedNodeIds);
         }
 
         _logger.LogWarning(

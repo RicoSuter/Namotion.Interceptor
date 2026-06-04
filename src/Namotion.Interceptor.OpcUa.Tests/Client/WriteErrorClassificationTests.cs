@@ -74,32 +74,85 @@ public class WriteErrorClassificationTests
     }
 
     [Theory]
+    [InlineData(StatusCodes.BadNodeIdUnknown)]
     [InlineData(StatusCodes.BadAttributeIdInvalid)]
     [InlineData(StatusCodes.BadTypeMismatch)]
     [InlineData(StatusCodes.BadWriteNotSupported)]
-    public void IsStructurallyPermanentError_WithSchemaLevelCode_ReturnsTrue(uint statusCode)
+    [InlineData(StatusCodes.BadUserAccessDenied)]
+    [InlineData(StatusCodes.BadNotWritable)]
+    public void IsPermanentWriteError_WithPermanentCode_ReturnsTrue(uint statusCode)
     {
         // Arrange
         var status = new StatusCode(statusCode);
 
         // Act
-        var result = OpcUaSubjectClientSource.IsStructurallyPermanentError(status);
+        var result = OpcUaSubjectClientSource.IsPermanentWriteError(status);
 
         // Assert
         Assert.True(result);
     }
 
     [Theory]
-    [InlineData(StatusCodes.BadNodeIdUnknown)]     // address space can change
-    [InlineData(StatusCodes.BadUserAccessDenied)]  // permissions can change
-    [InlineData(StatusCodes.BadNotWritable)]       // AccessLevel can be flipped
-    public void IsStructurallyPermanentError_WithStateDependentCode_ReturnsFalse(uint statusCode)
+    [InlineData(StatusCodes.BadTimeout)]
+    [InlineData(StatusCodes.BadServerNotConnected)]
+    [InlineData(StatusCodes.BadOutOfService)]
+    [InlineData(StatusCodes.BadTooManyOperations)]
+    [InlineData(StatusCodes.BadSessionIdInvalid)]
+    [InlineData(StatusCodes.BadSecureChannelClosed)]
+    public void IsPermanentWriteError_WithTransientCode_ReturnsFalse(uint statusCode)
     {
         // Arrange
         var status = new StatusCode(statusCode);
 
         // Act
-        var result = OpcUaSubjectClientSource.IsStructurallyPermanentError(status);
+        var result = OpcUaSubjectClientSource.IsPermanentWriteError(status);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.Good)]
+    [InlineData(StatusCodes.Uncertain)]
+    public void IsPermanentWriteError_WithNonBadStatus_ReturnsFalse(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act
+        var result = OpcUaSubjectClientSource.IsPermanentWriteError(status);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.BadTypeMismatch)]
+    [InlineData(StatusCodes.BadUserAccessDenied)]
+    [InlineData(StatusCodes.BadNotWritable)]
+    public void ShouldDropFailedWrite_WhenConfigEnabledAndPermanentCode_ReturnsTrue(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act
+        var result = OpcUaSubjectClientSource.ShouldDropFailedWrite(status, dropPermanentWriteFailures: true);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.BadTypeMismatch)]
+    [InlineData(StatusCodes.BadUserAccessDenied)]
+    [InlineData(StatusCodes.BadNotWritable)]
+    public void ShouldDropFailedWrite_WhenConfigDisabled_ReturnsFalseEvenForPermanentCode(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act
+        var result = OpcUaSubjectClientSource.ShouldDropFailedWrite(status, dropPermanentWriteFailures: false);
 
         // Assert
         Assert.False(result);
@@ -110,15 +163,30 @@ public class WriteErrorClassificationTests
     [InlineData(StatusCodes.BadServerNotConnected)]
     [InlineData(StatusCodes.Good)]
     [InlineData(StatusCodes.Uncertain)]
-    public void IsStructurallyPermanentError_WithTransientOrNonBadCode_ReturnsFalse(uint statusCode)
+    public void ShouldDropFailedWrite_ForNonPermanentCode_ReturnsFalseRegardlessOfConfig(uint statusCode)
     {
         // Arrange
         var status = new StatusCode(statusCode);
 
         // Act
-        var result = OpcUaSubjectClientSource.IsStructurallyPermanentError(status);
+        var resultEnabled = OpcUaSubjectClientSource.ShouldDropFailedWrite(status, dropPermanentWriteFailures: true);
+        var resultDisabled = OpcUaSubjectClientSource.ShouldDropFailedWrite(status, dropPermanentWriteFailures: false);
 
         // Assert
-        Assert.False(result);
+        Assert.False(resultEnabled);
+        Assert.False(resultDisabled);
+    }
+
+    [Fact]
+    public void DropPermanentWriteFailures_DefaultValue_IsTrue()
+    {
+        // Arrange
+        var configuration = new OpcUaClientConfiguration { ServerUrl = "opc.tcp://localhost:4840" };
+
+        // Act
+        var actual = configuration.DropPermanentWriteFailures;
+
+        // Assert
+        Assert.True(actual);
     }
 }
