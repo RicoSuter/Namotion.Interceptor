@@ -32,7 +32,7 @@ public class AdsClientConfigurationTests
         Assert.Equal(1000, configuration.WriteRetryQueueSize);
         Assert.Equal(TimeSpan.FromSeconds(5), configuration.HealthCheckInterval);
         Assert.Equal(TimeSpan.FromMilliseconds(8), configuration.BufferTime);
-        Assert.Equal(TimeSpan.FromSeconds(1), configuration.RetryTime);
+        Assert.Equal(TimeSpan.FromSeconds(10), configuration.RetryTime);
         Assert.Equal(5, configuration.CircuitBreakerFailureThreshold);
         Assert.Equal(TimeSpan.FromSeconds(60), configuration.CircuitBreakerCooldown);
         Assert.NotNull(configuration.ValueConverter);
