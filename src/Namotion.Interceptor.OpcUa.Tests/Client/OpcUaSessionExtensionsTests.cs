@@ -7,12 +7,13 @@ using Opc.Ua.Client;
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 /// <summary>
-/// Tests for the transient-vs-permanent classification behavior in
-/// <see cref="OpcUaSessionExtensions"/>. Transient per-NodeId bad statuses must
-/// throw <see cref="OpcUaTransientServiceException"/> so the caller (typically
-/// the source manager) can let the session reconnect retry from scratch.
-/// Permanent bad statuses are logged and skipped, mirroring the pre-classifier
-/// behavior so unresolvable NodeIds do not block the rest of the load.
+/// Tests for the bad-status handling in <see cref="OpcUaSessionExtensions"/>.
+/// Browse aborts on a transient per-NodeId status by throwing
+/// <see cref="OpcUaTransientServiceException"/> so the structural graph is never
+/// loaded incomplete; permanent statuses are logged and skipped. The read path is
+/// a best-effort primitive: it never classifies or throws, returning every result
+/// positionally so each caller applies its own policy (value loads keep the good
+/// values, type resolution aborts on transient itself).
 /// </summary>
 public class OpcUaSessionExtensionsTests
 {
@@ -180,10 +181,10 @@ public class OpcUaSessionExtensionsTests
     }
 
     [Fact]
-    public async Task WhenReadReturnsTransientBadStatus_ThenThrowsTransientServiceException()
+    public async Task WhenReadReturnsTransientBadStatus_ThenPassesResultThroughToCaller()
     {
-        // Arrange: read one node that returns a transient bad status. The flat
-        // allResults position determines which NodeId the exception reports.
+        // Arrange: the read path is best-effort and never throws, even on a transient
+        // status (BadServerNotConnected). The bad status passes through for the caller to handle.
         var nodeId = new NodeId(5001, 2);
         var mockSession = CreateMockSession();
         mockSession
@@ -204,17 +205,61 @@ public class OpcUaSessionExtensionsTests
             new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.Value }
         };
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<OpcUaTransientServiceException>(() =>
-            mockSession.Object.ReadNodesAsync(
-                nodesToRead,
-                TimestampsToReturn.Neither,
-                NullLogger<OpcUaSessionExtensionsTests>.Instance,
-                CancellationToken.None));
+        // Act
+        var results = await mockSession.Object.ReadNodesAsync(
+            nodesToRead,
+            TimestampsToReturn.Neither,
+            NullLogger<OpcUaSessionExtensionsTests>.Instance,
+            CancellationToken.None);
 
-        Assert.Equal("Read", exception.Operation);
-        Assert.Equal(nodeId, exception.NodeId);
-        Assert.Equal((StatusCode)StatusCodes.BadServerNotConnected, exception.StatusCode);
+        // Assert
+        Assert.Single(results);
+        Assert.Equal(StatusCodes.BadServerNotConnected, results[0].StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenReadMixesGoodAndNotReadyValues_ThenReturnsAllWithoutThrowing()
+    {
+        // Arrange: regression for one not-ready node cancelling the whole load.
+        // BadWaitingForInitialData (a startup status) must not throw or drop the good value read with it.
+        var goodNodeId = new NodeId(8001, 2);
+        var notReadyNodeId = new NodeId(8002, 2);
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReadResponse
+            {
+                Results =
+                [
+                    new DataValue { Value = 42, StatusCode = StatusCodes.Good },
+                    new DataValue { StatusCode = StatusCodes.BadWaitingForInitialData }
+                ],
+                DiagnosticInfos = []
+            });
+
+        var nodesToRead = new ReadValueIdCollection
+        {
+            new ReadValueId { NodeId = goodNodeId, AttributeId = Opc.Ua.Attributes.Value },
+            new ReadValueId { NodeId = notReadyNodeId, AttributeId = Opc.Ua.Attributes.Value }
+        };
+
+        // Act
+        var results = await mockSession.Object.ReadNodesAsync(
+            nodesToRead,
+            TimestampsToReturn.Source,
+            NullLogger<OpcUaSessionExtensionsTests>.Instance,
+            CancellationToken.None);
+
+        // Assert: both slots returned and aligned; the good value survives the not-ready one.
+        Assert.Equal(2, results.Count);
+        Assert.True(StatusCode.IsGood(results[0].StatusCode));
+        Assert.Equal(42, results[0].Value);
+        Assert.Equal(StatusCodes.BadWaitingForInitialData, results[1].StatusCode);
     }
 
     [Fact]

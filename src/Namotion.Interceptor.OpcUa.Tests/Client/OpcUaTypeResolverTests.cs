@@ -197,8 +197,8 @@ public class OpcUaTypeResolverTests
     public async Task WhenSessionExtensionPadsShortRead_ThenResolverPreservesAlignment()
     {
         // Arrange: two variables (= 4 ReadValueIds), but the server returns only the
-        // first 2 slots. ReadBatchAsync pads the missing slots with BadUnexpectedError,
-        // which is classified as transient, so the read throws an
+        // first 2 slots. ReadNodesAsync pads the missing slots with BadUnexpectedError;
+        // the resolver classifies that transient status and throws an
         // OpcUaTransientServiceException attributed to node2 (proving alignment held).
         var node1Id = new NodeId(7001, 2);
         var node2Id = new NodeId(7002, 2);
@@ -236,6 +236,81 @@ public class OpcUaTypeResolverTests
         Assert.Equal("Read", exception.Operation);
         Assert.Equal(node2Id, exception.NodeId);
         Assert.Equal((StatusCode)StatusCodes.BadUnexpectedError, exception.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenDataTypeReadReturnsTransientBadStatus_ThenAbortsByThrowing()
+    {
+        // Arrange: a transient DataType read would drop the property from the model, so
+        // the resolver must abort (throw) rather than build a partial model.
+        var variableNodeId = new NodeId(7101, 2);
+        var variables = new List<ReferenceDescription>
+        {
+            new() { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(variableNodeId), NodeClass = NodeClass.Variable }
+        };
+
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReadResponse
+            {
+                Results =
+                [
+                    new DataValue { StatusCode = StatusCodes.BadServerNotConnected },
+                    new DataValue { Value = -1, StatusCode = StatusCodes.Good }
+                ],
+                DiagnosticInfos = []
+            });
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<OpcUaTransientServiceException>(() =>
+            _resolver.ResolveVariableTypesAsync(mockSession.Object, variables, CancellationToken.None));
+
+        Assert.Equal("Read", exception.Operation);
+        Assert.Equal(variableNodeId, exception.NodeId);
+        Assert.Equal((StatusCode)StatusCodes.BadServerNotConnected, exception.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenDataTypeReadReturnsPermanentBadStatus_ThenSkipsPropertyWithoutThrowing()
+    {
+        // Arrange: a permanent DataType read cannot improve on retry, so the resolver must
+        // not abort; it leaves the type unresolved (null) for the loader to skip that property.
+        var variableNodeId = new NodeId(7201, 2);
+        var variables = new List<ReferenceDescription>
+        {
+            new() { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(variableNodeId), NodeClass = NodeClass.Variable }
+        };
+
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReadResponse
+            {
+                Results =
+                [
+                    new DataValue { StatusCode = StatusCodes.BadUserAccessDenied },
+                    new DataValue { Value = -1, StatusCode = StatusCodes.Good }
+                ],
+                DiagnosticInfos = []
+            });
+
+        // Act
+        var result = await _resolver.ResolveVariableTypesAsync(mockSession.Object, variables, CancellationToken.None);
+
+        // Assert: no throw; the node is present with an unresolved (null) type.
+        Assert.True(result.ContainsKey(variableNodeId));
+        Assert.Null(result[variableNodeId]);
     }
 
     [Fact]

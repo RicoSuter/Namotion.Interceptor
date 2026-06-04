@@ -452,6 +452,12 @@ When the initial subject load encounters a transient browse failure (e.g.,
 it produced and lets `SubjectSourceBase` retry from a clean slate after
 `RetryTime`.
 
+Only structural failures (browse and type resolution) trigger this
+rollback-and-retry. The initial *value* read is best-effort: a node that
+returns a transient or not-ready status such as `BadWaitingForInitialData` is
+skipped and backfilled by the subscription, rather than aborting the load and
+forcing a reconnect.
+
 **Guarantees on failure:**
 - No source ownership claims are committed
 - No staged sub-subjects leak into the registry

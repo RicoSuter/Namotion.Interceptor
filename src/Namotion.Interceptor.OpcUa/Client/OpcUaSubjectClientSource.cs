@@ -224,12 +224,12 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             }
         }
 
-        // Transient bad statuses would have already thrown inside ReadNodesAsync, so
-        // the gap between itemCount and result.Count is exclusively permanent bad
-        // statuses (logged-and-skipped per the classifier).
+        // Best-effort: any non-good status (e.g. a not-ready BadWaitingForInitialData) is
+        // left unset for the subscription to backfill. A single bad node must not abort
+        // the load or trigger a reconnect.
         var successCount = result.Count;
         _logger.LogInformation(
-            "Read {Total} OPC UA nodes from server ({Successful} good, {Skipped} skipped with permanent bad status).",
+            "Read {Total} OPC UA nodes from server ({Successful} good, {Skipped} skipped with non-good status).",
             itemCount, successCount, itemCount - successCount);
         return () =>
         {

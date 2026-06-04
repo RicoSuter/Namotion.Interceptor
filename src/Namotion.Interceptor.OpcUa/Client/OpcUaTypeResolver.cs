@@ -37,24 +37,11 @@ public class OpcUaTypeResolver
         if (children.Count > 0 && children[0].NodeClass == NodeClass.Object)
         {
             var name = children[0].BrowseName?.Name;
-            if (name is not null)
+            if (name is not null && OpcUaBrowseName.TryGetBracketContent(name, out var content))
             {
-                var bracketStart = name.LastIndexOf('[');
-                if (bracketStart >= 0 && name.EndsWith(']'))
-                {
-                    var content = name.AsSpan(bracketStart + 1, name.Length - bracketStart - 2);
-                    if (content.Length == 0)
-                    {
-                        // Empty brackets carry no key/index information; treat as a single reference.
-                        return typeof(DynamicSubject);
-                    }
-                    if (int.TryParse(content, out _))
-                    {
-                        return typeof(DynamicSubject[]);
-                    }
-
-                    return typeof(IReadOnlyDictionary<string, DynamicSubject>);
-                }
+                return int.TryParse(content, out _)
+                    ? typeof(DynamicSubject[])
+                    : typeof(IReadOnlyDictionary<string, DynamicSubject>);
             }
         }
 
@@ -63,7 +50,7 @@ public class OpcUaTypeResolver
 
     public virtual async Task<IReadOnlyDictionary<NodeId, Type?>> ResolveVariableTypesAsync(
         ISession session,
-        IReadOnlyList<ReferenceDescription> variables,
+        IReadOnlyCollection<ReferenceDescription> variables,
         CancellationToken cancellationToken)
     {
         var result = new Dictionary<NodeId, Type?>(variables.Count);
@@ -104,6 +91,12 @@ public class OpcUaTypeResolver
             var (nodeId, reference) = resolvedVariables[i];
             var dataTypeIndex = i * 2;
             var valueRankIndex = dataTypeIndex + 1;
+
+            // Abort on a transient attribute read: an unresolved type silently drops the
+            // property from the model (does not self-heal). Permanent statuses fall through
+            // to the graceful skip below.
+            OpcUaStatusCodeClassifier.ThrowIfTransientError(allResults[dataTypeIndex].StatusCode, "Read", nodeId);
+            OpcUaStatusCodeClassifier.ThrowIfTransientError(allResults[valueRankIndex].StatusCode, "Read", nodeId);
 
             Type? type = null;
             try

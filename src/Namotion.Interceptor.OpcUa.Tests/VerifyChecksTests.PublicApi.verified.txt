@@ -175,7 +175,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public OpcUaTypeResolver(Microsoft.Extensions.Logging.ILogger logger) { }
         public virtual System.Attribute[] GetDynamicPropertyAttributes(Opc.Ua.ReferenceDescription reference, Opc.Ua.Client.ISession session) { }
         public virtual System.Type ResolveObjectNodeType(System.Collections.Generic.IReadOnlyList<Opc.Ua.ReferenceDescription> children) { }
-        public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<Opc.Ua.NodeId, System.Type?>> ResolveVariableTypesAsync(Opc.Ua.Client.ISession session, System.Collections.Generic.IReadOnlyList<Opc.Ua.ReferenceDescription> variables, System.Threading.CancellationToken cancellationToken) { }
+        public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<Opc.Ua.NodeId, System.Type?>> ResolveVariableTypesAsync(Opc.Ua.Client.ISession session, System.Collections.Generic.IReadOnlyCollection<Opc.Ua.ReferenceDescription> variables, System.Threading.CancellationToken cancellationToken) { }
         protected virtual System.Type? TryMapBuiltInType(Opc.Ua.BuiltInType builtInType) { }
     }
     public sealed class OpcUaWriteException : System.InvalidOperationException

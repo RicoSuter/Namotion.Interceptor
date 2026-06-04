@@ -55,8 +55,7 @@ internal sealed class OpcUaSubjectLoader
     private readonly record struct ChildEntry(
         ReferenceDescription Reference,
         NodeId ResolvedNodeId,
-        RegisteredSubjectProperty? Property,
-        bool NeedsDynamicType);
+        RegisteredSubjectProperty? Property);
 
     private readonly record struct SubjectState(
         IInterceptorSubject Subject,
@@ -130,7 +129,7 @@ internal sealed class OpcUaSubjectLoader
         var objectTypeMap = await ResolveObjectTypesAsync(allDynamicObjectNodeIds, context).ConfigureAwait(false);
 
         var variableTypeMap = allDynamicVariableNodes.Count > 0
-            ? await _configuration.TypeResolver!.ResolveVariableTypesAsync(context.Session, allDynamicVariableNodes.Values.ToList(), context.CancellationToken).ConfigureAwait(false)
+            ? await _configuration.TypeResolver!.ResolveVariableTypesAsync(context.Session, allDynamicVariableNodes.Values, context.CancellationToken).ConfigureAwait(false)
             : new Dictionary<NodeId, Type?>();
 
         // Phase 4: Dispatch properties and load children (Phase 5 attribute discovery runs at the end of LoadChildPropertiesAsync)
@@ -206,7 +205,7 @@ internal sealed class OpcUaSubjectLoader
 
             if (property is not null)
             {
-                childEntries.Add(new ChildEntry(nodeReference, resolvedNodeId, property, false));
+                childEntries.Add(new ChildEntry(nodeReference, resolvedNodeId, property));
                 continue;
             }
 
@@ -226,7 +225,7 @@ internal sealed class OpcUaSubjectLoader
                 continue;
             }
 
-            childEntries.Add(new ChildEntry(nodeReference, resolvedNodeId, null, true));
+            childEntries.Add(new ChildEntry(nodeReference, resolvedNodeId, null));
             if (nodeReference.NodeClass == NodeClass.Object)
             {
                 dynamicObjectNodeIds.Add(resolvedNodeId);
@@ -281,9 +280,9 @@ internal sealed class OpcUaSubjectLoader
 
             for (var i = 0; i < stateChildEntries.Count; i++)
             {
-                var (nodeReference, resolvedNodeId, property, needsDynamicType) = stateChildEntries[i];
+                var (nodeReference, resolvedNodeId, property) = stateChildEntries[i];
 
-                if (needsDynamicType && property is null)
+                if (property is null)
                 {
                     property = TryCreateDynamicProperty(
                         stateRegisteredSubject, nodeReference, resolvedNodeId,
@@ -646,16 +645,9 @@ internal sealed class OpcUaSubjectLoader
 
     private static string ExtractDictionaryKey(string browseName)
     {
-        var bracketStart = browseName.LastIndexOf('[');
-        if (bracketStart >= 0 && browseName.EndsWith(']'))
-        {
-            var contentLength = browseName.Length - bracketStart - 2;
-            if (contentLength > 0)
-            {
-                return browseName.Substring(bracketStart + 1, contentLength);
-            }
-        }
-        return browseName;
+        return OpcUaBrowseName.TryGetBracketContent(browseName, out var content)
+            ? content.ToString()
+            : browseName;
     }
 
 }

@@ -63,7 +63,8 @@ internal static class OpcUaSessionExtensions
     /// <c>BadTooManyOperations</c>. Returns a positionally aligned
     /// <see cref="DataValueCollection"/> where <c>allResults[i]</c> corresponds to
     /// <paramref name="nodesToRead"/>[i]. Short server responses are padded with
-    /// <c>BadUnexpectedError</c> to maintain alignment.
+    /// <c>BadUnexpectedError</c> to maintain alignment. Best-effort: bad statuses are
+    /// never thrown here, so each caller decides how to handle them.
     /// </summary>
     public static async Task<DataValueCollection> ReadNodesAsync(
         this ISession session,
@@ -461,8 +462,6 @@ internal static class OpcUaSessionExtensions
             return;
         }
 
-        var appendStart = allResults.Count;
-
         var actual = response.Results.Count;
         if (actual == count)
         {
@@ -479,20 +478,12 @@ internal static class OpcUaSessionExtensions
             {
                 allResults.Add(response.Results[i]);
             }
-            // BadUnexpectedError is intentionally treated as transient by the
-            // classifier (not in the permanent list), so a short server response
-            // aborts the load and triggers a fresh retry rather than letting
-            // misaligned/missing data leak downstream.
+            // Pad missing trailing slots so allResults stays aligned with nodesToRead.
+            // This primitive never throws; callers classify the bad status themselves.
             for (var i = take; i < count; i++)
             {
                 allResults.Add(new DataValue { StatusCode = StatusCodes.BadUnexpectedError });
             }
-        }
-
-        for (var i = appendStart; i < allResults.Count; i++)
-        {
-            var nodeId = nodesToRead[batchStart + (i - appendStart)].NodeId;
-            OpcUaStatusCodeClassifier.ThrowIfTransientError(allResults[i].StatusCode, "Read", nodeId);
         }
     }
 }

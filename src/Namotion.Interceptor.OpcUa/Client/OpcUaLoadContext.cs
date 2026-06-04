@@ -50,7 +50,6 @@ internal sealed class OpcUaLoadContext : IDisposable
     }
 
     public ISession Session { get; }
-    public IInterceptorSubject RootSubject => _rootSubject;
     public List<MonitoredItem> MonitoredItems { get; } = new();
     public HashSet<IInterceptorSubject> LoadedSubjects { get; } = new();
     public Dictionary<NodeId, IInterceptorSubject> SubjectsByNodeId { get; } = new();
