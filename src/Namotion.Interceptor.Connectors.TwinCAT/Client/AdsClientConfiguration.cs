@@ -1,3 +1,4 @@
+using System;
 using System.Net;
 using Microsoft.Extensions.Configuration;
 using Namotion.Interceptor.Connectors.Mapping;
@@ -113,7 +114,7 @@ public class AdsClientConfiguration
     /// <summary>
     /// Gets or sets the retry time for failed writes.
     /// </summary>
-    public TimeSpan RetryTime { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan RetryTime { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Gets or sets the circuit breaker failure threshold.
