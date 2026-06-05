@@ -66,7 +66,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         // Partition source-bound vs local changes. The source receives a private array copy (never the
         // transaction's pooled buffer), matching the grouped path, so a source that retains the memory
         // past the call is not exposed to the array being returned to the pool.
-        ReadOnlyMemory<SubjectPropertyChange> sourceChanges;
+        SubjectPropertyChange[] sourceChanges;
         IReadOnlyList<SubjectPropertyChange> localChanges;
         if (!hasLocal)
         {
@@ -99,7 +99,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             {
                 return new TransactionWriteResult(
                     [],
-                    sourceChanges.ToArray(),
+                    sourceChanges,
                     [new InvalidOperationException(
                         $"SingleWrite requirement violated: Transaction contains {sourceChanges.Length} changes for source '{source.GetType().Name}', but WriteBatchSize is {batchSize}.")],
                     localChanges);
@@ -109,22 +109,13 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var allFailed = new List<SubjectPropertyChange>();
         var allErrors = new List<Exception>();
 
-        // 1. Write to the source.
+        // Write to the source. On a reported error only the non-failed changes reached it; otherwise
+        // the whole array did, so it is reused directly as the written set (no copy).
         var writeResult = await source.WriteChangesInBatchesAsync(sourceChanges, cancellationToken);
-
-        List<SubjectPropertyChange> written;
+        IReadOnlyList<SubjectPropertyChange> written = sourceChanges;
         if (writeResult.Error is not null)
         {
-            var failedSet = new HashSet<SubjectPropertyChange>(writeResult.FailedChanges);
-            written = new List<SubjectPropertyChange>(sourceChanges.Length);
-            foreach (var change in sourceChanges.Span)
-            {
-                if (!failedSet.Contains(change))
-                {
-                    written.Add(change);
-                }
-            }
-
+            written = ExcludeFailed(sourceChanges, writeResult.FailedChanges);
             allFailed.AddRange(writeResult.FailedChanges);
             allErrors.Add(new SourceTransactionWriteException(source, [.. writeResult.FailedChanges], writeResult.Error));
 
@@ -134,16 +125,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
                 return new TransactionWriteResult([], allFailed, allErrors, localChanges);
             }
         }
-        else
-        {
-            written = new List<SubjectPropertyChange>(sourceChanges.Length);
-            foreach (var change in sourceChanges.Span)
-            {
-                written.Add(change);
-            }
-        }
 
-        // 2. Apply the written changes to the in-process model.
+        // Apply the changes that reached the source to the in-process model.
         var (applied, applyFailed, applyErrors) = written.ApplyAllChanges();
         allFailed.AddRange(applyFailed);
         allErrors.AddRange(applyErrors);
@@ -164,8 +147,23 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         return new TransactionWriteResult(applied, allFailed, allErrors, localChanges);
     }
 
+    private static List<SubjectPropertyChange> ExcludeFailed(
+        IReadOnlyList<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange> failed)
+    {
+        var failedSet = new HashSet<SubjectPropertyChange>(failed);
+        var result = new List<SubjectPropertyChange>(changes.Count - failed.Count);
+        foreach (var change in changes)
+        {
+            if (!failedSet.Contains(change))
+            {
+                result.Add(change);
+            }
+        }
+        return result;
+    }
+
     private static Dictionary<ISubjectSource, List<SubjectPropertyChange>> SingleSourceMap(
-        ISubjectSource source, List<SubjectPropertyChange> changes) => new(1) { [source] = changes };
+        ISubjectSource source, IReadOnlyList<SubjectPropertyChange> changes) => new(1) { [source] = [.. changes] };
 
     private async Task<TransactionWriteResult> WriteGroupedAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
