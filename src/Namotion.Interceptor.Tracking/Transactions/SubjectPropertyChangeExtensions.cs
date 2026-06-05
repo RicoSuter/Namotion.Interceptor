@@ -33,7 +33,10 @@ internal static class SubjectPropertyChangeExtensions
         try
         {
             var metadata = change.Property.Metadata;
-            metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
+            using (SubjectChangeContext.WithState(change.Source, change.ChangedTimestamp, change.ReceivedTimestamp))
+            {
+                metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
+            }
             error = null;
             return true;
         }
