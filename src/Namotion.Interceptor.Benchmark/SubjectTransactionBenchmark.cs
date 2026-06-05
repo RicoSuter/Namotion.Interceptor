@@ -15,22 +15,29 @@ namespace Namotion.Interceptor.Benchmark;
 
 /// <summary>
 /// Measures the cost of committing a transaction that writes a batch of property changes.
-/// The <see cref="WithSource"/> parameter switches between a local-only commit (changes applied
-/// to the in-process model) and a source-bound commit (changes also dispatched to an external
-/// source via the source transaction writer).
+/// The <see cref="Mode"/> parameter selects a local-only commit, a commit where every change is
+/// bound to a single source, or one spread across multiple sources (the grouped fallback path).
 /// </summary>
 [MemoryDiagnoser]
 public class SubjectTransactionBenchmark
 {
     private const int PropertyCount = 50;
+    private const int SourceCount = 2;
 
     private IInterceptorSubjectContext _context;
     private Car _car;
     private Tire[] _tires;
     private int _counter;
 
-    [Params(false, true)]
-    public bool WithSource;
+    public enum CommitMode
+    {
+        Local,
+        SingleSource,
+        MultiSource
+    }
+
+    [Params(CommitMode.Local, CommitMode.SingleSource, CommitMode.MultiSource)]
+    public CommitMode Mode;
 
     [GlobalSetup]
     public void Setup()
@@ -41,7 +48,7 @@ public class SubjectTransactionBenchmark
             .WithRegistry()
             .WithTransactions();
 
-        if (WithSource)
+        if (Mode != CommitMode.Local)
         {
             context.WithSourceTransactions();
         }
@@ -52,12 +59,20 @@ public class SubjectTransactionBenchmark
         _tires = Enumerable.Range(0, PropertyCount).Select(_ => new Tire()).ToArray();
         _car.Tires = _tires;
 
-        if (WithSource)
+        if (Mode == CommitMode.SingleSource)
         {
             var source = new BenchmarkSource(_car);
             foreach (var tire in _tires)
             {
                 new PropertyReference(tire, nameof(Tire.Pressure_Minimum)).SetSource(source);
+            }
+        }
+        else if (Mode == CommitMode.MultiSource)
+        {
+            var sources = Enumerable.Range(0, SourceCount).Select(_ => new BenchmarkSource(_car)).ToArray();
+            for (var i = 0; i < _tires.Length; i++)
+            {
+                new PropertyReference(_tires[i], nameof(Tire.Pressure_Minimum)).SetSource(sources[i % SourceCount]);
             }
         }
     }
