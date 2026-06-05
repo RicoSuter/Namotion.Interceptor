@@ -356,25 +356,11 @@ public sealed class SubjectTransaction : IDisposable
 
         if (_failureHandling == TransactionFailureHandling.Rollback && successful is { Count: > 0 })
         {
-            for (var i = successful.Count - 1; i >= 0; i--)
+            var (_, revertFailed, revertErrors) = successful.ToRollbackChanges().ApplyAllChanges();
+            failed.AddRange(revertFailed);
+            if (revertErrors.Count > 0)
             {
-                var applied = successful[i];
-                var rollback = SubjectPropertyChange.Create(
-                    applied.Property,
-                    source: applied.Source,
-                    changedTimestamp: applied.ChangedTimestamp,
-                    receivedTimestamp: applied.ReceivedTimestamp,
-                    oldValue: applied.GetNewValue<object?>(),
-                    newValue: applied.GetOldValue<object?>());
-
-                if (!rollback.TryApplyChange(out var revertError))
-                {
-                    failed.Add(rollback);
-                    if (revertError != null)
-                    {
-                        (errors ??= []).Add(revertError);
-                    }
-                }
+                (errors ??= []).AddRange(revertErrors);
             }
             successful.Clear();
         }
