@@ -45,10 +45,10 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
         if (singleSource is not null && !multipleSources)
         {
-            return await WriteSingleSourceAsync(singleSource, changes, hasLocal, failureHandling, requirement, cancellationToken);
+            return await WriteSingleSourceAsync(singleSource, changes, hasLocal, failureHandling, requirement, cancellationToken).ConfigureAwait(false);
         }
 
-        return await WriteGroupedAsync(changes, failureHandling, requirement, cancellationToken);
+        return await WriteGroupedAsync(changes, failureHandling, requirement, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
         // Write to the source. On a reported error only the non-failed changes reached it; otherwise
         // the whole array did, so it is reused directly as the written set (no copy).
-        var writeResult = await source.WriteChangesInBatchesAsync(sourceChanges, cancellationToken);
+        var writeResult = await source.WriteChangesInBatchesAsync(sourceChanges, cancellationToken).ConfigureAwait(false);
         IReadOnlyList<SubjectPropertyChange> written = sourceChanges;
         if (writeResult.Error is not null)
         {
@@ -121,7 +121,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
             if (failureHandling == TransactionFailureHandling.Rollback)
             {
-                await TryRevertSourceWritesAsync(SingleSourceMap(source, written), allFailed, allErrors, cancellationToken);
+                await TryRevertSourceWritesAsync(SingleSourceMap(source, written), allFailed, allErrors, cancellationToken).ConfigureAwait(false);
                 return new TransactionWriteResult([], allFailed, allErrors, localChanges);
             }
         }
@@ -136,12 +136,12 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             if (failureHandling == TransactionFailureHandling.Rollback)
             {
                 TryRevertAppliedChanges(applied, allFailed, allErrors);
-                await TryRevertSourceWritesAsync(SingleSourceMap(source, written), allFailed, allErrors, cancellationToken);
+                await TryRevertSourceWritesAsync(SingleSourceMap(source, written), allFailed, allErrors, cancellationToken).ConfigureAwait(false);
                 return new TransactionWriteResult([], allFailed, allErrors, localChanges);
             }
 
             // BestEffort: revert only the sources for failed local applies (keep each property in sync).
-            await TryRevertSourceWritesAsync(GroupChangesBySource(applyFailed), allFailed, allErrors, cancellationToken);
+            await TryRevertSourceWritesAsync(GroupChangesBySource(applyFailed), allFailed, allErrors, cancellationToken).ConfigureAwait(false);
         }
 
         return new TransactionWriteResult(applied, allFailed, allErrors, localChanges);
@@ -196,14 +196,14 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var allErrors = new List<Exception>();
 
         // 4. Write to external sources in parallel
-        var (successfulBySource, failed, errors) = await WriteToExternalSourcesAsync(externalChangesBySource, cancellationToken);
+        var (successfulBySource, failed, errors) = await WriteToExternalSourcesAsync(externalChangesBySource, cancellationToken).ConfigureAwait(false);
         allFailed.AddRange(failed);
         allErrors.AddRange(errors);
 
         // If any source failed and rollback mode, revert successful sources
         if (failureHandling == TransactionFailureHandling.Rollback && allFailed.Count > 0)
         {
-            await TryRevertSourceWritesAsync(successfulBySource, allFailed, allErrors, cancellationToken);
+            await TryRevertSourceWritesAsync(successfulBySource, allFailed, allErrors, cancellationToken).ConfigureAwait(false);
             return new TransactionWriteResult([], allFailed, allErrors, localChanges);
         }
 
@@ -221,7 +221,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             {
                 // Rollback mode: revert everything (all-or-nothing)
                 TryRevertAppliedChanges(applied, allFailed, allErrors);
-                await TryRevertSourceWritesAsync(successfulBySource, allFailed, allErrors, cancellationToken);
+                await TryRevertSourceWritesAsync(successfulBySource, allFailed, allErrors, cancellationToken).ConfigureAwait(false);
                 return new TransactionWriteResult([], allFailed, allErrors, localChanges);
             }
 
@@ -229,7 +229,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             var sourcesToRollback = GroupChangesBySource(applyFailed);
             if (sourcesToRollback.Count > 0)
             {
-                await TryRevertSourceWritesAsync(sourcesToRollback, allFailed, allErrors, cancellationToken);
+                await TryRevertSourceWritesAsync(sourcesToRollback, allFailed, allErrors, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -306,7 +306,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             writeTasks[taskIndex++] = WriteToSourceWithResultAsync(kvp.Key, kvp.Value, cancellationToken);
         }
 
-        var results = await Task.WhenAll(writeTasks);
+        var results = await Task.WhenAll(writeTasks).ConfigureAwait(false);
 
         foreach (var (source, (successList, failList, error)) in results)
         {
@@ -334,7 +334,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             CancellationToken cancellationToken)
     {
         var memory = new ReadOnlyMemory<SubjectPropertyChange>(sourceChanges.ToArray());
-        var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
+        var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
 
         if (result.Error is not null)
         {
@@ -362,7 +362,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             var rollbackChanges = originalChanges.ToRollbackChanges().ToArray();
 
             var memory = new ReadOnlyMemory<SubjectPropertyChange>(rollbackChanges);
-            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
+            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
 
             if (result.Error is not null)
             {
@@ -463,7 +463,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             List<SubjectPropertyChange> sourceChanges,
             CancellationToken cancellationToken)
     {
-        var result = await TryWriteToSourceAsync(source, sourceChanges, cancellationToken);
+        var result = await TryWriteToSourceAsync(source, sourceChanges, cancellationToken).ConfigureAwait(false);
         return (source, result);
     }
 }
