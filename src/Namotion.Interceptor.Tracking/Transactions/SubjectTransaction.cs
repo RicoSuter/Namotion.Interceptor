@@ -241,7 +241,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
-    /// <exception cref="SubjectTransactionException">Thrown when one or more external source writes failed.</exception>
+    /// <exception cref="SubjectTransactionException">Thrown when one or more changes failed to commit.</exception>
     public async ValueTask CommitAsync(CancellationToken cancellationToken)
     {
         ValidateCanCommit();
@@ -262,33 +262,22 @@ public sealed class SubjectTransaction : IDisposable
         {
             ThrowIfConflictsDetected(changes.Span);
 
+            SubjectTransactionException? failure;
             var writeHandler = Context.TryGetService<ITransactionWriter>();
             if (writeHandler is null)
             {
                 // Fast path: in-memory only. No source writer, no async work, no CTS.
-                var failure = TryApplyChangesInMemory(changes.Span);
-
-                // Clear pending changes and mark committed BEFORE throwing so subsequent
-                // property reads do not return stale captured values via TryGetPendingValue.
-                lock (_pendingChangesLock)
-                {
-                    _pendingChanges.Clear();
-                }
-
-                _isCommitted = true;
-
-                if (failure is not null)
-                {
-                    throw failure;
-                }
-                return;
+                failure = TryApplyChangesInMemory(changes.Span);
+            }
+            else
+            {
+                using var timeoutCts = CreateCommitTimeoutCts();
+                var commitToken = timeoutCts?.Token ?? CancellationToken.None;
+                failure = await TryExecuteWritesWithSourceAsync(writeHandler, changes, commitToken).ConfigureAwait(false);
             }
 
-            using var timeoutCts = CreateCommitTimeoutCts();
-            var commitToken = timeoutCts?.Token ?? CancellationToken.None;
-
-            var sourceFailure = await TryExecuteWritesWithSourceAsync(writeHandler, changes, commitToken).ConfigureAwait(false);
-
+            // Clear pending changes and mark committed BEFORE throwing so subsequent
+            // property reads do not return stale captured values via TryGetPendingValue.
             lock (_pendingChangesLock)
             {
                 _pendingChanges.Clear();
@@ -296,9 +285,9 @@ public sealed class SubjectTransaction : IDisposable
 
             _isCommitted = true;
 
-            if (sourceFailure is not null)
+            if (failure is not null)
             {
-                throw sourceFailure;
+                throw failure;
             }
         }
         finally
@@ -472,7 +461,7 @@ public sealed class SubjectTransaction : IDisposable
             : CreateFailureException(allSuccessfulChanges, allFailedChanges, allErrors);
     }
 
-    private async ValueTask ApplyLocalChangesAsync(ITransactionWriter? writeHandler,
+    private async ValueTask ApplyLocalChangesAsync(ITransactionWriter writeHandler,
         List<SubjectPropertyChange> allSuccessfulChanges,
         List<SubjectPropertyChange> allFailedChanges,
         List<Exception> allErrors,
@@ -492,7 +481,7 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    private async ValueTask RollbackOnLocalFailureAsync(ITransactionWriter? writeHandler,
+    private async ValueTask RollbackOnLocalFailureAsync(ITransactionWriter writeHandler,
         List<SubjectPropertyChange> allSuccessfulChanges,
         List<SubjectPropertyChange> allFailedChanges,
         List<Exception> allErrors,
@@ -505,7 +494,7 @@ public sealed class SubjectTransaction : IDisposable
         allErrors.AddRange(localRevertErrors);
 
         // Revert source-bound changes by calling writer with rollback changes
-        if (writeHandler != null && allSuccessfulChanges.Count > 0)
+        if (allSuccessfulChanges.Count > 0)
         {
             var rollbackChanges = allSuccessfulChanges.ToRollbackChanges().ToArray();
             var rollbackResult = await writeHandler.WriteChangesAsync(

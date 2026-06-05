@@ -338,15 +338,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
         if (result.Error is not null)
         {
-            var failedSet = new HashSet<SubjectPropertyChange>(result.FailedChanges);
-            var written = new List<SubjectPropertyChange>(sourceChanges.Count);
-            foreach (var change in sourceChanges)
-            {
-                if (!failedSet.Contains(change))
-                {
-                    written.Add(change);
-                }
-            }
+            var written = ExcludeFailed(sourceChanges, result.FailedChanges);
             var error = new SourceTransactionWriteException(source, [.. result.FailedChanges], result.Error);
             return (written, [.. result.FailedChanges], error);
         }
