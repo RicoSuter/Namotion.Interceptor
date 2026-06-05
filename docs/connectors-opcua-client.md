@@ -447,16 +447,9 @@ builder.Services.AddOpcUaSubjectClientSource(
 
 ### Initial Load Failure Recovery
 
-When the initial subject load encounters a transient browse failure (e.g.,
-`BadServerHalted` on a single node), the loader rolls back any partial state
-it produced and lets `SubjectSourceBase` retry from a clean slate after
-`RetryTime`.
+When the initial subject load encounters a transient browse failure (e.g., `BadServerHalted` on a single node), the loader rolls back any partial state it produced and lets `SubjectSourceBase` retry from a clean slate after `RetryTime`.
 
-Only structural failures (browse and type resolution) trigger this
-rollback-and-retry. The initial *value* read is best-effort: a node that
-returns a transient or not-ready status such as `BadWaitingForInitialData` is
-skipped and backfilled by the subscription, rather than aborting the load and
-forcing a reconnect.
+Only structural failures (browse and type resolution) trigger this rollback-and-retry. The initial *value* read is best-effort: a node that returns a transient or not-ready status such as `BadWaitingForInitialData` is skipped and backfilled by the subscription, rather than aborting the load and forcing a reconnect.
 
 **Guarantees on failure:**
 - No source ownership claims are committed
@@ -467,10 +460,7 @@ forcing a reconnect.
 **Retry:** the next `StartListeningAsync` attempt runs against a clean state.
 No special caller handling required.
 
-**Partial-deferral trade-off (dynamic properties only):** dynamic property
-slots added to root during discovery remain as empty slots after failure;
-they're reused on retry. For statically-typed root subjects (most production
-usage) no such slots exist and failure leaves root completely unchanged.
+**Partial-deferral trade-off (dynamic properties only):** dynamic property slots added to root during discovery remain as empty slots after failure; they're reused on retry. For statically-typed root subjects (most production usage) no such slots exist and failure leaves root completely unchanged.
 
 ### Connection Loss Recovery
 
