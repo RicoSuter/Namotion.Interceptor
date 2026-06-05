@@ -16,9 +16,10 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         TransactionRequirement requirement,
         CancellationToken cancellationToken)
     {
-        // Single pass: detect whether all source-bound changes target one source (the common
-        // single-connector case). That case takes an allocation-light path; everything else
-        // (no source, or multiple sources) falls back to the general grouped path.
+        // Fast path when all source-bound changes target one source (common single-connector case);
+        // 0 sources or multiple sources fall back to the grouped path. A property's source is fixed
+        // for the transaction's lifetime (set at connector attach, cleared at detach, never mid-commit),
+        // so re-reading it in WriteSingleSourceAsync stays consistent with this scan.
         ISubjectSource? singleSource = null;
         var multipleSources = false;
         var hasLocal = false;
@@ -63,9 +64,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         TransactionRequirement requirement,
         CancellationToken cancellationToken)
     {
-        // Partition source-bound vs local changes. The source receives a private array copy (never the
-        // transaction's pooled buffer), matching the grouped path, so a source that retains the memory
-        // past the call is not exposed to the array being returned to the pool.
+        // The source gets a private array copy, never the transaction's pooled buffer, so a source that
+        // retains the memory is unaffected when the buffer returns to the pool (matches the grouped path).
         SubjectPropertyChange[] sourceChanges;
         IReadOnlyList<SubjectPropertyChange> localChanges;
         if (!hasLocal)

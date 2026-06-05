@@ -318,12 +318,9 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Synchronous in-memory commit used when no <see cref="ITransactionWriter"/> is registered.
-    /// Avoids CTS allocation, state-machine boxing, and eagerly-allocated tracking lists by applying
-    /// changes in-process directly. Returns null on success, or a populated exception when one or more
-    /// changes (or their rollbacks) failed. The caller must clear pending changes and mark the
-    /// transaction committed before re-throwing, otherwise subsequent reads would return stale pending
-    /// values via <see cref="TryGetPendingValue"/>.
+    /// Synchronous in-memory commit (no <see cref="ITransactionWriter"/>): applies changes directly,
+    /// avoiding CTS, async state-machine, and eager tracking-list allocations. Returns null on success
+    /// or a populated exception on failure (the caller clears pending state before re-throwing).
     /// </summary>
     private SubjectTransactionException? TryApplyChangesInMemory(ReadOnlySpan<SubjectPropertyChange> changes)
     {
@@ -445,8 +442,7 @@ public sealed class SubjectTransaction : IDisposable
 
         var localChanges = result.LocalChanges;
 
-        // Fast path: source writes all succeeded and there are no local changes to apply,
-        // so there is nothing to aggregate and no failure to report.
+        // Fast path: all source writes succeeded and nothing local to apply, so no aggregation needed.
         if (result.FailedChanges.Count == 0 && localChanges.Count == 0)
         {
             return null;

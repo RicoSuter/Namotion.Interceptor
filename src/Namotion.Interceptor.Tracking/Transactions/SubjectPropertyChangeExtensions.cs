@@ -48,12 +48,9 @@ internal static class SubjectPropertyChangeExtensions
     }
 
     /// <summary>
-    /// Applies multiple property changes, collecting successes and failures. On full success the input
-    /// is returned as the successful set (no copy); the failure/error lists are allocated only if a
-    /// change actually fails.
+    /// Applies all changes. On full success returns the input as the successful set (no copy); the
+    /// failed/error lists are allocated only when a change fails.
     /// </summary>
-    /// <param name="changes">The changes to apply.</param>
-    /// <returns>The successful changes, failed changes, and errors.</returns>
     public static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyAllChanges(this IReadOnlyList<SubjectPropertyChange> changes)
     {
