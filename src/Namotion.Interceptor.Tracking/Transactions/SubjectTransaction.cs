@@ -455,17 +455,28 @@ public sealed class SubjectTransaction : IDisposable
         Memory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
-        var changeCount = changes.Length;
+        var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, cancellationToken).ConfigureAwait(false);
 
-        var allSuccessfulChanges = new List<SubjectPropertyChange>(changeCount);
-        var allFailedChanges = new List<SubjectPropertyChange>();
-        var allErrors = new List<Exception>();
+        var localChanges = result.LocalChanges;
 
-        var localChangesToApply = new List<SubjectPropertyChange>(changeCount);
+        // Fast path: source writes all succeeded and there are no local changes to apply,
+        // so there is nothing to aggregate and no failure to report.
+        if (result.FailedChanges.Count == 0 && localChanges.Count == 0)
+        {
+            return null;
+        }
 
-        await WriteToSourcesAsync(
-            writeHandler, changes,
-            allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken).ConfigureAwait(false);
+        var allSuccessfulChanges = new List<SubjectPropertyChange>(result.SuccessfulChanges);
+        var allFailedChanges = new List<SubjectPropertyChange>(result.FailedChanges);
+        var allErrors = new List<Exception>(result.Errors);
+
+        var localChangesToApply = new List<SubjectPropertyChange>(localChanges);
+
+        if (_failureHandling == TransactionFailureHandling.Rollback && allFailedChanges.Count > 0)
+        {
+            allFailedChanges.AddRange(localChangesToApply);
+            localChangesToApply.Clear();
+        }
 
         if (localChangesToApply.Count > 0)
         {
@@ -475,27 +486,6 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         return TryBuildFailureException(allSuccessfulChanges, allFailedChanges, allErrors);
-    }
-
-    private async ValueTask WriteToSourcesAsync(ITransactionWriter writeHandler,
-        Memory<SubjectPropertyChange> changes,
-        List<SubjectPropertyChange> allSuccessfulChanges,
-        List<SubjectPropertyChange> allFailedChanges,
-        List<Exception> allErrors,
-        List<SubjectPropertyChange> localChangesToApply,
-        CancellationToken cancellationToken)
-    {
-        var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, cancellationToken).ConfigureAwait(false);
-        allSuccessfulChanges.AddRange(result.SuccessfulChanges);
-        allFailedChanges.AddRange(result.FailedChanges);
-        allErrors.AddRange(result.Errors);
-        localChangesToApply.AddRange(result.LocalChanges);
-
-        if (_failureHandling == TransactionFailureHandling.Rollback && allFailedChanges.Count > 0)
-        {
-            allFailedChanges.AddRange(localChangesToApply);
-            localChangesToApply.Clear();
-        }
     }
 
     private async ValueTask ApplyLocalChangesAsync(ITransactionWriter? writeHandler,
