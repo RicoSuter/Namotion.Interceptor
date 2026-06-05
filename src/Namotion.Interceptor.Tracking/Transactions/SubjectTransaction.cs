@@ -318,14 +318,12 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Synchronous in-memory commit. Used when no <see cref="ITransactionWriter"/> is registered.
-    /// Avoids CTS allocation, state-machine boxing, and eagerly-allocated tracking lists.
-    /// </summary>
-    /// <summary>
-    /// Applies all changes in-process. Returns null on success, or a populated exception when one or more
-    /// changes (or their rollbacks) failed. The caller is responsible for clearing pending changes and
-    /// marking the transaction committed before re-throwing — otherwise, subsequent reads would return
-    /// stale pending values via <see cref="TryGetPendingValue"/>.
+    /// Synchronous in-memory commit used when no <see cref="ITransactionWriter"/> is registered.
+    /// Avoids CTS allocation, state-machine boxing, and eagerly-allocated tracking lists by applying
+    /// changes in-process directly. Returns null on success, or a populated exception when one or more
+    /// changes (or their rollbacks) failed. The caller must clear pending changes and mark the
+    /// transaction committed before re-throwing, otherwise subsequent reads would return stale pending
+    /// values via <see cref="TryGetPendingValue"/>.
     /// </summary>
     private SubjectTransactionException? TryApplyChangesInMemory(ReadOnlySpan<SubjectPropertyChange> changes)
     {
@@ -381,14 +379,7 @@ public sealed class SubjectTransaction : IDisposable
             successful.Clear();
         }
 
-        var message = _failureHandling switch
-        {
-            TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
-            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the in-process model.",
-            _ => "One or more changes failed."
-        };
-
-        return new SubjectTransactionException(message, successful ?? [], failed, errors ?? []);
+        return CreateFailureException(successful ?? [], failed, errors ?? []);
     }
 
     private void ValidateCanCommit()
@@ -563,6 +554,14 @@ public sealed class SubjectTransaction : IDisposable
     {
         if (failed.Count == 0) return null;
 
+        return CreateFailureException(successful, failed, errors);
+    }
+
+    private SubjectTransactionException CreateFailureException(
+        IReadOnlyList<SubjectPropertyChange> successful,
+        IReadOnlyList<SubjectPropertyChange> failed,
+        IReadOnlyList<Exception> errors)
+    {
         var message = _failureHandling switch
         {
             TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
