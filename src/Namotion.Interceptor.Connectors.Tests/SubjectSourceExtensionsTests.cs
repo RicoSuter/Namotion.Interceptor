@@ -403,7 +403,6 @@ public class SubjectSourceExtensionsTests
         public IInterceptorSubject RootSubject => throw new NotSupportedException();
         public abstract int WriteBatchSize { get; }
         public abstract ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
-        public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken) => Task.FromResult<IDisposable?>(null);
         public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
     }
 
@@ -427,7 +426,6 @@ public class SubjectSourceExtensionsTests
 
         public void UnblockWrite() => _canComplete.TrySetResult();
 
-        public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken) => Task.FromResult<IDisposable?>(null);
         public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
     }
 }

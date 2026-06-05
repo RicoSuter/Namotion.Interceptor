@@ -29,6 +29,11 @@ internal static class McpTextFormatter
 
     public static string FormatSearchResult(SearchResult result)
     {
+        if (result.SubjectCount == 0)
+        {
+            return "No subjects found matching the search criteria.";
+        }
+
         var sb = new StringBuilder();
         sb.AppendLine(Legend);
         sb.AppendLine();

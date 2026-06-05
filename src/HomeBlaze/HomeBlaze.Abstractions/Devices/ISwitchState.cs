@@ -14,6 +14,6 @@ public interface ISwitchState
     /// <summary>
     /// Whether the switch is on (true), off (false), or unknown (null).
     /// </summary>
-    [State]
+    [State(Position = 100)]
     bool? IsOn { get; }
 }

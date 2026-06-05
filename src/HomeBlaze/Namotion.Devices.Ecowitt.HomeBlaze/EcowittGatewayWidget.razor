@@ -1,0 +1,90 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(EcowittGateway))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Cloud" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(GatewaySubject?.Title ?? "Ecowitt Gateway")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(GatewaySubject?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(GatewaySubject?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        <MudStack Row="true" Spacing="4">
+            @if (GatewaySubject?.OutdoorSensor != null)
+            {
+                <MudStack>
+                    <MudText Typo="Typo.caption">Temperature</MudText>
+                    <MudText Typo="Typo.h5">@(GatewaySubject.OutdoorSensor.Temperature?.ToString("F1") ?? "\u2014") °C</MudText>
+                </MudStack>
+
+                <MudStack>
+                    <MudText Typo="Typo.caption">Humidity</MudText>
+                    <MudText Typo="Typo.h5">@((GatewaySubject.OutdoorSensor.Humidity * 100)?.ToString("F0") ?? "\u2014") %</MudText>
+                </MudStack>
+
+                @if (GatewaySubject.OutdoorSensor.WindSpeed != null)
+                {
+                    <MudStack>
+                        <MudText Typo="Typo.caption">Wind</MudText>
+                        <MudText Typo="Typo.h5">@(GatewaySubject.OutdoorSensor.WindSpeed?.ToString("F1") ?? "\u2014") m/s</MudText>
+                    </MudStack>
+                }
+            }
+
+            @if (GatewaySubject?.RainGauge?.RainRate > 0)
+            {
+                <MudStack>
+                    <MudText Typo="Typo.caption">Rain</MudText>
+                    <MudText Typo="Typo.h5">@GatewaySubject.RainGauge.RainRate?.ToString("F1") mm/h</MudText>
+                </MudStack>
+            }
+        </MudStack>
+
+        <MudStack Row="true" Spacing="4">
+            @if (GatewaySubject?.ChannelSensors.Length > 0)
+            {
+                <MudStack>
+                    <MudText Typo="Typo.caption">Channels</MudText>
+                    <MudText Typo="Typo.h5">@GatewaySubject.ChannelSensors.Length</MudText>
+                </MudStack>
+            }
+
+            @if (GatewaySubject?.IndoorSensor != null)
+            {
+                <MudStack>
+                    <MudText Typo="Typo.caption">Indoor</MudText>
+                    <MudText Typo="Typo.h5">@(GatewaySubject.IndoorSensor.Temperature?.ToString("F1") ?? "\u2014") °C</MudText>
+                </MudStack>
+            }
+        </MudStack>
+
+        @if (GatewaySubject?.HostAddress != null)
+        {
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.OpenInNew"
+                       Href="@($"http://{GatewaySubject.HostAddress}")"
+                       Target="_blank"
+                       Size="Size.Small">
+                Open Web UI
+            </MudButton>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private EcowittGateway? GatewaySubject => Subject as EcowittGateway;
+}

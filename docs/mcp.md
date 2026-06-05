@@ -183,7 +183,7 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `format` | `text` | Output format: `text` for LLM-readable overview, `json` for exact structured data |
-| `text` | (none) | Filter by text (matches title and path, case-insensitive) |
+| `query` | (none) | Filter by path and enrichment values (e.g. `$title`, `$icon`); does not match types, interfaces, or property names |
 | `types` | all | Filter subjects by type/interface full names |
 | `path` | (none) | Scope search to a subtree path prefix |
 | `includeProperties` | false | Include property values |
@@ -222,7 +222,7 @@ var config = new McpServerConfiguration
     SubjectEnrichers = { new MySubjectEnricher() },
 
     // Optional: type discovery for list_types
-    TypeProviders = { new SubjectAbstractionsAssemblyTypeProvider() },
+    TypeProviders = { new MyTypeProvider() },
 
     // Optional: additional tools
     ToolProviders = { new MyToolProvider() },
@@ -236,10 +236,12 @@ var config = new McpServerConfiguration
 
 ### Access Control
 
-| `IsReadOnly` | `set_property` | `invoke_method` (Browse) | `invoke_method` (Operation) |
-|--------------|---------------|------------------------|-----------------------------|
-| `true` | Blocked | Allowed | Blocked |
-| `false` | Allowed | Allowed | Allowed |
+| `IsReadOnly` | `set_property` |
+|--------------|----------------|
+| `true` | Blocked |
+| `false` | Allowed |
+
+Custom tools provided via `IMcpToolProvider` can inspect `IsReadOnly` on the configuration and apply the same convention to their own mutating operations.
 
 ## Extension Points
 
@@ -277,8 +279,6 @@ public class MyTypeProvider : IMcpTypeProvider
     }
 }
 ```
-
-The built-in `SubjectAbstractionsAssemblyTypeProvider` returns all interfaces from assemblies marked with `[SubjectAbstractionsAssembly]`.
 
 ### IMcpToolProvider
 

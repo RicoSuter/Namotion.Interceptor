@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Dynamic;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -14,6 +15,19 @@ public class OpcUaTypeResolver
     public OpcUaTypeResolver(ILogger logger)
     {
         _logger = logger;
+    }
+
+    public virtual Attribute[] GetDynamicPropertyAttributes(ReferenceDescription reference, ISession session)
+    {
+        var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
+        return
+        [
+            new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
+            {
+                NodeIdentifier = reference.NodeId.Identifier.ToString(),
+                NodeNamespaceUri = namespaceUri
+            }
+        ];
     }
 
     public virtual async Task<Type?> TryGetTypeForNodeAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
@@ -45,23 +59,35 @@ public class OpcUaTypeResolver
                     ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
                     IncludeSubtypes = true,
                     NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object,
-                    ResultMask = (uint)BrowseResultMask.All
+                    ResultMask = (uint)(BrowseResultMask.BrowseName | BrowseResultMask.NodeClass)
                 }
             };
 
-            var response = await session.BrowseAsync(
-                null,
-                null,
-                0u,
-                browseDescriptions,
-                cancellationToken);
-
-            if (response.Results.Count > 0 && response.Results[0].References.Any(n => n.NodeClass == NodeClass.Variable))
+            // Browse only the first child: the [index] convention requires every collection/dictionary
+            // element to follow the pattern, so the first reference is enough to classify the parent.
+            var response = await session.BrowseAsync(null, null, 1u, browseDescriptions, cancellationToken);
+            if (response.Results.Count > 0 &&
+                response.Results[0].References.Count > 0 &&
+                response.Results[0].References[0].NodeClass == NodeClass.Object)
             {
-                return typeof(DynamicSubject);
+                var name = response.Results[0].References[0].BrowseName?.Name;
+                if (name is not null)
+                {
+                    var bracketStart = name.LastIndexOf('[');
+                    if (bracketStart >= 0 && name.EndsWith("]"))
+                    {
+                        var content = name.AsSpan(bracketStart + 1, name.Length - bracketStart - 2);
+                        if (int.TryParse(content, out _))
+                        {
+                            return typeof(DynamicSubject[]);
+                        }
+
+                        return typeof(IReadOnlyDictionary<string, DynamicSubject>);
+                    }
+                }
             }
 
-            return typeof(DynamicSubject[]);
+            return typeof(DynamicSubject);
         }
 
         try
@@ -83,7 +109,7 @@ public class OpcUaTypeResolver
                 var dataTypeId = response.Results[0].Value as NodeId;
                 if (dataTypeId != null)
                 {
-                    var builtIn = TypeInfo.GetBuiltInType(dataTypeId);
+                    var builtIn = await TypeInfo.GetBuiltInTypeAsync(dataTypeId, session.TypeTree, cancellationToken);
                     var elementType = TryMapBuiltInType(builtIn);
                     if (elementType is not null)
                     {
@@ -124,14 +150,21 @@ public class OpcUaTypeResolver
         BuiltInType.DateTime => typeof(DateTime),
         BuiltInType.Guid => typeof(Guid),
         BuiltInType.ByteString => typeof(byte[]),
+        BuiltInType.XmlElement => typeof(string),
         BuiltInType.NodeId => typeof(NodeId),
         BuiltInType.ExpandedNodeId => typeof(ExpandedNodeId),
         BuiltInType.StatusCode => typeof(StatusCode),
         BuiltInType.QualifiedName => typeof(QualifiedName),
         BuiltInType.LocalizedText => typeof(LocalizedText),
         BuiltInType.DiagnosticInfo => typeof(DiagnosticInfo),
+        BuiltInType.ExtensionObject => typeof(ExtensionObject),
         BuiltInType.DataValue => typeof(DataValue),
-        BuiltInType.Enumeration => typeof(int), // map enum to underlying Int32
+        BuiltInType.Enumeration => typeof(int),
+        BuiltInType.Number => typeof(double),
+        BuiltInType.Integer => typeof(long),
+        BuiltInType.UInteger => typeof(ulong),
+        BuiltInType.Variant => null,
+        BuiltInType.Null => null,
         _ => null
     };
 }

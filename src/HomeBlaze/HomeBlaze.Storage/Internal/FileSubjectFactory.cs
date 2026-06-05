@@ -91,9 +91,9 @@ internal sealed class FileSubjectFactory
                 return (IInterceptorSubject)subject;
             }
         }
-        catch
+        catch (Exception exception)
         {
-            // Not a configurable subject, fall through to JsonFile
+            _logger?.LogError(exception, "Failed to deserialize JSON subject from: {Path}", blob.FullPath);
         }
 
         // Create JsonFile for plain JSON

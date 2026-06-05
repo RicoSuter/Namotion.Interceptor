@@ -11,10 +11,10 @@ internal sealed class CollectionDiffBuilder
     // Reusable containers
     private readonly Dictionary<IInterceptorSubject, int> _oldIndexMap = new();
     private readonly Dictionary<IInterceptorSubject, int> _newIndexMap = new();
-    private readonly Dictionary<IInterceptorSubject, int> _oldCommonIndexMap = new();
-    private readonly List<IInterceptorSubject> _oldCommonOrder = [];
-    private readonly List<IInterceptorSubject> _newCommonOrder = [];
-    private readonly HashSet<object> _oldKeys = [];
+    private readonly Dictionary<IInterceptorSubject, int> _oldRetainedIndexMap = new();
+    private readonly List<IInterceptorSubject> _oldRetainedOrder = [];
+    private readonly List<IInterceptorSubject> _newRetainedOrder = [];
+    private readonly List<(object key, IInterceptorSubject item)> _retainedDictionaryItems = [];
 
     /// <summary>
     /// Builds collection change operations.
@@ -73,25 +73,25 @@ internal sealed class CollectionDiffBuilder
         }
 
         // Build common order lists to detect reordering
-        _oldCommonOrder.Clear();
-        _newCommonOrder.Clear();
+        _oldRetainedOrder.Clear();
+        _newRetainedOrder.Clear();
         for (var i = 0; i < oldItems.Count; i++)
         {
             if (_newIndexMap.ContainsKey(oldItems[i]))
-                _oldCommonOrder.Add(oldItems[i]);
+                _oldRetainedOrder.Add(oldItems[i]);
         }
         for (var i = 0; i < newItems.Count; i++)
         {
             if (_oldIndexMap.ContainsKey(newItems[i]))
-                _newCommonOrder.Add(newItems[i]);
+                _newRetainedOrder.Add(newItems[i]);
         }
 
         // Detect reordering and compute intermediate indices for moves
-        if (_oldCommonOrder.Count > 0 && !_oldCommonOrder.SequenceEqual(_newCommonOrder))
+        if (_oldRetainedOrder.Count > 0 && !_oldRetainedOrder.SequenceEqual(_newRetainedOrder))
         {
-            _oldCommonIndexMap.Clear();
-            for (var i = 0; i < _oldCommonOrder.Count; i++)
-                _oldCommonIndexMap[_oldCommonOrder[i]] = i;
+            _oldRetainedIndexMap.Clear();
+            for (var i = 0; i < _oldRetainedOrder.Count; i++)
+                _oldRetainedIndexMap[_oldRetainedOrder[i]] = i;
 
             // Build set of removed indices to compute index shifts for moves
             HashSet<int>? removedIndices = null;
@@ -107,10 +107,10 @@ internal sealed class CollectionDiffBuilder
                 }
             }
 
-            for (var i = 0; i < _newCommonOrder.Count; i++)
+            for (var i = 0; i < _newRetainedOrder.Count; i++)
             {
-                var item = _newCommonOrder[i];
-                var oldCommonIndex = _oldCommonIndexMap[item];
+                var item = _newRetainedOrder[i];
+                var oldCommonIndex = _oldRetainedIndexMap[item];
                 if (oldCommonIndex != i)
                 {
                     var originalOldIndex = _oldIndexMap[item];
@@ -146,10 +146,13 @@ internal sealed class CollectionDiffBuilder
     }
 
     /// <summary>
-    /// Builds dictionary change operations.
+    /// Builds dictionary change operations. Iterates <paramref name="oldDictionary"/> and
+    /// <paramref name="newDictionary"/> directly; non-subject entries are filtered inline so the
+    /// caller can pass any <see cref="IDictionary"/> (including passthrough of the user's value)
+    /// without a separate materialization step.
     /// </summary>
-    /// <param name="oldDictionary">The old dictionary.</param>
-    /// <param name="newDictionary">The new dictionary.</param>
+    /// <param name="oldDictionary">The old dictionary value, or null if none.</param>
+    /// <param name="newDictionary">The new dictionary value.</param>
     /// <param name="operations">Output: structural operations (Insert/Remove), or null if none.</param>
     /// <param name="newItemsToProcess">Output: items that are new and need full processing, or null if none.</param>
     /// <param name="removedKeys">Output: keys that were removed, or null if none.</param>
@@ -164,36 +167,37 @@ internal sealed class CollectionDiffBuilder
         newItemsToProcess = null;
         removedKeys = null;
 
-        _oldKeys.Clear();
+        // Track removed keys - start with all old subject-valued keys, remove ones that still exist
+        // with the same value below.
+        HashSet<object>? keysToRemove = null;
         if (oldDictionary is not null)
         {
-            foreach (var key in oldDictionary.Keys)
-                _oldKeys.Add(key);
+            foreach (DictionaryEntry entry in oldDictionary)
+            {
+                if (entry.Value is IInterceptorSubject)
+                {
+                    keysToRemove ??= [];
+                    keysToRemove.Add(entry.Key);
+                }
+            }
         }
-
-        // Track removed keys - start with all old keys, remove ones that still exist with same value
-        HashSet<object>? keysToRemove = _oldKeys.Count > 0 ? [.._oldKeys] : null;
 
         foreach (DictionaryEntry entry in newDictionary)
         {
+            if (entry.Value is not IInterceptorSubject newItem) continue;
             var key = entry.Key;
-            if (entry.Value is not IInterceptorSubject newItem)
-                continue;
 
-            if (_oldKeys.Contains(key))
+            if (oldDictionary is not null && oldDictionary.Contains(key) &&
+                oldDictionary[key] is IInterceptorSubject oldItem)
             {
-                // Key exists in both - check if VALUE changed (different object reference)
-                var oldValue = oldDictionary![key];
-                if (ReferenceEquals(oldValue, newItem))
+                if (ReferenceEquals(oldItem, newItem))
                 {
-                    // Same object - key is not removed, not a new item
                     keysToRemove?.Remove(key);
+                    _retainedDictionaryItems.Add((key, newItem));
                 }
                 else
                 {
                     // Different object at same key - treat as Remove + Insert
-                    // Key stays in keysToRemove (will generate Remove)
-                    // Add to newItemsToProcess (will generate Insert)
                     newItemsToProcess ??= [];
                     newItemsToProcess.Add((key, newItem));
                 }
@@ -220,9 +224,15 @@ internal sealed class CollectionDiffBuilder
         _newIndexMap.GetValueOrDefault(item, -1);
 
     /// <summary>
-    /// Gets items that exist in both old and new collections.
+    /// Gets items that exist in both old and new collections (retained by reference).
     /// </summary>
-    public IReadOnlyList<IInterceptorSubject> GetCommonItems() => _newCommonOrder;
+    public IReadOnlyList<IInterceptorSubject> GetRetainedItems() => _newRetainedOrder;
+
+    /// <summary>
+    /// Gets dictionary entries whose key and value (by reference) exist in both old and new.
+    /// Populated by <see cref="GetDictionaryChanges"/>.
+    /// </summary>
+    public IReadOnlyList<(object key, IInterceptorSubject item)> GetRetainedDictionaryItems() => _retainedDictionaryItems;
 
     /// <summary>
     /// Clears the builder for reuse. Call before returning to pool.
@@ -231,9 +241,9 @@ internal sealed class CollectionDiffBuilder
     {
         _oldIndexMap.Clear();
         _newIndexMap.Clear();
-        _oldCommonIndexMap.Clear();
-        _oldCommonOrder.Clear();
-        _newCommonOrder.Clear();
-        _oldKeys.Clear();
+        _oldRetainedIndexMap.Clear();
+        _oldRetainedOrder.Clear();
+        _newRetainedOrder.Clear();
+        _retainedDictionaryItems.Clear();
     }
 }

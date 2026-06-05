@@ -22,7 +22,7 @@ public class RegistryAttributeMigrationIntegrationTests
             .WithService<ILifecycleHandler>(
                 () => new MethodPropertyInitializer(),
                 handler => handler is MethodPropertyInitializer)
-            .WithService<ILifecycleHandler>(
+            .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
     }

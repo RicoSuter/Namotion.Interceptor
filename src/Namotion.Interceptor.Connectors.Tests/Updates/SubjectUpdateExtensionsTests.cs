@@ -80,16 +80,26 @@ public partial class SubjectUpdateExtensionsTests
     public async Task WhenApplyingCollectionProperty_ThenItWorks()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var source = new Person(context)
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+
+        // Use a fixed timestamp so the verified snapshot is deterministic. With wall-clock
+        // timestamps, two property writes can land in the same clock tick, which collapses
+        // Verify's DateTimeOffset_N numbering and makes the snapshot intermittently fail.
+        var timestamp = new DateTimeOffset(2024, 1, 15, 10, 30, 0, TimeSpan.Zero);
+
+        Person source;
+        using (SubjectChangeContext.WithChangedTimestamp(timestamp))
         {
-            FirstName = "Parent",
-            Children =
-            [
-                new Person(context) { FirstName = "Child1" },
-                new Person(context) { FirstName = "Child2" }
-            ]
-        };
+            source = new Person(context)
+            {
+                FirstName = "Parent",
+                Children =
+                [
+                    new Person(context) { FirstName = "Child1" },
+                    new Person(context) { FirstName = "Child2" }
+                ]
+            };
+        }
         var target = new Person(context);
 
         // Act

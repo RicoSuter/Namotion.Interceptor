@@ -171,26 +171,31 @@ public partial class FluentStorageContainer :
         var blobs = await Client.ListAsync(recurse: true, cancellationToken: cancellationToken);
 
         _pathRegistry.Clear();
-        var children = new Dictionary<string, IInterceptorSubject>();
-        var context = ((IInterceptorSubject)this).Context;
 
-        foreach (var blob in blobs.Where(b => !b.IsFolder))
+        var children = new Dictionary<string, IInterceptorSubject>();
+        foreach (var blob in blobs)
         {
             // Filter out hidden files/folders (e.g. .DS_Store, .idea)
-            var fileName = Path.GetFileName(blob.FullPath);
-            if (fileName.StartsWith('.') || blob.FullPath.Contains("/."))
+            var name = Path.GetFileName(blob.FullPath.TrimEnd('/'));
+            if (name.StartsWith('.') || blob.FullPath.Contains("/."))
             {
                 continue;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            if (blob.IsFolder)
+            {
+                _hierarchyManager.PlaceInHierarchy(blob.FullPath, null, children, this);
+                continue;
+            }
+
             try
             {
                 var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, cancellationToken);
                 if (subject != null)
                 {
-                    _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, context, this);
+                    _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, this);
                     _pathRegistry.Register(subject, blob.FullPath);
 
                     if (Path.GetExtension(blob.FullPath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
@@ -366,11 +371,10 @@ public partial class FluentStorageContainer :
     // TODO: Consider adding synchronization (lock) for thread safety if AddSubjectAsync/DeleteSubjectAsync can be called concurrently
     private void AddToHierarchy(string path, IInterceptorSubject subject)
     {
-        var context = ((IInterceptorSubject)this).Context;
         var children = new Dictionary<string, IInterceptorSubject>(Children);
 
         _pathRegistry.Register(subject, path);
-        _hierarchyManager.PlaceInHierarchy(path, subject, children, context, this);
+        _hierarchyManager.PlaceInHierarchy(path, subject, children, this);
 
         Children = children;
     }

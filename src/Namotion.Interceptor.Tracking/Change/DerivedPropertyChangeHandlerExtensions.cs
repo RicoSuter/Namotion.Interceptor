@@ -32,6 +32,31 @@ public static class DerivedPropertyChangeHandlerExtensions
     }
 
     /// <summary>
+    /// Recalculates a derived property by re-evaluating its getter and firing change
+    /// notifications if the value changed. Use this when the getter depends on external
+    /// (non-intercepted) data and that data has changed.
+    /// No-op if the property is not a derived property or is not attached to a context.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void RecalculateDerivedProperty(this PropertyReference property)
+    {
+        var data = property.TryGetDerivedPropertyData();
+        if (data is null || !Volatile.Read(ref data.IsDerived))
+        {
+            return;
+        }
+
+        // Pass storage timestamp as both storage and raw. For positive and no scope this is a
+        // positive value that seeds the dependent context's cache directly. For null scope it
+        // is 0 (the cache's uninitialized sentinel), which makes the dependent's terminal
+        // write lazy-resolve once; the resolved value then threads through any further
+        // cascade dependents via WriteTimestampRaw, so every change event from this recalc
+        // still shares a single publishing time (verified by mock-now tests in this file).
+        var storageTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
+        DerivedPropertyChangeHandler.RecalculateDerivedProperty(ref property, storageTimestamp, storageTimestamp);
+    }
+
+    /// <summary>
     /// Gets the consolidated tracking data for a property, creating it if needed.
     /// A single dictionary lookup provides access to UsedByProperties, RequiredProperties, and LastKnownValue.
     /// </summary>

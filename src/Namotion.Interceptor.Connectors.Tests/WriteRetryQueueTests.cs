@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -215,7 +216,7 @@ public class WriteRetryQueueTests
         var flush1 = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
         var flush2 = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
-        await Task.Delay(100); // Let them start
+        await AsyncTestHelpers.WaitUntilAsync(() => callCount >= 1);
 
         // Assert - only one should be running
         Assert.Equal(1, callCount);

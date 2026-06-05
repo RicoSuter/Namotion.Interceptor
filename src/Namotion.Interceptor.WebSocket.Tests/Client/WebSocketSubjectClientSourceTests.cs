@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;

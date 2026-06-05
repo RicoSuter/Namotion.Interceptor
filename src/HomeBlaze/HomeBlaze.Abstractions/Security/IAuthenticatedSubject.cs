@@ -13,18 +13,18 @@ public interface IAuthenticatedSubject
     /// <summary>
     /// Whether the subject is currently authenticated.
     /// </summary>
-    [State]
+    [State(Position = 870)]
     bool IsAuthenticated { get; }
 
     /// <summary>
     /// The authenticated user name or identifier.
     /// </summary>
-    [State]
+    [State(Position = 871)]
     string? AuthenticatedUser { get; }
 
     /// <summary>
     /// When authentication occurred.
     /// </summary>
-    [State]
+    [State(Position = 872)]
     DateTimeOffset? AuthenticatedAt { get; }
 }

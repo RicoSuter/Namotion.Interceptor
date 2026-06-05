@@ -13,6 +13,6 @@ public interface IButtonDevice
     /// <summary>
     /// The current button state.
     /// </summary>
-    [State]
+    [State(Position = 150)]
     ButtonState? ButtonState { get; }
 }

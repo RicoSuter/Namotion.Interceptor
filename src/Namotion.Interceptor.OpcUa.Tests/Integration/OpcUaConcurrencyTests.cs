@@ -60,7 +60,8 @@ public class OpcUaConcurrencyTests
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);
-            Assert.True(client.Diagnostics!.IsConnected);
+            Assert.NotNull(client.Source);
+            Assert.True(client.Source.Diagnostics.IsConnected);
             logger.Log("Initial connection established");
 
             // Background updates
@@ -94,7 +95,7 @@ public class OpcUaConcurrencyTests
             logger.Log("Stopping server...");
             await server.StopAsync();
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Diagnostics.IsConnected,
+                () => !client.Source.Diagnostics.IsConnected,
                 timeout: TimeSpan.FromSeconds(90),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
@@ -147,10 +148,10 @@ public class OpcUaConcurrencyTests
         {
             (server, client, port, logger) = await StartServerAndClientAsync();
 
-            Assert.NotNull(server.Diagnostics);
-            Assert.NotNull(client.Diagnostics);
+            Assert.NotNull(server.Server);
+            Assert.NotNull(client.Source);
 
-            logger.Log($"Server sessions: {server.Diagnostics.ActiveSessionCount}, Client connected: {client.Diagnostics.IsConnected}");
+            logger.Log($"Server sessions: {server.Server.Diagnostics.ActiveSessionCount}, Client connected: {client.Source.Diagnostics.IsConnected}");
 
             // === Test 1: Diagnostics access during disposal ===
             logger.Log("=== Test 1: Diagnostics during disposal ===");
@@ -163,10 +164,10 @@ public class OpcUaConcurrencyTests
                 {
                     try
                     {
-                        _ = server.Diagnostics.ActiveSessionCount;
-                        _ = server.Diagnostics.IsRunning;
-                        _ = client.Diagnostics.IsConnected;
-                        _ = client.Diagnostics.MonitoredItemCount;
+                        _ = server.Server.Diagnostics.ActiveSessionCount;
+                        _ = server.Server.Diagnostics.IsRunning;
+                        _ = client.Source.Diagnostics.IsConnected;
+                        _ = client.Source.Diagnostics.MonitoredItemCount;
                     }
                     catch (Exception ex)
                     {

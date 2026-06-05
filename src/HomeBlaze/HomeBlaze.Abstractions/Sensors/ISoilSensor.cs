@@ -13,6 +13,6 @@ public interface ISoilSensor
     /// <summary>
     /// The current soil moisture level (0..1).
     /// </summary>
-    [State(Unit = StateUnit.Percent)]
+    [State(Unit = StateUnit.Percent, Position = 260)]
     decimal? SoilMoisture { get; }
 }

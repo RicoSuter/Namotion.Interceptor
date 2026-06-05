@@ -109,8 +109,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Children = await _parser.ParseAsync(Content, this, Children, cancellationToken);
     }
 
-    [Query(Title = "Read Content", Description = "Returns the markdown file content", Icon = "Description")]
-    public string? ReadContent() => Content;
+    [Query(Title = "Read Raw Content", Description = "Returns the markdown file source, including unevaluated {{ path }} expressions", Icon = "Description")]
+    public string? ReadRawContent() => Content;
+
+    [Query(Title = "Read Evaluated Content", Description = "Returns the markdown content with {{ path }} expressions evaluated against the current object graph", Icon = "Preview")]
+    public string? ReadEvaluatedContent() => _parser.RenderContent(Content, this);
 
     public Task OnFileChangedAsync(CancellationToken cancellationToken)
     {

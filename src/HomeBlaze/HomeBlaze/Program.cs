@@ -2,8 +2,9 @@ using HomeBlaze.AI;
 using HomeBlaze.Components;
 using HomeBlaze.Host;
 using HomeBlaze.Samples;
-using HomeBlaze.Servers.OpcUa;
-using HomeBlaze.Servers.OpcUa.Blazor;
+using HomeBlaze.OpcUa;
+using HomeBlaze.OpcUa.Blazor;
+using HomeBlaze.Plugins;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor;
@@ -14,6 +15,10 @@ using Namotion.Devices.MyStrom;
 using Namotion.Devices.MyStrom.HomeBlaze;
 using Namotion.Devices.Shelly;
 using Namotion.Devices.Shelly.HomeBlaze;
+using Namotion.Devices.Wallbox;
+using Namotion.Devices.Wallbox.HomeBlaze;
+using Namotion.Devices.Ecowitt;
+using Namotion.Devices.Ecowitt.HomeBlaze;
 using Namotion.Devices.Philips.Hue;
 using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
@@ -24,14 +29,20 @@ var builder = WebApplication.CreateBuilder(args);
 // This registers the singleton IInterceptorSubjectContext with HostedServiceHandler
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
+
+var pluginConfigPath = builder.Configuration.GetValue<string>("PluginConfigurationPath")
+    ?? Path.Combine(AppContext.BaseDirectory, "Data", "Plugins.json");
+
+builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
 
 // Optionally add the MCP subject server (default: false, enabled in Development)
-if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);
+if (mcpEnabled)
 {
     builder.Services.AddMcpServer()
         .WithHttpTransport(options => options.Stateless = true)
-        .WithHomeBlazeMcpTools(isReadOnly: true);
+        .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
 }
 
 // Add services to the container.
@@ -52,8 +63,8 @@ typeProvider
     .AddAssembly(typeof(MarkdownFilePageComponent).Assembly)   // HomeBlaze.Storage.Blazor
     .AddAssembly(typeof(Widget).Assembly)                      // HomeBlaze.Components
     .AddAssembly(typeof(Motor).Assembly)                       // HomeBlaze.Samples
-    .AddAssembly(typeof(OpcUaServer).Assembly)                 // HomeBlaze.Servers.OpcUa
-    .AddAssembly(typeof(OpcUaServerEditComponent).Assembly)    // HomeBlaze.Servers.OpcUa.Blazor
+    .AddAssembly(typeof(OpcUaServer).Assembly)                 // HomeBlaze.OpcUa
+    .AddAssembly(typeof(OpcUaServerEditComponent).Assembly)    // HomeBlaze.OpcUa.Blazor
     .AddAssembly(typeof(GpioSubject).Assembly)
     .AddAssembly(typeof(GpioSubjectEditComponent).Assembly)
     .AddAssembly(typeof(HueBridge).Assembly)
@@ -61,7 +72,28 @@ typeProvider
     .AddAssembly(typeof(MyStromSwitch).Assembly)
     .AddAssembly(typeof(MyStromSwitchWidget).Assembly)
     .AddAssembly(typeof(ShellyDevice).Assembly)
-    .AddAssembly(typeof(ShellyDeviceWidget).Assembly);
+    .AddAssembly(typeof(ShellyDeviceWidget).Assembly)
+    .AddAssembly(typeof(WallboxCharger).Assembly)
+    .AddAssembly(typeof(WallboxChargerWidget).Assembly)
+    .AddAssembly(typeof(EcowittGateway).Assembly)
+    .AddAssembly(typeof(EcowittGatewayWidget).Assembly);
+
+// Register HomeBlaze.Plugins subject types
+typeProvider.AddAssembly(typeof(PluginManager).Assembly);
+
+// Load runtime plugins
+var pluginLoader = app.Services.GetRequiredService<PluginLoader>();
+var pluginResult = await pluginLoader.LoadPluginsAsync(CancellationToken.None);
+if (pluginResult != null)
+{
+    foreach (var plugin in pluginResult.LoadedPlugins)
+    {
+        foreach (var assembly in plugin.Assemblies)
+        {
+            typeProvider.AddAssembly(assembly);
+        }
+    }
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
@@ -70,11 +102,15 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
 app.UseAntiforgery();
 
 // Map MCP server endpoint if enabled
-if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+if (mcpEnabled)
 {
     app.MapMcp("/mcp");
 }
