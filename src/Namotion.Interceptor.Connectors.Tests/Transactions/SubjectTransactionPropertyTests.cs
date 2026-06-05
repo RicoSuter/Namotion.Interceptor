@@ -135,6 +135,39 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
+    public async Task CommitAsync_PreservesChangeContext_SourceAndTimestamps()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+        var mockSource = Mock.Of<ISubjectSource>();
+        var changedTime = DateTime.UtcNow.AddMinutes(-5);
+        var receivedTime = DateTime.UtcNow;
+
+        var notifications = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(Scheduler.Immediate)
+            .Subscribe(change => notifications.Add(change));
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            using (SubjectChangeContext.WithState(mockSource, changedTime, receivedTime))
+            {
+                person.FirstName = "John";
+            }
+
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert
+        var change = notifications.Single(n => n.Property.Metadata.Name == nameof(Person.FirstName));
+        Assert.Same(mockSource, change.Source);
+        Assert.Equal(changedTime, change.ChangedTimestamp);
+        Assert.Equal(receivedTime, change.ReceivedTimestamp);
+        Assert.Equal(changedTime, person.GetPropertyReference(nameof(Person.FirstName)).TryGetWriteTimestamp());
+    }
+
+    [Fact]
     public async Task ReadProperty_WhenTransactionActive_ReturnsPendingValue()
     {
         // Arrange
