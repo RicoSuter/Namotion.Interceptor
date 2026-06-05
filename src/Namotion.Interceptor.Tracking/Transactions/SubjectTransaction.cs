@@ -512,7 +512,7 @@ public sealed class SubjectTransaction : IDisposable
         List<SubjectPropertyChange> allSuccessfulChanges,
         List<SubjectPropertyChange> allFailedChanges,
         List<Exception> allErrors,
-        List<SubjectPropertyChange> applied,
+        IReadOnlyList<SubjectPropertyChange> applied,
         CancellationToken cancellationToken)
     {
         // Revert successful local applies

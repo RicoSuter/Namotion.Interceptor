@@ -12,7 +12,7 @@ internal static class SubjectPropertyChangeExtensions
     /// </summary>
     /// <param name="changes">The changes to create rollbacks for.</param>
     /// <returns>Rollback changes in reverse order.</returns>
-    public static IEnumerable<SubjectPropertyChange> ToRollbackChanges(
+    public static List<SubjectPropertyChange> ToRollbackChanges(
         this IEnumerable<SubjectPropertyChange> changes) =>
         changes.Reverse().Select(c => SubjectPropertyChange.Create(
             c.Property,
@@ -20,7 +20,7 @@ internal static class SubjectPropertyChangeExtensions
             changedTimestamp: c.ChangedTimestamp,
             receivedTimestamp: c.ReceivedTimestamp,
             oldValue: c.GetNewValue<object?>(),
-            newValue: c.GetOldValue<object?>()));
+            newValue: c.GetOldValue<object?>())).ToList();
 
     /// <summary>
     /// Applies a single property change to the in-process model.
@@ -48,33 +48,49 @@ internal static class SubjectPropertyChangeExtensions
     }
 
     /// <summary>
-    /// Applies multiple property changes, collecting successes and failures.
+    /// Applies multiple property changes, collecting successes and failures. On full success the input
+    /// is returned as the successful set (no copy); the failure/error lists are allocated only if a
+    /// change actually fails.
     /// </summary>
     /// <param name="changes">The changes to apply.</param>
-    /// <returns>Lists of successful changes, failed changes, and errors.</returns>
-    public static (List<SubjectPropertyChange> Successful, List<SubjectPropertyChange> Failed, List<Exception> Errors)
-        ApplyAllChanges(this IEnumerable<SubjectPropertyChange> changes)
+    /// <returns>The successful changes, failed changes, and errors.</returns>
+    public static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
+        ApplyAllChanges(this IReadOnlyList<SubjectPropertyChange> changes)
     {
-        var successful = new List<SubjectPropertyChange>();
-        var failed = new List<SubjectPropertyChange>();
-        var errors = new List<Exception>();
+        List<SubjectPropertyChange>? successful = null;
+        List<SubjectPropertyChange>? failed = null;
+        List<Exception>? errors = null;
 
-        foreach (var change in changes)
+        for (var i = 0; i < changes.Count; i++)
         {
+            var change = changes[i];
             if (change.TryApplyChange(out var error))
             {
-                successful.Add(change);
+                successful?.Add(change);
             }
             else
             {
+                if (failed is null)
+                {
+                    // First failure: materialize the successes seen so far.
+                    successful = new List<SubjectPropertyChange>(i);
+                    for (var j = 0; j < i; j++)
+                    {
+                        successful.Add(changes[j]);
+                    }
+                    failed = [];
+                }
+
                 failed.Add(change);
                 if (error != null)
                 {
-                    errors.Add(error);
+                    (errors ??= []).Add(error);
                 }
             }
         }
 
-        return (successful, failed, errors);
+        return failed is null
+            ? (changes, [], [])
+            : (successful!, failed, errors ?? []);
     }
 }

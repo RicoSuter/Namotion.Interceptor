@@ -389,7 +389,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     /// Attempts to revert in-process model changes by applying rollback changes.
     /// </summary>
     private static void TryRevertAppliedChanges(
-        List<SubjectPropertyChange> successfulChanges,
+        IReadOnlyList<SubjectPropertyChange> successfulChanges,
         List<SubjectPropertyChange> failedChanges,
         List<Exception> errors)
     {
