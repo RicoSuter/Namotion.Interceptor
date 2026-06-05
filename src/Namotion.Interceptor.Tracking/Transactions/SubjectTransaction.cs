@@ -471,7 +471,9 @@ public sealed class SubjectTransaction : IDisposable
                 allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken).ConfigureAwait(false);
         }
 
-        return TryBuildFailureException(allSuccessfulChanges, allFailedChanges, allErrors);
+        return allFailedChanges.Count == 0
+            ? null
+            : CreateFailureException(allSuccessfulChanges, allFailedChanges, allErrors);
     }
 
     private async ValueTask ApplyLocalChangesAsync(ITransactionWriter? writeHandler,
@@ -521,16 +523,6 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         allSuccessfulChanges.Clear();
-    }
-
-    private SubjectTransactionException? TryBuildFailureException(
-        List<SubjectPropertyChange> successful,
-        List<SubjectPropertyChange> failed,
-        List<Exception> errors)
-    {
-        if (failed.Count == 0) return null;
-
-        return CreateFailureException(successful, failed, errors);
     }
 
     private SubjectTransactionException CreateFailureException(
