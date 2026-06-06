@@ -93,8 +93,8 @@ internal class SubscriptionManager : IAsyncDisposable
         _shuttingDown = false;
 
         var itemCount = monitoredItems.Count;
-        var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
-        for (var i = 0; i < itemCount; i += maximumItemsPerSubscription)
+        var maxItemsPerSubscription = _configuration.MaxItemsPerSubscription;
+        for (var i = 0; i < itemCount; i += maxItemsPerSubscription)
         {
             var subscription = new Subscription(session.DefaultSubscription)
             {
@@ -105,7 +105,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
                 LifetimeCount = _configuration.SubscriptionLifetimeCount,
                 Priority = _configuration.SubscriptionPriority,
-                MaxNotificationsPerPublish = _configuration.SubscriptionMaximumNotificationsPerPublish,
+                MaxNotificationsPerPublish = _configuration.SubscriptionMaxNotificationsPerPublish,
                 RepublishAfterTransfer = true, // Enable SDK's automatic republish of missed messages after transfer
                 SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
             };
@@ -118,7 +118,7 @@ internal class SubscriptionManager : IAsyncDisposable
             subscription.FastDataChangeCallback += OnFastDataChange;
             await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
 
-            var batchEnd = Math.Min(i + maximumItemsPerSubscription, itemCount);
+            var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
             for (var j = i; j < batchEnd; j++)
             {
                 var item = monitoredItems[j];
@@ -260,7 +260,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
                 _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
 
-                var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
+                var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
 
                 // Check if we should fall back to polling for this item
                 if (_configuration.EnablePollingFallback &&
@@ -366,7 +366,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
         foreach (var item in subscription.MonitoredItems)
         {
-            if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
+            if (item is { Handle: RegisteredSubjectProperty property, Status.Created: true })
             {
                 var requestedInterval = GetRequestedSamplingInterval(property);
                 var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
@@ -413,7 +413,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 var disposalTimeout = _configuration.SessionDisposalTimeout;
                 try
                 {
-                    await session.RemoveSubscriptionsAsync(subscriptions, default)
+                    await session.RemoveSubscriptionsAsync(subscriptions, CancellationToken.None)
                         .WaitAsync(disposalTimeout).ConfigureAwait(false);
                 }
                 catch (Exception ex)

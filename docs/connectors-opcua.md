@@ -13,6 +13,7 @@ The `Namotion.Interceptor.OpcUa` package provides integration between Namotion.I
 - Attribute-based mapping for precise control
 - Subscription-based real-time updates
 - Arrays, nested objects, and collections support
+- Robust initial load: transient browse failures trigger a clean rollback and retry rather than leaving partial state
 
 ## Quick Start
 

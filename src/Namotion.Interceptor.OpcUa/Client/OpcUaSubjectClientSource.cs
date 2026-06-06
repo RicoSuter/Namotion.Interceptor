@@ -14,8 +14,6 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjectClientSource, IFaultInjectable, IAsyncDisposable
 {
-    private const int DefaultChunkSize = 512;
-
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
@@ -122,6 +120,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                var loadStopwatch = Stopwatch.StartNew();
+
                 var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
                 if (rootNode is not null)
                 {
@@ -139,6 +139,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 {
                     _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
                 }
+
+                _logger.LogInformation("OPC UA subject loading and subscription setup completed in {ElapsedMs}ms.", loadStopwatch.ElapsedMilliseconds);
             }
             finally
             {
@@ -199,43 +201,36 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
 
         var itemCount = ownedProperties.Count;
-        var batchSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
-        batchSize = batchSize is 0 ? int.MaxValue : batchSize;
+        var readValues = new ReadValueIdCollection(itemCount);
+        for (var i = 0; i < itemCount; i++)
+        {
+            readValues.Add(new ReadValueId
+            {
+                NodeId = ownedProperties[i].NodeId,
+                AttributeId = Opc.Ua.Attributes.Value
+            });
+        }
+
+        // ReadNodesAsync pads short responses to the requested length, so positional
+        // alignment between allResults[i] and ownedProperties[i] is guaranteed.
+        var allResults = await session.ReadNodesAsync(readValues, TimestampsToReturn.Source, _logger, cancellationToken).ConfigureAwait(false);
 
         var result = new Dictionary<RegisteredSubjectProperty, DataValue>(itemCount);
-        for (var offset = 0; offset < itemCount; offset += batchSize)
+        for (var i = 0; i < itemCount; i++)
         {
-            var take = Math.Min(batchSize, itemCount - offset);
-            var readValues = new ReadValueIdCollection(take);
-
-            for (var i = 0; i < take; i++)
+            if (StatusCode.IsGood(allResults[i].StatusCode))
             {
-                readValues.Add(new ReadValueId
-                {
-                    NodeId = ownedProperties[offset + i].NodeId,
-                    AttributeId = Opc.Ua.Attributes.Value
-                });
-            }
-
-            var readResponse = await session.ReadAsync(
-                requestHeader: null,
-                maxAge: 0,
-                timestampsToReturn: TimestampsToReturn.Source,
-                readValues,
-                cancellationToken).ConfigureAwait(false);
-
-            var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
-            for (var i = 0; i < resultCount; i++)
-            {
-                if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
-                {
-                    var dataValue = readResponse.Results[i];
-                    result[ownedProperties[offset + i].Property] = dataValue;
-                }
+                result[ownedProperties[i].Property] = allResults[i];
             }
         }
 
-        _logger.LogInformation("Successfully read {Count} OPC UA nodes from server.", itemCount);
+        // Best-effort: any non-good status (e.g. a not-ready BadWaitingForInitialData) is
+        // left unset for the subscription to backfill. A single bad node must not abort
+        // the load or trigger a reconnect.
+        var successCount = result.Count;
+        _logger.LogInformation(
+            "Read {Total} OPC UA nodes from server ({Successful} good, {Skipped} skipped with non-good status).",
+            itemCount, successCount, itemCount - successCount);
         return () =>
         {
             foreach (var (property, dataValue) in result)
@@ -244,7 +239,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
             }
 
-            _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
+            _logger.LogInformation("Updated {Count} properties with OPC UA node values.", successCount);
         };
     }
 
@@ -531,7 +526,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             for (var i = 0; i < rootPath.Length; i++)
             {
                 var references = await BrowseNodeAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
-                var match = references.FirstOrDefault(reference => reference.BrowseName.Name == rootPath[i]);
+                var match = FindChildByBrowseName(references, rootPath[i]);
                 if (match is null)
                 {
                     return null;
@@ -580,8 +575,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _logger.LogError(ex, "OPC UA CurrentSessionChanged event handler threw an exception.");
         }
     }
-
-    internal static bool IsTransientWriteError(StatusCode statusCode) => OutboundWriter.IsTransientWriteError(statusCode);
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
@@ -662,20 +655,20 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         NodeId nodeId,
         CancellationToken cancellationToken)
     {
-        const uint nodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
-
-        var (_, _, nodeProperties, _) = await session.BrowseAsync(
-            requestHeader: null,
-            view: null,
+        var results = await session.BrowseNodesAsync(
             [nodeId],
-            maxResultsToReturn: 0u,
-            BrowseDirection.Forward,
-            ReferenceTypeIds.HierarchicalReferences,
-            includeSubtypes: true,
-            nodeClassMask,
+            _configuration.MaxReferencesPerNode,
+            _configuration.MaxBrowseContinuations,
+            _logger,
             cancellationToken).ConfigureAwait(false);
 
-        return nodeProperties[0];
+        return results.TryGetValue(nodeId, out var refs) ? refs : new ReferenceDescriptionCollection();
+    }
+
+    internal static ReferenceDescription? FindChildByBrowseName(ReferenceDescriptionCollection references, string browseName)
+    {
+        // These raw references bypass DistinctByResolvedNodeId, so BrowseName may be null.
+        return references.FirstOrDefault(reference => reference.BrowseName?.Name == browseName);
     }
 
     private void Reset()
@@ -686,16 +679,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
-        _structureLock.Wait();
-        try
-        {
-            _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
-            _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
-        }
-        finally
-        {
-            _structureLock.Release();
-        }
+        _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
+        _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
     }
 
     public async ValueTask DisposeAsync()
@@ -705,11 +690,19 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return; // Already disposed
         }
 
-        var sessionManager = _sessionManager;
-        if (sessionManager is not null)
+        await _structureLock.WaitAsync().ConfigureAwait(false);
+        try
         {
-            await sessionManager.DisposeAsync().ConfigureAwait(false);
-            _sessionManager = null;
+            var sessionManager = _sessionManager;
+            if (sessionManager is not null)
+            {
+                await sessionManager.DisposeAsync().ConfigureAwait(false);
+                _sessionManager = null;
+            }
+        }
+        finally
+        {
+            _structureLock.Release();
         }
 
         // Clean up property data to prevent memory leaks

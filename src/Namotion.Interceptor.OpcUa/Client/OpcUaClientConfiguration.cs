@@ -43,7 +43,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets the maximum number of monitored items per subscription. Default is 1000.
     /// </summary>
-    public int MaximumItemsPerSubscription { get; set; } = 1000;
+    public int MaxItemsPerSubscription { get; set; } = 1000;
 
     /// <summary>
     /// Gets the maximum number of write operations to queue for retry when disconnected. Default is 1000.
@@ -108,7 +108,31 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
-    public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Gets or sets the safety bound on BrowseNext paging rounds per batched browse
+    /// request (default: 100). Guards against misbehaving servers that return a fresh
+    /// continuation point forever and never terminate paging.
+    /// </summary>
+    /// <remarks>
+    /// This is a per-batch round count, not a per-NodeId page count: with a multi-node
+    /// batch the loop aborts when the slowest-paging NodeId is still going after this
+    /// many rounds, even if no individual NodeId reached its share. For a single-NodeId
+    /// batch the effective per-node reference cap is
+    /// <c>MaxBrowseContinuations * MaxReferencesPerNode</c>; for larger batches the
+    /// effective cap is lower since all paged NodeIds share the round budget. Raise this
+    /// if loads involve deeply paged nodes across many siblings.
+    /// </remarks>
+    public int MaxBrowseContinuations { get; set; } = 100;
+
+    /// <summary>
+    /// Gets or sets the safety bound on attribute-traversal levels when loading the subject
+    /// tree (default: 100). Secondary defense against pathological dynamic-attribute cycles
+    /// under permissive <see cref="ShouldAddDynamicAttribute"/> predicates; the primary
+    /// defense is per-pair deduplication inside the loader.
+    /// </summary>
+    public int MaxAttributeTraversals { get; set; } = 100;
 
     /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute.
@@ -183,7 +207,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the maximum notifications per publish that the client requests (default: 0 = server default).
     /// </summary>
-    public uint SubscriptionMaximumNotificationsPerPublish { get; set; } = 0;
+    public uint SubscriptionMaxNotificationsPerPublish { get; set; } = 0;
 
     /// <summary>
     /// Gets or sets whether to process subscription messages sequentially (in order).
@@ -205,7 +229,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the maximum references per node to read per browse request. 0 uses server default.
     /// </summary>
-    public uint MaximumReferencesPerNode { get; set; } = 0;
+    public uint MaxReferencesPerNode { get; set; } = 0;
 
     /// <summary>
     /// Gets or sets whether to enable automatic polling fallback when subscriptions are not supported.
@@ -451,11 +475,11 @@ public class OpcUaClientConfiguration
                 nameof(SubscriptionHealthCheckInterval));
         }
 
-        if (MaximumItemsPerSubscription <= 0)
+        if (MaxItemsPerSubscription <= 0)
         {
             throw new ArgumentException(
-                $"MaximumItemsPerSubscription must be positive, got: {MaximumItemsPerSubscription}",
-                nameof(MaximumItemsPerSubscription));
+                $"MaxItemsPerSubscription must be positive, got: {MaxItemsPerSubscription}",
+                nameof(MaxItemsPerSubscription));
         }
 
         if (EnablePollingFallback)
@@ -529,6 +553,20 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"ReadAfterWriteBuffer must be non-negative, got: {ReadAfterWriteBuffer}",
                 nameof(ReadAfterWriteBuffer));
+        }
+
+        if (MaxBrowseContinuations <= 0)
+        {
+            throw new ArgumentException(
+                $"MaxBrowseContinuations must be positive, got: {MaxBrowseContinuations}",
+                nameof(MaxBrowseContinuations));
+        }
+
+        if (MaxAttributeTraversals <= 0)
+        {
+            throw new ArgumentException(
+                $"MaxAttributeTraversals must be positive, got: {MaxAttributeTraversals}",
+                nameof(MaxAttributeTraversals));
         }
     }
 }
