@@ -130,6 +130,33 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
+    internal bool RemoveFallbackContextDirect(IInterceptorSubjectContext context)
+    {
+        var contextImpl = (InterceptorSubjectContext)context;
+        lock (_lock)
+        {
+            if (_fallbackContexts.Remove(contextImpl))
+            {
+                lock (UsedByContextsLock) { contextImpl._usedByContexts.Remove(this); }
+                OnContextChanged();
+                return true;
+            }
+
+            return false;
+        }
+    }
+
+    public IReadOnlyCollection<IInterceptorSubjectContext> GetFallbackContexts()
+    {
+        lock (_lock)
+        {
+            if (_fallbackContexts.Count == 0)
+                return [];
+
+            return _fallbackContexts.ToArray<IInterceptorSubjectContext>();
+        }
+    }
+
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
     {
         lock (_lock)

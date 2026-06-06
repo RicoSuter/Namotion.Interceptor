@@ -58,6 +58,7 @@ namespace Namotion.Interceptor
         object? ExecuteInterceptedInvoke(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod);
         TProperty ExecuteInterceptedRead<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext context, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue);
         void ExecuteInterceptedWrite<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue);
+        System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubjectContext> GetFallbackContexts();
         System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>();
         bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context);
         bool TryAddService<TService>(System.Func<TService> factory, System.Func<TService, bool> exists);
@@ -75,6 +76,7 @@ namespace Namotion.Interceptor
         public object? ExecuteInterceptedInvoke(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod) { }
         public TProperty ExecuteInterceptedRead<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext context, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         public void ExecuteInterceptedWrite<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
+        public System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubjectContext> GetFallbackContexts() { }
         public System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>() { }
         protected bool HasFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public virtual bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
