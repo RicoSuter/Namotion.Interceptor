@@ -22,11 +22,11 @@ graph LR
     CQP --> B[Shared Buffer]
     B --> |cursor A| IM[InMemoryHistorySink<br/>~1s flush]
     B --> |cursor B| SQ[SqliteHistorySink<br/>~10s flush]
-    B --> |cursor C| PG[PostgreSqlSink<br/>~10s flush]
+    B --> |cursor C| TS[TimescaleDbHistorySink<br/>~10s flush]
     
     IM --> R[IHistoryReader]
     SQ --> R
-    PG --> R
+    TS --> R
     R --> MCP[MCP Tools]
     R --> UI[Dashboard UI]
 ```
@@ -39,6 +39,7 @@ graph LR
 | `HistorySinkBase` | Abstract base class for sinks. Each sink is an `[InterceptorSubject]` — a subject in the graph |
 | `InMemoryHistorySink` | Fast recent lookups (minutes) and comprehensive testing |
 | `SqliteHistorySink` | Long-term local storage with partitioned databases |
+| `TimescaleDbHistorySink` | Industrial-scale storage via TimescaleDB hypertables |
 | `HistoryMcpToolProvider` | MCP tools for AI agents to query history |
 
 ### Package Structure
@@ -49,12 +50,12 @@ graph BT
     HIST[HomeBlaze.History<br/>HistoryService, InMemoryHistorySink,<br/>HistorySinkBase]
     AI[HomeBlaze.AI<br/>MCP history tools]
     SQL[HomeBlaze.History.Sqlite<br/>SqliteHistorySink]
-    PG[HomeBlaze.History.PostgreSql<br/>planned]
+    TS[HomeBlaze.History.TimescaleDb<br/>TimescaleDbHistorySink]
 
     HIST --> ABS
     AI --> ABS
     SQL --> HIST
-    PG --> HIST
+    TS --> HIST
 ```
 
 `HomeBlaze.History` and `HomeBlaze.AI` are independent peers — both depend on `HomeBlaze.History.Abstractions` but not on each other.
@@ -130,7 +131,7 @@ The `HistoryService` records:
 
 ### Self-Recording Prevention
 
-Sinks have bookkeeping properties (`RecordsWritten`, `Status`, `LastSnapshotTime`). These are deliberately plain properties (not `[State]`) so they don't enter the change pipeline. Additionally, the CQP property filter excludes any subject implementing `IHistorySink` as a safety net.
+Sinks have bookkeeping properties (`RecordsWritten`, `Status`). These are deliberately plain properties (not `[State]`) so they don't enter the change pipeline. The last-snapshot timestamp is not a bookkeeping property; sinks expose it via `GetLatestSnapshotTimeAsync()` queried from their own storage. Additionally, the CQP property filter excludes any subject implementing `IHistorySink` as a safety net.
 
 ### Structural Property Recording
 
@@ -185,7 +186,7 @@ The `HistoryService` maintains a `Dictionary<IInterceptorSubject, string>` mappi
 
 ### Read Side — Path Chain Resolution
 
-When `FollowMoves = true` on a query, the sink resolves the full path chain:
+Move-following is always on. Every query resolves the full path chain:
 
 ```mermaid
 graph LR
@@ -201,11 +202,15 @@ All queries automatically follow moves — the cost is one extra query to the mo
 
 ## Aggregation
 
-The history system supports seven aggregation types: **Average**, **Minimum**, **Maximum**, **Sum**, **Count**, **First**, **Last**.
+The history system supports eight aggregation types: **Average**, **SampleMean**, **Minimum**, **Maximum**, **Sum**, **Count**, **First**, **Last**.
 
-`QueryAggregatedAsync` takes an `AggregationType` parameter — only the requested aggregation is computed (others are null in `AggregatedRecord`). This optimizes SQL queries, especially for First/Last which require subqueries.
+`Average` is **time-weighted**: each sample contributes proportionally to how long its value held before the next change (or before the bucket end). For irregularly-spaced state values (the dominant data shape in HomeBlaze), this is the correct mean. Example: a temperature reading of 20°C held for 59 minutes and 100°C held for 1 minute in the same hour gives `Average ≈ 21.3°C`, not the 60°C a sample mean would report.
 
-Non-numeric records (strings, complex objects) are silently skipped for numeric aggregations (Average, Minimum, Maximum, Sum). Count, First, and Last work on any value type.
+`SampleMean` is the count-weighted arithmetic mean (`sum(value) / count`). It is the right metric when the samples are themselves the unit of analysis (e.g., counting events that happened to carry a numeric payload), but it is misleading for state values. It is exposed as a separate aggregation type so callers select it deliberately.
+
+`QueryAggregatedAsync` takes an `AggregationType` parameter so only the requested aggregation is computed. The others are null in the returned `AggregatedRecord`. This keeps SQL cheap, especially for First/Last which need subqueries.
+
+Non-numeric records (strings, complex objects) are silently skipped for numeric aggregations (Average, SampleMean, Minimum, Maximum, Sum). Count, First, and Last work on any value type.
 
 ### Separate Query API
 
@@ -224,13 +229,16 @@ When a query spans multiple storage partitions (e.g., multiple weeks in SQLite),
 
 | Aggregation | Merge Strategy |
 |-------------|----------------|
-| Average | Weighted by count: `(sum1 + sum2) / (count1 + count2)` |
+| Average (time-weighted) | `(weighted_sum_1 + weighted_sum_2) / (total_duration_1 + total_duration_2)` |
+| SampleMean | `(sum_1 + sum_2) / (count_1 + count_2)` |
 | Minimum | Min of minimums |
 | Maximum | Max of maximums |
 | Sum | Sum of sums |
 | Count | Sum of counts |
 | First | Earliest by timestamp |
 | Last | Latest by timestamp |
+
+`AggregatedRecord` carries the internal `weighted_sum` and `total_duration` per bucket so the merge has the inputs it needs without re-reading rows. The same merge mechanism stitches the shared-buffer leg (recent tail) onto a cold sink's leg when a query crosses the `MinAge` boundary (see Sink Coverage).
 
 Sinks that support native aggregation (e.g., SQLite with SQL GROUP BY) set `SupportsNativeAggregation = true`. The `HistoryService` provides a fallback in-memory aggregation for sinks that don't.
 
@@ -266,6 +274,19 @@ The `HistoryService` schedules snapshots per sink. On sink attach, it calls `Get
 
 A per-sink boolean flag prevents overlapping snapshot creation — if a snapshot is still being written when the next tick fires, it is skipped.
 
+## Sink Coverage
+
+Each sink reports two time bounds that together define its **coverage window** `[now - MaxAge, now - MinAge]`:
+
+| Bound | Meaning |
+|-------|---------|
+| `MaxAge` | Configurable retention horizon. Data older than `MaxAge` is dropped (whole partition / chunk at a time). |
+| `MinAge` | Buffered-flush blind spot. Data younger than `MinAge` is still in the shared buffer, not yet visible to the sink's storage. Zero for `InMemoryHistorySink`; approximately `FlushInterval` for persistent sinks. |
+
+The shared buffer that `HistoryService` itself holds covers `[now - bufferLength, now]` directly, so queries against the recent tail always succeed regardless of which persistent sinks are attached. The `InMemoryHistorySink` subject is a registered query wrapper around that buffer; it is convenient but not required for the system to answer recent queries.
+
+Read routing splits queries at the `MinAge` boundary: the young tail is answered from the buffer, the rest is answered by the lowest-priority sink whose coverage window contains the remainder. Aggregated queries stitch the per-leg `weighted_sum` / `total_duration` (see Cross-Partition Merging).
+
 ## Sink Implementations
 
 ### InMemoryHistorySink
@@ -273,8 +294,9 @@ A per-sink boolean flag prevents overlapping snapshot creation — if a snapshot
 | Aspect | Detail |
 |--------|--------|
 | Purpose | Fast recent lookups + comprehensive testing |
-| Storage | In-memory lists |
-| Retention | Configurable `MaxRetention` (default 10 minutes) |
+| Storage | In-memory lists (also exposes the HistoryService shared buffer for the recent tail) |
+| `MaxAge` | Configurable (default 10 minutes) |
+| `MinAge` | Zero (queryable instantly) |
 | Flush interval | 1s (near-real-time) |
 | Aggregation | In-memory LINQ |
 | Move tracking | Full (list scan) |
@@ -285,9 +307,10 @@ A per-sink boolean flag prevents overlapping snapshot creation — if a snapshot
 |--------|--------|
 | Purpose | Long-term local storage |
 | Storage | Partitioned SQLite databases (one per day/week/month) |
-| Retention | Configurable `RetentionDays` (old partition files deleted) |
+| `MaxAge` | Configurable (default 365 days). Sweep deletes whole partition files when they fall entirely before `now - MaxAge`. No per-row deletes. |
+| `MinAge` | Approximately `FlushInterval` |
 | Flush interval | 10s (batched transactions) |
-| Aggregation | Native SQL GROUP BY |
+| Aggregation | Native SQL GROUP BY with `LEAD()`-based time-weighted Average |
 | Move tracking | Separate `history-moves.db` |
 
 #### Partition Layout
@@ -303,14 +326,20 @@ Each partition DB uses `WITHOUT ROWID` with a composite primary key `(subject_pa
 
 Snapshots are stored as gzipped JSON blobs in each partition's `snapshots` table — always read whole and decompressed, never partially queried.
 
-### Future: PostgreSQL Sink (TimescaleDB / QuestDB)
+### TimescaleDbHistorySink
 
-For deployments beyond SQLite's scale (~5,000 subjects, ~1,000 changes/sec). Both use the PostgreSQL wire protocol via Npgsql, so a single `HomeBlaze.History.PostgreSql` project supports both backends. The user picks their backend by choosing which Docker container to run.
+| Aspect | Detail |
+|--------|--------|
+| Purpose | Industrial-scale long-term storage (50K+ subjects, 10K+ changes/sec) |
+| Storage | Single hypertable `property_history` chunked by time (default 1 day); plain `property_moves` and `property_snapshots` tables |
+| `MaxAge` | Configurable. Enforced via `drop_chunks(older_than => now() - MaxAge)` on a timer. Cheapest possible retention because whole chunks drop atomically. |
+| `MinAge` | Approximately `FlushInterval` |
+| Flush interval | 10s (batched `COPY FROM STDIN BINARY` via Npgsql) |
+| Aggregation | Native via `time_bucket()` + `LEAD()`-based time-weighted Average. Same portable SQL pattern as SQLite. |
+| Move tracking | Plain table `property_moves` with index on `(to_path, timestamp)` |
+| Dependency | External PostgreSQL server with TimescaleDB extension |
 
-| Candidate | Strengths |
-|-----------|-----------|
-| TimescaleDB | Mature, PostgreSQL ecosystem, continuous aggregates, compression |
-| QuestDB | Fast ingestion, low resource usage, Apache 2.0 |
+v1 explicitly does NOT use TimescaleDB continuous aggregates or native compression. Continuous aggregates require pinning bucket sizes ahead of time, which conflicts with the per-query `bucketSize?` parameter. Both are good fits for v1.1 once real workloads inform the choice.
 
 ## MCP Tool Integration
 
@@ -321,6 +350,8 @@ Three history tools are exposed via MCP for AI agent access:
 | `get_property_history` | Raw or aggregated property values over time | `path`, `properties[]`, `from`, `to`, `bucketSize?`, `aggregation?` |
 | `get_snapshot` | Reconstruct graph state at a point in time | `path`, `time` |
 | `get_snapshots` | Snapshot series over a time range | `path`, `from`, `to`, `interval` |
+
+`aggregation` accepts: `"average"` (time-weighted, default for state values), `"sampleMean"` (count-weighted, use only when samples are the unit of analysis), `"minimum"`, `"maximum"`, `"sum"`, `"count"`, `"first"`, `"last"`. Aggregated responses surface only the requested field plus `bucketStart`/`bucketEnd`; internal merge fields (`weightedSum`, `totalDurationTicks`) are stripped before serialization.
 
 Tools are implemented in `HomeBlaze.AI` using `IMcpToolProvider`. They resolve the best available `IHistoryReader` from the `HistoryService` (by priority and capability) and delegate queries. The tools depend only on `HomeBlaze.History.Abstractions` — no coupling to specific sink implementations.
 
@@ -339,18 +370,26 @@ When a limit is hit, the response includes a truncation indicator so the AI agen
 
 ## Query Routing
 
-When multiple sinks are active, the `HistoryService` selects the best reader for each query:
+When multiple sinks are active, the `HistoryService` splits the requested range at the `MinAge` boundary, then selects the best reader for each leg:
 
 ```mermaid
 graph TD
-    Q[Query] --> A{Aggregation<br/>requested?}
-    A -->|Yes| B{Any sink with<br/>native aggregation?}
-    A -->|No| C[Lowest priority sink<br/>covering time range]
+    Q[Query: from..to] --> SPLIT{Range extends into<br/>now - MinAge_min?}
+    SPLIT -->|Yes| BUF[Young tail: served by shared buffer]
+    SPLIT -->|No| ROUTE
+    BUF --> ROUTE[Remainder]
+    ROUTE --> A{Aggregation<br/>requested?}
+    A -->|Yes| B{Any sink with<br/>native aggregation<br/>covering remainder?}
+    A -->|No| C[Lowest priority sink<br/>covering remainder]
     B -->|Yes| D[Lowest priority sink<br/>with native aggregation]
     B -->|No| E[Lowest priority sink<br/>+ in-memory aggregation fallback]
+    BUF --> STITCH[Stitch results by timestamp]
+    C --> STITCH
+    D --> STITCH
+    E --> STITCH
 ```
 
-Lower priority number = higher preference. Priority is configurable per sink. When no sink covers the requested time range, an empty result is returned.
+Lower priority number = higher preference. Priority is configurable per sink. When no sink covers a portion of the requested range, that portion returns empty (not an error). Aggregated queries merge per-leg `weighted_sum` / `total_duration` using the cross-partition merge strategy.
 
 ## Configuration
 
@@ -370,9 +409,9 @@ Each sink is a subject with its own `[Configuration]` properties:
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `FlushInterval` | TimeSpan | 10s | How often the sink receives batched writes |
+| `FlushInterval` | TimeSpan | 10s | How often the sink receives batched writes. Also determines `MinAge` for persistent sinks. |
 | `SnapshotInterval` | TimeSpan | 1 day | How often full graph snapshots are taken |
-| `RetentionDays` | int | 365 | How long data is kept |
+| `MaxAge` | TimeSpan | 365 days | Retention horizon. `Zero` (or sink-specific sentinel) means unlimited. Old partitions / chunks are dropped wholesale. |
 | `Priority` | int | 100 | Query routing preference (lower = preferred) |
 
 Sink-specific properties (e.g., `DatabasePath`, `PartitionInterval` for SQLite) are defined on each sink class.
@@ -383,7 +422,7 @@ Sink-specific properties (e.g., `DatabasePath`, `PartitionInterval` for SQLite) 
 |------|------|----------|-------------|----------------|
 | Development | InMemory | Any | Unlimited | None |
 | Edge / Home | SQLite | ~5,000 | ~1,000 | Embedded, no server |
-| Industrial | TimescaleDB / QuestDB | 50,000+ | 10,000+ | External PostgreSQL |
+| Industrial | TimescaleDB | 50,000+ | 10,000+ | External PostgreSQL + TimescaleDB extension |
 | Custom | Any `IHistorySink` | Depends | Depends | User-provided storage backend |
 
 Multiple tiers can run simultaneously. A typical production deployment might use InMemory (fast AI queries) + SQLite (local persistence) + TimescaleDB (central long-term storage).
@@ -400,6 +439,8 @@ Satellites can install history sinks independently for local history, which is u
 |---------|---------|
 | InfluxDB | v3 is proprietary/cloud-only, v2 has restrictive license, Flux query language deprecated. Risky long-term investment |
 | File-based (CSV/JSON) | Considered as simplest option but SQLite provides better query performance at similar complexity. Can be added later via `IHistorySink` if human-readable logs are needed |
+| Plain PostgreSQL | Without TimescaleDB's hypertables, `time_bucket()`, and `drop_chunks()`, retention and aggregation would either re-implement those features in stored procedures or accept significantly slower queries. Add later only if a deployment specifically asks. |
+| QuestDB | Same wire protocol as PostgreSQL but no hypertable equivalent and different SQL extensions. Could share infrastructure with a plain-PG sink if added. Not in v1. |
 
 ## Key Decisions
 
@@ -412,10 +453,13 @@ Satellites can install history sinks independently for local history, which is u
 | Sink bookkeeping properties | Plain properties (not `[State]`) | Prevents self-recording feedback loop without complex filtering |
 | Move tracking scope | Runtime only (no cross-restart) | Subject IDs are in-memory only (regenerated on restart). In practice, moves happen while the app is running |
 | Aggregation API | Separate `QueryAggregatedAsync` | Different return types for raw vs aggregated. No ambiguity, richer aggregated data |
+| `Average` semantics | Time-weighted (with `SampleMean` as a separate type) | Property changes are irregular state samples. Count-weighted Average misleads when a value holds for very different durations across a bucket. Sample-mean kept for the rare case where it is wanted. |
+| Recent-tail coverage | Shared buffer is intrinsic to `HistoryService` | Guarantees `[now - bufferLength, now]` is queryable without requiring an `InMemoryHistorySink` subject to be attached. Simpler operator contract; no validation throw. |
+| Retention model | Per-sink `MaxAge`, wholesale drop at partition / chunk granularity | Avoids per-row deletes that thrash storage. Each sink picks the natural drop unit (SQLite file, TimescaleDB chunk). |
 | Structural property recording | Lightweight path references | Enables graph reconstruction between snapshots without bloating storage |
 | Value serialization | JSON-encoded for all types | Lossless round-tripping including booleans, nulls, and strings |
 | Snapshot search direction | Backwards from target time | O(1) in common case (1-2 partition reads) vs O(N) scanning forward |
-| Move following | Always on | One extra moves-table query per request. No-op when no moves exist. Simplifies API — no parameter needed |
+| Move following | Always on | One extra moves-table query per request. No-op when no moves exist. Simplifies API; no parameter needed. |
 
 ## Backpressure and Overload
 
@@ -438,9 +482,10 @@ Queue depth and error counts are exposed via sink `Status` properties so operato
 ## Follow-Up Items [Planned]
 
 ### Retention Policies
-- Per-property or per-type retention (currently global per sink)
+- Per-property or per-type retention (currently per-sink only)
 - Downsampling strategy for long-term storage (e.g., keep 1-minute resolution for 30 days, then downsample to hourly)
 - Automatic tier migration (move data from fast tier to slow tier as it ages)
+- TimescaleDB continuous aggregates and compression once production bucket sizes are known
 
 ### History Export/Import
 - Backup and migration tooling for history databases
@@ -467,5 +512,6 @@ Queue depth and error counts are exposed via sink `Status` properties so operato
 ## Open Questions
 
 - Should history recording be opt-out per subject (e.g., `[ExcludeFromHistory]` attribute) for subjects that produce high-frequency noise?
-- Should the `InMemoryHistorySink` be auto-registered (always present) rather than requiring a JSON config file?
 - How should history behave during FluentStorage file sync (bulk subject attach/detach)?
+
+The previously open question about auto-registering `InMemoryHistorySink` is moot: the `HistoryService` always owns a shared buffer that covers the recent tail. A user-attached `InMemoryHistorySink` subject is now just a convenience wrapper for queries, not a requirement.

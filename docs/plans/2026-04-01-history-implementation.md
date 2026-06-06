@@ -111,7 +111,9 @@ namespace HomeBlaze.History;
 
 public enum AggregationType
 {
-    Average, Minimum, Maximum, Sum, Count, First, Last
+    Average,      // time-weighted: sum(value_i * duration_i) / sum(duration_i)
+    SampleMean,   // count-weighted: sum(value_i) / count
+    Minimum, Maximum, Sum, Count, First, Last
 }
 ```
 
@@ -172,9 +174,15 @@ namespace HomeBlaze.History;
 public record AggregatedRecord(
     DateTimeOffset BucketStart,
     DateTimeOffset BucketEnd,
-    double? Average, double? Minimum, double? Maximum,
+    double? Average,        // time-weighted
+    double? SampleMean,     // count-weighted (raw sample mean)
+    double? Minimum, double? Maximum,
     double? Sum, long Count,
-    JsonElement? First, JsonElement? Last);
+    JsonElement? First, JsonElement? Last,
+    // Internal fields used to merge buckets across partitions and the buffer/sink legs.
+    // Populated when Aggregation == Average or SampleMean; null otherwise.
+    double? WeightedSum = null,         // sum(value_i * duration_i)
+    long? TotalDurationTicks = null);   // sum(duration_i) in ticks
 ```
 
 ```csharp
@@ -260,6 +268,8 @@ public interface IHistoryReader
 {
     int Priority { get; }
     DateTimeOffset? OldestRecord { get; }
+    TimeSpan MinAge { get; }   // buffered-flush blind spot; routing uses [now - MaxAge, now - MinAge]
+    TimeSpan MaxAge { get; }   // configured retention horizon
     bool SupportsNativeAggregation { get; }
 
     Task<DateTimeOffset?> GetLatestSnapshotTimeAsync();
@@ -353,16 +363,21 @@ public abstract partial class HistorySinkBase : IHistorySink
     public partial TimeSpan SnapshotInterval { get; set; }  // default 1 day
 
     [Configuration]
-    public partial int RetentionDays { get; set; }  // default 365
+    public partial TimeSpan MaxAge { get; set; }  // default 365 days; TimeSpan.Zero = unlimited
 
     [Configuration]
     public partial int Priority { get; set; }  // default 100
 
-    // Plain properties — NOT [State] to avoid self-recording feedback loop
+    // Plain properties (NOT [State]) to avoid self-recording feedback loop
     public long RecordsWritten { get; set; }
     public string? Status { get; set; }
 
     int IHistoryReader.Priority => Priority;
+    TimeSpan IHistoryReader.MaxAge => MaxAge;
+
+    // MinAge defaults to FlushInterval for persistent sinks (the buffered-flush blind spot).
+    // InMemoryHistorySink overrides to TimeSpan.Zero because it queries the buffer directly.
+    public virtual TimeSpan MinAge => FlushInterval;
 
     public abstract DateTimeOffset? OldestRecord { get; }
     public abstract bool SupportsNativeAggregation { get; }
@@ -397,8 +412,14 @@ public partial class InMemoryHistorySink : HistorySinkBase
     private readonly List<HistorySnapshot> _snapshots = new();
     private readonly Lock _lock = new();
 
-    [Configuration]
-    public partial TimeSpan MaxRetention { get; set; }
+    public InMemoryHistorySink()
+    {
+        // Override base defaults for the hot-cache role.
+        FlushInterval = TimeSpan.FromSeconds(1);
+        MaxAge = TimeSpan.FromMinutes(10);
+    }
+
+    public override TimeSpan MinAge => TimeSpan.Zero;  // queries hit the in-memory list directly
 
     public override DateTimeOffset? OldestRecord
     {
@@ -497,44 +518,124 @@ public partial class InMemoryHistorySink : HistorySinkBase
             if (query.BucketSize is null || query.Aggregation is null)
                 return Task.FromResult<IReadOnlyList<AggregatedRecord>>(Array.Empty<AggregatedRecord>());
 
-            // Always follow moves — transparent path chain resolution
+            // Always follow moves: transparent path chain resolution
             var paths = ResolvePathChain(query.SubjectPath, query.From, query.To);
 
             var bucketTicks = query.BucketSize.Value.Ticks;
-            var allRows = new List<(long timestamp, string propertyName, double value)>();
+            var queryFromTicks = query.From.Ticks;
+            var queryEndTicks = query.To.Ticks;
 
-            foreach (var (path, from, to) in paths)
+            // Step 1: collect in-range numeric samples per property, AND the carry sample
+            // (the latest record with timestamp < query.From) so the first bucket has a
+            // starting value rather than appearing empty until the next change arrives.
+            var rowsByProperty = new Dictionary<string, List<(long timestamp, double value)>>();
+            foreach (var propertyName in query.PropertyNames)
+                rowsByProperty[propertyName] = new();
+
+            foreach (var (path, fromInPath, toInPath) in paths)
             {
-                allRows.AddRange(_records
-                    .Where(r => r.SubjectPath == path
-                        && query.PropertyNames.Contains(r.PropertyName)
-                        && r.TimestampTicks >= from.Ticks
-                        && r.TimestampTicks <= to.Ticks
-                        && r.ValueType is HistoryValueType.Double or HistoryValueType.Boolean)
-                    .Select(r => (r.TimestampTicks, r.PropertyName, r.NumericValue)));
+                var fromTicks = Math.Max(fromInPath.Ticks, queryFromTicks);
+                var toTicks = Math.Min(toInPath.Ticks, queryEndTicks);
+
+                // In-range rows
+                foreach (var r in _records)
+                {
+                    if (r.SubjectPath != path) continue;
+                    if (!query.PropertyNames.Contains(r.PropertyName)) continue;
+                    if (r.ValueType is not (HistoryValueType.Double or HistoryValueType.Boolean)) continue;
+                    if (r.TimestampTicks < fromTicks || r.TimestampTicks > toTicks) continue;
+                    rowsByProperty[r.PropertyName].Add((r.TimestampTicks, r.NumericValue));
+                }
+
+                // Carry sample per property: latest numeric record with timestamp < fromTicks
+                foreach (var propertyName in query.PropertyNames)
+                {
+                    var carry = _records
+                        .Where(r => r.SubjectPath == path
+                            && r.PropertyName == propertyName
+                            && r.TimestampTicks < fromTicks
+                            && r.ValueType is HistoryValueType.Double or HistoryValueType.Boolean)
+                        .OrderByDescending(r => r.TimestampTicks)
+                        .FirstOrDefault();
+                    if (carry.PropertyName is not null)
+                        rowsByProperty[propertyName].Add((carry.TimestampTicks, carry.NumericValue));
+                }
             }
 
-            var results = allRows
-                .GroupBy(r => (r.propertyName, bucket: (r.timestamp / bucketTicks) * bucketTicks))
-                .OrderBy(g => g.Key.bucket)
-                .Select(g =>
-                {
-                    var values = g.Select(r => r.value).ToList();
-                    var bucketStart = new DateTimeOffset(g.Key.bucket, TimeSpan.Zero);
-                    var bucketEnd = bucketStart.Add(query.BucketSize.Value);
-                    return new AggregatedRecord(
-                        bucketStart, bucketEnd,
-                        Average: values.Average(),
-                        Minimum: values.Min(),
-                        Maximum: values.Max(),
-                        Sum: values.Sum(),
-                        Count: values.Count,
-                        First: JsonSerializer.SerializeToElement(values.First()),
-                        Last: JsonSerializer.SerializeToElement(values.Last()));
-                })
-                .ToList();
+            // Sort each property's rows by timestamp ascending so LEAD-like next-timestamp works.
+            foreach (var propertyName in rowsByProperty.Keys.ToList())
+                rowsByProperty[propertyName] = rowsByProperty[propertyName]
+                    .OrderBy(r => r.timestamp).ToList();
 
-            return Task.FromResult<IReadOnlyList<AggregatedRecord>>(results);
+            // Step 2: emit one AggregatedRecord per (property, bucket) for buckets that overlap
+            // the query range. Iterate buckets explicitly so a bucket inheriting a carry value
+            // is emitted even if no change happens inside it.
+            var results = new List<AggregatedRecord>();
+            var firstBucketStart = (queryFromTicks / bucketTicks) * bucketTicks;
+            var lastBucketStart  = ((queryEndTicks - 1) / bucketTicks) * bucketTicks;
+
+            foreach (var (propertyName, rows) in rowsByProperty)
+            {
+                if (rows.Count == 0) continue;
+
+                for (var bs = firstBucketStart; bs <= lastBucketStart; bs += bucketTicks)
+                {
+                    var be = bs + bucketTicks;
+                    double weightedSum = 0.0;
+                    long totalDuration = 0;
+                    double sum = 0.0;
+                    long count = 0;
+                    double min = double.PositiveInfinity, max = double.NegativeInfinity;
+                    double? firstValue = null, lastValue = null;
+
+                    for (var i = 0; i < rows.Count; i++)
+                    {
+                        var (ts, value) = rows[i];
+                        var nextTs = i + 1 < rows.Count ? rows[i + 1].timestamp : queryEndTicks;
+
+                        // The sample's validity interval is [ts, nextTs). Clip to bucket [bs, be).
+                        var effStart = Math.Max(ts, bs);
+                        var effEnd = Math.Min(nextTs, be);
+                        if (effEnd <= effStart) continue;
+
+                        var duration = effEnd - effStart;
+                        weightedSum += value * duration;
+                        totalDuration += duration;
+
+                        // Sample-mean / min / max / first / last only count samples whose own
+                        // timestamp falls inside the bucket. Carry samples contribute to
+                        // weighted-Average only.
+                        if (ts >= bs && ts < be)
+                        {
+                            sum += value;
+                            count++;
+                            if (value < min) min = value;
+                            if (value > max) max = value;
+                            firstValue ??= value;
+                            lastValue = value;
+                        }
+                    }
+
+                    if (totalDuration <= 0) continue;  // bucket has no coverage at all
+
+                    results.Add(new AggregatedRecord(
+                        new DateTimeOffset(bs, TimeSpan.Zero),
+                        new DateTimeOffset(be, TimeSpan.Zero),
+                        Average: weightedSum / totalDuration,
+                        SampleMean: count > 0 ? sum / count : null,
+                        Minimum: count > 0 ? min : null,
+                        Maximum: count > 0 ? max : null,
+                        Sum: count > 0 ? sum : null,
+                        Count: count,
+                        First: firstValue is null ? null : JsonSerializer.SerializeToElement(firstValue.Value),
+                        Last:  lastValue  is null ? null : JsonSerializer.SerializeToElement(lastValue.Value),
+                        WeightedSum: weightedSum,
+                        TotalDurationTicks: totalDuration));
+                }
+            }
+
+            return Task.FromResult<IReadOnlyList<AggregatedRecord>>(
+                results.OrderBy(r => r.BucketStart).ToList());
         }
     }
 
@@ -648,10 +749,10 @@ public partial class InMemoryHistorySink : HistorySinkBase
 
     private void Evict()
     {
-        if (MaxRetention <= TimeSpan.Zero)
+        if (MaxAge <= TimeSpan.Zero)
             return;
 
-        var cutoff = DateTimeOffset.UtcNow.Subtract(MaxRetention).Ticks;
+        var cutoff = DateTimeOffset.UtcNow.Subtract(MaxAge).Ticks;
         _records.RemoveAll(r => r.TimestampTicks < cutoff);
         _snapshots.RemoveAll(s => s.Timestamp.Ticks < cutoff);
         _moves.RemoveAll(m => m.Timestamp.Ticks < cutoff);
@@ -1146,7 +1247,10 @@ Expected: Build succeeded
 - `WhenSnapshotWrittenAndRead_ThenRoundTrips`
 - `WhenSnapshotRequestedBetweenSnapshots_ThenReplaysChanges`
 - `WhenSnapshotSeriesRequested_ThenReturnsAtIntervals`
-- `WhenMaxRetentionSet_ThenOldRecordsEvicted`
+- `WhenMaxAgeSet_ThenOldRecordsEvicted`
+- `WhenAverageRequestedOverIrregularSamples_ThenReturnsTimeWeightedMean`
+- `WhenSampleMeanRequested_ThenReturnsCountWeightedMean`
+- `WhenQueryRangeExtendsIntoMinAge_ThenYoungTailServedFromBuffer`
 - `WhenPartialSnapshotRequested_ThenFiltersByPath`
 
 **Step 3:** Write move tracking tests covering:
@@ -1242,21 +1346,79 @@ CREATE INDEX ix_moves_to ON moves (to_path, timestamp);
 ```
 
 **Step 3:** Create `SqliteHistorySink` implementing all methods:
-- `WriteBatchAsync` — group by partition, batch INSERT per transaction
-- `WriteMovesAsync` — write to moves DB
-- `QueryAsync` — query across partitions, follow moves via path chain resolution
-- `QueryAggregatedAsync` — SQL GROUP BY per partition, merge cross-partition buckets (including First/Last via subqueries)
-- `WriteSnapshotAsync` — gzip + store in partition's snapshots table
-- `GetLatestSnapshotTimeAsync` — `SELECT MAX(timestamp) FROM snapshots` across recent partitions
-- `GetSnapshotAsync` — scan partitions backwards for nearest snapshot, replay changes
-- `GetSnapshotsAsync` — iterate calling GetSnapshotAsync at intervals
+- `WriteBatchAsync`: group by partition, batch INSERT per transaction.
+- `WriteMovesAsync`: write to moves DB.
+- `QueryAsync`: query across partitions, follow moves via path chain resolution.
+- `QueryAggregatedAsync`: see Step 3b below.
+- `WriteSnapshotAsync`: gzip + store in partition's snapshots table.
+- `GetLatestSnapshotTimeAsync`: `SELECT MAX(timestamp) FROM snapshots` across recent partitions.
+- `GetSnapshotAsync`: scan partitions backwards for nearest snapshot, replay changes.
+- `GetSnapshotsAsync`: iterate calling GetSnapshotAsync at intervals.
+- `MinAge`: inherited default of `FlushInterval` (no override needed).
+- `MaxAge`: inherited; the partition sweep deletes whole partition files when their `[partition_start, partition_end]` falls entirely before `now - MaxAge` (no per-row DELETE).
+
+**Step 3b:** Implement time-weighted aggregation per partition. Per (property, partition):
+
+```csharp
+// Pseudocode for per-partition aggregation; see the design doc for the full CTE SQL.
+async Task<List<AggregatedRecord>> AggregatePartitionAsync(
+    SqliteConnection conn, string path, string propertyName,
+    long fromTicks, long toTicks, long rangeEndTicks, long bucketTicks,
+    AggregationType aggregation)
+{
+    // 1. SQL with carry-sample CTE (see design doc "Native Aggregation" SQL).
+    //    Run the CTE once; SQL emits one row per bucket with:
+    //    bucket_start, weighted_sum, total_duration, sample_mean, min, max, sum, count.
+    //
+    // 2. For First/Last (when requested), issue:
+    //      SELECT numeric_value FROM history
+    //      WHERE subject_path=@path AND property_name=@property
+    //        AND timestamp >= @bucketStart AND timestamp < @bucketEnd
+    //      ORDER BY timestamp [ASC|DESC] LIMIT 1
+    //    per bucket. Gate on AggregationType so we don't pay for it otherwise.
+    //
+    // 3. Build AggregatedRecord with ALL nullable fields, including:
+    //      WeightedSum = weighted_sum,
+    //      TotalDurationTicks = total_duration
+    //    so the cross-partition / cross-leg merge has its inputs.
+}
+```
+
+**Step 3c:** Cross-partition merge. After running `AggregatePartitionAsync` for each partition that overlaps the query range, merge per `(propertyName, BucketStart)`:
+
+```csharp
+static AggregatedRecord MergeBuckets(AggregatedRecord a, AggregatedRecord b)
+{
+    // Both inputs are for the same bucket; merge using the cross-partition merge table
+    // from the design doc.
+    var weightedSum = (a.WeightedSum ?? 0) + (b.WeightedSum ?? 0);
+    var totalDuration = (a.TotalDurationTicks ?? 0) + (b.TotalDurationTicks ?? 0);
+    var sum = (a.Sum ?? 0) + (b.Sum ?? 0);
+    var count = a.Count + b.Count;
+    return a with
+    {
+        Average = totalDuration > 0 ? weightedSum / totalDuration : null,
+        SampleMean = count > 0 ? sum / count : null,
+        Minimum = NullableMin(a.Minimum, b.Minimum),
+        Maximum = NullableMax(a.Maximum, b.Maximum),
+        Sum = count > 0 ? sum : null,
+        Count = count,
+        First = a.BucketStart <= b.BucketStart ? a.First : b.First,  // both same bucket; First is by row timestamp inside it
+        Last  = a.BucketStart >= b.BucketStart ? a.Last  : b.Last,
+        WeightedSum = weightedSum,
+        TotalDurationTicks = totalDuration,
+    };
+}
+```
+
+The same `MergeBuckets` helper is used by `HistoryService` when stitching the buffer leg onto a cold-sink leg (see Task 9b). Move it to `HomeBlaze.History.Abstractions` so both projects share one implementation.
 
 Key implementation notes:
-- `ReadJsonValue` uses `JsonSerializer.Deserialize<JsonElement>()` (not `JsonDocument.Parse()`) to avoid memory leaks
-- Boolean values read back via `JsonSerializer.SerializeToElement(reader.GetDouble() != 0.0)`
-- Null values produce `JsonSerializer.SerializeToElement<object?>(null)`
-- Snapshot search scans partitions backwards, stops at first found
-- Aggregation uses real SQL GROUP BY, mergeable across partitions
+- `ReadJsonValue` uses `JsonSerializer.Deserialize<JsonElement>()` (not `JsonDocument.Parse()`) to avoid memory leaks.
+- Boolean values read back via `JsonSerializer.SerializeToElement(reader.GetDouble() != 0.0)`.
+- Null values produce `JsonSerializer.SerializeToElement<object?>(null)`.
+- Snapshot search scans partitions backwards, stops at first found.
+- For samples that span more than one bucket (a value held longer than `bucketSize`), expand via a recursive CTE generating bucket-boundary rows so each bucket the sample touches gets its proportional contribution. Tests must cover the long-hold case.
 
 **Step 4:** Add to solution and build:
 ```bash
@@ -1298,7 +1460,11 @@ Read tests:
 Aggregation tests:
 - `WhenAggregatingWithBuckets_ThenReturnsSqlGroupedResults`
 - `WhenAggregatingAcrossPartitions_ThenMergesBuckets`
-- `WhenAggregatingAverage_ThenWeightedByCount`
+- `WhenAggregatingAverage_ThenReturnsTimeWeightedMean`
+- `WhenAggregatingSampleMean_ThenReturnsCountWeightedMean`
+- `WhenBucketHasOneSample_ThenAverageEqualsSampleValue`
+- `WhenBucketInheritsValueFromCarrySample_ThenAverageEqualsCarriedValue`
+- `WhenQueryCrossesPartitions_ThenWeightedSumsMergeCorrectly`
 - `WhenAggregatingMinimum_ThenMinOfMins`
 - `WhenAggregatingFirst_ThenEarliestByTimestamp`
 
@@ -1324,6 +1490,101 @@ dotnet test src/HomeBlaze/HomeBlaze.History.Sqlite.Tests/ --no-restore
 Expected: ALL PASS
 
 Commit.
+
+---
+
+### Task 8b: Implement MinAge-aware Read Routing and Queryable Shared Buffer
+
+**Files:**
+- Modify: `src/HomeBlaze/HomeBlaze.History/HistoryService.cs`
+- Create: `src/HomeBlaze/HomeBlaze.History/BufferHistoryReader.cs`
+- Modify: `src/HomeBlaze/HomeBlaze.History.Abstractions/AggregatedRecord.cs` (already done, no-op)
+- Create: `src/HomeBlaze/HomeBlaze.History.Abstractions/AggregatedRecordMerger.cs`
+- Modify: `src/HomeBlaze/HomeBlaze.History.Tests/HistoryServiceRoutingTests.cs`
+
+**Why:** The brainstorm specifies that the shared buffer covers `[now - bufferLength, now]` and that the service splits queries at `MinAge_min` so the young tail is always served. Without this task, `HistoryService` just delegates queries to one sink and gives up on the young tail when no sink covers it natively.
+
+**Step 1:** Create `BufferHistoryReader : IHistoryReader` adapter. Constructor takes a `Func<ReadOnlySpan<ResolvedHistoryRecord>>` returning a snapshot of the shared buffer (HistoryService passes a delegate that locks and copies). Properties:
+
+```csharp
+public int Priority => -1;                     // highest priority for the recent tail
+public DateTimeOffset? OldestRecord { get; }   // computed from buffer head timestamp
+public TimeSpan MinAge => TimeSpan.Zero;       // by construction
+public TimeSpan MaxAge { get; }                // = bufferLength
+public bool SupportsNativeAggregation => true; // in-memory aggregation reuses Step 3
+```
+
+`QueryAsync` filters the buffer snapshot by path / property / time-range and maps `ResolvedHistoryRecord` to `HistoryRecord` (deserialize value via the same helper used in `InMemoryHistorySink`). `QueryAggregatedAsync` reuses the time-weighted aggregation code from `InMemoryHistorySink` (refactor it into a shared internal helper in `HomeBlaze.History` so both classes call it). `WriteBatchAsync` and friends throw `NotSupportedException` (the buffer is read-only from a sink's perspective).
+
+**Step 2:** Add `AggregatedRecordMerger` to Abstractions with three pure helpers:
+
+```csharp
+public static class AggregatedRecordMerger
+{
+    // Combine two AggregatedRecord lists by (BucketStart) using the cross-partition merge.
+    public static IReadOnlyList<AggregatedRecord> Merge(
+        IReadOnlyList<AggregatedRecord> a, IReadOnlyList<AggregatedRecord> b);
+
+    // Used by per-partition merge (SqliteHistorySink) and per-leg merge (HistoryService).
+    public static AggregatedRecord MergeBuckets(AggregatedRecord x, AggregatedRecord y);
+
+    private static double? NullableMin(double? x, double? y);
+    private static double? NullableMax(double? x, double? y);
+}
+```
+
+**Step 3:** In `HistoryService`, replace the existing `GetBestReader` shortcut with explicit routing:
+
+```csharp
+// Pseudocode
+public async Task<IReadOnlyList<HistoryRecord>> QueryAsync(HistoryQuery query)
+{
+    var bufferReader = new BufferHistoryReader(/* delegate */);
+    var minAgeCutoff = DateTimeOffset.UtcNow - MinMinAgeOfAttachedSinks();
+    var youngFrom = Max(query.From, minAgeCutoff);
+    var youngTo = query.To;
+    var coldFrom = query.From;
+    var coldTo = Min(query.To, minAgeCutoff);
+
+    var legs = new List<IReadOnlyList<HistoryRecord>>();
+    if (youngFrom < youngTo)
+        legs.Add(await bufferReader.QueryAsync(query with { From = youngFrom, To = youngTo }));
+    if (coldFrom < coldTo)
+    {
+        var coldReader = PickReader(coldFrom, coldTo, query.Aggregation is not null);
+        if (coldReader is not null)
+            legs.Add(await coldReader.QueryAsync(query with { From = coldFrom, To = coldTo }));
+    }
+    return legs.SelectMany(x => x).OrderBy(r => r.Timestamp).ToList();
+}
+
+public async Task<IReadOnlyList<AggregatedRecord>> QueryAggregatedAsync(HistoryQuery query)
+{
+    // Same split, but each leg returns AggregatedRecord with WeightedSum/TotalDurationTicks
+    // populated. Use AggregatedRecordMerger.Merge to combine legs by BucketStart.
+}
+```
+
+`PickReader(from, to, requireNativeAgg)` walks attached sinks in ascending `Priority` order, returning the first whose coverage window `[now - MaxAge, now - MinAge]` contains `[from, to]` and whose `SupportsNativeAggregation` is satisfied (for aggregation queries).
+
+**Step 4:** Snapshot routing. `HistoryService.GetSnapshotAsync(path, time)` picks the lowest-priority sink whose `OldestRecord <= time` (or falls back to the buffer if the time is within `MaxAge` of `bufferReader`). For times within `MinAge` of every persistent sink, only the buffer + base-snapshot replay can answer; document the trade-off in code comments.
+
+**Step 5:** Tests in `HistoryServiceRoutingTests`:
+- `WhenRangeFullyInsidePersistentSink_ThenBufferLegIsEmpty`
+- `WhenRangeFullyInsideBuffer_ThenColdLegIsEmpty`
+- `WhenRangeCrossesMinAgeBoundary_ThenStitchesBufferAndSink`
+- `WhenAggregationCrossesBoundary_ThenMergesWeightedSums`
+- `WhenSampleSpansMinAgeBoundary_ThenWeightedAverageRemainsExact` (regression for the joint-leg edge case)
+- `WhenNoPersistentSinkAttached_ThenBufferAnswersWithinBufferLength`
+- `WhenTwoSinksCoverSameRange_ThenLowestPriorityWins`
+
+**Step 6:** Build and run unit tests:
+```bash
+dotnet test src/HomeBlaze/HomeBlaze.History.Tests/ --no-restore
+```
+Expected: ALL PASS
+
+**Step 7:** Commit.
 
 ---
 
@@ -1396,7 +1657,7 @@ typeProvider.AddAssembly(typeof(SqliteHistorySink).Assembly);
   "FlushInterval": "00:00:10",
   "PartitionInterval": "Weekly",
   "SnapshotInterval": "1.00:00:00",
-  "RetentionDays": 365,
+  "MaxAge": "365.00:00:00",
   "Priority": 100
 }
 ```
@@ -1426,6 +1687,273 @@ dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"
 ```
 Expected: All PASS
 
-**Step 3:** Verify no leftover TODOs — search for `throw new NotImplementedException()` in history projects. All should be resolved.
+**Step 3:** Verify no leftover TODOs. Search for `throw new NotImplementedException()` in history projects. All should be resolved.
 
 **Step 4:** Commit.
+
+---
+
+### Task 13: Create HomeBlaze.History.TimescaleDb Project
+
+**Files:**
+- Create: `src/HomeBlaze/HomeBlaze.History.TimescaleDb/HomeBlaze.History.TimescaleDb.csproj`
+- Create: `src/HomeBlaze/HomeBlaze.History.TimescaleDb/TimescaleDbHistorySink.cs`
+- Create: `src/HomeBlaze/HomeBlaze.History.TimescaleDb/TimescaleDbSchema.cs`
+- Modify: `src/Namotion.Interceptor.slnx`
+
+**Step 1:** Create .csproj. References `HomeBlaze.History` and adds `Npgsql` (9.x).
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HomeBlaze.History\HomeBlaze.History.csproj" />
+    <PackageReference Include="Npgsql" Version="9.*" />
+  </ItemGroup>
+</Project>
+```
+
+**Step 2:** Create `TimescaleDbSchema` with idempotent bootstrap. Runs once on first connection per sink instance, guarded by a flag.
+
+```sql
+CREATE TABLE IF NOT EXISTS property_history (
+    timestamp     TIMESTAMPTZ NOT NULL,
+    subject_path  TEXT        NOT NULL,
+    property_name TEXT        NOT NULL,
+    value_type    SMALLINT    NOT NULL,
+    numeric_value DOUBLE PRECISION,
+    raw_value     TEXT,
+    PRIMARY KEY (subject_path, property_name, timestamp)
+);
+SELECT create_hypertable('property_history', 'timestamp',
+    chunk_time_interval => INTERVAL '1 day',
+    if_not_exists       => TRUE);
+
+CREATE TABLE IF NOT EXISTS property_moves (
+    timestamp TIMESTAMPTZ NOT NULL,
+    from_path TEXT        NOT NULL,
+    to_path   TEXT        NOT NULL,
+    PRIMARY KEY (timestamp, from_path)
+);
+CREATE INDEX IF NOT EXISTS ix_moves_to ON property_moves (to_path, timestamp);
+
+CREATE TABLE IF NOT EXISTS property_snapshots (
+    timestamp  TIMESTAMPTZ NOT NULL PRIMARY KEY,
+    base_path  TEXT        NOT NULL,
+    data       BYTEA       NOT NULL
+);
+```
+
+**Step 3:** Implement `TimescaleDbHistorySink : HistorySinkBase`. Skeleton:
+
+```csharp
+[InterceptorSubject]
+public partial class TimescaleDbHistorySink : HistorySinkBase
+{
+    [Configuration]
+    public partial string ConnectionString { get; set; } = "";
+
+    public TimescaleDbHistorySink()
+    {
+        FlushInterval = TimeSpan.FromSeconds(10);
+        MaxAge = TimeSpan.FromDays(365);
+    }
+
+    public override TimeSpan MinAge => FlushInterval;
+    public override bool SupportsNativeAggregation => true;
+    // OldestRecord: SELECT MIN(timestamp) FROM property_history (cached, refreshed on retention sweep)
+}
+```
+
+**Step 4:** Write path. `WriteBatchAsync` uses a TEMP table + `INSERT ... ON CONFLICT DO NOTHING` from it. Direct `COPY FROM STDIN BINARY` does NOT support `ON CONFLICT`, so the temp-table indirection is required.
+
+```csharp
+public override async Task WriteBatchAsync(ReadOnlyMemory<ResolvedHistoryRecord> records)
+{
+    await using var conn = new NpgsqlConnection(ConnectionString);
+    await conn.OpenAsync();
+    await using var tx = await conn.BeginTransactionAsync();
+
+    await using (var cmd = new NpgsqlCommand("""
+        CREATE TEMP TABLE IF NOT EXISTS property_history_staging
+            (LIKE property_history INCLUDING DEFAULTS)
+        ON COMMIT DROP;
+        """, conn, tx))
+    {
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    await using (var importer = await conn.BeginBinaryImportAsync("""
+        COPY property_history_staging
+            (timestamp, subject_path, property_name, value_type, numeric_value, raw_value)
+        FROM STDIN (FORMAT BINARY)
+        """))
+    {
+        for (var i = 0; i < records.Length; i++)
+        {
+            var r = records.Span[i];
+            await importer.StartRowAsync();
+            await importer.WriteAsync(new DateTime(r.TimestampTicks, DateTimeKind.Utc), NpgsqlDbType.TimestampTz);
+            await importer.WriteAsync(r.SubjectPath, NpgsqlDbType.Text);
+            await importer.WriteAsync(r.PropertyName, NpgsqlDbType.Text);
+            await importer.WriteAsync((short)r.ValueType, NpgsqlDbType.Smallint);
+            if (r.ValueType is HistoryValueType.Double or HistoryValueType.Boolean)
+                await importer.WriteAsync(r.NumericValue, NpgsqlDbType.Double);
+            else
+                await importer.WriteNullAsync();
+            if (r.ValueType is HistoryValueType.String or HistoryValueType.Complex)
+                await importer.WriteAsync(System.Text.Encoding.UTF8.GetString(r.RawValue.Span), NpgsqlDbType.Text);
+            else
+                await importer.WriteNullAsync();
+        }
+        await importer.CompleteAsync();
+    }
+
+    await using (var cmd = new NpgsqlCommand("""
+        INSERT INTO property_history
+        SELECT * FROM property_history_staging
+        ON CONFLICT DO NOTHING;
+        """, conn, tx))
+    {
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    await tx.CommitAsync();
+    RecordsWritten += records.Length;
+    Status = "Connected";
+}
+```
+
+`WriteMovesAsync` and `WriteSnapshotAsync` are plain parameterized INSERTs in their own short transactions.
+
+**Step 5:** Read path. `QueryAsync` mirrors SQLite (path-chain resolution + a single `SELECT ... WHERE subject_path=ANY(@paths) AND property_name=ANY(@properties) AND timestamp BETWEEN @from AND @to ORDER BY timestamp`). Hypertable chunk pruning happens automatically.
+
+`QueryAggregatedAsync` reuses the same carry-sample CTE pattern as the SQLite sink, swapping integer-tick math for `time_bucket(@bucket, timestamp)`:
+
+```sql
+WITH carry AS (
+    SELECT timestamp, numeric_value
+    FROM property_history
+    WHERE subject_path = @path AND property_name = @property
+      AND value_type IN (1, 2)
+      AND timestamp < @from
+    ORDER BY timestamp DESC
+    LIMIT 1
+),
+in_range AS (
+    SELECT timestamp, numeric_value
+    FROM property_history
+    WHERE subject_path = @path AND property_name = @property
+      AND value_type IN (1, 2)
+      AND timestamp BETWEEN @from AND @to
+),
+samples AS (
+    SELECT * FROM carry UNION ALL SELECT * FROM in_range
+),
+samples_with_next AS (
+    SELECT timestamp, numeric_value,
+           LEAD(timestamp, 1, @rangeEnd) OVER (ORDER BY timestamp) AS next_timestamp
+    FROM samples
+),
+clipped AS (
+    SELECT
+        time_bucket(@bucket, timestamp) AS bucket_start,
+        numeric_value,
+        GREATEST(timestamp, time_bucket(@bucket, timestamp))                     AS effective_start,
+        LEAST(next_timestamp, time_bucket(@bucket, timestamp) + @bucket)          AS effective_end
+    FROM samples_with_next
+)
+SELECT
+    bucket_start,
+    SUM(numeric_value * EXTRACT(EPOCH FROM (effective_end - effective_start))) /
+        NULLIF(SUM(EXTRACT(EPOCH FROM (effective_end - effective_start))), 0)  AS average,
+    AVG(numeric_value)                                                          AS sample_mean,
+    MIN(numeric_value)                                                          AS minimum,
+    MAX(numeric_value)                                                          AS maximum,
+    SUM(numeric_value)                                                          AS sum,
+    COUNT(*)                                                                    AS count,
+    SUM(numeric_value * EXTRACT(EPOCH FROM (effective_end - effective_start)))  AS weighted_sum,
+    SUM(EXTRACT(EPOCH FROM (effective_end - effective_start)) * 1e7)            AS total_duration_ticks
+FROM clipped
+GROUP BY bucket_start
+ORDER BY bucket_start;
+```
+
+Populate `AggregatedRecord.WeightedSum` and `TotalDurationTicks` from the last two columns so `HistoryService` cross-leg merging works (see Task 8b).
+
+**Step 6:** Retention. `HostedService` timer (every `RetentionSweepInterval`, default 1 hour) issues:
+
+```sql
+SELECT drop_chunks('property_history', older_than => NOW() - @maxAge);
+```
+
+Chunks fully older than `now - MaxAge` drop atomically. Moves and snapshots tables are not swept in v1.
+
+**Step 7:** Add to solution and build:
+
+```bash
+dotnet sln src/Namotion.Interceptor.slnx add src/HomeBlaze/HomeBlaze.History.TimescaleDb/HomeBlaze.History.TimescaleDb.csproj --solution-folder /HomeBlaze
+dotnet build src/HomeBlaze/HomeBlaze.History.TimescaleDb/HomeBlaze.History.TimescaleDb.csproj
+```
+
+**Step 8:** Commit.
+
+---
+
+### Task 14: Create TimescaleDB Tests
+
+**Files:**
+- Create: `src/HomeBlaze/HomeBlaze.History.TimescaleDb.Tests/HomeBlaze.History.TimescaleDb.Tests.csproj`
+- Create: `src/HomeBlaze/HomeBlaze.History.TimescaleDb.Tests/TimescaleDbFixture.cs`
+- Create: `src/HomeBlaze/HomeBlaze.History.TimescaleDb.Tests/TimescaleDbHistorySinkTests.cs`
+
+**Step 1:** Project references `HomeBlaze.History.TimescaleDb`, `xunit`, `Testcontainers.PostgreSql` (3.x).
+
+**Step 2:** `TimescaleDbFixture` is an `IAsyncLifetime` that starts `timescale/timescaledb-ha:pg17` (or pg16-all if pg17 image is not pinned in your CI), exposes a connection string, and disposes the container at end of class.
+
+**Step 3:** Tests are tagged `[Trait("Category", "Integration")]` so they don't run in the default unit suite. Each test:
+- Boots the fixture, creates a sink instance, calls `BootstrapAsync` (schema migration).
+- Writes a known batch, queries it back, asserts.
+- Test list:
+  - `WhenBatchWritten_ThenQueryableByPath`
+  - `WhenSamePrimaryKeyWrittenTwice_ThenSecondIsDroppedSilently` (ON CONFLICT DO NOTHING)
+  - `WhenAggregatingAverage_ThenReturnsTimeWeightedMean`
+  - `WhenAggregatingSampleMean_ThenReturnsCountWeightedMean`
+  - `WhenBucketInheritsValueFromCarrySample_ThenAverageEqualsCarriedValue`
+  - `WhenSampleSpansMultipleBuckets_ThenEachBucketReceivesProportionalContribution`
+  - `WhenDropChunksCalled_ThenChunksOlderThanMaxAgeAreRemoved`
+  - `WhenMovesWritten_ThenPathChainResolves`
+
+**Step 4:** Add CI gate: integration job runs on PR and main only when the `homeblaze-history-timescaledb` label is present, OR on push to `feature/homeblaze-history` and `master`. Avoids paying TimescaleDB image pull on every PR.
+
+**Step 5:** Sample config `src/HomeBlaze/HomeBlaze/Data/history-timescaledb.json`:
+
+```json
+{
+  "$type": "HomeBlaze.History.TimescaleDb.TimescaleDbHistorySink",
+  "ConnectionString": "Host=localhost;Database=homeblaze;Username=homeblaze;Password=...",
+  "FlushInterval": "00:00:10",
+  "SnapshotInterval": "1.00:00:00",
+  "MaxAge": "365.00:00:00",
+  "Priority": 100
+}
+```
+
+**Step 6:** Build and run integration tests locally:
+
+```bash
+dotnet test src/HomeBlaze/HomeBlaze.History.TimescaleDb.Tests/
+```
+Expected: ALL PASS
+
+**Step 7:** Commit.
+
+**Explicit non-goals for v1:**
+
+- TimescaleDB continuous aggregates (require pinning bucket sizes).
+- Native compression (`add_compression_policy`).
+- Plain PostgreSQL / QuestDB fallback (no hypertables, would re-implement retention manually).
