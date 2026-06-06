@@ -368,6 +368,8 @@ public sealed class SubjectTransaction : IDisposable
         Memory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
+        // The writer is contractually expected to report failures via SourceWriteResult, not throw.
+        // A throwing writer propagates here and bypasses source-revert (matches prior behavior).
         var (written, failedSource, sourceErrors) = await writer
             .WriteToSourcesAsync(changes, _requirement, cancellationToken).ConfigureAwait(false);
 
@@ -648,6 +650,9 @@ public sealed class SubjectTransaction : IDisposable
         {
             // Set _isCommitting inside the lock to prevent concurrent writes from being
             // captured into _pendingChanges between the copy and the flag update (TOCTOU).
+            // Nothing between setting this flag (and renting the ArrayPool buffer below) and the
+            // caller's try/finally may throw: EndCommit runs only in the finally, so an exception here
+            // would leave _isCommitting stuck true and leak the rented buffer.
             _isCommitting = true;
 
             var changeCount = _pendingChanges.Count;

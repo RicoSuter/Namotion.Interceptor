@@ -10,46 +10,6 @@ namespace Namotion.Interceptor.Connectors.Transactions;
 /// </summary>
 internal sealed class SourceTransactionWriter : ITransactionWriter
 {
-    public async Task<TransactionWriteResult> WriteChangesAsync(
-        ReadOnlyMemory<SubjectPropertyChange> changes,
-        TransactionFailureHandling failureHandling,
-        TransactionRequirement requirement,
-        CancellationToken cancellationToken)
-    {
-        // Read each property's source exactly once: classify (single / multiple / none) and collect the
-        // source-less (local) changes in the same pass, so the single-source path never re-reads the
-        // mapping (which a concurrent SetSource/RemoveSource could otherwise change between two reads).
-        ISubjectSource? singleSource = null;
-        var multipleSources = false;
-        List<SubjectPropertyChange>? localChanges = null;
-        foreach (var change in changes.Span)
-        {
-            if (change.Property.TryGetSource(out var source))
-            {
-                if (singleSource is null)
-                {
-                    singleSource = source;
-                }
-                else if (!ReferenceEquals(singleSource, source))
-                {
-                    multipleSources = true;
-                    break;
-                }
-            }
-            else
-            {
-                (localChanges ??= []).Add(change);
-            }
-        }
-
-        if (singleSource is not null && !multipleSources)
-        {
-            return await WriteSingleSourceAsync(singleSource, changes, localChanges, failureHandling, requirement, cancellationToken).ConfigureAwait(false);
-        }
-
-        return await WriteGroupedAsync(changes, failureHandling, requirement, cancellationToken).ConfigureAwait(false);
-    }
-
     public async ValueTask<SourceWriteResult> WriteToSourcesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         TransactionRequirement requirement,
@@ -220,105 +180,6 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         return new SourceRevertResult(failed, errors);
     }
 
-    /// <summary>
-    /// Allocation-light path for the common case where every source-bound change targets the same
-    /// source: writes once (no per-source grouping or parallel dispatch) and applies in-process.
-    /// <paramref name="localChanges"/> are the source-less changes already separated by the caller's
-    /// single classification pass. Failure and rollback semantics mirror <see cref="WriteGroupedAsync"/>.
-    /// </summary>
-    private static async Task<TransactionWriteResult> WriteSingleSourceAsync(
-        ISubjectSource source,
-        ReadOnlyMemory<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange>? localChanges,
-        TransactionFailureHandling failureHandling,
-        TransactionRequirement requirement,
-        CancellationToken cancellationToken)
-    {
-        // The source gets a private array copy, never the transaction's pooled buffer, so a source that
-        // retains the memory is unaffected when the buffer returns to the pool (matches the grouped path).
-        // Source-bound changes are derived by excluding the already-collected local changes, so the
-        // property source is never read a second time.
-        var local = localChanges ?? (IReadOnlyList<SubjectPropertyChange>)[];
-        SubjectPropertyChange[] sourceChanges;
-        if (local.Count == 0)
-        {
-            sourceChanges = changes.ToArray();
-        }
-        else
-        {
-            // local is an in-order subsequence of changes (both walk changes.Span in the same order),
-            // so a two-pointer walk separates the source-bound changes without an extra set/lookup.
-            var sourceList = new List<SubjectPropertyChange>(changes.Length - local.Count);
-            var localIndex = 0;
-            foreach (var change in changes.Span)
-            {
-                if (localIndex < local.Count && local[localIndex].Equals(change))
-                {
-                    localIndex++;
-                }
-                else
-                {
-                    sourceList.Add(change);
-                }
-            }
-            sourceChanges = [.. sourceList];
-        }
-
-        if (requirement == TransactionRequirement.SingleWrite)
-        {
-            var batchSize = source.WriteBatchSize;
-            if (batchSize > 0 && sourceChanges.Length > batchSize)
-            {
-                return new TransactionWriteResult(
-                    [],
-                    sourceChanges,
-                    [new InvalidOperationException(
-                        $"SingleWrite requirement violated: Transaction contains {sourceChanges.Length} changes for source '{source.GetType().Name}', but WriteBatchSize is {batchSize}.")],
-                    local);
-            }
-        }
-
-        var allFailed = new List<SubjectPropertyChange>();
-        var allErrors = new List<Exception>();
-
-        // Write to the source. On a reported error only the non-failed changes reached it; otherwise
-        // the whole array did, so it is reused directly as the written set (no copy).
-        var writeResult = await source.WriteChangesInBatchesAsync(sourceChanges, cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<SubjectPropertyChange> written = sourceChanges;
-        if (writeResult.Error is not null)
-        {
-            written = ExcludeFailed(sourceChanges, writeResult.FailedChanges);
-            allFailed.AddRange(writeResult.FailedChanges);
-            allErrors.Add(new SourceTransactionWriteException(source, [.. writeResult.FailedChanges], writeResult.Error));
-
-            if (failureHandling == TransactionFailureHandling.Rollback)
-            {
-                await TryRevertSourceWritesAsync(SingleSourceMap(source, written), allFailed, allErrors, cancellationToken).ConfigureAwait(false);
-                return new TransactionWriteResult([], allFailed, allErrors, local);
-            }
-        }
-
-        // Apply the changes that reached the source to the in-process model.
-        var (applied, applyFailed, applyErrors) = written.ApplyAllChanges();
-        allFailed.AddRange(applyFailed);
-        allErrors.AddRange(applyErrors);
-
-        if (applyFailed.Count > 0)
-        {
-            if (failureHandling == TransactionFailureHandling.Rollback)
-            {
-                TryRevertAppliedChanges(applied, allFailed, allErrors);
-                await TryRevertSourceWritesAsync(SingleSourceMap(source, written), allFailed, allErrors, cancellationToken).ConfigureAwait(false);
-                return new TransactionWriteResult([], allFailed, allErrors, local);
-            }
-
-            // BestEffort: revert only the sources for failed local applies (keep each property in sync).
-            await TryRevertSourceWritesAsync(GroupChangesBySource(applyFailed), allFailed, allErrors, cancellationToken).ConfigureAwait(false);
-        }
-
-        return new TransactionWriteResult(applied, allFailed, allErrors, local);
-    }
-
     private static List<SubjectPropertyChange> ExcludeFailed(
         IReadOnlyList<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange> failed)
     {
@@ -332,80 +193,6 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             }
         }
         return result;
-    }
-
-    private static Dictionary<ISubjectSource, List<SubjectPropertyChange>> SingleSourceMap(
-        ISubjectSource source, IReadOnlyList<SubjectPropertyChange> changes) => new(1) { [source] = [.. changes] };
-
-    private async Task<TransactionWriteResult> WriteGroupedAsync(
-        ReadOnlyMemory<SubjectPropertyChange> changes,
-        TransactionFailureHandling failureHandling,
-        TransactionRequirement requirement,
-        CancellationToken cancellationToken)
-    {
-        // 1. Separate source-bound vs local changes
-        var (localChanges, externalChangesBySource) = GroupChangesBySourceType(changes.Span);
-
-        // 2. Validate SingleWrite requirement (only applies to source-bound changes)
-        if (requirement == TransactionRequirement.SingleWrite)
-        {
-            var validationError = ValidateSingleWriteRequirement(externalChangesBySource);
-            if (validationError != null)
-            {
-                var allSourceChanges = FlattenChanges(externalChangesBySource);
-                return new TransactionWriteResult([], allSourceChanges, [validationError], localChanges);
-            }
-        }
-
-        // 3. If no source-bound changes, just return local changes for caller to handle
-        if (externalChangesBySource.Count == 0)
-        {
-            return new TransactionWriteResult([], [], [], localChanges);
-        }
-
-        var allSuccessful = new List<SubjectPropertyChange>();
-        var allFailed = new List<SubjectPropertyChange>();
-        var allErrors = new List<Exception>();
-
-        // 4. Write to external sources in parallel
-        var (successfulBySource, failed, errors) = await WriteToExternalSourcesAsync(externalChangesBySource, cancellationToken).ConfigureAwait(false);
-        allFailed.AddRange(failed);
-        allErrors.AddRange(errors);
-
-        // If any source failed and rollback mode, revert successful sources
-        if (failureHandling == TransactionFailureHandling.Rollback && allFailed.Count > 0)
-        {
-            await TryRevertSourceWritesAsync(successfulBySource, allFailed, allErrors, cancellationToken).ConfigureAwait(false);
-            return new TransactionWriteResult([], allFailed, allErrors, localChanges);
-        }
-
-        // 5. Apply source-bound values to in-process model
-        var sourceBoundChanges = FlattenChanges(successfulBySource);
-        var (applied, applyFailed, applyErrors) = sourceBoundChanges.ApplyAllChanges();
-        allSuccessful.AddRange(applied);
-        allFailed.AddRange(applyFailed);
-        allErrors.AddRange(applyErrors);
-
-        // If in-process apply failed, rollback sources to maintain consistency
-        if (applyFailed.Count > 0)
-        {
-            if (failureHandling == TransactionFailureHandling.Rollback)
-            {
-                // Rollback mode: revert everything (all-or-nothing)
-                TryRevertAppliedChanges(applied, allFailed, allErrors);
-                await TryRevertSourceWritesAsync(successfulBySource, allFailed, allErrors, cancellationToken).ConfigureAwait(false);
-                return new TransactionWriteResult([], allFailed, allErrors, localChanges);
-            }
-
-            // BestEffort mode: rollback only sources for failed local applies (keep each property in sync)
-            var sourcesToRollback = GroupChangesBySource(applyFailed);
-            if (sourcesToRollback.Count > 0)
-            {
-                await TryRevertSourceWritesAsync(sourcesToRollback, allFailed, allErrors, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        return new TransactionWriteResult(allSuccessful, allFailed, allErrors, localChanges);
     }
 
     /// <summary>
@@ -547,19 +334,6 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
                 errors.Add(rollbackException);
             }
         }
-    }
-
-    /// <summary>
-    /// Attempts to revert in-process model changes by applying rollback changes.
-    /// </summary>
-    private static void TryRevertAppliedChanges(
-        IReadOnlyList<SubjectPropertyChange> successfulChanges,
-        List<SubjectPropertyChange> failedChanges,
-        List<Exception> errors)
-    {
-        var (_, revertFailed, revertErrors) = successfulChanges.ToRollbackChanges().ApplyAllChanges();
-        failedChanges.AddRange(revertFailed);
-        errors.AddRange(revertErrors);
     }
 
     /// <summary>

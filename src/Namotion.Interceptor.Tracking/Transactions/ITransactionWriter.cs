@@ -10,20 +10,6 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public interface ITransactionWriter
 {
     /// <summary>
-    /// Writes the specified changes to external sources.
-    /// </summary>
-    /// <param name="changes">The property changes to write.</param>
-    /// <param name="failureHandling">The transaction mode controlling failure handling behavior.</param>
-    /// <param name="requirement">The transaction requirement for validation.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The result indicating which changes succeeded and which failed.</returns>
-    Task<TransactionWriteResult> WriteChangesAsync(
-        ReadOnlyMemory<SubjectPropertyChange> changes,
-        TransactionFailureHandling failureHandling,
-        TransactionRequirement requirement,
-        CancellationToken cancellationToken);
-
-    /// <summary>
     /// Writes every source-bound change to its source (best-effort per source) and reports the
     /// per-change outcome. Does not apply anything in-process. Performs classification (source vs
     /// local) and the SingleWrite requirement check, since it alone knows the SetSource mappings.

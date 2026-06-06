@@ -216,7 +216,6 @@ namespace Namotion.Interceptor.Tracking.Transactions
     public interface ITransactionWriter
     {
         System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.SourceRevertResult> RevertAsync(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> written, System.Threading.CancellationToken cancellationToken);
-        System.Threading.Tasks.Task<Namotion.Interceptor.Tracking.Transactions.TransactionWriteResult> WriteChangesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, Namotion.Interceptor.Tracking.Transactions.TransactionFailureHandling failureHandling, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.SourceWriteResult> WriteToSourcesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement, System.Threading.CancellationToken cancellationToken);
     }
     public readonly struct SourceRevertResult : System.IEquatable<Namotion.Interceptor.Tracking.Transactions.SourceRevertResult>
@@ -303,14 +302,5 @@ namespace Namotion.Interceptor.Tracking.Transactions
     {
         None = 0,
         SingleWrite = 1,
-    }
-    public readonly struct TransactionWriteResult : System.IEquatable<Namotion.Interceptor.Tracking.Transactions.TransactionWriteResult>
-    {
-        public TransactionWriteResult(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> SuccessfulChanges, System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> FailedChanges, System.Collections.Generic.IReadOnlyList<System.Exception> Errors, System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> LocalChanges) { }
-        public System.Collections.Generic.IReadOnlyList<System.Exception> Errors { get; init; }
-        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> FailedChanges { get; init; }
-        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> LocalChanges { get; init; }
-        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> SuccessfulChanges { get; init; }
-        public static Namotion.Interceptor.Tracking.Transactions.TransactionWriteResult Success(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes) { }
     }
 }
