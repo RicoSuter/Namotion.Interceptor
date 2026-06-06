@@ -28,7 +28,9 @@ Snapshots and structural recording are deliberately deferred: they roughly doubl
 
 ## Phase 0: prerequisites
 
-Three shared-infrastructure changes precede the history packages. None of them depend on history, all are independently useful, and they touch core libraries shared by other connectors, so they land **first as their own focused prerequisite PR(s)** (with their own tests) rather than inside the history feature PRs. The history packages then depend on the merged capabilities.
+Three shared-infrastructure changes precede the history packages. None of them depend on history, all are independently useful, and they touch core libraries shared by other connectors. They ship together as a **single Phase 0 prerequisite PR** (with tests) that merges before the feature work.
+
+Delivery is three sequential PRs that build on each other: **Phase 0** (these prerequisites), then **Phase A** (v1), then **Phase B** (v1.1). Each merges to `master` before the next begins, so dependent code builds on a settled API rather than a long-lived stacked branch that would need rebasing every time an upstream PR changes during review.
 
 1. **Promote `ThroughputCounter`.** It is currently `internal sealed` in `Namotion.Interceptor.OpcUa`. Move it to `Namotion.Interceptor.Connectors` and make it `public` so OPC UA connectors and the history stores share one lock-free 60-second sliding-window rate counter. `Namotion.Interceptor.Connectors` already hosts `ChangeQueueProcessor`, so no new dependency is introduced.
 
@@ -36,7 +38,7 @@ Three shared-infrastructure changes precede the history packages. None of them d
 
 3. **Add opt-in bounded-queue backpressure to `ChangeQueueProcessor`.** The processor's queue is currently unbounded; the canonical architecture already specifies "bounded queue semantics, oldest dropped on overflow." Add an optional `maxQueueDepth` constructor parameter (default `null` = unbounded, preserving current connector behavior). When set and exceeded, the oldest unprocessed change is dropped and a drop counter increments. This makes the `DropCount` `[State]` metric below real rather than aspirational. Because it lives in `ChangeQueueProcessor`, the knob is exposed uniformly: any consumer (OPC UA, MQTT, WebSocket) can opt in, which matters most on the central UNS where the WebSocket handler sees the highest aggregate change rate.
 
-   This is its own core PR, separate from the other two prerequisites, because it changes hot-path behavior and deserves isolated review. One semantic note for connector adopters: a dropped change in a *sync* connector is not just a metric, it is a downstream divergence (a client never receives that value), so the right overload reaction for a connector is usually to trigger a resync rather than accept silent loss. History stores can drop freely (a bounded gap in a passive log); connectors choosing to bound should pair it with a resync policy. That per-connector policy is follow-up; this PR only adds and exposes the mechanism, with the default leaving every existing connector unchanged.
+   Because it changes hot-path behavior, the Phase 0 PR covers it with explicit tests (overflow drops the oldest entry and increments the counter; the default-null path leaves every existing connector byte-for-byte unchanged). One semantic note for connector adopters: a dropped change in a *sync* connector is not just a metric, it is a downstream divergence (a client never receives that value), so the right overload reaction for a connector is usually to trigger a resync rather than accept silent loss. History stores can drop freely (a bounded gap in a passive log); connectors choosing to bound should pair it with a resync policy. That per-connector policy is follow-up; Phase 0 only adds and exposes the mechanism, with the default leaving every existing connector unchanged.
 
 ## Architecture
 
