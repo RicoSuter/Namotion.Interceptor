@@ -423,4 +423,115 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // In-process model matches source (both have false)
         Assert.False(device.PropertyA);
     }
+
+    [Fact]
+    public async Task RollbackMode_SingleSourceWithLocal_SourceBoundApplyThrows_RevertsEverything()
+    {
+        // Arrange - One source bound to two device properties (PropertyA throws on apply,
+        // PropertyB applies fine) plus a local (no-source) change. In Rollback mode an apply
+        // failure must leave nothing applied: the source-bound apply failure reverts the source
+        // for every written change and the local change is rolled back too.
+        var context = CreateContext();
+        var person = new Person(context);
+        var device = new ThrowingDevice(context)
+        {
+            ShouldThrow = prop => prop == nameof(ThrowingDevice.PropertyA)
+        };
+
+        var writtenValues = new List<(string Property, bool Value)>();
+        var source = new Mock<ISubjectSource>();
+        source.Setup(s => s.WriteBatchSize).Returns(0);
+        source.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenValues.Add((change.Property.Name, change.GetNewValue<bool>()));
+                }
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).SetSource(source.Object);
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyB)).SetSource(source.Object);
+        // person.LastName has no source -> local change.
+
+        // Act & Assert
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        device.PropertyA = true; // Source-bound, OnSet* throws during apply
+        device.PropertyB = true; // Source-bound, OnSet* succeeds
+        person.LastName = "Doe"; // Local, would succeed
+
+        device.ThrowingEnabled = true;
+
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert - nothing stays applied in-process
+        Assert.False(device.PropertyA); // Never applied (apply threw)
+        Assert.False(device.PropertyB); // Applied then rolled back
+        Assert.Null(person.LastName);   // Local change rolled back
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Contains("Rollback was attempted", exception.Message);
+
+        // Both source-bound writes were reverted at the source (each written true then false)
+        Assert.Equal(2, writtenValues.Count(v => v.Value));   // initial writes
+        Assert.Equal(2, writtenValues.Count(v => !v.Value));  // revert writes
+    }
+
+    [Fact]
+    public async Task BestEffortMode_SingleSourceWithLocal_SourceBoundApplyThrows_KeepsSuccessfulAndRevertsFailedSource()
+    {
+        // Arrange - One source bound to two device properties (PropertyA throws on apply,
+        // PropertyB applies fine) plus a local (no-source) change. In BestEffort mode the
+        // successful changes (PropertyB written+applied, local applied) stay, while the
+        // failed-apply property has its source write reverted so source and model agree.
+        var context = CreateContext();
+        var person = new Person(context);
+        var device = new ThrowingDevice(context)
+        {
+            ShouldThrow = prop => prop == nameof(ThrowingDevice.PropertyA)
+        };
+
+        var writtenValues = new List<(string Property, bool Value)>();
+        var source = new Mock<ISubjectSource>();
+        source.Setup(s => s.WriteBatchSize).Returns(0);
+        source.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenValues.Add((change.Property.Name, change.GetNewValue<bool>()));
+                }
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).SetSource(source.Object);
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyB)).SetSource(source.Object);
+        // person.LastName has no source -> local change.
+
+        // Act & Assert
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        device.PropertyA = true; // Source-bound, OnSet* throws during apply
+        device.PropertyB = true; // Source-bound, OnSet* succeeds
+        person.LastName = "Doe"; // Local, succeeds
+
+        device.ThrowingEnabled = true;
+
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert - successful changes stay applied
+        Assert.False(device.PropertyA);     // Failed apply, not applied; source reverted to match
+        Assert.True(device.PropertyB);      // Written and applied
+        Assert.Equal("Doe", person.LastName); // Local applied
+
+        // Only the failed-apply property is reported; the other two succeeded
+        Assert.Single(exception.FailedChanges);
+        Assert.Equal(nameof(ThrowingDevice.PropertyA), exception.FailedChanges[0].Property.Metadata.Name);
+        Assert.Equal(2, exception.AppliedChanges.Count);
+
+        // PropertyA's source was reverted (true then false); PropertyB written once and not reverted.
+        Assert.Single(writtenValues, v => v.Property == nameof(ThrowingDevice.PropertyA) && !v.Value);
+        Assert.Contains((nameof(ThrowingDevice.PropertyA), true), writtenValues);
+        Assert.Single(writtenValues, v => v.Property == nameof(ThrowingDevice.PropertyB));
+        Assert.Contains((nameof(ThrowingDevice.PropertyB), true), writtenValues);
+    }
 }
