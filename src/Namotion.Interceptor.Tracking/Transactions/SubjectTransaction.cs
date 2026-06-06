@@ -246,7 +246,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
     /// <exception cref="SubjectTransactionException">Thrown when one or more changes failed to commit.</exception>
-    public async ValueTask CommitAsync(CancellationToken cancellationToken)
+    public ValueTask CommitAsync(CancellationToken cancellationToken)
     {
         ValidateCanCommit();
 
@@ -255,39 +255,65 @@ public sealed class SubjectTransaction : IDisposable
             if (_pendingChanges.Count == 0)
             {
                 _isCommitted = true;
-                return;
+                return default;
             }
         }
 
-        var commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken).ConfigureAwait(false);
+        var writer = Context.TryGetService<ITransactionWriter>();
+        if (writer is null)
+        {
+            // No source writer: the entire commit is in-process. For the default (Exclusive) locking
+            // mode the lock is already held, so the whole flow runs synchronously without a
+            // CancellationTokenSource or an async state machine. Optimistic locking needs an async lock
+            // acquisition, so only that case falls back to the async wrapper.
+            var lockTask = AcquireOptimisticLockIfNeededAsync(cancellationToken);
+            if (lockTask.IsCompletedSuccessfully)
+            {
+                CommitInProcessOnly(lockTask.Result);
+                return default;
+            }
+
+            return CommitInProcessAfterLockAsync(lockTask);
+        }
+
+        return CommitWithWriterAsync(writer, cancellationToken);
+    }
+
+    private async ValueTask CommitInProcessAfterLockAsync(ValueTask<IDisposable?> lockTask)
+    {
+        var commitLock = await lockTask.ConfigureAwait(false);
+        CommitInProcessOnly(commitLock);
+    }
+
+    /// <summary>
+    /// In-process commit body when no <see cref="ITransactionWriter"/> is registered: snapshots, applies
+    /// the whole snapshot in one pass, and reverts in-process on Rollback failure. Fully synchronous.
+    /// </summary>
+    private void CommitInProcessOnly(IDisposable? commitLock)
+    {
         var (rentedArray, changes) = StartCommitAndSnapshotChanges();
 
         try
         {
             ThrowIfConflictsDetected(changes.Span);
 
-            SubjectTransactionException? failure;
-            var writeHandler = Context.TryGetService<ITransactionWriter>();
-            if (writeHandler is null)
+            var (applied, applyFailed, applyErrors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes.Span, exclude: null);
+
+            SubjectTransactionException? failure = null;
+            if (applyFailed.Count > 0)
             {
-                // Fast path: in-memory only. No source writer, no async work, no CTS.
-                failure = TryApplyChangesInMemory(changes.Span);
-            }
-            else
-            {
-                using var timeoutCts = CreateCommitTimeoutCts();
-                var commitToken = timeoutCts?.Token ?? CancellationToken.None;
-                failure = await TryExecuteWritesWithSourceAsync(writeHandler, changes, commitToken).ConfigureAwait(false);
+                if (_failureHandling == TransactionFailureHandling.Rollback)
+                {
+                    var (revertFailed, revertErrors) = RevertInProcess(applied);
+                    failure = CreateFailureException([], Concat(applyFailed, revertFailed), Concat(applyErrors, revertErrors));
+                }
+                else
+                {
+                    failure = CreateFailureException(applied, applyFailed, applyErrors);
+                }
             }
 
-            // Clear pending changes and mark committed BEFORE throwing so subsequent
-            // property reads do not return stale captured values via TryGetPendingValue.
-            lock (_pendingChangesLock)
-            {
-                _pendingChanges.Clear();
-            }
-
-            _isCommitted = true;
+            FinishCommit();
 
             if (failure is not null)
             {
@@ -296,66 +322,296 @@ public sealed class SubjectTransaction : IDisposable
         }
         finally
         {
-            _isCommitting = false;
-
-            if (!_isCommitted)
-            {
-                // Allow retry: reset so CommitAsync can be called again after a failure
-                // (e.g., conflict detected, timeout, validation during replay).
-                Volatile.Write(ref _commitStarted, 0);
-            }
-
-            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray);
-            commitLock?.Dispose();
+            EndCommit(rentedArray, commitLock);
         }
     }
 
     /// <summary>
-    /// Synchronous in-memory commit (no <see cref="ITransactionWriter"/>): applies changes directly,
-    /// avoiding CTS, async state-machine, and eager tracking-list allocations. Returns null on success
-    /// or a populated exception on failure (the caller clears pending state before re-throwing).
+    /// Commit when an <see cref="ITransactionWriter"/> is registered: writes source-bound changes,
+    /// applies the snapshot minus source-write failures in one pass, then reconciles per the
+    /// failure/rollback matrix using the writer for source reverts.
     /// </summary>
-    private SubjectTransactionException? TryApplyChangesInMemory(ReadOnlySpan<SubjectPropertyChange> changes)
+    private async ValueTask CommitWithWriterAsync(ITransactionWriter writer, CancellationToken cancellationToken)
     {
-        List<SubjectPropertyChange>? successful = null;
-        List<SubjectPropertyChange>? failed = null;
-        List<Exception>? errors = null;
+        var commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken).ConfigureAwait(false);
+        var (rentedArray, changes) = StartCommitAndSnapshotChanges();
 
+        try
+        {
+            ThrowIfConflictsDetected(changes.Span);
+
+            using var timeoutCts = CreateCommitTimeoutCts();
+            var commitToken = timeoutCts?.Token ?? CancellationToken.None;
+
+            var failure = await ReconcileWithWriterAsync(writer, changes, commitToken).ConfigureAwait(false);
+
+            FinishCommit();
+
+            if (failure is not null)
+            {
+                throw failure;
+            }
+        }
+        finally
+        {
+            EndCommit(rentedArray, commitLock);
+        }
+    }
+
+    /// <summary>
+    /// Single reconcile point for the writer path. Implements the failure/rollback matrix:
+    /// write to sources, apply snapshot minus source-write failures in one pass, then revert as needed.
+    /// Returns null on full success or a populated exception otherwise.
+    /// </summary>
+    private async ValueTask<SubjectTransactionException?> ReconcileWithWriterAsync(
+        ITransactionWriter writer,
+        Memory<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
+    {
+        var (written, failedSource, sourceErrors) = await writer
+            .WriteToSourcesAsync(changes, _requirement, cancellationToken).ConfigureAwait(false);
+
+        // Rollback with any source-write failure: nothing is applied in-process; revert what reached
+        // a source and report. The local (no-source) changes are never applied, but they are still
+        // reported as failed (they did not commit), matching the all-or-nothing contract.
+        if (_failureHandling == TransactionFailureHandling.Rollback && failedSource.Count > 0)
+        {
+            var revert = await writer.RevertAsync(written, cancellationToken).ConfigureAwait(false);
+            var notApplied = ExcludeByProperty(changes.Span, failedSource, written);
+            return CreateFailureException(
+                [],
+                Concat(failedSource, notApplied, revert.Failed),
+                Concat(sourceErrors, revert.Errors));
+        }
+
+        // Apply the whole snapshot except the source-write failures, in a single pass. With no source
+        // failure this is the entire snapshot and ApplyAllChanges returns an empty Successful set.
+        var exclude = failedSource.Count == 0 ? null : failedSource;
+        var (applied, applyFailed, applyErrors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes.Span, exclude);
+
+        if (applyFailed.Count > 0)
+        {
+            if (_failureHandling == TransactionFailureHandling.Rollback)
+            {
+                // All-or-nothing: revert in-process applies, then the source writes.
+                var (revertFailed, revertErrors) = RevertInProcess(applied);
+                var sourceRevert = await writer.RevertAsync(written, cancellationToken).ConfigureAwait(false);
+                return CreateFailureException(
+                    [],
+                    Concat(failedSource, applyFailed, revertFailed, sourceRevert.Failed),
+                    Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
+            }
+
+            // BestEffort: keep source == model for failed-apply properties by reverting only the
+            // source writes whose property failed to apply (matched by Property equality).
+            var toRevert = IntersectByProperty(applyFailed, written);
+            var bestEffortRevert = await writer.RevertAsync(toRevert, cancellationToken).ConfigureAwait(false);
+            return CreateFailureException(
+                applied,
+                Concat(failedSource, applyFailed, bestEffortRevert.Failed),
+                Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
+        }
+
+        // Apply succeeded. If sources partially failed (BestEffort, since Rollback handled above),
+        // report the partial success.
+        if (failedSource.Count > 0)
+        {
+            return CreateFailureException(applied, failedSource, sourceErrors);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reverts previously-applied in-process changes by applying their inverse values in reverse order.
+    /// Returns any revert failures and errors so the caller can fold them into the exception.
+    /// </summary>
+    private static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertInProcess(
+        IReadOnlyList<SubjectPropertyChange> applied)
+    {
+        if (applied.Count == 0)
+        {
+            return ([], []);
+        }
+
+        var (_, revertFailed, revertErrors) = applied.ToRollbackChanges().ApplyAllChanges();
+        return (revertFailed, revertErrors);
+    }
+
+    /// <summary>
+    /// Returns the subset of <paramref name="written"/> whose property also appears in
+    /// <paramref name="failed"/> (matched by <see cref="SubjectPropertyChange.Property"/>).
+    /// </summary>
+    private static IReadOnlyList<SubjectPropertyChange> IntersectByProperty(
+        IReadOnlyList<SubjectPropertyChange> failed,
+        IReadOnlyList<SubjectPropertyChange> written)
+    {
+        if (failed.Count == 0 || written.Count == 0)
+        {
+            return [];
+        }
+
+        var failedProperties = new HashSet<PropertyReference>(failed.Count, PropertyReference.Comparer);
+        foreach (var change in failed)
+        {
+            failedProperties.Add(change.Property);
+        }
+
+        List<SubjectPropertyChange>? result = null;
+        foreach (var change in written)
+        {
+            if (failedProperties.Contains(change.Property))
+            {
+                (result ??= new List<SubjectPropertyChange>(failed.Count)).Add(change);
+            }
+        }
+
+        return result ?? (IReadOnlyList<SubjectPropertyChange>)[];
+    }
+
+    /// <summary>
+    /// Returns the changes in <paramref name="changes"/> whose property is in neither
+    /// <paramref name="excludeFirst"/> nor <paramref name="excludeSecond"/> (matched by
+    /// <see cref="SubjectPropertyChange.Property"/>). Used to collect the local (no-source) changes that
+    /// were neither written to a source nor failed at a source.
+    /// </summary>
+    private static IReadOnlyList<SubjectPropertyChange> ExcludeByProperty(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> excludeFirst,
+        IReadOnlyList<SubjectPropertyChange> excludeSecond)
+    {
+        var excluded = new HashSet<PropertyReference>(
+            excludeFirst.Count + excludeSecond.Count, PropertyReference.Comparer);
+        foreach (var change in excludeFirst)
+        {
+            excluded.Add(change.Property);
+        }
+        foreach (var change in excludeSecond)
+        {
+            excluded.Add(change.Property);
+        }
+
+        List<SubjectPropertyChange>? result = null;
         foreach (var change in changes)
         {
-            if (change.TryApplyChange(out var error))
+            if (!excluded.Contains(change.Property))
             {
-                // Track applied changes when rollback is possible (we may need to revert them)
-                // or when a failure has already occurred (we need them for the exception).
-                if (_failureHandling == TransactionFailureHandling.Rollback || failed is not null)
-                {
-                    (successful ??= new List<SubjectPropertyChange>(changes.Length)).Add(change);
-                }
-            }
-            else
-            {
-                (failed ??= []).Add(change);
-                if (error != null)
-                {
-                    (errors ??= []).Add(error);
-                }
+                (result ??= []).Add(change);
             }
         }
 
-        if (failed is null) return null;
+        return result ?? (IReadOnlyList<SubjectPropertyChange>)[];
+    }
 
-        if (_failureHandling == TransactionFailureHandling.Rollback && successful is { Count: > 0 })
+    private static IReadOnlyList<SubjectPropertyChange> Concat(
+        IReadOnlyList<SubjectPropertyChange> first,
+        IReadOnlyList<SubjectPropertyChange> second)
+    {
+        if (second.Count == 0) return first;
+        if (first.Count == 0) return second;
+
+        var result = new List<SubjectPropertyChange>(first.Count + second.Count);
+        result.AddRange(first);
+        result.AddRange(second);
+        return result;
+    }
+
+    private static IReadOnlyList<SubjectPropertyChange> Concat(
+        IReadOnlyList<SubjectPropertyChange> first,
+        IReadOnlyList<SubjectPropertyChange> second,
+        IReadOnlyList<SubjectPropertyChange> third)
+    {
+        var result = new List<SubjectPropertyChange>(first.Count + second.Count + third.Count);
+        result.AddRange(first);
+        result.AddRange(second);
+        result.AddRange(third);
+        return result;
+    }
+
+    private static IReadOnlyList<SubjectPropertyChange> Concat(
+        IReadOnlyList<SubjectPropertyChange> first,
+        IReadOnlyList<SubjectPropertyChange> second,
+        IReadOnlyList<SubjectPropertyChange> third,
+        IReadOnlyList<SubjectPropertyChange> fourth)
+    {
+        var result = new List<SubjectPropertyChange>(first.Count + second.Count + third.Count + fourth.Count);
+        result.AddRange(first);
+        result.AddRange(second);
+        result.AddRange(third);
+        result.AddRange(fourth);
+        return result;
+    }
+
+    private static IReadOnlyList<Exception> Concat(
+        IReadOnlyList<Exception> first,
+        IReadOnlyList<Exception> second)
+    {
+        if (second.Count == 0) return first;
+        if (first.Count == 0) return second;
+
+        var result = new List<Exception>(first.Count + second.Count);
+        result.AddRange(first);
+        result.AddRange(second);
+        return result;
+    }
+
+    private static IReadOnlyList<Exception> Concat(
+        IReadOnlyList<Exception> first,
+        IReadOnlyList<Exception> second,
+        IReadOnlyList<Exception> third)
+    {
+        var result = new List<Exception>(first.Count + second.Count + third.Count);
+        result.AddRange(first);
+        result.AddRange(second);
+        result.AddRange(third);
+        return result;
+    }
+
+    private static IReadOnlyList<Exception> Concat(
+        IReadOnlyList<Exception> first,
+        IReadOnlyList<Exception> second,
+        IReadOnlyList<Exception> third,
+        IReadOnlyList<Exception> fourth)
+    {
+        var result = new List<Exception>(first.Count + second.Count + third.Count + fourth.Count);
+        result.AddRange(first);
+        result.AddRange(second);
+        result.AddRange(third);
+        result.AddRange(fourth);
+        return result;
+    }
+
+    /// <summary>
+    /// Clears pending changes and marks the transaction committed BEFORE any exception is thrown so
+    /// subsequent property reads do not return stale captured values via TryGetPendingValue.
+    /// </summary>
+    private void FinishCommit()
+    {
+        lock (_pendingChangesLock)
         {
-            var (_, revertFailed, revertErrors) = successful.ToRollbackChanges().ApplyAllChanges();
-            failed.AddRange(revertFailed);
-            if (revertErrors.Count > 0)
-            {
-                (errors ??= []).AddRange(revertErrors);
-            }
-            successful.Clear();
+            _pendingChanges.Clear();
         }
 
-        return CreateFailureException(successful ?? [], failed, errors ?? []);
+        _isCommitted = true;
+    }
+
+    /// <summary>
+    /// Common cleanup for every commit path (success or failure): resets commit state for retry on
+    /// failure, returns the pooled snapshot array, and releases the optimistic lock.
+    /// </summary>
+    private void EndCommit(SubjectPropertyChange[] rentedArray, IDisposable? commitLock)
+    {
+        _isCommitting = false;
+
+        if (!_isCommitted)
+        {
+            // Allow retry: reset so CommitAsync can be called again after a failure
+            // (e.g., conflict detected, timeout, validation during replay).
+            Volatile.Write(ref _commitStarted, 0);
+        }
+
+        ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray);
+        commitLock?.Dispose();
     }
 
     private void ValidateCanCommit()
@@ -424,94 +680,6 @@ public sealed class SubjectTransaction : IDisposable
         return _commitTimeout == Timeout.InfiniteTimeSpan
             ? null
             : new CancellationTokenSource(_commitTimeout);
-    }
-
-    private async ValueTask<SubjectTransactionException?> TryExecuteWritesWithSourceAsync(
-        ITransactionWriter writeHandler,
-        Memory<SubjectPropertyChange> changes,
-        CancellationToken cancellationToken)
-    {
-        var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, cancellationToken).ConfigureAwait(false);
-
-        var localChanges = result.LocalChanges;
-
-        // Fast path: all source writes succeeded and nothing local to apply, so no aggregation needed.
-        if (result.FailedChanges.Count == 0 && localChanges.Count == 0)
-        {
-            return null;
-        }
-
-        var allSuccessfulChanges = new List<SubjectPropertyChange>(result.SuccessfulChanges);
-        var allFailedChanges = new List<SubjectPropertyChange>(result.FailedChanges);
-        var allErrors = new List<Exception>(result.Errors);
-
-        var localChangesToApply = new List<SubjectPropertyChange>(localChanges);
-
-        if (_failureHandling == TransactionFailureHandling.Rollback && allFailedChanges.Count > 0)
-        {
-            allFailedChanges.AddRange(localChangesToApply);
-            localChangesToApply.Clear();
-        }
-
-        if (localChangesToApply.Count > 0)
-        {
-            await ApplyLocalChangesAsync(
-                writeHandler,
-                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken).ConfigureAwait(false);
-        }
-
-        return allFailedChanges.Count == 0
-            ? null
-            : CreateFailureException(allSuccessfulChanges, allFailedChanges, allErrors);
-    }
-
-    private async ValueTask ApplyLocalChangesAsync(ITransactionWriter writeHandler,
-        List<SubjectPropertyChange> allSuccessfulChanges,
-        List<SubjectPropertyChange> allFailedChanges,
-        List<Exception> allErrors,
-        List<SubjectPropertyChange> localChangesToApply,
-        CancellationToken cancellationToken)
-    {
-        var (applied, applyFailed, applyErrors) = localChangesToApply.ApplyAllChanges();
-        allSuccessfulChanges.AddRange(applied);
-        allFailedChanges.AddRange(applyFailed);
-        allErrors.AddRange(applyErrors);
-
-        if (_failureHandling == TransactionFailureHandling.Rollback && applyFailed.Count > 0)
-        {
-            await RollbackOnLocalFailureAsync(
-                writeHandler,
-                allSuccessfulChanges, allFailedChanges, allErrors, applied, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private async ValueTask RollbackOnLocalFailureAsync(ITransactionWriter writeHandler,
-        List<SubjectPropertyChange> allSuccessfulChanges,
-        List<SubjectPropertyChange> allFailedChanges,
-        List<Exception> allErrors,
-        IReadOnlyList<SubjectPropertyChange> applied,
-        CancellationToken cancellationToken)
-    {
-        // Revert successful local applies
-        var (_, localRevertFailed, localRevertErrors) = applied.ToRollbackChanges().ApplyAllChanges();
-        allFailedChanges.AddRange(localRevertFailed);
-        allErrors.AddRange(localRevertErrors);
-
-        // Revert source-bound changes by calling writer with rollback changes
-        if (allSuccessfulChanges.Count > 0)
-        {
-            var rollbackChanges = allSuccessfulChanges.ToRollbackChanges().ToArray();
-            var rollbackResult = await writeHandler.WriteChangesAsync(
-                rollbackChanges.AsMemory(),
-                TransactionFailureHandling.BestEffort,
-                TransactionRequirement.None,
-                cancellationToken).ConfigureAwait(false);
-
-            allFailedChanges.AddRange(rollbackResult.FailedChanges);
-            allErrors.AddRange(rollbackResult.Errors);
-        }
-
-        allSuccessfulChanges.Clear();
     }
 
     private SubjectTransactionException CreateFailureException(
