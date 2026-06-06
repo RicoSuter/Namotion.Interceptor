@@ -392,13 +392,15 @@ The recommended production image is `timescale/timescaledb-ha:pg16-latest` (bund
 
 | Parameter | Required | Default | Notes |
 |---|---|---|---|
-| `path` | yes | | canonical property path |
+| `paths` | yes | | one or more canonical property paths |
 | `from` | yes | | ISO 8601; bare timestamps treated as UTC |
 | `to` | no | now | ISO 8601 |
 | `bucket` | no | null (raw) | `TimeSpan`-parseable, e.g. `5m` |
 | `aggregation` | no | `Last` | case-insensitive match against `HistoryAggregations` |
 
-The response carries `path`, echoed query parameters, a `value_type` hint (`number` / `string` / `boolean` / `enum`), the `points` array (null entries for gaps), and `truncated`. Unknown aggregation or aggregation-not-servable-over-range returns a structured error with the `available` set, with no silent fallback. Empty results and unknown paths are not errors. `MaxPoints` is not exposed (10 000 raw / 1 000 bucketed caps keep responses bounded; callers narrow `from`/`to` for detail).
+The tool queries multiple properties in one call: `from`/`to`/`bucket`/`aggregation` apply to every path, and the response is a per-path map, each entry carrying a `value_type` hint (`number` / `string` / `boolean` / `enum`), the `points` array (null entries for gaps), and `truncated`. This lets an AI agent compare related signals (for example temperature and humidity) in a single request.
+
+Multi-property is a thin fan-out, not an engine change: `HistoryQuery` stays single-path, the cross-store merger exposes a multi-path overload that runs the per-path queries (parallelizable), and the chart dialog reuses it to draw multiple series. Unknown aggregation or aggregation-not-servable-over-range returns a structured error with the `available` set, with no silent fallback. Empty results and unknown paths are not errors. `MaxPoints` is not exposed (10 000 raw / 1 000 bucketed caps per path keep responses bounded; callers narrow `from`/`to` for detail).
 
 ## Configuration summary
 
@@ -473,7 +475,7 @@ Each store takes periodic whole-graph snapshots on its own `SnapshotInterval` in
 
 ## Open questions / future work
 
-**Fast-follow:** runtime validation of the `MaxAge >= 2 * FlushInterval` constraint; per-range re-evaluation of the aggregation dropdown; multi-property compare and CSV/JSON export in the dialog; `Median`/`Percentile` (toolkit `approx_percentile` vs native `percentile_cont`).
+**Fast-follow:** runtime validation of the `MaxAge >= 2 * FlushInterval` constraint; per-range re-evaluation of the aggregation dropdown; CSV/JSON export from the dialog; `Median`/`Percentile` (toolkit `approx_percentile` vs native `percentile_cont`). (Multi-property query is in v1; the dialog's multi-series compare builds on it.)
 
 **Phase 2 (after v1.1):** `Rate`/`Delta` for cumulative properties (toolkit `counter_agg`; in-process for InMemory; look-back already present); `StateDuration` for discrete properties; server-side `Interpolate` gap-fill for smoothly-varying signals; recording complex types beyond path references; TimescaleDB continuous aggregates and native compression once production bucket sizes are known.
 
