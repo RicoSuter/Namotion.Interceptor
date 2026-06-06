@@ -187,6 +187,16 @@ namespace Namotion.Interceptor.Tracking.Parent
         public Namotion.Interceptor.PropertyReference Property { get; set; }
     }
 }
+namespace Namotion.Interceptor.Tracking.Performance
+{
+    public sealed class ObjectPool<T>
+        where T :  class
+    {
+        public ObjectPool(System.Func<T> factory) { }
+        public T Rent() { }
+        public void Return(T item) { }
+    }
+}
 namespace Namotion.Interceptor.Tracking.Recorder
 {
     public class ReadPropertyRecorder : Namotion.Interceptor.Interceptors.IReadInterceptor

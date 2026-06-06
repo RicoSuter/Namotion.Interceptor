@@ -12,7 +12,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Performance;
+using Namotion.Interceptor.Tracking.Performance;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt.Client;

@@ -1,5 +1,6 @@
 using System.Buffers;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Performance;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
 
@@ -31,7 +32,10 @@ public sealed class SubjectTransaction : IDisposable
     /// Preserves insertion order so that commit replays changes in the order they were written.
     /// Access must be synchronized via <see cref="_pendingChangesLock"/>.
     /// </summary>
-    private readonly OrderedDictionary<PropertyReference, SubjectPropertyChange> _pendingChanges = new(PropertyReference.Comparer);
+    private static readonly ObjectPool<OrderedDictionary<PropertyReference, SubjectPropertyChange>> PendingChangesPool
+        = new(() => new OrderedDictionary<PropertyReference, SubjectPropertyChange>(PropertyReference.Comparer));
+
+    private readonly OrderedDictionary<PropertyReference, SubjectPropertyChange> _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
     private volatile bool _isCommitting;
@@ -558,6 +562,7 @@ public sealed class SubjectTransaction : IDisposable
             {
                 _pendingChanges.Clear();
             }
+            PendingChangesPool.Return(_pendingChanges);
 
             CurrentTransaction.Value = null;
             _lockReleaser?.Dispose(); // May be null for Optimistic transactions
