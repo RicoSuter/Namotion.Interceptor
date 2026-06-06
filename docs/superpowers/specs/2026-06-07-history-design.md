@@ -28,13 +28,15 @@ Snapshots and structural recording are deliberately deferred: they roughly doubl
 
 ## Phase 0: prerequisites
 
-Three shared-infrastructure changes precede the history packages:
+Three shared-infrastructure changes precede the history packages. None of them depend on history, all are independently useful, and they touch core libraries shared by other connectors, so they land **first as their own focused prerequisite PR(s)** (with their own tests) rather than inside the history feature PRs. The history packages then depend on the merged capabilities.
 
 1. **Promote `ThroughputCounter`.** It is currently `internal sealed` in `Namotion.Interceptor.OpcUa`. Move it to `Namotion.Interceptor.Connectors` and make it `public` so OPC UA connectors and the history stores share one lock-free 60-second sliding-window rate counter. `Namotion.Interceptor.Connectors` already hosts `ChangeQueueProcessor`, so no new dependency is introduced.
 
 2. **Extract `ISubjectPathResolver`.** Today only the concrete `SubjectPathResolver` exists (`HomeBlaze.Services`). Extract a minimal interface (`GetPath`, `GetPaths`, `ResolveSubject`) so stores depend on the abstraction. This enables unit tests to inject deterministic paths without a live graph, which is essential for testing the recording and move-detection paths in isolation.
 
-3. **Add opt-in bounded-queue backpressure to `ChangeQueueProcessor`.** The processor's queue is currently unbounded; the canonical architecture already specifies "bounded queue semantics, oldest dropped on overflow." Add an optional `maxQueueDepth` constructor parameter (default `null` = unbounded, preserving current connector behavior). When set and exceeded, the oldest unprocessed change is dropped and a drop counter increments. History stores opt in; existing connectors are unaffected. This makes the `DropCount` `[State]` metric below real rather than aspirational.
+3. **Add opt-in bounded-queue backpressure to `ChangeQueueProcessor`.** The processor's queue is currently unbounded; the canonical architecture already specifies "bounded queue semantics, oldest dropped on overflow." Add an optional `maxQueueDepth` constructor parameter (default `null` = unbounded, preserving current connector behavior). When set and exceeded, the oldest unprocessed change is dropped and a drop counter increments. This makes the `DropCount` `[State]` metric below real rather than aspirational. Because it lives in `ChangeQueueProcessor`, the knob is exposed uniformly: any consumer (OPC UA, MQTT, WebSocket) can opt in, which matters most on the central UNS where the WebSocket handler sees the highest aggregate change rate.
+
+   This is its own core PR, separate from the other two prerequisites, because it changes hot-path behavior and deserves isolated review. One semantic note for connector adopters: a dropped change in a *sync* connector is not just a metric, it is a downstream divergence (a client never receives that value), so the right overload reaction for a connector is usually to trigger a resync rather than accept silent loss. History stores can drop freely (a bounded gap in a passive log); connectors choosing to bound should pair it with a resync policy. That per-connector policy is follow-up; this PR only adds and exposes the mechanism, with the default leaving every existing connector unchanged.
 
 ## Architecture
 
