@@ -117,9 +117,15 @@ Route both branches through one reconcile/exception builder (`CreateFailureExcep
 
 **Step 2:** Run: `pwsh scripts/benchmark.ps1 -Filter "*SubjectTransactionBenchmark*" -BaseBranch <335+pool baseline>` (full job). Compare all four modes.
 
-**Step 3:** Success criterion: allocation and time at least as good as #335+pool on every mode, with `SingleSourceWithLocal` no longer an outlier, and a net reduction in production lines. Record the table in the PR description.
+**Step 3:** Success criterion: allocation and time at least as good as #335+pool on every mode, with `SingleSourceWithLocal` no longer an outlier, and a net reduction in production lines.
 
 **Step 4:** Commit any benchmark adjustments; do not commit generated `benchmark_*.md`.
+
+**Step 5 (very last, definitive result): benchmark v2 vs master.** The #335+pool comparison only proves v2 is not a regression against the in-flight work. The headline number for the PR is v2 vs **master**. Create/use a baseline branch that is `master` plus the 4-mode `SubjectTransactionBenchmark` (e.g. `bench-base-transactions`), then run:
+
+`pwsh scripts/benchmark.ps1 -Filter "*SubjectTransactionBenchmark*" -BaseBranch <master+benchmark baseline>` (full job, pinned CPU).
+
+Record the complete v2-vs-master table (all four modes, allocations and time) as the definitive result in the PR description.
 
 ---
 
