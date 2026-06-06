@@ -93,15 +93,15 @@ internal static class SubjectPropertyChangeExtensions
 
     /// <summary>
     /// Applies all changes in the span except those whose <see cref="SubjectPropertyChange.Property"/>
-    /// matches a change in <paramref name="exclude"/>. On full success (no exclusions and no apply
-    /// failures) returns a list of the applied changes; the failed/error lists are allocated only when
-    /// a change fails.
+    /// matches a change in <paramref name="exclude"/>. On full success with no exclusions the Successful
+    /// list is returned empty; the caller already holds the input span, and no caller needs the applied
+    /// set unless a change fails (or exclusions force a rebuild). Inspect Failed.Count == 0 to detect
+    /// full success.
     /// </summary>
     /// <param name="changes">The changes to apply.</param>
     /// <param name="exclude">
-    /// Changes to skip, matched by <see cref="SubjectPropertyChange.Property"/> equality. When this is
-    /// an in-order subsequence of <paramref name="changes"/> (the common case) a two-pointer walk is
-    /// used; otherwise it falls back to a <see cref="HashSet{T}"/> of excluded properties.
+    /// Changes to skip, matched by <see cref="SubjectPropertyChange.Property"/> equality, using a
+    /// <see cref="HashSet{T}"/> of excluded properties.
     /// </param>
     public static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyAllChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude)
@@ -109,13 +109,6 @@ internal static class SubjectPropertyChangeExtensions
         if (exclude is null || exclude.Count == 0)
         {
             return ApplyAllChanges(changes);
-        }
-
-        // Common case: exclude is an in-order subsequence of changes (the writer reports source-write
-        // failures in the same order). Walk both with two pointers; fall back to a HashSet otherwise.
-        if (IsInOrderSubsequence(changes, exclude))
-        {
-            return ApplyAllChangesWithSubsequenceExclude(changes, exclude);
         }
 
         var excludedProperties = new HashSet<PropertyReference>(exclude.Count, PropertyReference.Comparer);
@@ -127,6 +120,11 @@ internal static class SubjectPropertyChangeExtensions
         return ApplyAllChangesWithSetExclude(changes, excludedProperties);
     }
 
+    /// <summary>
+    /// On full success with no exclusions the Successful list is returned empty; the caller already
+    /// holds the input span, and no caller needs the applied set unless a change fails (or exclusions
+    /// force a rebuild). Inspect Failed.Count == 0 to detect full success.
+    /// </summary>
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyAllChanges(ReadOnlySpan<SubjectPropertyChange> changes)
     {
@@ -163,33 +161,8 @@ internal static class SubjectPropertyChangeExtensions
         }
 
         return failed is null
-            ? (CopyToList(changes), [], [])
+            ? ([], [], [])
             : (successful!, failed, errors ?? []);
-    }
-
-    private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyAllChangesWithSubsequenceExclude(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange> exclude)
-    {
-        var successful = new List<SubjectPropertyChange>(changes.Length - exclude.Count);
-        List<SubjectPropertyChange>? failed = null;
-        List<Exception>? errors = null;
-
-        var excludeIndex = 0;
-        for (var i = 0; i < changes.Length; i++)
-        {
-            var change = changes[i];
-            if (excludeIndex < exclude.Count && PropertyReference.Comparer.Equals(change.Property, exclude[excludeIndex].Property))
-            {
-                excludeIndex++;
-                continue;
-            }
-
-            ApplyOrCollect(change, successful, ref failed, ref errors);
-        }
-
-        return failed is null
-            ? (successful, [], [])
-            : (successful, failed, errors ?? []);
     }
 
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
@@ -235,33 +208,4 @@ internal static class SubjectPropertyChangeExtensions
         }
     }
 
-    private static bool IsInOrderSubsequence(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange> exclude)
-    {
-        if (exclude.Count > changes.Length)
-        {
-            return false;
-        }
-
-        var excludeIndex = 0;
-        for (var i = 0; i < changes.Length && excludeIndex < exclude.Count; i++)
-        {
-            if (PropertyReference.Comparer.Equals(changes[i].Property, exclude[excludeIndex].Property))
-            {
-                excludeIndex++;
-            }
-        }
-
-        return excludeIndex == exclude.Count;
-    }
-
-    private static List<SubjectPropertyChange> CopyToList(ReadOnlySpan<SubjectPropertyChange> changes)
-    {
-        var list = new List<SubjectPropertyChange>(changes.Length);
-        foreach (var change in changes)
-        {
-            list.Add(change);
-        }
-
-        return list;
-    }
 }

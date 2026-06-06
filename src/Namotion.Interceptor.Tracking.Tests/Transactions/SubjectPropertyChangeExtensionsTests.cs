@@ -47,7 +47,9 @@ public class SubjectPropertyChangeExtensionsTests
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
         Assert.Equal("Tesla", car.Name);
-        Assert.Equal(3, successful.Count);
+        // On full success with no exclusions the Successful list is returned empty (zero-alloc);
+        // the caller already holds the input span. Full success is detected via Failed.Count == 0.
+        Assert.Empty(successful);
         Assert.Empty(failed);
         Assert.Empty(errors);
     }
@@ -106,5 +108,31 @@ public class SubjectPropertyChangeExtensionsTests
         Assert.Single(successful);
         Assert.Empty(failed);
         Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void ApplyAllChanges_Span_WhenApplyFails_ReportsFailedAndErrors()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+        var throwing = new ThrowingSetterPerson(context);
+        var car = new Car(context);
+
+        var first = CreateChange(person, nameof(Person.FirstName), "John");
+        var failing = CreateChange(throwing, nameof(ThrowingSetterPerson.Name), "Boom");
+        var third = CreateChange(car, nameof(Car.Name), "Tesla");
+
+        SubjectPropertyChange[] changes = [first, failing, third];
+
+        // Act
+        var (successful, failed, errors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes, exclude: null);
+
+        // Assert
+        Assert.Contains(failing, failed);
+        Assert.NotEmpty(errors);
+        Assert.Contains(first, successful);
+        Assert.Contains(third, successful);
+        Assert.DoesNotContain(failing, successful);
     }
 }
