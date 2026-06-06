@@ -257,6 +257,99 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
+    public async Task CommitAsync_WithMultipleSourcesAndLocal_WritesSourcesAndAppliesLocal()
+    {
+        // Arrange - two distinct sources plus a local (no-source) change in one transaction;
+        // exercises the grouped path with a non-empty local set.
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source1Writes = new List<int>();
+        var source1Mock = new Mock<ISubjectSource>();
+        source1Mock.Setup(s => s.WriteBatchSize).Returns(0);
+        source1Mock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                source1Writes.Add(changes.Length);
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        var source2Writes = new List<int>();
+        var source2Mock = new Mock<ISubjectSource>();
+        source2Mock.Setup(s => s.WriteBatchSize).Returns(0);
+        source2Mock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                source2Writes.Add(changes.Length);
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1Mock.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source2Mock.Object);
+        // FirstName_MaxLength is left without a source -> local change applied in-process.
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            person.LastName = "Doe";
+            person.FirstName_MaxLength = 42;
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert - each source written once with its single change; the local change is applied.
+        Assert.Single(source1Writes);
+        Assert.Single(source2Writes);
+        Assert.Equal(1, source1Writes[0]);
+        Assert.Equal(1, source2Writes[0]);
+        Assert.Equal(42, person.FirstName_MaxLength);
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithSingleSourceAndLocal_WritesOnlySourceBoundAndAppliesLocal()
+    {
+        // Arrange - two source-bound changes on one source plus a local change interleaved between
+        // them; directly exercises the single-source path's source/local separation (two-pointer).
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var written = new List<SubjectPropertyChange>();
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                foreach (var change in changes.Span)
+                {
+                    written.Add(change);
+                }
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceMock.Object);
+        // FirstName_MaxLength is left without a source -> local change.
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            person.FirstName_MaxLength = 42; // local change interleaved between source-bound changes
+            person.LastName = "Doe";
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert - only the two source-bound changes reached the source; the local change was applied.
+        Assert.Equal(2, written.Count);
+        Assert.Contains(written, c => c.Property.Metadata.Name == nameof(Person.FirstName));
+        Assert.Contains(written, c => c.Property.Metadata.Name == nameof(Person.LastName));
+        Assert.DoesNotContain(written, c => c.Property.Metadata.Name == nameof(Person.FirstName_MaxLength));
+        Assert.Equal(42, person.FirstName_MaxLength);
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+    }
+
+    [Fact]
     public async Task CommitAsync_UserCancellationIsIgnored_CommitSucceeds()
     {
         // Arrange

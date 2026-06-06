@@ -33,10 +33,11 @@ public class SubjectTransactionBenchmark
     {
         Local,
         SingleSource,
+        SingleSourceWithLocal,
         MultiSource
     }
 
-    [Params(CommitMode.Local, CommitMode.SingleSource, CommitMode.MultiSource)]
+    [Params(CommitMode.Local, CommitMode.SingleSource, CommitMode.SingleSourceWithLocal, CommitMode.MultiSource)]
     public CommitMode Mode;
 
     [GlobalSetup]
@@ -65,6 +66,19 @@ public class SubjectTransactionBenchmark
             foreach (var tire in _tires)
             {
                 new PropertyReference(tire, nameof(Tire.Pressure_Minimum)).SetSource(source);
+            }
+        }
+        else if (Mode == CommitMode.SingleSourceWithLocal)
+        {
+            // Half the changes target one source, half are local (no source) - exercises the
+            // single-source path's mixed branch where source-bound and local changes are separated.
+            var source = new BenchmarkSource(_car);
+            for (var i = 0; i < _tires.Length; i++)
+            {
+                if (i % 2 == 0)
+                {
+                    new PropertyReference(_tires[i], nameof(Tire.Pressure_Minimum)).SetSource(source);
+                }
             }
         }
         else if (Mode == CommitMode.MultiSource)
