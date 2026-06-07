@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Performance;
 
@@ -309,15 +308,15 @@ public sealed class SubjectTransaction : IDisposable
 
             ThrowIfConflictsDetected(changes.Span);
 
-            var (applied, applyFailed, applyErrors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes.Span, exclude: null);
+            var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes.Span, exclude: null);
 
             SubjectTransactionException? failure = null;
             if (applyFailed.Count > 0)
             {
                 if (_failureHandling == TransactionFailureHandling.Rollback)
                 {
-                    var (revertFailed, revertErrors) = RevertInProcess(applied);
-                    failure = CreateFailureException([], Concat(applyFailed, revertFailed), Concat(applyErrors, revertErrors));
+                    var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertInProcess(applied);
+                    failure = CreateFailureException([], SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed), SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors));
                 }
                 else
                 {
@@ -390,39 +389,39 @@ public sealed class SubjectTransaction : IDisposable
         if (_failureHandling == TransactionFailureHandling.Rollback && failedSource.Count > 0)
         {
             var revert = await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
-            var notApplied = ExcludeByProperty(changes.Span, failedSource, written);
+            var notApplied = SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, written);
             return CreateFailureException(
                 [],
-                Concat(failedSource, notApplied, revert.Failed),
-                Concat(sourceErrors, revert.Errors));
+                SubjectPropertyChangeOperations.Concat(failedSource, notApplied, revert.Failed),
+                SubjectPropertyChangeOperations.Concat(sourceErrors, revert.Errors));
         }
 
         // Apply the whole snapshot except the source-write failures, in a single pass. With no source
         // failure this is the entire snapshot and ApplyAllChanges returns an empty Successful set.
         var exclude = failedSource.Count == 0 ? null : failedSource;
-        var (applied, applyFailed, applyErrors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes.Span, exclude);
+        var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes.Span, exclude);
 
         if (applyFailed.Count > 0)
         {
             if (_failureHandling == TransactionFailureHandling.Rollback)
             {
                 // All-or-nothing: revert in-process applies, then the source writes.
-                var (revertFailed, revertErrors) = RevertInProcess(applied);
+                var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertInProcess(applied);
                 var sourceRevert = await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
                 return CreateFailureException(
                     [],
-                    Concat(failedSource, applyFailed, revertFailed, sourceRevert.Failed),
-                    Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
+                    SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, revertFailed, sourceRevert.Failed),
+                    SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
             }
 
             // BestEffort: keep source == model for failed-apply properties by reverting only the
             // source writes whose property failed to apply (matched by Property equality).
-            var toRevert = IntersectByProperty(applyFailed, written);
+            var toRevert = SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written);
             var bestEffortRevert = await writer.RevertSourceWritesAsync(toRevert, revertState, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
                 applied,
-                Concat(failedSource, applyFailed, bestEffortRevert.Failed),
-                Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
+                SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, bestEffortRevert.Failed),
+                SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
         }
 
         // Apply succeeded. If sources partially failed (BestEffort, since Rollback handled above),
@@ -433,113 +432,6 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Reverts previously-applied in-process changes by applying their inverse values in reverse order.
-    /// Returns any revert failures and errors so the caller can fold them into the exception.
-    /// </summary>
-    private static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertInProcess(
-        IReadOnlyList<SubjectPropertyChange> applied)
-    {
-        var rollback = applied.ToRollbackChanges();
-        var (_, revertFailed, revertErrors) = SubjectPropertyChangeExtensions.ApplyAllChanges(
-            CollectionsMarshal.AsSpan(rollback), exclude: null);
-        return (revertFailed, revertErrors);
-    }
-
-    /// <summary>
-    /// Returns the subset of <paramref name="written"/> whose property also appears in
-    /// <paramref name="failed"/> (matched by <see cref="SubjectPropertyChange.Property"/>).
-    /// </summary>
-    private static IReadOnlyList<SubjectPropertyChange> IntersectByProperty(
-        IReadOnlyList<SubjectPropertyChange> failed,
-        IReadOnlyList<SubjectPropertyChange> written)
-    {
-        if (failed.Count == 0 || written.Count == 0)
-        {
-            return [];
-        }
-
-        var failedProperties = new HashSet<PropertyReference>(failed.Count, PropertyReference.Comparer);
-        foreach (var change in failed)
-        {
-            failedProperties.Add(change.Property);
-        }
-
-        List<SubjectPropertyChange>? result = null;
-        foreach (var change in written)
-        {
-            if (failedProperties.Contains(change.Property))
-            {
-                (result ??= new List<SubjectPropertyChange>(failed.Count)).Add(change);
-            }
-        }
-
-        return result ?? (IReadOnlyList<SubjectPropertyChange>)[];
-    }
-
-    /// <summary>
-    /// Returns the changes in <paramref name="changes"/> whose property is in neither
-    /// <paramref name="excludeFirst"/> nor <paramref name="excludeSecond"/> (matched by
-    /// <see cref="SubjectPropertyChange.Property"/>). Used to collect the local (no-source) changes that
-    /// were neither written to a source nor failed at a source.
-    /// </summary>
-    private static IReadOnlyList<SubjectPropertyChange> ExcludeByProperty(
-        ReadOnlySpan<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange> excludeFirst,
-        IReadOnlyList<SubjectPropertyChange> excludeSecond)
-    {
-        if (excludeFirst.Count == 0 && excludeSecond.Count == 0)
-        {
-            return changes.ToArray();
-        }
-
-        var excluded = new HashSet<PropertyReference>(
-            excludeFirst.Count + excludeSecond.Count, PropertyReference.Comparer);
-        foreach (var change in excludeFirst)
-        {
-            excluded.Add(change.Property);
-        }
-        foreach (var change in excludeSecond)
-        {
-            excluded.Add(change.Property);
-        }
-
-        List<SubjectPropertyChange>? result = null;
-        foreach (var change in changes)
-        {
-            if (!excluded.Contains(change.Property))
-            {
-                (result ??= []).Add(change);
-            }
-        }
-
-        return result ?? (IReadOnlyList<SubjectPropertyChange>)[];
-    }
-
-    private static IReadOnlyList<T> Concat<T>(params ReadOnlySpan<IReadOnlyList<T>> lists)
-    {
-        var total = 0;
-        IReadOnlyList<T>? single = null;
-        var nonEmptyCount = 0;
-        foreach (var list in lists)
-        {
-            if (list.Count == 0) continue;
-            total += list.Count;
-            single = list;
-            nonEmptyCount++;
-        }
-
-        if (total == 0) return [];
-        if (nonEmptyCount == 1) return single!; // avoid copying when only one list has items
-
-        var result = new List<T>(total);
-        foreach (var list in lists)
-        {
-            if (list.Count > 0) result.AddRange(list);
-        }
-        return result;
     }
 
     /// <summary>
@@ -645,7 +537,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
         {
-            var conflictingProperties = DetectConflicts(changes);
+            var conflictingProperties = SubjectPropertyChangeOperations.DetectConflicts(changes);
             if (conflictingProperties.Count > 0)
             {
                 throw new SubjectTransactionConflictException(conflictingProperties);
@@ -673,26 +565,6 @@ public sealed class SubjectTransaction : IDisposable
         };
 
         return new SubjectTransactionException(message, successful, failed, errors);
-    }
-
-    /// <summary>
-    /// Detects conflicts by comparing captured OldValue with current actual value.
-    /// </summary>
-    private static List<PropertyReference> DetectConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
-    {
-        List<PropertyReference>? conflictingProperties = null;
-        foreach (var change in changes)
-        {
-            var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
-            var capturedOldValue = change.GetOldValue<object?>();
-
-            if (!Equals(currentValue, capturedOldValue))
-            {
-                conflictingProperties ??= [];
-                conflictingProperties.Add(change.Property);
-            }
-        }
-        return conflictingProperties ?? [];
     }
 
     /// <summary>

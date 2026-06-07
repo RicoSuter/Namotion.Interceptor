@@ -4,7 +4,7 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
-public class SubjectPropertyChangeExtensionsTests
+public class SubjectPropertyChangeOperationsTests
 {
     private static IInterceptorSubjectContext CreateContext()
     {
@@ -41,7 +41,7 @@ public class SubjectPropertyChangeExtensionsTests
         ];
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes, exclude: null);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes, exclude: null);
 
         // Assert
         Assert.Equal("John", person.FirstName);
@@ -70,7 +70,7 @@ public class SubjectPropertyChangeExtensionsTests
         var exclude = new List<SubjectPropertyChange> { second };
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes, exclude);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes, exclude);
 
         // Assert
         Assert.Equal("John", person.FirstName);
@@ -99,7 +99,7 @@ public class SubjectPropertyChangeExtensionsTests
         var exclude = new List<SubjectPropertyChange> { third, first };
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes, exclude);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes, exclude);
 
         // Assert
         Assert.Null(person.FirstName);
@@ -126,7 +126,7 @@ public class SubjectPropertyChangeExtensionsTests
         SubjectPropertyChange[] changes = [first, failing, third];
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes, exclude: null);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes, exclude: null);
 
         // Assert
         Assert.Contains(failing, failed);
@@ -154,7 +154,7 @@ public class SubjectPropertyChangeExtensionsTests
         var exclude = new List<SubjectPropertyChange> { excluded };
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes, exclude);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes, exclude);
 
         // Assert
         Assert.Equal("John", person.FirstName); // applied
