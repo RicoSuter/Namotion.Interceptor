@@ -23,31 +23,6 @@ internal static class SubjectPropertyChangeExtensions
             newValue: c.GetOldValue<object?>())).ToList();
 
     /// <summary>
-    /// Applies a single property change to the in-process model.
-    /// </summary>
-    /// <param name="change">The change to apply.</param>
-    /// <param name="error">The exception if the change failed, null otherwise.</param>
-    /// <returns>True if successful, false if an exception occurred.</returns>
-    public static bool TryApplyChange(this SubjectPropertyChange change, out Exception? error)
-    {
-        try
-        {
-            var metadata = change.Property.Metadata;
-            using (SubjectChangeContext.WithState(change.Source, change.ChangedTimestamp, change.ReceivedTimestamp))
-            {
-                metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
-            }
-            error = null;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = ex;
-            return false;
-        }
-    }
-
-    /// <summary>
     /// Applies all changes in the span except those whose <see cref="SubjectPropertyChange.Property"/>
     /// matches a change in <paramref name="exclude"/> (matched via a <see cref="HashSet{T}"/> of excluded
     /// properties). Inspect Failed.Count == 0 to detect full success. The Successful list is returned empty
@@ -119,5 +94,24 @@ internal static class SubjectPropertyChangeExtensions
         return failed is null
             ? (successful ?? (IReadOnlyList<SubjectPropertyChange>)[], [], [])
             : (successful!, failed, errors ?? []);
+    }
+    
+    private static bool TryApplyChange(this SubjectPropertyChange change, out Exception? error)
+    {
+        try
+        {
+            var metadata = change.Property.Metadata;
+            using (SubjectChangeContext.WithState(change.Source, change.ChangedTimestamp, change.ReceivedTimestamp))
+            {
+                metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
+            }
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex;
+            return false;
+        }
     }
 }
