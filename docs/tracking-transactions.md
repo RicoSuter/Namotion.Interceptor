@@ -226,21 +226,17 @@ When only `WithTransactions()` is configured (no external sources):
 
 ### With Source Transactions
 
-When `WithSourceTransactions()` is configured, commits execute in three stages:
+When `WithSourceTransactions()` is configured, commits execute in two stages:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│  Stage 1: External Sources (parallel)                                     │
-│  Write to OPC UA, MQTT, databases, etc.                                   │
-│  Properties with SetSource() are processed here                           │
+│  Stage 1: External sources (parallel when multiple)                       │
+│  Write source-bound changes to OPC UA, MQTT, databases, etc.              │
+│  Nothing is applied to the in-process model yet.                          │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  Stage 2: Source-Bound Properties                                         │
-│  Apply source-bound values to in-process model                            │
-│  (After external writes succeed, triggers OnChanging/OnChanged hooks)     │
-├───────────────────────────────────────────────────────────────────────────┤
-│  Stage 3: Local Properties                                                │
-│  Apply changes to properties WITHOUT sources                              │
-│  (Calls to OnChanging/OnChanged partial methods can throw exceptions)     │
+│  Stage 2: Apply to the in-process model in a single pass                  │
+│  Source-bound and local changes are applied together, excluding           │
+│  any whose source write failed (triggers OnChanging/OnChanged).           │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -248,9 +244,8 @@ When `WithSourceTransactions()` is configured, commits execute in three stages:
 
 | Failure Stage | BestEffort | Rollback |
 |---------------|------------|----------|
-| External sources fail | Only successful ones applied | All sources reverted, nothing applied |
-| Source-bound apply fails | Successful applied, failed sources reverted | All reverted |
-| Local properties fail | Successful applied, failed sources reverted | All reverted |
+| Source write fails | Successful sources written and applied | All sources reverted, nothing applied |
+| In-process apply fails (source-bound or local) | Successful kept, failed sources reverted | All reverted |
 
 Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
 
@@ -267,7 +262,7 @@ propertyReference.SetSource(this);
 // On commit, WriteChangesInBatchesAsync is called on the source
 ```
 
-Properties without an associated source are applied directly in Stage 3.
+Properties without an associated source are applied in Stage 2 alongside source-bound properties.
 
 ## Error Handling
 
