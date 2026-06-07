@@ -135,4 +135,36 @@ public class SubjectPropertyChangeExtensionsTests
         Assert.Contains(third, successful);
         Assert.DoesNotContain(failing, successful);
     }
+
+    [Fact]
+    public void ApplyAllChanges_Span_WithExcludeAndApplyFailure_PartitionsCorrectly()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+        var throwing = new ThrowingSetterPerson(context);
+        var car = new Car(context);
+
+        var first = CreateChange(person, nameof(Person.FirstName), "John");
+        var failing = CreateChange(throwing, nameof(ThrowingSetterPerson.Name), "Boom");
+        var third = CreateChange(car, nameof(Car.Name), "Tesla");
+        var excluded = CreateChange(person, nameof(Person.LastName), "Doe");
+
+        SubjectPropertyChange[] changes = [first, failing, third, excluded];
+        var exclude = new List<SubjectPropertyChange> { excluded };
+
+        // Act
+        var (successful, failed, errors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes, exclude);
+
+        // Assert
+        Assert.Equal("John", person.FirstName); // applied
+        Assert.Null(person.LastName); // excluded, not applied
+        Assert.Equal("Tesla", car.Name); // applied
+        Assert.Contains(failing, failed);
+        Assert.NotEmpty(errors);
+        Assert.Contains(first, successful);
+        Assert.Contains(third, successful);
+        Assert.DoesNotContain(failing, successful);
+        Assert.DoesNotContain(excluded, successful);
+    }
 }

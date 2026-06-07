@@ -564,8 +564,10 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            // Clear inside the lock so a concurrent Dispose sees an in-flight commit and skips
-            // returning the pooled buffer until this commit has finished using it.
+            // Clear under the lock so a concurrent Dispose observes the in-flight commit consistently:
+            // while _isCommitting is true Dispose skips returning the pooled _pendingChanges buffer to
+            // PendingChangesPool (this commit still owns it). The ArrayPool buffer below is owned solely
+            // by this commit and is always returned here.
             _isCommitting = false;
         }
 

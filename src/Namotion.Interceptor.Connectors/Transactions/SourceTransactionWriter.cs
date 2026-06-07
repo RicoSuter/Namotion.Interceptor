@@ -158,7 +158,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             var validationError = ValidateSingleWriteRequirement(externalChangesBySource);
             if (validationError != null)
             {
-                return new SourceWriteResult([], FlattenChanges(externalChangesBySource), [validationError], RevertState: externalChangesBySource);
+                // Nothing was written (validation failed before any source write), so there is no revert state.
+                return new SourceWriteResult([], FlattenChanges(externalChangesBySource), [validationError], RevertState: null);
             }
         }
 
