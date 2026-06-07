@@ -706,8 +706,11 @@ public sealed class SubjectTransaction : IDisposable
             lock (_pendingChangesLock)
             {
                 _pendingChanges.Clear();
-                // If a commit is in flight on another thread it still owns the buffer; skip the pool
-                // return (the buffer is then GC'd) so a live buffer is never handed to another transaction.
+                // Defensive against misuse only: this branch is reached when Dispose races an in-flight
+                // commit, which requires disposing without awaiting CommitAsync (or disposing cross-thread
+                // mid-commit). Correct usage (await the commit, or never commit) always pools the buffer.
+                // In that misuse case the commit still owns the buffer, so skip the pool return (it is then
+                // GC'd) rather than hand a live buffer to another transaction and corrupt its pending changes.
                 returnBuffer = !_isCommitting;
             }
             if (returnBuffer)
