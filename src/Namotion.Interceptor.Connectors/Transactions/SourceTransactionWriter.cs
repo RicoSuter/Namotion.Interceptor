@@ -141,7 +141,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         TransactionRequirement requirement,
         CancellationToken cancellationToken)
     {
-        var (_, externalChangesBySource) = GroupChangesBySourceType(changes.Span);
+        var externalChangesBySource = GroupSourceBoundChanges(changes.Span);
 
         if (requirement == TransactionRequirement.SingleWrite)
         {
@@ -218,12 +218,12 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     }
 
     /// <summary>
-    /// Groups changes into local (no source) and external (has source) categories.
+    /// Groups source-bound changes by their associated source (ignores changes without sources).
+    /// The writer never handles local changes, so the source-less bucket is not built.
     /// </summary>
-    private static (List<SubjectPropertyChange> Local, Dictionary<ISubjectSource, List<SubjectPropertyChange>> External)
-        GroupChangesBySourceType(ReadOnlySpan<SubjectPropertyChange> changes)
+    private static Dictionary<ISubjectSource, List<SubjectPropertyChange>>
+        GroupSourceBoundChanges(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        var local = new List<SubjectPropertyChange>();
         var external = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();
 
         foreach (var change in changes)
@@ -237,13 +237,9 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
                 }
                 list.Add(change);
             }
-            else
-            {
-                local.Add(change);
-            }
         }
 
-        return (local, external);
+        return external;
     }
 
     /// <summary>

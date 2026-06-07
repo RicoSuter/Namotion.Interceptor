@@ -93,10 +93,10 @@ internal static class SubjectPropertyChangeExtensions
 
     /// <summary>
     /// Applies all changes in the span except those whose <see cref="SubjectPropertyChange.Property"/>
-    /// matches a change in <paramref name="exclude"/>. On full success with no exclusions the Successful
-    /// list is returned empty; the caller already holds the input span, and no caller needs the applied
-    /// set unless a change fails (or exclusions force a rebuild). Inspect Failed.Count == 0 to detect
-    /// full success.
+    /// matches a change in <paramref name="exclude"/>. The Successful list is returned empty only when
+    /// there are no exclusions and no failures; in that case the caller already holds the input span and
+    /// no caller needs the applied set. With exclusions, or on any failure, the Successful list is
+    /// populated. Inspect Failed.Count == 0 to detect full success.
     /// </summary>
     /// <param name="changes">The changes to apply.</param>
     /// <param name="exclude">
@@ -121,9 +121,10 @@ internal static class SubjectPropertyChangeExtensions
     }
 
     /// <summary>
-    /// On full success with no exclusions the Successful list is returned empty; the caller already
-    /// holds the input span, and no caller needs the applied set unless a change fails (or exclusions
-    /// force a rebuild). Inspect Failed.Count == 0 to detect full success.
+    /// Applies all changes in the span (no exclusions). The Successful list is returned empty only when
+    /// there are no failures; the caller already holds the input span and needs the applied set only when
+    /// a change fails. On any failure the Successful list is populated. Inspect Failed.Count == 0 to
+    /// detect full success.
     /// </summary>
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyAllChanges(ReadOnlySpan<SubjectPropertyChange> changes)

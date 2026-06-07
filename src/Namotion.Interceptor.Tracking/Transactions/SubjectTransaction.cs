@@ -482,6 +482,11 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<SubjectPropertyChange> excludeFirst,
         IReadOnlyList<SubjectPropertyChange> excludeSecond)
     {
+        if (excludeFirst.Count == 0 && excludeSecond.Count == 0)
+        {
+            return changes.ToArray();
+        }
+
         var excluded = new HashSet<PropertyReference>(
             excludeFirst.Count + excludeSecond.Count, PropertyReference.Comparer);
         foreach (var change in excludeFirst)
