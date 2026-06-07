@@ -15,6 +15,12 @@ public interface ITransactionWriter
     /// local) and the SingleWrite requirement check, since it alone knows the SetSource mappings.
     /// Local (no-source) changes are neither written nor returned; the transaction applies them.
     /// </summary>
+    /// <remarks>
+    /// Implementations must REPORT per-source failures via <see cref="SourceWriteResult"/> rather than
+    /// throwing. This contract is load-bearing: a thrown exception propagates past the transaction's
+    /// reconcile logic and bypasses source revert, leaving already-succeeded writes from other sources
+    /// applied at their sources.
+    /// </remarks>
     /// <param name="changes">The property changes to classify and write.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
     /// <param name="cancellationToken">The cancellation token.</param>

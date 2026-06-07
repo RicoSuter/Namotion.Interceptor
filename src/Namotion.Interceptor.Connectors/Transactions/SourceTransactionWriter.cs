@@ -134,12 +134,14 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             var batchSize = source.WriteBatchSize;
             if (batchSize > 0 && count > batchSize)
             {
+                // Nothing was written (validation failed before the source write), so there is no revert
+                // state, mirroring the multi-source validation path.
                 return new SourceWriteResult(
                     [],
                     sourceChanges,
                     [new InvalidOperationException(
                         $"SingleWrite requirement violated: Transaction contains {count} changes for source '{source.GetType().Name}', but WriteBatchSize is {batchSize}.")],
-                    RevertState: source);
+                    RevertState: null);
             }
         }
 

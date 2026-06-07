@@ -465,7 +465,10 @@ public sealed class SubjectTransaction : IDisposable
 
         if (rentedArray != null)
         {
-            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray);
+            // clearArray: true because SubjectPropertyChange holds object references (subject, source,
+            // boxed value holders); leaving them in the pooled buffer would keep those graphs alive
+            // until the slot is next overwritten.
+            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
         }
 
         // Release the optimistic lock BEFORE resetting _commitStarted so a retry cannot start
@@ -474,8 +477,11 @@ public sealed class SubjectTransaction : IDisposable
 
         if (!_isCommitted)
         {
-            // Allow retry: reset so CommitAsync can be called again after a failure
-            // (e.g., conflict detected, timeout, validation during replay).
+            // Reset so CommitAsync can be called again, but only for failures that occur BEFORE any
+            // change is applied in-process (conflict detected, optimistic lock acquisition failed,
+            // commit timeout, or the writer threw). Once the apply pass runs, FinishCommit has marked
+            // the transaction committed and this branch is skipped, so an apply/validation failure is
+            // terminal and cannot be retried.
             Volatile.Write(ref _commitStarted, 0);
         }
     }
