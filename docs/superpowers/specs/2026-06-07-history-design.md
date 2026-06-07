@@ -490,3 +490,43 @@ Each store takes periodic whole-graph snapshots on its own `SnapshotInterval` in
 **Phase 2 (after v1.1):** `Rate`/`Delta` for cumulative properties (toolkit `counter_agg`; in-process for InMemory; look-back already present); `StateDuration` for discrete properties; server-side `Interpolate` gap-fill for smoothly-varying signals; recording complex types beyond path references; TimescaleDB continuous aggregates and native compression once production bucket sizes are known.
 
 **Deferred:** property-path normalization lookup table (trigger: `EstimatedStorageBytes` alarms); per-property `[Historize]`/`[NoHistory]` opt-in/out and store-level glob filters; cross-sink auto-tier migration; cross-restart move tracking; plain PostgreSQL / QuestDB sinks (both lack hypertables, `time_bucket`, `drop_chunks`). InfluxDB is ruled out (v3 proprietary/cloud-only, v2 restrictive license, Flux deprecated).
+
+## Appendix: Implementation anchors
+
+Exact paths and signatures the plan-writer needs, verified against current source (2026-06-07). No `HomeBlaze.History.*` project exists yet; this is greenfield.
+
+### Existing types to extend or model after
+
+| Type / area | Path | Shape (current) | How history uses it |
+|---|---|---|---|
+| `ChangeQueueProcessor` | `src/Namotion.Interceptor.Connectors/ChangeQueueProcessor.cs` | `ctor(object? source, IInterceptorSubjectContext context, Func<PropertyReference,bool> propertyFilter, Func<ReadOnlyMemory<SubjectPropertyChange>,CancellationToken,ValueTask> writeHandler, TimeSpan? bufferTime, ILogger)`; `Task ProcessAsync(ct)`. Backing queue is an unbounded `ConcurrentQueue`. | Each store constructs one in `ExecuteAsync` and awaits `ProcessAsync`. Phase 0 adds `maxQueueDepth`. |
+| `SubjectSourceBase` | `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs` | `ExecuteAsync` retry-loop that builds a `ChangeQueueProcessor` (filter `propertyReference => ...`, a `writeHandler`) and awaits `ProcessAsync`. | The in-loop template for a store's record loop. |
+| `ThroughputCounter` | `src/Namotion.Interceptor.OpcUa/ThroughputCounter.cs` | `internal sealed`; `void Add(int)`, `double CurrentRate`. | Phase 0 promotes to `Namotion.Interceptor.Connectors` (public); stores reuse for rate metrics. |
+| `SubjectPathResolver`, `PathStyle` | `src/HomeBlaze/HomeBlaze.Services/SubjectPathResolver.cs`, `PathStyle.cs` | `string? GetPath(subject, PathStyle)`, `GetPaths(...)`, `ResolveSubject(...)`; self-registers via `context.AddService(this)`. `enum PathStyle { Canonical, Route }`. | Phase 0 extracts `ISubjectPathResolver` and moves `PathStyle` into `HomeBlaze.Abstractions`. History calls `GetPath(subject, PathStyle.Canonical)`. |
+| `ISubjectRegistry`, `RegisteredSubjectProperty` | `src/Namotion.Interceptor.Registry/Abstractions/ISubjectRegistry.cs`, `RegisteredSubjectProperty.cs` | `KnownSubjects` is `IReadOnlyDictionary<IInterceptorSubject,RegisteredSubject>`. Property exposes `Type`, `Name`, `CanContainSubjects`, `TryGetAttribute(name)`, `GetValue()`. No `IsState` / `HasChildren`. | Merger: `registry.KnownSubjects.Keys.OfType<IHistoryStore>()`. Eligibility: `TryGetAttribute(KnownAttributes.State)` + `CanContainSubjects`. |
+| `KnownAttributes`, `StateMetadata` | `src/HomeBlaze/HomeBlaze.Abstractions/KnownAttributes.cs`, `Metadata/StateMetadata.cs` | `const string State = "HB:State"`. `StateMetadata { Title, StateUnit Unit, int Position, bool IsCumulative, bool IsDiscrete, bool IsEstimated }`. | Eligibility reads the `HB:State` attribute; UI gating reads `IsCumulative`/`IsDiscrete`. `Unit` is a `StateUnit` enum, not a string. |
+| `ILifecycleHandler` | `src/Namotion.Interceptor.Tracking/Lifecycle/ILifecycleHandler.cs` | `void HandleLifecycleChange(SubjectLifecycleChange)`; register via `context.AddService(this)` or implement on the subject. | Stores use detach events to drop per-store `lastKnownPath` entries. |
+| BackgroundService subject shape | `src/HomeBlaze/HomeBlaze.OpcUa/OpcUaServer.cs` | `[Category][Description][InterceptorSubject] partial class : BackgroundService, IConfigurable`; `[Configuration]`/`[State]` partial properties; DI-injected ctor. | Model each store subject on this. |
+| `McpToolInfo`, `IMcpToolProvider` | `src/Namotion.Interceptor.Mcp/McpToolInfo.cs`, `Abstractions/IMcpToolProvider.cs` | `McpToolInfo { string Name, string Description, JsonElement InputSchema, Func<JsonElement,CancellationToken,Task<object?>> Handler }`; provider `IEnumerable<McpToolInfo> GetTools()`. | `get_property_history` is one `McpToolInfo`. |
+| `GetPropertyTool` (tool template) | `src/Namotion.Interceptor.Mcp/Tools/GetPropertyTool.cs` | Static `JsonElement` schema via `JsonSerializer.SerializeToElement(new { type="object", properties=..., required=... })`; handler reads `input.GetProperty("path")`. | Template for the history tool's schema and handler. |
+| `StateAttributePathProvider` | `src/HomeBlaze/HomeBlaze.AI/Mcp/StateAttributePathProvider.cs` | `PathProviderBase`; resolves `/State`-style paths; instantiated directly in `McpBuilderExtensions` and passed to `HomeBlazeMcpToolProvider`. | History tool reuses this instance to resolve a path to a property. No move to `HomeBlaze.Services` is needed. |
+| `SubjectComponentAttribute`, `ISubjectEditComponent` | `src/HomeBlaze/HomeBlaze.Components.Abstractions/Attributes/SubjectComponentAttribute.cs`, `ISubjectEditComponent.cs` | `@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(TSubject))]` on the `.razor`, `@implements ISubjectEditComponent` (`IsValid`, `IsDirty`, `SaveAsync`, ...). | Each store ships `<Store>EditComponent.razor` with this attribute. |
+
+### Wiring checklist (host integration)
+
+1. **Solution:** add each new project to `src/Namotion.Interceptor.slnx` as `<Project Path="HomeBlaze/.../X.csproj" />` inside an appropriate `<Folder>` (paths are relative to `src/`; add a `/HomeBlaze/History/` folder).
+2. **Type registration (the real JSON-config load path):** a subject type loads from a JSON `$type` only if its assembly is in `TypeProvider`. Add `typeProvider.AddAssembly(typeof(SqliteHistoryStore).Assembly)` and the matching `.Blazor` assembly in `src/HomeBlaze/HomeBlaze/Program.cs` (the `AddAssembly` block). Each store must be `[InterceptorSubject]` and implement `IConfigurable`. The per-library `Add<X>()` DI extensions are test-only and are *not* the config-load path.
+3. **MCP tool:** add `get_property_history` to `HomeBlazeMcpToolProvider.GetTools()` (it already receives `_pathProvider`, `_serviceProvider`, and root access) or add a new `IMcpToolProvider` to the `ToolProviders` collection in `src/HomeBlaze/HomeBlaze.AI/McpBuilderExtensions.cs`.
+4. **Blazor edit components** need no DI registration: the `[SubjectComponent]` attribute plus the `TypeProvider.AddAssembly` from step 2 is enough; `SubjectComponentRegistry` discovers them.
+
+### Doc-vs-code corrections (facts, restated)
+
+- `RegisteredSubjectProperty` has no `IsState` / `HasChildren`: use `TryGetAttribute(KnownAttributes.State)` and `CanContainSubjects`.
+- `ChangeQueueProcessor` and `PropertyChangeQueueSubscription` both use unbounded `ConcurrentQueue`s today: the bounded-queue backpressure does not exist yet (Phase 0 adds it).
+- No `ISubjectPathResolver` interface exists yet (Phase 0 creates it); `PathStyle` currently lives in `HomeBlaze.Services` (Phase 0 moves it).
+- `ThroughputCounter` is `internal` to `Namotion.Interceptor.OpcUa` (Phase 0 promotes it).
+- `StateMetadata.Unit` is a `StateUnit` enum, not a string.
+
+### Conventions (in CLAUDE.md, not repeated here)
+
+Build/test commands; TDD test naming `When<Condition>_Then<ExpectedBehavior>`; explicit Arrange/Act/Assert comments; no hardcoded waits (use `AsyncTestHelpers.WaitUntilAsync` or event-based sync); `PublicApiGenerator` + `Verify` snapshot tests for new public APIs (accept a change by replacing `.verified.txt` with the test's `.received.txt`). The new public abstractions (`IHistoryStore`, the query/result records, `ISubjectPathResolver`) likely warrant a public-API snapshot test.
