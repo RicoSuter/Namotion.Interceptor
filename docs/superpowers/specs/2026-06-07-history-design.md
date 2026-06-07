@@ -28,13 +28,15 @@ Snapshots and structural recording are deliberately deferred: they roughly doubl
 
 ## Phase 0: prerequisites
 
-Two shared-infrastructure changes precede the history packages. Neither depends on history, both are independently useful, and they touch core libraries shared by other connectors. They ship together as a **single Phase 0 prerequisite PR** (with tests) that merges before the feature work.
+Three shared-infrastructure changes precede the history packages. None depend on history, all are independently useful, and they touch core libraries shared by other connectors. They ship together as a **single Phase 0 prerequisite PR** (with tests) that merges before the feature work.
 
 Delivery is three sequential PRs that build on each other: **Phase 0** (these prerequisites), then **Phase A** (v1), then **Phase B** (v1.1). Each merges to `master` before the next begins, so dependent code builds on a settled API rather than a long-lived stacked branch that would need rebasing every time an upstream PR changes during review.
 
 1. **Promote `ThroughputCounter`.** It is currently `internal sealed` in `Namotion.Interceptor.OpcUa`. Move it to `Namotion.Interceptor.Connectors` and make it `public` so OPC UA connectors and the history stores share one lock-free 60-second sliding-window rate counter. `Namotion.Interceptor.Connectors` already hosts `ChangeQueueProcessor`, so no new dependency is introduced.
 
-2. **Add opt-in bounded-queue backpressure to `ChangeQueueProcessor`.** The processor's queue is currently unbounded; the canonical architecture already specifies "bounded queue semantics, oldest dropped on overflow." Add an optional `maxQueueDepth` constructor parameter (default `null` = unbounded, preserving current connector behavior). When set and exceeded, the oldest unprocessed change is dropped and a drop counter increments. This makes the `DropCount` `[State]` metric below real rather than aspirational. Because it lives in `ChangeQueueProcessor`, the knob is exposed uniformly: any consumer (OPC UA, MQTT, WebSocket) can opt in, which matters most on the central UNS where the WebSocket handler sees the highest aggregate change rate.
+2. **Add a minimal `ICanonicalPathResolver` to `HomeBlaze.Abstractions`.** A store needs exactly one thing from path resolution: a subject's canonical path. Referencing the heavy `HomeBlaze.Services` layer (nine project references) for that single call would over-couple the store packages, so instead define a one-method abstraction `string? GetCanonicalPath(IInterceptorSubject subject)` in the lean `HomeBlaze.Abstractions` (it references only `Namotion.Interceptor`, and the history abstractions already depend on it for `KnownAttributes.State` / `StateMetadata`). `SubjectPathResolver` in `HomeBlaze.Services` implements it as `GetPath(subject, PathStyle.Canonical)`. Stores resolve it from the context service registry and stay off `HomeBlaze.Services`. This is narrower and better placed than the broad three-method `ISubjectPathResolver` the earlier full-system plan proposed (the history system never needs `ResolveSubject` or `PathStyle`), and it keeps the recording path trivially unit-testable.
+
+3. **Add opt-in bounded-queue backpressure to `ChangeQueueProcessor`.** The processor's queue is currently unbounded; the canonical architecture already specifies "bounded queue semantics, oldest dropped on overflow." Add an optional `maxQueueDepth` constructor parameter (default `null` = unbounded, preserving current connector behavior). When set and exceeded, the oldest unprocessed change is dropped and a drop counter increments. This makes the `DropCount` `[State]` metric below real rather than aspirational. Because it lives in `ChangeQueueProcessor`, the knob is exposed uniformly: any consumer (OPC UA, MQTT, WebSocket) can opt in, which matters most on the central UNS where the WebSocket handler sees the highest aggregate change rate.
 
    Because it changes hot-path behavior, the Phase 0 PR covers it with explicit tests (overflow drops the oldest entry and increments the counter; the default-null path leaves every existing connector byte-for-byte unchanged). One semantic note for connector adopters: a dropped change in a *sync* connector is not just a metric, it is a downstream divergence (a client never receives that value), so the right overload reaction for a connector is usually to trigger a resync rather than accept silent loss. History stores can drop freely (a bounded gap in a passive log); connectors choosing to bound should pair it with a resync policy. That per-connector policy is follow-up; Phase 0 only adds and exposes the mechanism, with the default leaving every existing connector unchanged.
 
@@ -227,12 +229,12 @@ Each store is a `BackgroundService` subject. In `ExecuteAsync` it constructs a `
 var property = change.Property.TryGetRegisteredProperty();
 if (property is null || !property.HasHistory()) continue;
 
-var path = _pathResolver.GetPath(property.Subject, PathStyle.Canonical) + "/" + property.Name;
+var path = _pathResolver.GetCanonicalPath(property.Subject) + "/" + property.Name;
 DetectMove(property.Subject, path, change.Timestamp);   // see Move Tracking
 Record(path, change);                                    // route by ValueColumnFor(property.Type)
 ```
 
-The path resolver is the concrete `SubjectPathResolver` (obtained via DI or the context service registry, exactly as `OpcUaServer` does); no interface extraction is needed. Resolution happens only at this boundary: everything below it (ring buffer, retention, aggregation, query, and the move-detection comparison) operates on plain canonical-path strings, so that logic is unit-tested with literal paths and no graph, while the change-to-path glue is verified by an integration test against the real resolver.
+`_pathResolver` is an `ICanonicalPathResolver` (Phase 0), resolved from the context service registry and backed by `SubjectPathResolver`, so the store package depends on the lean `HomeBlaze.Abstractions` rather than the heavy `HomeBlaze.Services` layer. Resolution happens only at this boundary: everything below it (ring buffer, retention, aggregation, query, and the move-detection comparison) operates on plain canonical-path strings, so that logic is unit-tested with literal paths and no graph, while the change-to-path glue is verified by an integration test against the real resolver.
 
 `Record` routes the new value into the correct column:
 
