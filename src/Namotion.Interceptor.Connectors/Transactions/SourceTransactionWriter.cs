@@ -17,29 +17,64 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         TransactionRequirement requirement,
         CancellationToken cancellationToken)
     {
-        // Read each property's source exactly once: classify (single / multiple / none) and collect the
-        // source-less (local) changes in the same pass, so the single-source path never re-reads the
-        // mapping (which a concurrent SetSource/RemoveSource could otherwise change between two reads).
+        // Read each property's source exactly ONCE for ALL paths (single, multiple, local): a single pass
+        // both classifies (single / multiple / none) and accumulates the per-source grouping, so no path
+        // re-reads the mapping (which a concurrent SetSource/RemoveSource could otherwise change between
+        // two reads). While only one distinct source has been seen the source-bound changes accumulate into
+        // a private array buffer (handed to the source directly, no extra copy); the per-source dictionary is
+        // seeded lazily (with that single-source prefix) only when a second distinct source appears.
+        // Source-less (local) changes are skipped: the writer never handles them; the transaction applies them.
         ISubjectSource? singleSource = null;
-        var multipleSources = false;
-        List<SubjectPropertyChange>? localChanges = null;
+        SubjectPropertyChange firstChange = default;   // the first source-bound change, held until we know single vs multi
+        SubjectPropertyChange[]? buffer = null;        // allocated only once a 2nd same-source change confirms single-source
+        var count = 0;
+        Dictionary<ISubjectSource, List<SubjectPropertyChange>>? bySource = null;
         foreach (var change in changes.Span)
         {
-            if (change.Property.TryGetSource(out var source))
+            if (!change.Property.TryGetSource(out var source))
             {
-                if (singleSource is null)
+                continue;
+            }
+
+            if (bySource is not null)
+            {
+                AddToGroup(bySource, source, change);
+            }
+            else if (singleSource is null)
+            {
+                // First source-bound change: just remember it. Defer allocating the buffer until a second
+                // same-source change confirms single-source, so a multi-source transaction (whose 2nd
+                // source-bound change targets a different source) never allocates a buffer it abandons.
+                singleSource = source;
+                firstChange = change;
+            }
+            else if (ReferenceEquals(source, singleSource))
+            {
+                if (buffer is null)
                 {
-                    singleSource = source;
+                    buffer = new SubjectPropertyChange[changes.Length];
+                    buffer[count++] = firstChange;
                 }
-                else if (!ReferenceEquals(singleSource, source))
-                {
-                    multipleSources = true;
-                    break;
-                }
+                buffer[count++] = change;
             }
             else
             {
-                (localChanges ??= []).Add(change);
+                // Second distinct source: switch to multi-source, seeding the dict with the single-source
+                // prefix (everything seen so far belonged to singleSource since no other source appeared yet).
+                var prefix = new List<SubjectPropertyChange>(buffer is null ? 1 : count);
+                if (buffer is null)
+                {
+                    prefix.Add(firstChange);
+                }
+                else
+                {
+                    for (var i = 0; i < count; i++)
+                    {
+                        prefix.Add(buffer[i]);
+                    }
+                }
+                bySource = new Dictionary<ISubjectSource, List<SubjectPropertyChange>> { [singleSource] = prefix };
+                AddToGroup(bySource, source, change);
             }
         }
 
@@ -49,48 +84,69 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             return new SourceWriteResult([], [], [], RevertState: null);
         }
 
-        if (!multipleSources)
+        if (bySource is not null)
         {
-            return await WriteToSingleSourceAsync(singleSource, changes, localChanges, requirement, cancellationToken).ConfigureAwait(false);
+            return await WriteToMultipleSourcesAsync(bySource, requirement, cancellationToken).ConfigureAwait(false);
         }
 
-        return await WriteToMultipleSourcesAsync(changes, requirement, cancellationToken).ConfigureAwait(false);
+        // Single source. If only one source-bound change was seen, the buffer was never allocated.
+        if (buffer is null)
+        {
+            buffer = [firstChange];
+            count = 1;
+        }
+
+        return await WriteToSingleSourceAsync(singleSource, buffer, count, requirement, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void AddToGroup(Dictionary<ISubjectSource, List<SubjectPropertyChange>> bySource, ISubjectSource source, SubjectPropertyChange change)
+    {
+        if (!bySource.TryGetValue(source, out var list))
+        {
+            list = [];
+            bySource[source] = list;
+        }
+        list.Add(change);
     }
 
     /// <summary>
-    /// Allocation-light path for the common case where every source-bound change targets the same
-    /// source: writes once (no per-source grouping or parallel dispatch) and reports the outcome.
-    /// Applies nothing in-process. <paramref name="localChanges"/> are the source-less changes already
-    /// separated by the single classification pass; they are neither written nor returned.
+    /// Allocation-light path for the common case where every source-bound change targets the same source:
+    /// writes once (no per-source grouping or parallel dispatch) and reports the outcome. Applies nothing
+    /// in-process. <paramref name="buffer"/> holds the source-bound changes in its first
+    /// <paramref name="count"/> slots (a privately-owned array built by the single pass, never the pooled
+    /// snapshot buffer); the source receives exactly those, with no extra copy.
     /// </summary>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     private static async ValueTask<SourceWriteResult> WriteToSingleSourceAsync(
         ISubjectSource source,
-        ReadOnlyMemory<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange>? localChanges,
+        SubjectPropertyChange[] buffer,
+        int count,
         TransactionRequirement requirement,
         CancellationToken cancellationToken)
     {
-        var sourceChanges = SeparateSourceChanges(changes, localChanges);
+        // The source-bound changes occupy buffer[0..count]. Expose them without copying: the whole array
+        // when it is exactly full (no local changes), otherwise an ArraySegment view over the prefix.
+        IReadOnlyList<SubjectPropertyChange> sourceChanges =
+            count == buffer.Length ? buffer : new ArraySegment<SubjectPropertyChange>(buffer, 0, count);
 
         if (requirement == TransactionRequirement.SingleWrite)
         {
             var batchSize = source.WriteBatchSize;
-            if (batchSize > 0 && sourceChanges.Length > batchSize)
+            if (batchSize > 0 && count > batchSize)
             {
                 return new SourceWriteResult(
                     [],
                     sourceChanges,
                     [new InvalidOperationException(
-                        $"SingleWrite requirement violated: Transaction contains {sourceChanges.Length} changes for source '{source.GetType().Name}', but WriteBatchSize is {batchSize}.")],
+                        $"SingleWrite requirement violated: Transaction contains {count} changes for source '{source.GetType().Name}', but WriteBatchSize is {batchSize}.")],
                     RevertState: source);
             }
         }
 
         // Write to the source. On a reported error only the non-failed changes reached it; otherwise
-        // the whole array did, so it is reused directly as the written set (no copy).
+        // the whole set did, so it is reused directly as the written set (no copy).
         // RevertState is the single source itself (no extra allocation): every written change belongs to it.
-        var writeResult = await source.WriteChangesInBatchesAsync(sourceChanges, cancellationToken).ConfigureAwait(false);
+        var writeResult = await source.WriteChangesInBatchesAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
         if (writeResult.Error is null)
         {
             return new SourceWriteResult(sourceChanges, [], [], RevertState: source);
@@ -105,54 +161,16 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     }
 
     /// <summary>
-    /// Derives the source-bound changes from <paramref name="changes"/> by excluding the already-collected
-    /// <paramref name="localChanges"/>, so the property source is never read a second time. The source gets
-    /// a private array copy, never the transaction's pooled buffer, so a source that retains the memory is
-    /// unaffected when the buffer returns to the pool.
-    /// </summary>
-    private static SubjectPropertyChange[] SeparateSourceChanges(
-        ReadOnlyMemory<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange>? localChanges)
-    {
-        var local = localChanges ?? (IReadOnlyList<SubjectPropertyChange>)[];
-        if (local.Count == 0)
-        {
-            return changes.ToArray();
-        }
-
-        // local is an in-order subsequence of changes (both walk changes.Span in the same order),
-        // so a two-pointer walk separates the source-bound changes without an extra set/lookup,
-        // filling a single sized array directly (no intermediate list).
-        // Correct only because a transaction snapshot holds at most one change per property (keyed by
-        // PropertyReference) and SubjectPropertyChange.Equals compares Property only, so the per-property
-        // Equals match below is unambiguous.
-        var result = new SubjectPropertyChange[changes.Length - local.Count];
-        var localIndex = 0;
-        var outIndex = 0;
-        foreach (var change in changes.Span)
-        {
-            if (localIndex < local.Count && local[localIndex].Equals(change))
-            {
-                localIndex++;
-                continue;
-            }
-            result[outIndex++] = change;
-        }
-        return result;
-    }
-
-    /// <summary>
     /// Writes source-bound changes grouped per source and dispatched in parallel. Applies nothing
-    /// in-process. Local (no-source) changes are neither written nor returned.
+    /// in-process. Receives the per-source grouping already built by the single pass; local (no-source)
+    /// changes are neither written nor returned.
     /// </summary>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     private static async ValueTask<SourceWriteResult> WriteToMultipleSourcesAsync(
-        ReadOnlyMemory<SubjectPropertyChange> changes,
+        Dictionary<ISubjectSource, List<SubjectPropertyChange>> externalChangesBySource,
         TransactionRequirement requirement,
         CancellationToken cancellationToken)
     {
-        var externalChangesBySource = GroupSourceBoundChanges(changes.Span);
-
         if (requirement == TransactionRequirement.SingleWrite)
         {
             var validationError = ValidateSingleWriteRequirement(externalChangesBySource);
@@ -246,31 +264,6 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             }
         }
         return result;
-    }
-
-    /// <summary>
-    /// Groups source-bound changes by their associated source (ignores changes without sources).
-    /// The writer never handles local changes, so the source-less bucket is not built.
-    /// </summary>
-    private static Dictionary<ISubjectSource, List<SubjectPropertyChange>>
-        GroupSourceBoundChanges(ReadOnlySpan<SubjectPropertyChange> changes)
-    {
-        var external = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();
-
-        foreach (var change in changes)
-        {
-            if (change.Property.TryGetSource(out var source))
-            {
-                if (!external.TryGetValue(source, out var list))
-                {
-                    list = [];
-                    external[source] = list;
-                }
-                list.Add(change);
-            }
-        }
-
-        return external;
     }
 
     /// <summary>
