@@ -772,4 +772,150 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var completed = await Task.WhenAny(task, Task.Delay(timeout)).ConfigureAwait(false);
         return completed == task;
     }
+
+    /// <summary>
+    /// Creates a source that records, in arrival order across all of its WriteChangesAsync calls,
+    /// the property name of every change it receives. Used by the classifier regression tests to
+    /// assert per-source grouping and order.
+    /// </summary>
+    private static Mock<ISubjectSource> CreateRecordingSource(List<string> recorded)
+    {
+        var mock = new Mock<ISubjectSource>();
+        mock.Setup(s => s.WriteBatchSize).Returns(0);
+        mock.Setup(s => s.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                foreach (var change in changes.Span)
+                {
+                    recorded.Add(change.Property.Metadata.Name!);
+                }
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+        return mock;
+    }
+
+    [Fact]
+    public async Task CommitAsync_MultiSource_SourceReappearsAfterSwitch_PreservesGroupingAndOrder()
+    {
+        // Arrange - commit order A, B, A: P0 (FirstName) and P2 (FirstName_MaxLength_Unit) bind to sourceA,
+        // P1 (LastName) binds to sourceB. The trailing A change must route into the EXISTING sourceA group
+        // (created during the single-source prefix, before the switch to sourceB) rather than a new/duplicate
+        // group, and its order relative to the earlier A change must be preserved.
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var sourceARecorded = new List<string>();
+        var sourceA = CreateRecordingSource(sourceARecorded);
+
+        var sourceBRecorded = new List<string>();
+        var sourceB = CreateRecordingSource(sourceBRecorded);
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceA.Object);            // P0 -> A
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceB.Object);             // P1 -> B
+        new PropertyReference(person, nameof(Person.FirstName_MaxLength_Unit)).SetSource(sourceA.Object); // P2 -> A
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "Joh";                  // P0
+            person.LastName = "Doe";                   // P1
+            person.FirstName_MaxLength_Unit = "Items"; // P2
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert - sourceA received exactly [P0, P2] in that order (single group, no duplication);
+        // sourceB received exactly [P1]; the in-process model holds all three values.
+        Assert.Equal(
+            new[] { nameof(Person.FirstName), nameof(Person.FirstName_MaxLength_Unit) },
+            sourceARecorded);
+        Assert.Equal(new[] { nameof(Person.LastName) }, sourceBRecorded);
+        Assert.Equal("Joh", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+        Assert.Equal("Items", person.FirstName_MaxLength_Unit);
+    }
+
+    [Fact]
+    public async Task CommitAsync_MultiSource_LateSwitchWithInterleavedLocals_GroupsSourceBoundOnly()
+    {
+        // Arrange - commit order: P0 (FirstName) -> sourceA, P1 (FirstName_MaxLength) local (no source),
+        // P2 (FirstName_MaxLength_Unit) -> sourceA, P3 (LastName) -> sourceB. The interleaved local must be
+        // excluded from the single-source prefix that seeds the dictionary on the late switch to sourceB,
+        // and source-bound order must be preserved.
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var sourceARecorded = new List<string>();
+        var sourceA = CreateRecordingSource(sourceARecorded);
+
+        var sourceBRecorded = new List<string>();
+        var sourceB = CreateRecordingSource(sourceBRecorded);
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceA.Object);                // P0 -> A
+        // P1 (FirstName_MaxLength) intentionally left without a source -> local.
+        new PropertyReference(person, nameof(Person.FirstName_MaxLength_Unit)).SetSource(sourceA.Object); // P2 -> A
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceB.Object);                 // P3 -> B
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "Joh";                  // P0 (source A)
+            person.FirstName_MaxLength = 42;           // P1 (local)
+            person.FirstName_MaxLength_Unit = "Items"; // P2 (source A)
+            person.LastName = "Doe";                   // P3 (source B)
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert - sourceA received exactly [P0, P2] (local P1 excluded, order preserved); sourceB got [P3];
+        // the local P1 was applied in-process and never written to any source.
+        Assert.Equal(
+            new[] { nameof(Person.FirstName), nameof(Person.FirstName_MaxLength_Unit) },
+            sourceARecorded);
+        Assert.Equal(new[] { nameof(Person.LastName) }, sourceBRecorded);
+        Assert.DoesNotContain(nameof(Person.FirstName_MaxLength), sourceARecorded);
+        Assert.DoesNotContain(nameof(Person.FirstName_MaxLength), sourceBRecorded);
+        Assert.Equal(42, person.FirstName_MaxLength); // local applied in-process
+        Assert.Equal("Joh", person.FirstName);
+        Assert.Equal("Items", person.FirstName_MaxLength_Unit);
+        Assert.Equal("Doe", person.LastName);
+    }
+
+    [Fact]
+    public async Task CommitAsync_SingleSource_WithTrailingLocals_WritesExactlySourceBound()
+    {
+        // Arrange - P0 (FirstName) and P1 (LastName) bind to sourceA; P2 (FirstName_MaxLength) and
+        // P3 (FirstName_MaxLength_Unit) are local. The single-source buffer is sized to the full change
+        // count (4), but only 2 slots are filled. The source must receive EXACTLY those 2 changes via the
+        // ArraySegment/AsMemory(0, count) view, never the unused (default/zeroed) buffer tail.
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var recorded = new List<string>();
+        var sourceA = CreateRecordingSource(recorded);
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceA.Object); // P0 -> A
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceA.Object);  // P1 -> A
+        // P2 (FirstName_MaxLength) and P3 (FirstName_MaxLength_Unit) left without a source -> local.
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "Joh";                  // P0 (source A)
+            person.LastName = "Doe";                   // P1 (source A)
+            person.FirstName_MaxLength = 42;           // P2 (local, trailing)
+            person.FirstName_MaxLength_Unit = "Items"; // P3 (local, trailing)
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert - the source saw EXACTLY the 2 source-bound changes (not 4, no tail garbage); the trailing
+        // locals were applied in-process only.
+        Assert.Equal(
+            new[] { nameof(Person.FirstName), nameof(Person.LastName) },
+            recorded);
+        Assert.Equal(42, person.FirstName_MaxLength);        // local applied in-process
+        Assert.Equal("Items", person.FirstName_MaxLength_Unit); // local applied in-process
+        Assert.Equal("Joh", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+    }
 }
