@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Performance;
 
@@ -286,8 +287,7 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// In-process commit body when no <see cref="ITransactionWriter"/> is registered: snapshots, applies
-    /// the whole snapshot in one pass, and reverts in-process on Rollback failure. Fully synchronous.
+    /// Fully synchronous in-process commit when no <see cref="ITransactionWriter"/> is registered.
     /// </summary>
     private void CommitInProcessOnly(IDisposable? commitLock)
     {
@@ -327,9 +327,7 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Commit when an <see cref="ITransactionWriter"/> is registered: writes source-bound changes,
-    /// applies the snapshot minus source-write failures in one pass, then reconciles per the
-    /// failure/rollback matrix using the writer for source reverts.
+    /// Commit when an <see cref="ITransactionWriter"/> is registered.
     /// </summary>
     private async ValueTask CommitWithWriterAsync(ITransactionWriter writer, CancellationToken cancellationToken)
     {
@@ -359,9 +357,7 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Single reconcile point for the writer path. Implements the failure/rollback matrix:
-    /// write to sources, apply snapshot minus source-write failures in one pass, then revert as needed.
-    /// Returns null on full success or a populated exception otherwise.
+    /// Implements the failure/rollback matrix for the writer path. Returns null on full success.
     /// </summary>
     private async ValueTask<SubjectTransactionException?> ReconcileWithWriterAsync(
         ITransactionWriter writer,
@@ -431,12 +427,9 @@ public sealed class SubjectTransaction : IDisposable
     private static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertInProcess(
         IReadOnlyList<SubjectPropertyChange> applied)
     {
-        if (applied.Count == 0)
-        {
-            return ([], []);
-        }
-
-        var (_, revertFailed, revertErrors) = applied.ToRollbackChanges().ApplyAllChanges();
+        var rollback = applied.ToRollbackChanges();
+        var (_, revertFailed, revertErrors) = SubjectPropertyChangeExtensions.ApplyAllChanges(
+            CollectionsMarshal.AsSpan(rollback), exclude: null);
         return (revertFailed, revertErrors);
     }
 
@@ -510,81 +503,27 @@ public sealed class SubjectTransaction : IDisposable
         return result ?? (IReadOnlyList<SubjectPropertyChange>)[];
     }
 
-    private static IReadOnlyList<SubjectPropertyChange> Concat(
-        IReadOnlyList<SubjectPropertyChange> first,
-        IReadOnlyList<SubjectPropertyChange> second)
+    private static IReadOnlyList<T> Concat<T>(params ReadOnlySpan<IReadOnlyList<T>> lists)
     {
-        if (second.Count == 0) return first;
-        if (first.Count == 0) return second;
+        var total = 0;
+        IReadOnlyList<T>? single = null;
+        var nonEmptyCount = 0;
+        foreach (var list in lists)
+        {
+            if (list.Count == 0) continue;
+            total += list.Count;
+            single = list;
+            nonEmptyCount++;
+        }
 
-        var result = new List<SubjectPropertyChange>(first.Count + second.Count);
-        result.AddRange(first);
-        result.AddRange(second);
-        return result;
-    }
+        if (total == 0) return [];
+        if (nonEmptyCount == 1) return single!; // avoid copying when only one list has items
 
-    private static IReadOnlyList<SubjectPropertyChange> Concat(
-        IReadOnlyList<SubjectPropertyChange> first,
-        IReadOnlyList<SubjectPropertyChange> second,
-        IReadOnlyList<SubjectPropertyChange> third)
-    {
-        var result = new List<SubjectPropertyChange>(first.Count + second.Count + third.Count);
-        result.AddRange(first);
-        result.AddRange(second);
-        result.AddRange(third);
-        return result;
-    }
-
-    private static IReadOnlyList<SubjectPropertyChange> Concat(
-        IReadOnlyList<SubjectPropertyChange> first,
-        IReadOnlyList<SubjectPropertyChange> second,
-        IReadOnlyList<SubjectPropertyChange> third,
-        IReadOnlyList<SubjectPropertyChange> fourth)
-    {
-        var result = new List<SubjectPropertyChange>(first.Count + second.Count + third.Count + fourth.Count);
-        result.AddRange(first);
-        result.AddRange(second);
-        result.AddRange(third);
-        result.AddRange(fourth);
-        return result;
-    }
-
-    private static IReadOnlyList<Exception> Concat(
-        IReadOnlyList<Exception> first,
-        IReadOnlyList<Exception> second)
-    {
-        if (second.Count == 0) return first;
-        if (first.Count == 0) return second;
-
-        var result = new List<Exception>(first.Count + second.Count);
-        result.AddRange(first);
-        result.AddRange(second);
-        return result;
-    }
-
-    private static IReadOnlyList<Exception> Concat(
-        IReadOnlyList<Exception> first,
-        IReadOnlyList<Exception> second,
-        IReadOnlyList<Exception> third)
-    {
-        var result = new List<Exception>(first.Count + second.Count + third.Count);
-        result.AddRange(first);
-        result.AddRange(second);
-        result.AddRange(third);
-        return result;
-    }
-
-    private static IReadOnlyList<Exception> Concat(
-        IReadOnlyList<Exception> first,
-        IReadOnlyList<Exception> second,
-        IReadOnlyList<Exception> third,
-        IReadOnlyList<Exception> fourth)
-    {
-        var result = new List<Exception>(first.Count + second.Count + third.Count + fourth.Count);
-        result.AddRange(first);
-        result.AddRange(second);
-        result.AddRange(third);
-        result.AddRange(fourth);
+        var result = new List<T>(total);
+        foreach (var list in lists)
+        {
+            if (list.Count > 0) result.AddRange(list);
+        }
         return result;
     }
 

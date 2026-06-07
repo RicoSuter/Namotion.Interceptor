@@ -48,165 +48,76 @@ internal static class SubjectPropertyChangeExtensions
     }
 
     /// <summary>
-    /// Applies all changes. On full success returns the input as the successful set (no copy); the
-    /// failed/error lists are allocated only when a change fails.
-    /// </summary>
-    public static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyAllChanges(this IReadOnlyList<SubjectPropertyChange> changes)
-    {
-        List<SubjectPropertyChange>? successful = null;
-        List<SubjectPropertyChange>? failed = null;
-        List<Exception>? errors = null;
-
-        for (var i = 0; i < changes.Count; i++)
-        {
-            var change = changes[i];
-            if (change.TryApplyChange(out var error))
-            {
-                successful?.Add(change);
-            }
-            else
-            {
-                if (failed is null)
-                {
-                    // First failure: materialize the successes seen so far.
-                    successful = new List<SubjectPropertyChange>(i);
-                    for (var j = 0; j < i; j++)
-                    {
-                        successful.Add(changes[j]);
-                    }
-                    failed = [];
-                }
-
-                failed.Add(change);
-                if (error != null)
-                {
-                    (errors ??= []).Add(error);
-                }
-            }
-        }
-
-        return failed is null
-            ? (changes, [], [])
-            : (successful!, failed, errors ?? []);
-    }
-
-    /// <summary>
     /// Applies all changes in the span except those whose <see cref="SubjectPropertyChange.Property"/>
-    /// matches a change in <paramref name="exclude"/>. The Successful list is returned empty only when
-    /// there are no exclusions and no failures; in that case the caller already holds the input span and
-    /// no caller needs the applied set. With exclusions, or on any failure, the Successful list is
-    /// populated. Inspect Failed.Count == 0 to detect full success.
+    /// matches a change in <paramref name="exclude"/> (matched via a <see cref="HashSet{T}"/> of excluded
+    /// properties). Inspect Failed.Count == 0 to detect full success. The Successful list is returned empty
+    /// only on the no-exclude full-success path, where the caller already holds the input span and does not
+    /// need the applied set; with exclusions, or on any failure, Successful is populated.
     /// </summary>
-    /// <param name="changes">The changes to apply.</param>
-    /// <param name="exclude">
-    /// Changes to skip, matched by <see cref="SubjectPropertyChange.Property"/> equality, using a
-    /// <see cref="HashSet{T}"/> of excluded properties.
-    /// </param>
     public static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyAllChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude)
     {
-        if (exclude is null || exclude.Count == 0)
+        HashSet<PropertyReference>? excluded = null;
+        if (exclude is { Count: > 0 })
         {
-            return ApplyAllChanges(changes);
+            excluded = new HashSet<PropertyReference>(exclude.Count, PropertyReference.Comparer);
+            foreach (var change in exclude)
+            {
+                excluded.Add(change.Property);
+            }
         }
 
-        var excludedProperties = new HashSet<PropertyReference>(exclude.Count, PropertyReference.Comparer);
-        foreach (var change in exclude)
-        {
-            excludedProperties.Add(change.Property);
-        }
-
-        return ApplyAllChangesWithSetExclude(changes, excludedProperties);
+        return ApplyCore(changes, excluded);
     }
 
-    /// <summary>
-    /// Applies all changes in the span (no exclusions). The Successful list is returned empty only when
-    /// there are no failures; the caller already holds the input span and needs the applied set only when
-    /// a change fails. On any failure the Successful list is populated. Inspect Failed.Count == 0 to
-    /// detect full success.
-    /// </summary>
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyAllChanges(ReadOnlySpan<SubjectPropertyChange> changes)
+        ApplyCore(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded)
     {
-        List<SubjectPropertyChange>? successful = null;
+        // When excluded is null the applied set equals the input on success, so Successful stays null
+        // (returned empty) until the first failure. When excluded is set the applied set differs from the
+        // input, so Successful is materialized up front.
+        List<SubjectPropertyChange>? successful = excluded is null ? null : new List<SubjectPropertyChange>(changes.Length);
         List<SubjectPropertyChange>? failed = null;
         List<Exception>? errors = null;
 
         for (var i = 0; i < changes.Length; i++)
         {
             var change = changes[i];
-            if (change.TryApplyChange(out var error))
-            {
-                successful?.Add(change);
-            }
-            else
-            {
-                if (failed is null)
-                {
-                    successful = new List<SubjectPropertyChange>(i);
-                    for (var j = 0; j < i; j++)
-                    {
-                        successful.Add(changes[j]);
-                    }
-
-                    failed = [];
-                }
-
-                failed.Add(change);
-                if (error != null)
-                {
-                    (errors ??= []).Add(error);
-                }
-            }
-        }
-
-        return failed is null
-            ? ([], [], [])
-            : (successful!, failed, errors ?? []);
-    }
-
-    private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyAllChangesWithSetExclude(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference> excludedProperties)
-    {
-        var successful = new List<SubjectPropertyChange>(changes.Length);
-        List<SubjectPropertyChange>? failed = null;
-        List<Exception>? errors = null;
-
-        for (var i = 0; i < changes.Length; i++)
-        {
-            var change = changes[i];
-            if (excludedProperties.Contains(change.Property))
+            if (excluded is not null && excluded.Contains(change.Property))
             {
                 continue;
             }
 
-            ApplyOrCollect(change, successful, ref failed, ref errors);
+            if (change.TryApplyChange(out var error))
+            {
+                successful?.Add(change);
+            }
+            else
+            {
+                if (failed is null)
+                {
+                    if (successful is null)
+                    {
+                        // First failure on the no-exclude path: materialize the successes seen so far.
+                        successful = new List<SubjectPropertyChange>(i);
+                        for (var j = 0; j < i; j++)
+                        {
+                            successful.Add(changes[j]);
+                        }
+                    }
+                    failed = [];
+                }
+
+                failed.Add(change);
+                if (error != null)
+                {
+                    (errors ??= []).Add(error);
+                }
+            }
         }
 
         return failed is null
-            ? (successful, [], [])
-            : (successful, failed, errors ?? []);
+            ? (successful ?? (IReadOnlyList<SubjectPropertyChange>)[], [], [])
+            : (successful!, failed, errors ?? []);
     }
-
-    private static void ApplyOrCollect(
-        SubjectPropertyChange change,
-        List<SubjectPropertyChange> successful,
-        ref List<SubjectPropertyChange>? failed,
-        ref List<Exception>? errors)
-    {
-        if (change.TryApplyChange(out var error))
-        {
-            successful.Add(change);
-        }
-        else
-        {
-            (failed ??= []).Add(change);
-            if (error != null)
-            {
-                (errors ??= []).Add(error);
-            }
-        }
-    }
-
 }

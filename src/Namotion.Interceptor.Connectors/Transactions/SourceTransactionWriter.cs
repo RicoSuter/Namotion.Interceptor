@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -10,6 +11,7 @@ namespace Namotion.Interceptor.Connectors.Transactions;
 /// </summary>
 internal sealed class SourceTransactionWriter : ITransactionWriter
 {
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public async ValueTask<SourceWriteResult> WriteToSourcesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         TransactionRequirement requirement,
@@ -61,6 +63,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     /// Applies nothing in-process. <paramref name="localChanges"/> are the source-less changes already
     /// separated by the single classification pass; they are neither written nor returned.
     /// </summary>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     private static async ValueTask<SourceWriteResult> WriteToSingleSourceAsync(
         ISubjectSource source,
         ReadOnlyMemory<SubjectPropertyChange> changes,
@@ -115,27 +118,28 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         }
 
         // local is an in-order subsequence of changes (both walk changes.Span in the same order),
-        // so a two-pointer walk separates the source-bound changes without an extra set/lookup.
-        var sourceList = new List<SubjectPropertyChange>(changes.Length - local.Count);
+        // so a two-pointer walk separates the source-bound changes without an extra set/lookup,
+        // filling a single sized array directly (no intermediate list).
+        var result = new SubjectPropertyChange[changes.Length - local.Count];
         var localIndex = 0;
+        var outIndex = 0;
         foreach (var change in changes.Span)
         {
             if (localIndex < local.Count && local[localIndex].Equals(change))
             {
                 localIndex++;
+                continue;
             }
-            else
-            {
-                sourceList.Add(change);
-            }
+            result[outIndex++] = change;
         }
-        return [.. sourceList];
+        return result;
     }
 
     /// <summary>
     /// Writes source-bound changes grouped per source and dispatched in parallel. Applies nothing
     /// in-process. Local (no-source) changes are neither written nor returned.
     /// </summary>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     private static async ValueTask<SourceWriteResult> WriteToMultipleSourcesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         TransactionRequirement requirement,
