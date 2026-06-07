@@ -173,7 +173,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         return new SourceWriteResult(FlattenChanges(successfulBySource), failed, errors, RevertState: externalChangesBySource);
     }
 
-    public async ValueTask<SourceRevertResult> RevertAsync(
+    public async ValueTask<SourceRevertResult> RevertSourceWritesAsync(
         IReadOnlyList<SubjectPropertyChange> written,
         object? revertState,
         CancellationToken cancellationToken)

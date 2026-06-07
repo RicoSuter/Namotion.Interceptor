@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// </summary>
 /// <param name="Written">
 /// The source-bound changes that reached their source and can therefore be reverted there. The
-/// transaction holds this list opaquely and passes it back to <see cref="ITransactionWriter.RevertAsync"/>
+/// transaction holds this list opaquely and passes it back to <see cref="ITransactionWriter.RevertSourceWritesAsync"/>
 /// on rollback.
 /// </param>
 /// <param name="Failed">
@@ -21,7 +21,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// </param>
 /// <param name="RevertState">
 /// Opaque writer-owned state that identifies which source each written change was written to, handed
-/// back to <see cref="ITransactionWriter.RevertAsync"/> so reverts target the exact sources written
+/// back to <see cref="ITransactionWriter.RevertSourceWritesAsync"/> so reverts target the exact sources written
 /// (never re-derived from the current SetSource mapping).
 /// </param>
 public readonly record struct SourceWriteResult(

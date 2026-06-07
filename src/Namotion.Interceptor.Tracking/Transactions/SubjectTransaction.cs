@@ -389,7 +389,7 @@ public sealed class SubjectTransaction : IDisposable
         // reported as failed (they did not commit), matching the all-or-nothing contract.
         if (_failureHandling == TransactionFailureHandling.Rollback && failedSource.Count > 0)
         {
-            var revert = await writer.RevertAsync(written, revertState, cancellationToken).ConfigureAwait(false);
+            var revert = await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
             var notApplied = ExcludeByProperty(changes.Span, failedSource, written);
             return CreateFailureException(
                 [],
@@ -408,7 +408,7 @@ public sealed class SubjectTransaction : IDisposable
             {
                 // All-or-nothing: revert in-process applies, then the source writes.
                 var (revertFailed, revertErrors) = RevertInProcess(applied);
-                var sourceRevert = await writer.RevertAsync(written, revertState, cancellationToken).ConfigureAwait(false);
+                var sourceRevert = await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
                 return CreateFailureException(
                     [],
                     Concat(failedSource, applyFailed, revertFailed, sourceRevert.Failed),
@@ -418,7 +418,7 @@ public sealed class SubjectTransaction : IDisposable
             // BestEffort: keep source == model for failed-apply properties by reverting only the
             // source writes whose property failed to apply (matched by Property equality).
             var toRevert = IntersectByProperty(applyFailed, written);
-            var bestEffortRevert = await writer.RevertAsync(toRevert, revertState, cancellationToken).ConfigureAwait(false);
+            var bestEffortRevert = await writer.RevertSourceWritesAsync(toRevert, revertState, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
                 applied,
                 Concat(failedSource, applyFailed, bestEffortRevert.Failed),
