@@ -266,7 +266,9 @@ propertyReference.SetSource(this);
 
 Properties without an associated source are applied in Stage 2 alongside source-bound properties.
 
-A property's forward source routing is resolved once at commit time, and reverts target whatever sources were actually written (captured in the revert state), so a `RemoveSource` that races the commit never strands a revert. What is ambiguous is only whether a `SetSource` or `RemoveSource` that races the commit's classification is observed by that commit, in other words whether the change is treated as source-bound or local for this particular commit.
+**Changing a source while a commit runs:** the source a property writes to is decided when the transaction commits, not when you set the value. So if you call `SetSource` or `RemoveSource` on a property at the same time a commit is running, it is undefined whether that commit uses the old or the new binding for that property.
+
+Rollback is not affected by this: a revert always undoes the writes at the sources they were actually written to, even if the binding changed in the meantime.
 
 ## Error Handling
 
