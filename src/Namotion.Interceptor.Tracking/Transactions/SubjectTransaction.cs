@@ -269,7 +269,7 @@ public sealed class SubjectTransaction : IDisposable
             var lockTask = AcquireOptimisticLockIfNeededAsync(cancellationToken);
             if (lockTask.IsCompletedSuccessfully)
             {
-                CommitInProcessOnly(lockTask.Result);
+                CommitWithoutWriter(lockTask.Result);
                 return default;
             }
 
@@ -288,17 +288,17 @@ public sealed class SubjectTransaction : IDisposable
         }
         catch
         {
-            // A failed optimistic lock acquire must not wedge the transaction: reset so a retry is possible.
+            // A failed optimistic lock must not wedge the transaction: reset so a retry is possible.
             Volatile.Write(ref _commitStarted, 0);
             throw;
         }
-        CommitInProcessOnly(commitLock);
+        CommitWithoutWriter(commitLock);
     }
 
     /// <summary>
     /// Fully synchronous in-process commit when no <see cref="ITransactionWriter"/> is registered.
     /// </summary>
-    private void CommitInProcessOnly(IDisposable? commitLock)
+    private void CommitWithoutWriter(IDisposable? commitLock)
     {
         SubjectPropertyChange[]? rentedArray = null;
         try
@@ -315,7 +315,7 @@ public sealed class SubjectTransaction : IDisposable
             {
                 if (_failureHandling == TransactionFailureHandling.Rollback)
                 {
-                    var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertInProcess(applied);
+                    var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
                     failure = CreateFailureException([], SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed), SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors));
                 }
                 else
@@ -396,8 +396,8 @@ public sealed class SubjectTransaction : IDisposable
                 SubjectPropertyChangeOperations.Concat(sourceErrors, revert.Errors));
         }
 
-        // Apply the whole snapshot except the source-write failures, in a single pass. With no source
-        // failure this is the entire snapshot and ApplyAllChanges returns an empty Successful set.
+        // Apply the whole snapshot except the source-write failures in a single pass. With no source
+        // failure, this is the entire snapshot, and ApplyAllChanges returns an empty Successful set.
         var exclude = failedSource.Count == 0 ? null : failedSource;
         var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes.Span, exclude);
 
@@ -406,7 +406,7 @@ public sealed class SubjectTransaction : IDisposable
             if (_failureHandling == TransactionFailureHandling.Rollback)
             {
                 // All-or-nothing: revert in-process applies, then the source writes.
-                var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertInProcess(applied);
+                var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
                 var sourceRevert = await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
                 return CreateFailureException(
                     [],
@@ -436,7 +436,7 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Clears pending changes and marks the transaction committed BEFORE any exception is thrown so
-    /// subsequent property reads do not return stale captured values via TryGetPendingValue.
+    /// later property reads do not return stale captured values via TryGetPendingValue.
     /// </summary>
     private void FinishCommit()
     {

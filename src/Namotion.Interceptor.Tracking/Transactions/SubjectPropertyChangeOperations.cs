@@ -120,7 +120,7 @@ internal static class SubjectPropertyChangeOperations
     /// Reverts previously-applied in-process changes by applying their inverse values in reverse order.
     /// Returns any revert failures and errors so the caller can fold them into the exception.
     /// </summary>
-    internal static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertInProcess(
+    internal static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertLocalChanges(
         IReadOnlyList<SubjectPropertyChange> applied)
     {
         var rollback = applied.ToRollbackChanges();

@@ -228,7 +228,6 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             }
 
             await TryRevertSourceWritesAsync(toRevert, failed, errors, cancellationToken).ConfigureAwait(false);
-            return new SourceRevertResult(failed, errors);
         }
 
         return new SourceRevertResult(failed, errors);
