@@ -19,7 +19,13 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// <param name="Errors">
 /// The errors that occurred while writing to sources, typically one per source that failed.
 /// </param>
+/// <param name="RevertState">
+/// Opaque writer-owned state that identifies which source each written change was written to, handed
+/// back to <see cref="ITransactionWriter.RevertAsync"/> so reverts target the exact sources written
+/// (never re-derived from the current SetSource mapping).
+/// </param>
 public readonly record struct SourceWriteResult(
     IReadOnlyList<SubjectPropertyChange> Written,
     IReadOnlyList<SubjectPropertyChange> Failed,
-    IReadOnlyList<Exception> Errors);
+    IReadOnlyList<Exception> Errors,
+    object? RevertState);

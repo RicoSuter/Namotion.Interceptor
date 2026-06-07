@@ -5,6 +5,7 @@ using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
+using Xunit;
 
 namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 
@@ -628,5 +629,147 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         Assert.Null(person.LastName);
         Assert.Contains("Rollback was attempted", ex.Message);
         Assert.Equal(2, writeCallCount); // Initial write + revert
+    }
+
+    [Fact]
+    public async Task RollbackMode_WhenSourceRemovedDuringWrite_StillRevertsToOriginalSource()
+    {
+        // Arrange - A source S is bound to a property. A local property fails to apply during commit,
+        // which (in Rollback mode) triggers a revert of the already-written source change. The source's
+        // WriteChangesAsync callback detaches itself from the property (RemoveSource) before returning
+        // success, so a TryGetSource-based revert would silently drop the revert. With RevertState the
+        // revert still targets the original source.
+        var context = CreateContext();
+        var person = new Person(context);
+        var device = new ThrowingDevice(context)
+        {
+            ShouldThrow = prop => prop == nameof(ThrowingDevice.PropertyB)
+        };
+
+        var firstNameProp = new PropertyReference(person, nameof(Person.FirstName));
+
+        var writes = new List<(string Property, string? Value)>();
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                foreach (var change in changes.Span)
+                {
+                    writes.Add((change.Property.Metadata.Name!, change.GetNewValue<string?>()));
+                }
+
+                // Detach the source from the property right after the forward write: a revert that
+                // re-derives the source via TryGetSource would now find nothing.
+                firstNameProp.RemoveSource(sourceMock!.Object);
+
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        firstNameProp.SetSource(sourceMock.Object);
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "John"; // source-bound, written then reverted
+        device.PropertyB = true;   // local, throws during apply -> triggers rollback
+
+        device.ThrowingEnabled = true;
+
+        await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert - the forward write and the revert write both reached the original source, even though
+        // the source was removed from the property between them.
+        Assert.Equal(2, writes.Count);
+        Assert.Equal((nameof(Person.FirstName), "John"), writes[0]);
+        Assert.Equal((nameof(Person.FirstName), (string?)null), writes[1]); // inverse value reverted to S
+    }
+
+    [Fact]
+    public async Task Dispose_DuringInFlightCommit_DoesNotReturnLiveBufferToPool()
+    {
+        // Arrange - Reproduces the genuine interleaving the pool-return guard protects against:
+        //   A (transaction A) parks inside its source writer with _isCommitting == true and its pending
+        //   dictionary NOT yet cleared (FinishCommit runs only after the writer returns). While A is parked,
+        //   A is disposed (Dispose-during-in-flight-commit) and a second transaction B is started on the
+        //   SAME context. B rents a pending dictionary from the shared pool. If Dispose returned A's still
+        //   live dictionary, B rents that very instance; then A's FinishCommit().Clear() would wipe B's
+        //   pending change before B commits. The guard (returnBuffer = !_isCommitting) prevents this by not
+        //   pooling a buffer an in-flight commit still owns, so B always gets a clean buffer.
+        //
+        // With fix #1: B's change survives and is applied.
+        // Without fix #1 (Dispose returns the live buffer unconditionally): B shares A's dictionary, A's
+        // FinishCommit clears it, B commits nothing and person.LastName stays null -> the assertion fails.
+        var timeout = TimeSpan.FromSeconds(10);
+
+        var context = CreateContext();
+        var person = new Person(context);
+
+        // A's source parks inside WriteChangesAsync until the test releases it, holding A in flight.
+        var writerEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWriter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var parkingSource = new Mock<ISubjectSource>();
+        parkingSource.Setup(s => s.WriteBatchSize).Returns(0);
+        parkingSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            {
+                writerEntered.TrySetResult(true);
+                await releaseWriter.Task.ConfigureAwait(false);
+                return WriteResult.Success;
+            });
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(parkingSource.Object);
+
+        var succeedingSource = CreateSucceedingSource();
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(succeedingSource.Object);
+
+        // Act - Run A entirely on its own execution context (Task.Run) so its AsyncLocal current-transaction
+        // does not flow into the test thread or into B. A parks in the writer with its dictionary alive.
+        SubjectTransaction transactionA = null!;
+        var commitA = Task.Run(async () =>
+        {
+            transactionA = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+            person.FirstName = "John";
+            await transactionA.CommitAsync(CancellationToken.None);
+        });
+
+        Assert.True(await WaitWithTimeout(writerEntered.Task, timeout),
+            "Transaction A's writer was never entered.");
+
+        // Dispose A while its commit is parked in the writer. With the bug this returns A's live dictionary
+        // to the pool. A still holds _isCommitting == true, so the guard must skip the pool return.
+        transactionA.Dispose();
+
+        // Start B on the same context (A released the exclusive lock on Dispose) and capture a change so B
+        // rents a dictionary from the pool. Run on its own context so B's AsyncLocal is isolated from A.
+        var commitB = Task.Run(async () =>
+        {
+            using var transactionB = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+            person.LastName = "Doe"; // rents from the pool and populates the pending dictionary
+
+            // Release A's writer only now that B has populated its buffer: if B shares A's dictionary, A's
+            // FinishCommit().Clear() (after the writer returns) wipes B's pending change.
+            releaseWriter.TrySetResult(true);
+            Assert.True(await WaitWithTimeout(commitA, timeout), "Transaction A's commit did not finish.");
+
+            await transactionB.CommitAsync(CancellationToken.None);
+        });
+
+        Assert.True(await WaitWithTimeout(commitB, timeout), "Transaction B's commit did not finish.");
+        await commitB; // observe exceptions
+
+        // Assert - B committed its own change. With the bug, B's change was wiped by A's FinishCommit and
+        // LastName stays null; the guard keeps B's buffer separate so the change survives and is applied.
+        Assert.Equal("John", person.FirstName); // A's commit still completed after the writer was released
+        Assert.Equal("Doe", person.LastName);   // B's change survived (fails without fix #1)
+        succeedingSource.Verify(s => s.WriteChangesAsync(
+            It.Is<ReadOnlyMemory<SubjectPropertyChange>>(m => m.Length == 1),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private static async Task<bool> WaitWithTimeout(Task task, TimeSpan timeout)
+    {
+        var completed = await Task.WhenAny(task, Task.Delay(timeout)).ConfigureAwait(false);
+        return completed == task;
     }
 }

@@ -32,9 +32,11 @@ public interface ITransactionWriter
     /// values back to each source.
     /// </summary>
     /// <param name="written">The previously-written changes to revert, as returned in <see cref="SourceWriteResult.Written"/>.</param>
+    /// <param name="revertState">The opaque writer-owned state from <see cref="SourceWriteResult.RevertState"/> identifying the original target sources.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The result reporting any revert failures and their errors.</returns>
     ValueTask<SourceRevertResult> RevertAsync(
         IReadOnlyList<SubjectPropertyChange> written,
+        object? revertState,
         CancellationToken cancellationToken);
 }

@@ -215,7 +215,7 @@ namespace Namotion.Interceptor.Tracking.Transactions
 {
     public interface ITransactionWriter
     {
-        System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.SourceRevertResult> RevertAsync(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> written, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.SourceRevertResult> RevertAsync(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> written, object? revertState, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.SourceWriteResult> WriteToSourcesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement, System.Threading.CancellationToken cancellationToken);
     }
     public readonly struct SourceRevertResult : System.IEquatable<Namotion.Interceptor.Tracking.Transactions.SourceRevertResult>
@@ -226,9 +226,10 @@ namespace Namotion.Interceptor.Tracking.Transactions
     }
     public readonly struct SourceWriteResult : System.IEquatable<Namotion.Interceptor.Tracking.Transactions.SourceWriteResult>
     {
-        public SourceWriteResult(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Written, System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed, System.Collections.Generic.IReadOnlyList<System.Exception> Errors) { }
+        public SourceWriteResult(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Written, System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed, System.Collections.Generic.IReadOnlyList<System.Exception> Errors, object? RevertState) { }
         public System.Collections.Generic.IReadOnlyList<System.Exception> Errors { get; init; }
         public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed { get; init; }
+        public object? RevertState { get; init; }
         public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Written { get; init; }
     }
     public sealed class SubjectTransaction : System.IDisposable

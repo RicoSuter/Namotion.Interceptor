@@ -46,7 +46,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         // No source-bound changes: nothing to write. The transaction applies the local changes.
         if (singleSource is null)
         {
-            return new SourceWriteResult([], [], []);
+            return new SourceWriteResult([], [], [], RevertState: null);
         }
 
         if (!multipleSources)
@@ -82,23 +82,26 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
                     [],
                     sourceChanges,
                     [new InvalidOperationException(
-                        $"SingleWrite requirement violated: Transaction contains {sourceChanges.Length} changes for source '{source.GetType().Name}', but WriteBatchSize is {batchSize}.")]);
+                        $"SingleWrite requirement violated: Transaction contains {sourceChanges.Length} changes for source '{source.GetType().Name}', but WriteBatchSize is {batchSize}.")],
+                    RevertState: source);
             }
         }
 
         // Write to the source. On a reported error only the non-failed changes reached it; otherwise
         // the whole array did, so it is reused directly as the written set (no copy).
+        // RevertState is the single source itself (no extra allocation): every written change belongs to it.
         var writeResult = await source.WriteChangesInBatchesAsync(sourceChanges, cancellationToken).ConfigureAwait(false);
         if (writeResult.Error is null)
         {
-            return new SourceWriteResult(sourceChanges, [], []);
+            return new SourceWriteResult(sourceChanges, [], [], RevertState: source);
         }
 
         IReadOnlyList<SubjectPropertyChange> written = ExcludeFailed(sourceChanges, writeResult.FailedChanges);
         return new SourceWriteResult(
             written,
             [.. writeResult.FailedChanges],
-            [new SourceTransactionWriteException(source, [.. writeResult.FailedChanges], writeResult.Error)]);
+            [new SourceTransactionWriteException(source, [.. writeResult.FailedChanges], writeResult.Error)],
+            RevertState: source);
     }
 
     /// <summary>
@@ -120,6 +123,9 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         // local is an in-order subsequence of changes (both walk changes.Span in the same order),
         // so a two-pointer walk separates the source-bound changes without an extra set/lookup,
         // filling a single sized array directly (no intermediate list).
+        // Correct only because a transaction snapshot holds at most one change per property (keyed by
+        // PropertyReference) and SubjectPropertyChange.Equals compares Property only, so the per-property
+        // Equals match below is unambiguous.
         var result = new SubjectPropertyChange[changes.Length - local.Count];
         var localIndex = 0;
         var outIndex = 0;
@@ -152,24 +158,27 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             var validationError = ValidateSingleWriteRequirement(externalChangesBySource);
             if (validationError != null)
             {
-                return new SourceWriteResult([], FlattenChanges(externalChangesBySource), [validationError]);
+                return new SourceWriteResult([], FlattenChanges(externalChangesBySource), [validationError], RevertState: externalChangesBySource);
             }
         }
 
         if (externalChangesBySource.Count == 0)
         {
-            return new SourceWriteResult([], [], []);
+            return new SourceWriteResult([], [], [], RevertState: null);
         }
 
+        // RevertState is the per-source grouping already built above (reused as-is, no extra allocation):
+        // revert resolves each written change to its original source from this map instead of re-deriving.
         var (successfulBySource, failed, errors) = await WriteToExternalSourcesAsync(externalChangesBySource, cancellationToken).ConfigureAwait(false);
-        return new SourceWriteResult(FlattenChanges(successfulBySource), failed, errors);
+        return new SourceWriteResult(FlattenChanges(successfulBySource), failed, errors, RevertState: externalChangesBySource);
     }
 
     public async ValueTask<SourceRevertResult> RevertAsync(
         IReadOnlyList<SubjectPropertyChange> written,
+        object? revertState,
         CancellationToken cancellationToken)
     {
-        if (written.Count == 0)
+        if (written.Count == 0 || revertState is null)
         {
             return new SourceRevertResult([], []);
         }
@@ -177,9 +186,49 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var failed = new List<SubjectPropertyChange>();
         var errors = new List<Exception>();
 
-        // Reuse the existing source-revert helper: group the written changes by source and write the
-        // inverse values (ToRollbackChanges) back to each source in batches.
-        await TryRevertSourceWritesAsync(GroupChangesBySource(written), failed, errors, cancellationToken).ConfigureAwait(false);
+        if (revertState is ISubjectSource source)
+        {
+            // Single-source write path: every written change belongs to this exact source.
+            // Revert by writing the inverse values (ToRollbackChanges) back, without re-deriving the source.
+            var single = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>(1)
+            {
+                [source] = [.. written]
+            };
+            await TryRevertSourceWritesAsync(single, failed, errors, cancellationToken).ConfigureAwait(false);
+            return new SourceRevertResult(failed, errors);
+        }
+
+        if (revertState is Dictionary<ISubjectSource, List<SubjectPropertyChange>> groups)
+        {
+            // Multi-source write path: revert exactly the passed 'written' subset to the ORIGINAL sources
+            // recorded at write time. Build a property set of 'written' and, per group, revert only the
+            // intersection (so a best-effort partial revert targets the right sources).
+            var writtenSet = new HashSet<PropertyReference>(written.Count, PropertyReference.Comparer);
+            foreach (var change in written)
+            {
+                writtenSet.Add(change.Property);
+            }
+
+            var toRevert = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>(groups.Count);
+            foreach (var (groupSource, groupChanges) in groups)
+            {
+                List<SubjectPropertyChange>? subset = null;
+                foreach (var change in groupChanges)
+                {
+                    if (writtenSet.Contains(change.Property))
+                    {
+                        (subset ??= []).Add(change);
+                    }
+                }
+                if (subset is not null)
+                {
+                    toRevert[groupSource] = subset;
+                }
+            }
+
+            await TryRevertSourceWritesAsync(toRevert, failed, errors, cancellationToken).ConfigureAwait(false);
+            return new SourceRevertResult(failed, errors);
+        }
 
         return new SourceRevertResult(failed, errors);
     }
@@ -194,28 +243,6 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             if (!failedSet.Contains(change))
             {
                 result.Add(change);
-            }
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Groups changes by their associated source (ignores changes without sources).
-    /// </summary>
-    private static Dictionary<ISubjectSource, List<SubjectPropertyChange>> GroupChangesBySource(
-        IEnumerable<SubjectPropertyChange> changes)
-    {
-        var result = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();
-        foreach (var change in changes)
-        {
-            if (change.Property.TryGetSource(out var source))
-            {
-                if (!result.TryGetValue(source, out var list))
-                {
-                    list = [];
-                    result[source] = list;
-                }
-                list.Add(change);
             }
         }
         return result;

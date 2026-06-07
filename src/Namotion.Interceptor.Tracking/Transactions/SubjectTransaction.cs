@@ -282,7 +282,17 @@ public sealed class SubjectTransaction : IDisposable
 
     private async ValueTask CommitInProcessAfterLockAsync(ValueTask<IDisposable?> lockTask)
     {
-        var commitLock = await lockTask.ConfigureAwait(false);
+        IDisposable? commitLock;
+        try
+        {
+            commitLock = await lockTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // A failed optimistic lock acquire must not wedge the transaction: reset so a retry is possible.
+            Volatile.Write(ref _commitStarted, 0);
+            throw;
+        }
         CommitInProcessOnly(commitLock);
     }
 
@@ -291,10 +301,12 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     private void CommitInProcessOnly(IDisposable? commitLock)
     {
-        var (rentedArray, changes) = StartCommitAndSnapshotChanges();
-
+        SubjectPropertyChange[]? rentedArray = null;
         try
         {
+            var (rented, changes) = StartCommitAndSnapshotChanges();
+            rentedArray = rented;
+
             ThrowIfConflictsDetected(changes.Span);
 
             var (applied, applyFailed, applyErrors) = SubjectPropertyChangeExtensions.ApplyAllChanges(changes.Span, exclude: null);
@@ -331,11 +343,14 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     private async ValueTask CommitWithWriterAsync(ITransactionWriter writer, CancellationToken cancellationToken)
     {
-        var commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken).ConfigureAwait(false);
-        var (rentedArray, changes) = StartCommitAndSnapshotChanges();
-
+        IDisposable? commitLock = null;
+        SubjectPropertyChange[]? rentedArray = null;
         try
         {
+            commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken).ConfigureAwait(false);
+            var (rented, changes) = StartCommitAndSnapshotChanges();
+            rentedArray = rented;
+
             ThrowIfConflictsDetected(changes.Span);
 
             using var timeoutCts = CreateCommitTimeoutCts();
@@ -366,7 +381,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         // The writer is contractually expected to report failures via SourceWriteResult, not throw.
         // A throwing writer propagates here and bypasses source-revert (matches prior behavior).
-        var (written, failedSource, sourceErrors) = await writer
+        var (written, failedSource, sourceErrors, revertState) = await writer
             .WriteToSourcesAsync(changes, _requirement, cancellationToken).ConfigureAwait(false);
 
         // Rollback with any source-write failure: nothing is applied in-process; revert what reached
@@ -374,7 +389,7 @@ public sealed class SubjectTransaction : IDisposable
         // reported as failed (they did not commit), matching the all-or-nothing contract.
         if (_failureHandling == TransactionFailureHandling.Rollback && failedSource.Count > 0)
         {
-            var revert = await writer.RevertAsync(written, cancellationToken).ConfigureAwait(false);
+            var revert = await writer.RevertAsync(written, revertState, cancellationToken).ConfigureAwait(false);
             var notApplied = ExcludeByProperty(changes.Span, failedSource, written);
             return CreateFailureException(
                 [],
@@ -393,7 +408,7 @@ public sealed class SubjectTransaction : IDisposable
             {
                 // All-or-nothing: revert in-process applies, then the source writes.
                 var (revertFailed, revertErrors) = RevertInProcess(applied);
-                var sourceRevert = await writer.RevertAsync(written, cancellationToken).ConfigureAwait(false);
+                var sourceRevert = await writer.RevertAsync(written, revertState, cancellationToken).ConfigureAwait(false);
                 return CreateFailureException(
                     [],
                     Concat(failedSource, applyFailed, revertFailed, sourceRevert.Failed),
@@ -403,7 +418,7 @@ public sealed class SubjectTransaction : IDisposable
             // BestEffort: keep source == model for failed-apply properties by reverting only the
             // source writes whose property failed to apply (matched by Property equality).
             var toRevert = IntersectByProperty(applyFailed, written);
-            var bestEffortRevert = await writer.RevertAsync(toRevert, cancellationToken).ConfigureAwait(false);
+            var bestEffortRevert = await writer.RevertAsync(toRevert, revertState, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
                 applied,
                 Concat(failedSource, applyFailed, bestEffortRevert.Failed),
@@ -545,9 +560,23 @@ public sealed class SubjectTransaction : IDisposable
     /// Common cleanup for every commit path (success or failure): resets commit state for retry on
     /// failure, returns the pooled snapshot array, and releases the optimistic lock.
     /// </summary>
-    private void EndCommit(SubjectPropertyChange[] rentedArray, IDisposable? commitLock)
+    private void EndCommit(SubjectPropertyChange[]? rentedArray, IDisposable? commitLock)
     {
-        _isCommitting = false;
+        lock (_pendingChangesLock)
+        {
+            // Clear inside the lock so a concurrent Dispose sees an in-flight commit and skips
+            // returning the pooled buffer until this commit has finished using it.
+            _isCommitting = false;
+        }
+
+        if (rentedArray != null)
+        {
+            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray);
+        }
+
+        // Release the optimistic lock BEFORE resetting _commitStarted so a retry cannot start
+        // before the optimistic lock is actually free.
+        commitLock?.Dispose();
 
         if (!_isCommitted)
         {
@@ -555,9 +584,6 @@ public sealed class SubjectTransaction : IDisposable
             // (e.g., conflict detected, timeout, validation during replay).
             Volatile.Write(ref _commitStarted, 0);
         }
-
-        ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray);
-        commitLock?.Dispose();
     }
 
     private void ValidateCanCommit()
@@ -592,15 +618,16 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            // Set _isCommitting inside the lock to prevent concurrent writes from being
-            // captured into _pendingChanges between the copy and the flag update (TOCTOU).
-            // Nothing between setting this flag (and renting the ArrayPool buffer below) and the
-            // caller's try/finally may throw: EndCommit runs only in the finally, so an exception here
-            // would leave _isCommitting stuck true and leak the rented buffer.
-            _isCommitting = true;
-
+            // Rent the ArrayPool buffer BEFORE setting _isCommitting so an OOM in Rent leaves the
+            // transaction reusable (the flag is never set, no cleanup is owed).
             var changeCount = _pendingChanges.Count;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
+
+            // Set _isCommitting inside the lock to prevent concurrent writes from being
+            // captured into _pendingChanges between the copy and the flag update (TOCTOU).
+            // Once set, EndCommit (run only in the caller's finally) is responsible for clearing it
+            // and returning the rented buffer.
+            _isCommitting = true;
 
             var index = 0;
             foreach (var change in _pendingChanges.Values)
@@ -675,11 +702,18 @@ public sealed class SubjectTransaction : IDisposable
         {
             Interlocked.Decrement(ref _activeTransactionCount);
 
+            bool returnBuffer;
             lock (_pendingChangesLock)
             {
                 _pendingChanges.Clear();
+                // If a commit is in flight on another thread it still owns the buffer; skip the pool
+                // return (the buffer is then GC'd) so a live buffer is never handed to another transaction.
+                returnBuffer = !_isCommitting;
             }
-            PendingChangesPool.Return(_pendingChanges);
+            if (returnBuffer)
+            {
+                PendingChangesPool.Return(_pendingChanges);
+            }
 
             CurrentTransaction.Value = null;
             _lockReleaser?.Dispose(); // May be null for Optimistic transactions

@@ -175,6 +175,8 @@ Controls how optimistic transactions detect concurrent modifications.
 | `FailOnConflict` | Throw `TransactionConflictException` if values changed since transaction started. (default) |
 | `Ignore` | Overwrite any concurrent changes without checking. |
 
+Conflict detection is best-effort and not atomic with respect to non-transactional writes that happen between detection and apply. Transactions are serialized against each other, but a raw property write or an external source callback can still interleave during that window.
+
 ### Requirements
 
 Enforces constraints on transaction scope, useful for protocols like OPC UA.
@@ -263,6 +265,8 @@ propertyReference.SetSource(this);
 ```
 
 Properties without an associated source are applied in Stage 2 alongside source-bound properties.
+
+A property's forward source routing is resolved once at commit time, and reverts target whatever sources were actually written (captured in the revert state), so a `RemoveSource` that races the commit never strands a revert. What is ambiguous is only whether a `SetSource` or `RemoveSource` that races the commit's classification is observed by that commit, in other words whether the change is treated as source-bound or local for this particular commit.
 
 ## Error Handling
 
