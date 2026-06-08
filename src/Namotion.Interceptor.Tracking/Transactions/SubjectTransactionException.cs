@@ -28,12 +28,17 @@ public class SubjectTransactionException : Exception
     public IReadOnlyList<SubjectPropertyChange> AppliedChanges { get; }
 
     /// <summary>
-    /// Gets the changes that failed to write to source (not applied to local model).
+    /// Gets the changes that did not commit: source-write failures, changes that threw while being applied
+    /// to or reverted from the local model, and, under <see cref="TransactionFailureHandling.Rollback"/>,
+    /// local (no-source) changes that were never applied. A change can appear more than once if it failed at
+    /// more than one stage.
     /// </summary>
     public IReadOnlyList<SubjectPropertyChange> FailedChanges { get; }
 
     /// <summary>
-    /// Gets the errors that occurred, one per source that failed.
+    /// Gets the errors that occurred during commit. Not aligned one to one with <see cref="FailedChanges"/>:
+    /// a failed source write or revert yields one error covering all of that source's changes, while a failed
+    /// local apply or revert yields one error per change, so this list can be shorter.
     /// </summary>
     public IReadOnlyList<Exception> Errors { get; }
 

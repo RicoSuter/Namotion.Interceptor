@@ -13,7 +13,7 @@ internal static class SubjectPropertyChangeOperations
     /// </summary>
     /// <param name="changes">The changes to create rollbacks for.</param>
     /// <returns>Rollback changes in reverse order.</returns>
-    public static List<SubjectPropertyChange> ConvertToReverseRollbackChanges(
+    public static IEnumerable<SubjectPropertyChange> ToRollbackChanges(
         this IEnumerable<SubjectPropertyChange> changes) =>
         changes.Reverse().Select(c => SubjectPropertyChange.Create(
             c.Property,
@@ -21,7 +21,7 @@ internal static class SubjectPropertyChangeOperations
             changedTimestamp: c.ChangedTimestamp,
             receivedTimestamp: c.ReceivedTimestamp,
             oldValue: c.GetNewValue<object?>(),
-            newValue: c.GetOldValue<object?>())).ToList();
+            newValue: c.GetOldValue<object?>()));
 
     /// <summary>
     /// Applies all changes in the span except those whose <see cref="SubjectPropertyChange.Property"/>
@@ -123,7 +123,7 @@ internal static class SubjectPropertyChangeOperations
     internal static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertLocalChanges(
         IReadOnlyList<SubjectPropertyChange> applied)
     {
-        var rollback = applied.ConvertToReverseRollbackChanges();
+        var rollback = applied.ToRollbackChanges().ToList();
         var (_, revertFailed, revertErrors) = ApplyLocalChanges(
             CollectionsMarshal.AsSpan(rollback), exclude: null);
         return (revertFailed, revertErrors);

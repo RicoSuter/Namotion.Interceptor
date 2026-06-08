@@ -340,7 +340,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var rollbackChanges = originalChanges.ConvertToReverseRollbackChanges().ToArray();
+            var rollbackChanges = originalChanges.ToRollbackChanges().ToArray();
 
             var memory = new ReadOnlyMemory<SubjectPropertyChange>(rollbackChanges);
             var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
