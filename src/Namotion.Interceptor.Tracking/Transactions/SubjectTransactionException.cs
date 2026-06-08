@@ -43,7 +43,8 @@ public class SubjectTransactionException : Exception
     public IReadOnlyList<Exception> Errors { get; }
 
     /// <summary>
-    /// Gets a value indicating whether at least one change was applied successfully.
+    /// Gets a value indicating whether the commit was a partial success: at least one change was applied
+    /// and at least one change failed.
     /// </summary>
     public bool IsPartialSuccess => AppliedChanges.Count > 0 && FailedChanges.Count > 0;
 

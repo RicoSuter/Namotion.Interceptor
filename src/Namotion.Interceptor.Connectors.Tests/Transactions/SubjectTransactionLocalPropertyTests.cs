@@ -156,18 +156,19 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // succeeds (first setter call during commit) and only its revert fails (second call).
         var propertyACommitCalls = 0;
         var context = CreateContext();
-        var device = new ThrowingDevice(context);
-
-        device.ShouldThrow = prop =>
+        var device = new ThrowingDevice(context)
         {
-            if (prop == nameof(ThrowingDevice.PropertyB))
-                return true; // PropertyB fails on apply, forcing a rollback
-            if (prop == nameof(ThrowingDevice.PropertyA))
+            ShouldThrow = prop =>
             {
-                propertyACommitCalls++;
-                return propertyACommitCalls >= 2; // succeed on apply, throw on revert
+                if (prop == nameof(ThrowingDevice.PropertyB))
+                    return true; // PropertyB fails on apply, forcing a rollback
+                if (prop == nameof(ThrowingDevice.PropertyA))
+                {
+                    propertyACommitCalls++;
+                    return propertyACommitCalls >= 2; // succeed on apply, throw on revert
+                }
+                return false;
             }
-            return false;
         };
 
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
@@ -525,6 +526,15 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         Assert.Null(person.LastName);   // Local change rolled back
         Assert.Empty(exception.AppliedChanges);
         Assert.Contains("Rollback was attempted", exception.Message);
+
+        // Under all-or-nothing rollback, FailedChanges reports every submitted change that did not commit:
+        // the source-bound apply failure (PropertyA) and the no-source local that was applied then reverted
+        // (LastName). PropertyB (source-bound, written then cleanly reverted) is not reported, matching the
+        // source-write-failure branch.
+        Assert.Equal(2, exception.FailedChanges.Count);
+        Assert.Contains(exception.FailedChanges, c => c.Property.Name == nameof(ThrowingDevice.PropertyA));
+        Assert.Contains(exception.FailedChanges, c => c.Property.Name == nameof(Person.LastName));
+        Assert.DoesNotContain(exception.FailedChanges, c => c.Property.Name == nameof(ThrowingDevice.PropertyB));
 
         // Both source-bound writes were reverted at the source (each written true then false)
         Assert.Equal(2, writtenValues.Count(v => v.Value));   // initial writes

@@ -172,7 +172,7 @@ Controls how optimistic transactions detect concurrent modifications.
 
 | Value | Description |
 |-------|-------------|
-| `FailOnConflict` | Throw `TransactionConflictException` if values changed since transaction started. (default) |
+| `FailOnConflict` | Throw `SubjectTransactionConflictException` if values changed since transaction started. (default) |
 | `Ignore` | Overwrite any concurrent changes without checking. |
 
 Conflict detection is best-effort and not atomic with respect to non-transactional writes that happen between detection and apply. Transactions are serialized against each other, but a raw property write or an external source callback can still interleave during that window.
@@ -198,7 +198,7 @@ using var tx = await context.BeginTransactionAsync(
 
 ### Commit Timeout
 
-**Default: 30-second timeout** for all commits. Throws `TaskCanceledException` if exceeded.
+**Default: 30-second timeout**, applied only to the external source write/revert phase (commits with no sources are not timed). If a source write exceeds it, that write is reported as a failure in a `SubjectTransactionException`; if a revert is in progress when it fires, an `OperationCanceledException` is thrown.
 
 ```csharp
 // Custom timeout
@@ -313,7 +313,7 @@ catch (SubjectTransactionConflictException ex)
 |-----------|-------|
 | `InvalidOperationException` | Nested transactions, already committed, transactions not enabled |
 | `ObjectDisposedException` | Using a disposed transaction |
-| `TaskCanceledException` | Commit timeout exceeded |
+| `OperationCanceledException` | Commit timeout during source revert (source-write timeouts are reported via `SubjectTransactionException`) |
 
 ## Advanced Topics
 
@@ -557,4 +557,4 @@ For strict atomicity, use a single source per transaction or implement applicati
 
 ### Rollback is Best-Effort
 
-Rollback operations can also fail. If revert fails, `TransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case.
+Rollback operations can also fail. If revert fails, `SubjectTransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case.

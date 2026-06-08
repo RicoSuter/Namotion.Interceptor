@@ -407,9 +407,15 @@ public sealed class SubjectTransaction : IDisposable
                 // All-or-nothing: revert local applies, then the source writes.
                 var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
                 var sourceRevert = await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
+                // The no-source local changes were applied then reverted; under all-or-nothing they did not
+                // commit, so report them as failed too (consistent with the source-write-failure branch and
+                // the documented Rollback contract). Exclude source-bound changes (in 'written'; failedSource
+                // is empty on this branch) and anything already reported as an apply/revert failure.
+                var rolledBackLocals = SubjectPropertyChangeOperations.ExcludeByProperty(
+                    changes.Span, written, SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed));
                 return CreateFailureException(
                     [],
-                    SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, revertFailed, sourceRevert.Failed),
+                    SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, rolledBackLocals, revertFailed, sourceRevert.Failed),
                     SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
             }
 
@@ -564,7 +570,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         var message = _failureHandling switch
         {
-            TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
+            TransactionFailureHandling.BestEffort => "One or more changes failed. Successful changes have been applied.",
             TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the local model.",
             _ => "One or more changes failed."
         };
