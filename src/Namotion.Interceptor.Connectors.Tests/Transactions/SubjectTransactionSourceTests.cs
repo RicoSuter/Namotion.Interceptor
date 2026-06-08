@@ -691,19 +691,27 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         // Arrange - Reproduces the genuine interleaving the pool-return guard protects against:
         //   A (transaction A) parks inside its source writer with _isCommitting == true and its pending
         //   dictionary NOT yet cleared (FinishCommit runs only after the writer returns). While A is parked,
-        //   A is disposed (Dispose-during-in-flight-commit) and a second transaction B is started on the
-        //   SAME context. B rents a pending dictionary from the shared pool. If Dispose returned A's still
-        //   live dictionary, B rents that very instance; then A's FinishCommit().Clear() would wipe B's
-        //   pending change before B commits. The guard (returnBuffer = !_isCommitting) prevents this by not
-        //   pooling a buffer an in-flight commit still owns, so B always gets a clean buffer.
+        //   A is disposed (Dispose-during-in-flight-commit) and a second transaction B is started. B rents a
+        //   pending dictionary from the shared PendingChangesPool. If Dispose returned A's still live
+        //   dictionary, B rents that very instance; then A's FinishCommit().Clear() would wipe B's pending
+        //   change before B commits. The guard (skip the pool return while _isCommitting) prevents this by
+        //   not pooling a buffer an in-flight commit still owns, so B always gets a clean buffer.
         //
-        // With fix #1: B's change survives and is applied.
-        // Without fix #1 (Dispose returns the live buffer unconditionally): B shares A's dictionary, A's
-        // FinishCommit clears it, B commits nothing and person.LastName stays null -> the assertion fails.
+        // B runs on a SEPARATE context (its own subject) on purpose: the pending-changes pool is a single
+        // static pool shared across all contexts, so a separate context still exercises the guard, while
+        // avoiding A's exclusive transaction lock (which a disposed-but-still-committing A now holds until
+        // its commit completes - that lock is per-context, so a same-context B would correctly block here).
+        //
+        // With the guard: B's change survives and is applied.
+        // Without the guard (Dispose returns the live buffer unconditionally): B shares A's dictionary, A's
+        // FinishCommit clears it, B commits nothing and personB.LastName stays null -> the assertion fails.
         var timeout = TimeSpan.FromSeconds(10);
 
-        var context = CreateContext();
-        var person = new Person(context);
+        var contextA = CreateContext();
+        var personA = new Person(contextA);
+
+        var contextB = CreateContext();
+        var personB = new Person(contextB);
 
         // A's source parks inside WriteChangesAsync until the test releases it, holding A in flight.
         var writerEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -718,18 +726,18 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                 return WriteResult.Success;
             });
 
-        new PropertyReference(person, nameof(Person.FirstName)).SetSource(parkingSource.Object);
+        new PropertyReference(personA, nameof(Person.FirstName)).SetSource(parkingSource.Object);
 
         var succeedingSource = CreateSucceedingSource();
-        new PropertyReference(person, nameof(Person.LastName)).SetSource(succeedingSource.Object);
+        new PropertyReference(personB, nameof(Person.LastName)).SetSource(succeedingSource.Object);
 
         // Act - Run A entirely on its own execution context (Task.Run) so its AsyncLocal current-transaction
         // does not flow into the test thread or into B. A parks in the writer with its dictionary alive.
         SubjectTransaction transactionA = null!;
         var commitA = Task.Run(async () =>
         {
-            transactionA = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-            person.FirstName = "John";
+            transactionA = await contextA.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+            personA.FirstName = "John";
             await transactionA.CommitAsync(CancellationToken.None);
         });
 
@@ -740,12 +748,12 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         // to the pool. A still holds _isCommitting == true, so the guard must skip the pool return.
         transactionA.Dispose();
 
-        // Start B on the same context (A released the exclusive lock on Dispose) and capture a change so B
-        // rents a dictionary from the pool. Run on its own context so B's AsyncLocal is isolated from A.
+        // Start B (separate context) and capture a change so B rents a dictionary from the shared pool.
+        // Run on its own execution context so B's AsyncLocal is isolated from A.
         var commitB = Task.Run(async () =>
         {
-            using var transactionB = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-            person.LastName = "Doe"; // rents from the pool and populates the pending dictionary
+            using var transactionB = await contextB.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+            personB.LastName = "Doe"; // rents from the pool and populates the pending dictionary
 
             // Release A's writer only now that B has populated its buffer: if B shares A's dictionary, A's
             // FinishCommit().Clear() (after the writer returns) wipes B's pending change.
@@ -760,11 +768,79 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
         // Assert - B committed its own change. With the bug, B's change was wiped by A's FinishCommit and
         // LastName stays null; the guard keeps B's buffer separate so the change survives and is applied.
-        Assert.Equal("John", person.FirstName); // A's commit still completed after the writer was released
-        Assert.Equal("Doe", person.LastName);   // B's change survived (fails without fix #1)
+        Assert.Equal("John", personA.FirstName); // A's commit still completed after the writer was released
+        Assert.Equal("Doe", personB.LastName);   // B's change survived (fails without the pool-return guard)
         succeedingSource.Verify(s => s.WriteChangesAsync(
             It.Is<ReadOnlyMemory<SubjectPropertyChange>>(m => m.Length == 1),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Dispose_DuringInFlightExclusiveCommit_ReleasesLockAfterCommitCompletes()
+    {
+        // A disposed-but-still-committing transaction holds the exclusive (per-context) transaction lock
+        // until its commit actually finishes; Dispose defers releasing it to EndCommit. This verifies:
+        //   1. The lock is NOT released early - a second transaction on the same context cannot begin while
+        //      A's commit is parked, so no other transaction can apply to the same graph concurrently.
+        //   2. The lock is released exactly once when the commit completes (no leak) - a same-context B then
+        //      begins and commits normally.
+        var timeout = TimeSpan.FromSeconds(10);
+
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var writerEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWriter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var parkingSource = new Mock<ISubjectSource>();
+        parkingSource.Setup(s => s.WriteBatchSize).Returns(0);
+        parkingSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            {
+                writerEntered.TrySetResult(true);
+                await releaseWriter.Task.ConfigureAwait(false);
+                return WriteResult.Success;
+            });
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(parkingSource.Object);
+
+        // Act - A parks inside its writer, then is disposed mid-commit (it still holds the exclusive lock).
+        SubjectTransaction transactionA = null!;
+        var commitA = Task.Run(async () =>
+        {
+            transactionA = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+            person.FirstName = "John";
+            await transactionA.CommitAsync(CancellationToken.None);
+        });
+
+        Assert.True(await WaitWithTimeout(writerEntered.Task, timeout), "Transaction A's writer was never entered.");
+        transactionA.Dispose();
+
+        // B begins on the SAME context; it must not acquire the exclusive lock until A's deferred commit
+        // completes and releases it.
+        var bBegan = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var commitB = Task.Run(async () =>
+        {
+            using var transactionB = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+            bBegan.TrySetResult(true);
+            person.LastName = "Doe";
+            await transactionB.CommitAsync(CancellationToken.None);
+        });
+
+        // While A is still parked, B must remain blocked on the lock. A non-occurrence can only be observed
+        // within a window; this cannot false-fail because A cannot complete (and free the lock) until the
+        // writer is released below, which happens only after this check.
+        Assert.False(await WaitWithTimeout(bBegan.Task, TimeSpan.FromMilliseconds(200)),
+            "Transaction B acquired the exclusive lock before A's in-flight commit completed.");
+
+        // Release A's writer -> A's commit completes -> EndCommit releases the deferred lock -> B proceeds.
+        releaseWriter.TrySetResult(true);
+        Assert.True(await WaitWithTimeout(commitA, timeout), "Transaction A's commit did not finish.");
+        Assert.True(await WaitWithTimeout(commitB, timeout), "Transaction B never completed (exclusive lock leaked).");
+        await commitB; // observe exceptions
+
+        // Assert - both commits landed; the lock was held through A and released exactly once.
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
     }
 
     private static async Task<bool> WaitWithTimeout(Task task, TimeSpan timeout)

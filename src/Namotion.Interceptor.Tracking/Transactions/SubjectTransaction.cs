@@ -42,6 +42,10 @@ public sealed class SubjectTransaction : IDisposable
     private int _commitStarted;
     private int _isDisposed;
 
+    // Handoff from Dispose to EndCommit: when Dispose runs mid-commit, EndCommit releases the exclusive lock
+    // once the commit finishes. Accessed only under _pendingChangesLock (no volatile needed; never read lock-free).
+    private bool _disposeRequestedDuringCommit;
+
     /// <summary>
     /// Gets the current transaction in this execution context, or null if none is active.
     /// </summary>
@@ -459,13 +463,16 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     private void EndCommit(SubjectPropertyChange[]? rentedArray, IDisposable? commitLock)
     {
+        bool releaseDeferredLock;
         lock (_pendingChangesLock)
         {
-            // Clear under the lock so a concurrent Dispose observes the in-flight commit consistently:
-            // while _isCommitting is true Dispose skips returning the pooled _pendingChanges buffer to
-            // PendingChangesPool (this commit still owns it). The ArrayPool buffer below is owned solely
+            // Clear under the lock so a concurrent Dispose observes the in-flight commit consistently: while
+            // _isCommitting is true Dispose skips returning the pooled buffer (this commit owns it) and defers
+            // the exclusive-lock release to us. Reading the flag here makes that release exactly-once
+            // (whichever of Dispose/EndCommit observes the other). The ArrayPool buffer below is owned solely
             // by this commit and is always returned here.
             _isCommitting = false;
+            releaseDeferredLock = _disposeRequestedDuringCommit;
         }
 
         if (rentedArray != null)
@@ -479,6 +486,13 @@ public sealed class SubjectTransaction : IDisposable
         // Release the optimistic lock BEFORE resetting _commitStarted so a retry cannot start
         // before the optimistic lock is actually free.
         commitLock?.Dispose();
+
+        // Release the exclusive lock deferred by a concurrent Dispose, now that the commit has fully finished
+        // (so no other transaction on this context could interleave with its apply pass).
+        if (releaseDeferredLock)
+        {
+            _lockReleaser?.Dispose();
+        }
 
         if (!_isCommitted)
         {
@@ -587,24 +601,28 @@ public sealed class SubjectTransaction : IDisposable
         {
             Interlocked.Decrement(ref _activeTransactionCount);
 
-            bool returnBuffer;
+            bool committing;
             lock (_pendingChangesLock)
             {
                 _pendingChanges.Clear();
-                // Defensive against misuse only: this branch is reached when Dispose races an in-flight
-                // commit, which requires disposing without awaiting CommitAsync (or disposing cross-thread
-                // mid-commit). Correct usage (await the commit, or never commit) always pools the buffer.
-                // In that misuse case the commit still owns the buffer, so skip the pool return (it is then
-                // GC'd) rather than hand a live buffer to another transaction and corrupt its pending changes.
-                returnBuffer = !_isCommitting;
-            }
-            if (returnBuffer)
-            {
-                PendingChangesPool.Return(_pendingChanges);
+                committing = _isCommitting;
+                if (committing)
+                {
+                    _disposeRequestedDuringCommit = true;
+                }
             }
 
             CurrentTransaction.Value = null;
-            _lockReleaser?.Dispose(); // May be null for Optimistic transactions
+
+            // A commit in flight (reachable only by misuse: disposing without awaiting CommitAsync) still owns
+            // the pooled buffer and the exclusive lock. Returning the buffer would corrupt another transaction's
+            // pending changes; releasing the lock would drop mutual exclusion mid-apply. So defer both here and
+            // let EndCommit do them when the commit completes.
+            if (!committing)
+            {
+                PendingChangesPool.Return(_pendingChanges);
+                _lockReleaser?.Dispose(); // May be null for Optimistic transactions
+            }
         }
     }
 }
