@@ -13,7 +13,7 @@ internal static class SubjectPropertyChangeOperations
     /// </summary>
     /// <param name="changes">The changes to create rollbacks for.</param>
     /// <returns>Rollback changes in reverse order.</returns>
-    public static List<SubjectPropertyChange> ToRollbackChanges(
+    public static List<SubjectPropertyChange> ConvertToReverseRollbackChanges(
         this IEnumerable<SubjectPropertyChange> changes) =>
         changes.Reverse().Select(c => SubjectPropertyChange.Create(
             c.Property,
@@ -31,7 +31,7 @@ internal static class SubjectPropertyChangeOperations
     /// need the applied set; with exclusions, or on any failure, Successful is populated.
     /// </summary>
     public static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyAllChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude)
+        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude)
     {
         HashSet<PropertyReference>? excluded = null;
         if (exclude is { Count: > 0 })
@@ -43,11 +43,11 @@ internal static class SubjectPropertyChangeOperations
             }
         }
 
-        return ApplyCore(changes, excluded);
+        return ApplyLocalChanges(changes, excluded);
     }
 
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyCore(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded)
+        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded)
     {
         // When excluded is null the applied set equals the input on success, so Successful stays null
         // (returned empty) until the first failure. When excluded is set the applied set differs from the
@@ -64,7 +64,7 @@ internal static class SubjectPropertyChangeOperations
                 continue;
             }
 
-            if (change.TryApplyChange(out var error))
+            if (change.TryApplyLocalChange(out var error))
             {
                 successful?.Add(change);
             }
@@ -97,7 +97,7 @@ internal static class SubjectPropertyChangeOperations
             : (successful!, failed, errors ?? []);
     }
     
-    private static bool TryApplyChange(this SubjectPropertyChange change, out Exception? error)
+    private static bool TryApplyLocalChange(this SubjectPropertyChange change, out Exception? error)
     {
         try
         {
@@ -117,14 +117,14 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Reverts previously-applied in-process changes by applying their inverse values in reverse order.
+    /// Reverts previously-applied local changes by applying their inverse values in reverse order.
     /// Returns any revert failures and errors so the caller can fold them into the exception.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertLocalChanges(
         IReadOnlyList<SubjectPropertyChange> applied)
     {
-        var rollback = applied.ToRollbackChanges();
-        var (_, revertFailed, revertErrors) = ApplyAllChanges(
+        var rollback = applied.ConvertToReverseRollbackChanges();
+        var (_, revertFailed, revertErrors) = ApplyLocalChanges(
             CollectionsMarshal.AsSpan(rollback), exclude: null);
         return (revertFailed, revertErrors);
     }
@@ -226,7 +226,7 @@ internal static class SubjectPropertyChangeOperations
     /// <summary>
     /// Detects conflicts by comparing captured OldValue with current actual value.
     /// </summary>
-    internal static List<PropertyReference> DetectConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
+    internal static List<PropertyReference> DetectChangeConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         List<PropertyReference>? conflictingProperties = null;
         foreach (var change in changes)

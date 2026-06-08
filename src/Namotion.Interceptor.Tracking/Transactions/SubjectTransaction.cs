@@ -22,7 +22,6 @@ public sealed class SubjectTransaction : IDisposable
     internal static bool HasActiveTransaction => Volatile.Read(ref _activeTransactionCount) > 0;
 
     private readonly TransactionFailureHandling _failureHandling;
-    private readonly TransactionLocking _locking;
     private readonly TransactionRequirement _requirement;
     private readonly TimeSpan _commitTimeout;
     private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
@@ -151,7 +150,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Gets the locking mode for this transaction.
     /// </summary>
-    public TransactionLocking Locking => _locking;
+    public TransactionLocking Locking { get; }
 
     private SubjectTransaction(
         IInterceptorSubjectContext context,
@@ -166,7 +165,7 @@ public sealed class SubjectTransaction : IDisposable
         Context = context;
         Interceptor = interceptor;
         _failureHandling = failureHandling;
-        _locking = locking;
+        Locking = locking;
         _requirement = requirement;
         ConflictBehavior = conflictBehavior;
         _commitTimeout = commitTimeout;
@@ -234,7 +233,7 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Commits all pending changes. If external write handlers are configured on subjects' contexts,
-    /// changes are written to external sources first, then applied to the in-process model.
+    /// changes are written to external sources first, then applied to the local model.
     /// The behavior on partial failure depends on the <see cref="_failureHandling"/> specified at transaction creation.
     /// </summary>
     /// <remarks>
@@ -262,7 +261,7 @@ public sealed class SubjectTransaction : IDisposable
         var writer = Context.TryGetService<ITransactionWriter>();
         if (writer is null)
         {
-            // No source writer: the entire commit is in-process. For the default (Exclusive) locking
+            // No source writer: the entire commit is local. For the default (Exclusive) locking
             // mode the lock is already held, so the whole flow runs synchronously without a
             // CancellationTokenSource or an async state machine. Optimistic locking needs an async lock
             // acquisition, so only that case falls back to the async wrapper.
@@ -273,13 +272,13 @@ public sealed class SubjectTransaction : IDisposable
                 return default;
             }
 
-            return CommitInProcessAfterLockAsync(lockTask);
+            return CommitLocalAfterLockAsync(lockTask);
         }
 
         return CommitWithWriterAsync(writer, cancellationToken);
     }
 
-    private async ValueTask CommitInProcessAfterLockAsync(ValueTask<IDisposable?> lockTask)
+    private async ValueTask CommitLocalAfterLockAsync(ValueTask<IDisposable?> lockTask)
     {
         IDisposable? commitLock;
         try
@@ -296,7 +295,7 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Fully synchronous in-process commit when no <see cref="ITransactionWriter"/> is registered.
+    /// Fully synchronous local commit when no <see cref="ITransactionWriter"/> is registered.
     /// </summary>
     private void CommitWithoutWriter(IDisposable? commitLock)
     {
@@ -308,7 +307,7 @@ public sealed class SubjectTransaction : IDisposable
 
             ThrowIfConflictsDetected(changes.Span);
 
-            var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes.Span, exclude: null);
+            var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null);
 
             SubjectTransactionException? failure = null;
             if (applyFailed.Count > 0)
@@ -383,7 +382,7 @@ public sealed class SubjectTransaction : IDisposable
         var (written, failedSource, sourceErrors, revertState) = await writer
             .WriteToSourcesAsync(changes, _requirement, cancellationToken).ConfigureAwait(false);
 
-        // Rollback with any source-write failure: nothing is applied in-process; revert what reached
+        // Rollback with any source-write failure: nothing is applied to the local model; revert what reached
         // a source and report. The local (no-source) changes are never applied, but they are still
         // reported as failed (they did not commit), matching the all-or-nothing contract.
         if (_failureHandling == TransactionFailureHandling.Rollback && failedSource.Count > 0)
@@ -399,13 +398,13 @@ public sealed class SubjectTransaction : IDisposable
         // Apply the whole snapshot except the source-write failures in a single pass. With no source
         // failure, this is the entire snapshot, and ApplyAllChanges returns an empty Successful set.
         var exclude = failedSource.Count == 0 ? null : failedSource;
-        var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes.Span, exclude);
+        var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude);
 
         if (applyFailed.Count > 0)
         {
             if (_failureHandling == TransactionFailureHandling.Rollback)
             {
-                // All-or-nothing: revert in-process applies, then the source writes.
+                // All-or-nothing: revert local applies, then the source writes.
                 var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
                 var sourceRevert = await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
                 return CreateFailureException(
@@ -478,7 +477,7 @@ public sealed class SubjectTransaction : IDisposable
         if (!_isCommitted)
         {
             // Reset so CommitAsync can be called again, but only for failures that occur BEFORE any
-            // change is applied in-process (conflict detected, optimistic lock acquisition failed,
+            // change is applied to the local model (conflict detected, optimistic lock acquisition failed,
             // commit timeout, or the writer threw). Once the apply pass runs, FinishCommit has marked
             // the transaction committed and this branch is skipped, so an apply/validation failure is
             // terminal and cannot be retried.
@@ -502,7 +501,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         // Sync fast path for the default (Exclusive) locking mode: lock was already
         // acquired in BeginTransactionAsync, so commit needs no lock here.
-        if (_locking != TransactionLocking.Optimistic)
+        if (Locking != TransactionLocking.Optimistic)
         {
             return default;
         }
@@ -543,7 +542,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
         {
-            var conflictingProperties = SubjectPropertyChangeOperations.DetectConflicts(changes);
+            var conflictingProperties = SubjectPropertyChangeOperations.DetectChangeConflicts(changes);
             if (conflictingProperties.Count > 0)
             {
                 throw new SubjectTransactionConflictException(conflictingProperties);
@@ -566,7 +565,7 @@ public sealed class SubjectTransaction : IDisposable
         var message = _failureHandling switch
         {
             TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
-            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the in-process model.",
+            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the local model.",
             _ => "One or more changes failed."
         };
 

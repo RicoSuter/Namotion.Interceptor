@@ -18,7 +18,7 @@ public class SubjectTransactionReconcileRegressionTests : TransactionTestBase
     public async Task BestEffortMode_WhenSourceWriteFailsAndAnotherApplyFails_KeepsSuccessAndRevertsOnlyAppliedThenFailed()
     {
         // Arrange - Three source-bound properties so the reconcile path sees BOTH a source-write
-        // failure (failedSource.Count > 0) AND an in-process apply failure (applyFailed.Count > 0)
+        // failure (failedSource.Count > 0) AND a local apply failure (applyFailed.Count > 0)
         // at the same time under BestEffort:
         //   A = person.FirstName : bound to a source whose write FAILS (apply would be fine).
         //   B = device.PropertyB : bound to a source whose write SUCCEEDS, but OnSet THROWS on apply.
@@ -95,9 +95,9 @@ public class SubjectTransactionReconcileRegressionTests : TransactionTestBase
     public async Task OptimisticMode_WhenLockAcquireCancelled_TransactionRemainsRetryable()
     {
         // Arrange - Context with WithTransactions() but NOT WithSourceTransactions(): no writer, so
-        // commit goes through the in-process path where the optimistic lock is acquired at commit time
+        // commit goes through the local path where the optimistic lock is acquired at commit time
         // using the passed cancellation token. A cancelled token makes the lock acquire throw, which must
-        // reset _commitStarted so a retry is possible (the fix in CommitInProcessAfterLockAsync).
+        // reset _commitStarted so a retry is possible (the fix in CommitLocalAfterLockAsync).
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()

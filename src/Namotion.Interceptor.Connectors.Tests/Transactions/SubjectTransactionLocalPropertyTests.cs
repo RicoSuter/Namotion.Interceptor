@@ -299,7 +299,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     public async Task StagedExecution_SourceBoundPropertyOnSetThrows_RevertsExternalSources()
     {
         // Arrange - Tests Stage 3 failure: source-bound property's OnSet* throws after external write succeeds
-        // This is different from local property failure - it's when applying source-bound values to in-process model fails
+        // This is different from local property failure - it's when applying source-bound values to the local model fails
         var context = CreateContext();
         var device = new ThrowingDevice(context);
 
@@ -311,7 +311,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
                 new ValueTask<WriteResult>(WriteResult.Success));
 
-        // Bind PropertyA to external source - it will throw during in-process apply (Stage 3)
+        // Bind PropertyA to external source - it will throw during the local apply (Stage 3)
         new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).SetSource(successSource.Object);
 
         device.ShouldThrow = prop => prop == nameof(ThrowingDevice.PropertyA);
@@ -420,7 +420,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         Assert.Equal(("PropertyA", true), writtenValues[0]);   // Initial write
         Assert.Equal(("PropertyA", false), writtenValues[1]);  // Rollback write
 
-        // In-process model matches source (both have false)
+        // Local model matches source (both have false)
         Assert.False(device.PropertyA);
     }
 
@@ -465,7 +465,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
 
         var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
-        // Assert - nothing stays applied in-process
+        // Assert - nothing stays applied to the local model
         Assert.False(device.PropertyA); // Never applied (apply threw)
         Assert.False(device.PropertyB); // Applied then rolled back
         Assert.Null(person.LastName);   // Local change rolled back

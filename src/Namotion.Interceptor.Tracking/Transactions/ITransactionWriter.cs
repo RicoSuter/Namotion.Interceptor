@@ -11,7 +11,7 @@ public interface ITransactionWriter
 {
     /// <summary>
     /// Writes every source-bound change to its source (best-effort per source) and reports the
-    /// per-change outcome. Does not apply anything in-process. Performs classification (source vs
+    /// per-change outcome. Does not apply anything to the local model. Performs classification (source vs
     /// local) and the SingleWrite requirement check, since it alone knows the SetSource mappings.
     /// Local (no-source) changes are neither written nor returned; the transaction applies them.
     /// </summary>

@@ -112,7 +112,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     /// <summary>
     /// Allocation-light path for the common case where every source-bound change targets the same source:
     /// writes once (no per-source grouping or parallel dispatch) and reports the outcome. Applies nothing
-    /// in-process. <paramref name="buffer"/> holds the source-bound changes in its first
+    /// to the local model. <paramref name="buffer"/> holds the source-bound changes in its first
     /// <paramref name="count"/> slots (a privately-owned array built by the single pass, never the pooled
     /// snapshot buffer); the source receives exactly those, with no extra copy.
     /// </summary>
@@ -164,7 +164,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
     /// <summary>
     /// Writes source-bound changes grouped per source and dispatched in parallel. Applies nothing
-    /// in-process. Receives the per-source grouping already built by the single pass; local (no-source)
+    /// to the local model. Receives the per-source grouping already built by the single pass; local (no-source)
     /// changes are neither written nor returned.
     /// </summary>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
@@ -340,7 +340,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var rollbackChanges = originalChanges.ToRollbackChanges().ToArray();
+            var rollbackChanges = originalChanges.ConvertToReverseRollbackChanges().ToArray();
 
             var memory = new ReadOnlyMemory<SubjectPropertyChange>(rollbackChanges);
             var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);

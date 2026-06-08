@@ -41,7 +41,7 @@ public class SubjectPropertyChangeOperationsTests
         ];
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes, exclude: null);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude: null);
 
         // Assert
         Assert.Equal("John", person.FirstName);
@@ -70,7 +70,7 @@ public class SubjectPropertyChangeOperationsTests
         var exclude = new List<SubjectPropertyChange> { second };
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes, exclude);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude);
 
         // Assert
         Assert.Equal("John", person.FirstName);
@@ -99,7 +99,7 @@ public class SubjectPropertyChangeOperationsTests
         var exclude = new List<SubjectPropertyChange> { third, first };
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes, exclude);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude);
 
         // Assert
         Assert.Null(person.FirstName);
@@ -126,7 +126,7 @@ public class SubjectPropertyChangeOperationsTests
         SubjectPropertyChange[] changes = [first, failing, third];
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes, exclude: null);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude: null);
 
         // Assert
         Assert.Contains(failing, failed);
@@ -154,7 +154,7 @@ public class SubjectPropertyChangeOperationsTests
         var exclude = new List<SubjectPropertyChange> { excluded };
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyAllChanges(changes, exclude);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude);
 
         // Assert
         Assert.Equal("John", person.FirstName); // applied

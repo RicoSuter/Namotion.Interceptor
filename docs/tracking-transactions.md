@@ -4,7 +4,7 @@ The `Namotion.Interceptor.Tracking` package provides transaction support for bat
 
 ## When to Use Transactions
 
-Without transactions, property changes are applied to the in-process model immediately, while external sources synchronize asynchronously in the background. This is suitable when the local model is the source of truth, or eventual consistency is acceptable.
+Without transactions, property changes are applied to the local model immediately, while external sources synchronize asynchronously in the background. This is suitable when the local model is the source of truth, or eventual consistency is acceptable.
 
 Use transactions when you need guarantees about what was actually persisted to external sources.
 
@@ -14,7 +14,7 @@ Transactions provide:
 - **Configurable commit modes**: Choose between best-effort or rollback behavior on partial failures
 - **Read-your-writes consistency**: Reading a property inside a transaction returns the pending value
 - **Notification suppression**: Change notifications are suppressed during the transaction and fired after commit
-- **External source integration**: Changes can be written to external sources before being applied to the in-process model
+- **External source integration**: Changes can be written to external sources before being applied to the local model
 - **Rollback on dispose**: Uncommitted changes are discarded when the transaction is disposed
 
 ## Setup
@@ -222,7 +222,7 @@ When `CommitAsync()` is called, changes are processed in stages. The exact flow 
 
 When only `WithTransactions()` is configured (no external sources):
 
-1. **Apply all changes** to the in-process model (calls property setters, triggers `OnChanging/OnChanged` methods)
+1. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
 2. If any apply fails and `Rollback` mode: revert successful applies
 3. Fire change notifications
 
@@ -234,9 +234,9 @@ When `WithSourceTransactions()` is configured, commits execute in two stages:
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  Stage 1: External sources (parallel when multiple)                       │
 │  Write source-bound changes to OPC UA, MQTT, databases, etc.              │
-│  Nothing is applied to the in-process model yet.                          │
+│  Nothing is applied to the local model yet.                               │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  Stage 2: Apply to the in-process model in a single pass                  │
+│  Stage 2: Apply to the local model in a single pass                       │
 │  Source-bound and local changes are applied together, excluding           │
 │  any whose source write failed (triggers OnChanging/OnChanged).           │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -247,7 +247,7 @@ When `WithSourceTransactions()` is configured, commits execute in two stages:
 | Failure Stage | BestEffort | Rollback |
 |---------------|------------|----------|
 | Source write fails | Successful sources written and applied | All sources reverted, nothing applied |
-| In-process apply fails (source-bound or local) | Successful kept, failed sources reverted | All reverted |
+| Local apply fails (source-bound or local) | Successful kept, failed sources reverted | All reverted |
 
 Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
 

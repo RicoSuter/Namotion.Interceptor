@@ -143,7 +143,7 @@ Key features:
 - **Notification suppression**: Change notifications fired after commit, not during capture
 - **Rollback on dispose**: Uncommitted changes discarded if transaction not committed
 
-For external source integration (OPC UA, MQTT, etc.), use `WithSourceTransactions()` from the Sources package to write changes to external sources before applying them to the in-process model.
+For external source integration (OPC UA, MQTT, etc.), use `WithSourceTransactions()` from the Sources package to write changes to external sources before applying them to the local model.
 
 See [Transactions](tracking-transactions.md) for detailed documentation.
 

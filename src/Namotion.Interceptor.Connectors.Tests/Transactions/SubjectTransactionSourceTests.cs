@@ -287,7 +287,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1Mock.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source2Mock.Object);
-        // FirstName_MaxLength is left without a source -> local change applied in-process.
+        // FirstName_MaxLength is left without a source -> local change applied to the local model.
 
         // Act
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -826,7 +826,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         }
 
         // Assert - sourceA received exactly [P0, P2] in that order (single group, no duplication);
-        // sourceB received exactly [P1]; the in-process model holds all three values.
+        // sourceB received exactly [P1]; the local model holds all three values.
         Assert.Equal(
             new[] { nameof(Person.FirstName), nameof(Person.FirstName_MaxLength_Unit) },
             sourceARecorded);
@@ -868,14 +868,14 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         }
 
         // Assert - sourceA received exactly [P0, P2] (local P1 excluded, order preserved); sourceB got [P3];
-        // the local P1 was applied in-process and never written to any source.
+        // the local P1 was applied to the local model and never written to any source.
         Assert.Equal(
             new[] { nameof(Person.FirstName), nameof(Person.FirstName_MaxLength_Unit) },
             sourceARecorded);
         Assert.Equal(new[] { nameof(Person.LastName) }, sourceBRecorded);
         Assert.DoesNotContain(nameof(Person.FirstName_MaxLength), sourceARecorded);
         Assert.DoesNotContain(nameof(Person.FirstName_MaxLength), sourceBRecorded);
-        Assert.Equal(42, person.FirstName_MaxLength); // local applied in-process
+        Assert.Equal(42, person.FirstName_MaxLength); // local applied to the local model
         Assert.Equal("Joh", person.FirstName);
         Assert.Equal("Items", person.FirstName_MaxLength_Unit);
         Assert.Equal("Doe", person.LastName);
@@ -909,12 +909,12 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         }
 
         // Assert - the source saw EXACTLY the 2 source-bound changes (not 4, no tail garbage); the trailing
-        // locals were applied in-process only.
+        // locals were applied to the local model only.
         Assert.Equal(
             new[] { nameof(Person.FirstName), nameof(Person.LastName) },
             recorded);
-        Assert.Equal(42, person.FirstName_MaxLength);        // local applied in-process
-        Assert.Equal("Items", person.FirstName_MaxLength_Unit); // local applied in-process
+        Assert.Equal(42, person.FirstName_MaxLength);        // local applied to the local model
+        Assert.Equal("Items", person.FirstName_MaxLength_Unit); // local applied to the local model
         Assert.Equal("Joh", person.FirstName);
         Assert.Equal("Doe", person.LastName);
     }
