@@ -615,9 +615,9 @@ public sealed class SubjectTransaction : IDisposable
             CurrentTransaction.Value = null;
 
             // A commit in flight (reachable only by misuse: disposing without awaiting CommitAsync) still owns
-            // the pooled buffer and the exclusive lock. Returning the buffer would corrupt another transaction's
-            // pending changes; releasing the lock would drop mutual exclusion mid-apply. So defer both here and
-            // let EndCommit do them when the commit completes.
+            // the pooled buffer and the exclusive lock, so skip both here: returning the buffer would corrupt
+            // another transaction's pending changes, and releasing the lock would drop mutual exclusion mid-apply.
+            // EndCommit releases the deferred lock once the commit completes; the buffer is left unpooled (GC'd).
             if (!committing)
             {
                 PendingChangesPool.Return(_pendingChanges);
