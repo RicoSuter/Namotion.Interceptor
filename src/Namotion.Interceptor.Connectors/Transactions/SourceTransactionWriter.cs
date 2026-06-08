@@ -210,7 +210,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         if (revertState is ISubjectSource source)
         {
             // Single-source write path: every written change belongs to this exact source.
-            // Revert by writing the inverse values (ToRollbackChanges) back, without re-deriving the source.
+            // Revert by writing the inverse values (ToRollbackChange) back, without re-deriving the source.
             var single = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>(1)
             {
                 [source] = [.. written]
@@ -340,7 +340,9 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var rollbackChanges = originalChanges.ToRollbackChanges().ToArray();
+            var rollbackChanges = Enumerable.Reverse(originalChanges)
+                .Select(c => c.ToRollbackChange())
+                .ToArray();
 
             var memory = new ReadOnlyMemory<SubjectPropertyChange>(rollbackChanges);
             var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);

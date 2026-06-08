@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
@@ -9,19 +8,16 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 internal static class SubjectPropertyChangeOperations
 {
     /// <summary>
-    /// Creates rollback changes for a collection, reversing order for proper undo sequence.
+    /// Creates the inverse of a change (old and new values swapped) for undoing an applied change.
     /// </summary>
-    /// <param name="changes">The changes to create rollbacks for.</param>
-    /// <returns>Rollback changes in reverse order.</returns>
-    public static IEnumerable<SubjectPropertyChange> ToRollbackChanges(
-        this IEnumerable<SubjectPropertyChange> changes) =>
-        changes.Reverse().Select(c => SubjectPropertyChange.Create(
-            c.Property,
-            source: c.Source,
-            changedTimestamp: c.ChangedTimestamp,
-            receivedTimestamp: c.ReceivedTimestamp,
-            oldValue: c.GetNewValue<object?>(),
-            newValue: c.GetOldValue<object?>()));
+    internal static SubjectPropertyChange ToRollbackChange(this SubjectPropertyChange change) =>
+        SubjectPropertyChange.Create(
+            change.Property,
+            source: change.Source,
+            changedTimestamp: change.ChangedTimestamp,
+            receivedTimestamp: change.ReceivedTimestamp,
+            oldValue: change.GetNewValue<object?>(),
+            newValue: change.GetOldValue<object?>());
 
     /// <summary>
     /// Applies all changes in the span except those whose <see cref="SubjectPropertyChange.Property"/>
@@ -118,15 +114,34 @@ internal static class SubjectPropertyChangeOperations
 
     /// <summary>
     /// Reverts previously-applied local changes by applying their inverse values in reverse order.
-    /// Returns any revert failures and errors so the caller can fold them into the exception.
+    /// On failure the reported change is the original forward change (not the inverted rollback record),
+    /// so <see cref="SubjectTransactionException.FailedChanges"/> always holds the change that was submitted,
+    /// consistent with the source-revert path. Returns any revert failures and errors so the caller can fold
+    /// them into the exception.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertLocalChanges(
         IReadOnlyList<SubjectPropertyChange> applied)
     {
-        var rollback = applied.ToRollbackChanges().ToList();
-        var (_, revertFailed, revertErrors) = ApplyLocalChanges(
-            CollectionsMarshal.AsSpan(rollback), exclude: null);
-        return (revertFailed, revertErrors);
+        List<SubjectPropertyChange>? failed = null;
+        List<Exception>? errors = null;
+
+        // Reverse order so dependent properties unwind in the opposite order they were applied.
+        for (var i = applied.Count - 1; i >= 0; i--)
+        {
+            var original = applied[i];
+            var rollback = original.ToRollbackChange();
+
+            if (!rollback.TryApplyLocalChange(out var error))
+            {
+                (failed ??= []).Add(original);
+                if (error != null)
+                {
+                    (errors ??= []).Add(error);
+                }
+            }
+        }
+
+        return (failed ?? (IReadOnlyList<SubjectPropertyChange>)[], errors ?? (IReadOnlyList<Exception>)[]);
     }
 
     /// <summary>
