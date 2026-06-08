@@ -8,25 +8,13 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 internal static class SubjectPropertyChangeOperations
 {
     /// <summary>
-    /// Creates the inverse of a change (old and new values swapped) for undoing an applied change.
-    /// </summary>
-    internal static SubjectPropertyChange ToRollbackChange(this SubjectPropertyChange change) =>
-        SubjectPropertyChange.Create(
-            change.Property,
-            source: change.Source,
-            changedTimestamp: change.ChangedTimestamp,
-            receivedTimestamp: change.ReceivedTimestamp,
-            oldValue: change.GetNewValue<object?>(),
-            newValue: change.GetOldValue<object?>());
-
-    /// <summary>
     /// Applies all changes in the span except those whose <see cref="SubjectPropertyChange.Property"/>
     /// matches a change in <paramref name="exclude"/> (matched via a <see cref="HashSet{T}"/> of excluded
     /// properties). Inspect Failed.Count == 0 to detect full success. The Successful list is returned empty
     /// only on the no-exclude full-success path, where the caller already holds the input span and does not
     /// need the applied set; with exclusions, or on any failure, Successful is populated.
     /// </summary>
-    public static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
+    internal static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude)
     {
         HashSet<PropertyReference>? excluded = null;
@@ -92,25 +80,6 @@ internal static class SubjectPropertyChangeOperations
             ? (successful ?? (IReadOnlyList<SubjectPropertyChange>)[], [], [])
             : (successful!, failed, errors ?? []);
     }
-    
-    private static bool TryApplyLocalChange(this SubjectPropertyChange change, out Exception? error)
-    {
-        try
-        {
-            var metadata = change.Property.Metadata;
-            using (SubjectChangeContext.WithState(change.Source, change.ChangedTimestamp, change.ReceivedTimestamp))
-            {
-                metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
-            }
-            error = null;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = ex;
-            return false;
-        }
-    }
 
     /// <summary>
     /// Reverts previously-applied local changes by applying their inverse values in reverse order.
@@ -143,6 +112,37 @@ internal static class SubjectPropertyChangeOperations
 
         return (failed ?? (IReadOnlyList<SubjectPropertyChange>)[], errors ?? (IReadOnlyList<Exception>)[]);
     }
+
+    private static bool TryApplyLocalChange(this SubjectPropertyChange change, out Exception? error)
+    {
+        try
+        {
+            var metadata = change.Property.Metadata;
+            using (SubjectChangeContext.WithState(change.Source, change.ChangedTimestamp, change.ReceivedTimestamp))
+            {
+                metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
+            }
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Creates the inverse of a change (old and new values swapped) for undoing an applied change.
+    /// </summary>
+    internal static SubjectPropertyChange ToRollbackChange(this SubjectPropertyChange change) =>
+        SubjectPropertyChange.Create(
+            change.Property,
+            source: change.Source,
+            changedTimestamp: change.ChangedTimestamp,
+            receivedTimestamp: change.ReceivedTimestamp,
+            oldValue: change.GetNewValue<object?>(),
+            newValue: change.GetOldValue<object?>());
 
     /// <summary>
     /// Returns the subset of <paramref name="written"/> whose property also appears in
@@ -193,6 +193,7 @@ internal static class SubjectPropertyChangeOperations
 
         var excluded = new HashSet<PropertyReference>(
             excludeFirst.Count + excludeSecond.Count, PropertyReference.Comparer);
+      
         foreach (var change in excludeFirst)
         {
             excluded.Add(change.Property);
