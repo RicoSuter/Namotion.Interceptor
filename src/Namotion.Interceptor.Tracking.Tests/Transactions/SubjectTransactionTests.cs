@@ -196,12 +196,17 @@ public class SubjectTransactionTests
     [Fact]
     public async Task WhenTransactionAlreadyCommitted_ThenCommitAgainThrows()
     {
-        // Arrange
+        // Arrange: a successful non-empty commit, so the committed state comes from the
+        // full commit path rather than the empty-commit early return.
         var context = CreateTransactionContext();
+        var person = new Person(context);
 
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
+            person.FirstName = "John";
             await transaction.CommitAsync(CancellationToken.None);
+            Assert.Equal("John", person.FirstName);
+            Assert.Empty(transaction.GetPendingChanges());
 
             // Act & Assert
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(
