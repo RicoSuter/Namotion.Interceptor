@@ -530,6 +530,11 @@ public sealed class SubjectTransaction : IDisposable
         if (Volatile.Read(ref _isDisposed) != 0)
             throw new ObjectDisposedException(nameof(SubjectTransaction));
 
+        if (!ReferenceEquals(CurrentTransaction.Value, this))
+            throw new InvalidOperationException(
+                "Transaction is being committed from a different async flow than the one it is active in. " +
+                "Begin, use, commit, and dispose a transaction within the same async flow.");
+
         if (_isCommitted)
             throw new InvalidOperationException("Transaction has already been committed.");
 

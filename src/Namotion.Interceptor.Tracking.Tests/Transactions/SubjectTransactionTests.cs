@@ -516,4 +516,25 @@ public class SubjectTransactionTests
         // Assert
         Assert.Equal("Modified", person.FirstName);
     }
+
+    [Fact]
+    public async Task WhenCommittingFromDifferentAsyncFlow_ThenThrows()
+    {
+        // Arrange: begin in a separate flow so its AsyncLocal current-transaction does not reach here.
+        var context = CreateTransactionContext();
+        var transaction = await Task.Run(async () =>
+            await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort));
+
+        // Act & Assert
+        try
+        {
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+            Assert.Contains("async flow", exception.Message);
+        }
+        finally
+        {
+            transaction.Dispose();
+        }
+    }
 }
