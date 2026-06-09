@@ -131,15 +131,18 @@ public class SubjectTransactionOptimisticLockingTests
         // Wait for tx1 to acquire the lock
         await tx1Acquired.Task;
 
-        Task<SubjectTransaction> tx2Task;
+        // tx2 begins, writes, and commits within its own flow (begin/use/commit must be in the same flow).
+        Task tx2Task;
         using (ExecutionContext.SuppressFlow())
         {
             tx2Task = Task.Run(async () =>
             {
                 tx2Started.SetResult(true);
-                return await context.BeginTransactionAsync(
+                using var tx = await context.BeginTransactionAsync(
                     TransactionFailureHandling.BestEffort,
                     TransactionLocking.Exclusive);
+                person.LastName = "Tx2";
+                await tx.CommitAsync(CancellationToken.None);
             });
         }
 
@@ -148,16 +151,10 @@ public class SubjectTransactionOptimisticLockingTests
         await Task.Yield();
         Assert.False(tx2Task.IsCompleted, "tx2 should wait for tx1 to complete");
 
-        // Release tx1 to commit
+        // Release tx1 to commit; tx2 then unblocks and commits within its own flow.
         tx1CanCommit.SetResult(true);
         await tx1Task;
-
-        // Now tx2 should complete
-        using var tx2 = await tx2Task;
-        person.LastName = "Tx2";
-        await tx2.CommitAsync(CancellationToken.None);
-
-        await tx1Task;
+        await tx2Task;
 
         // Assert
         Assert.Equal("Tx1", person.FirstName);
