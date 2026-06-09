@@ -292,7 +292,7 @@ catch (SubjectTransactionException ex)
 }
 ```
 
-If a custom `ITransactionWriter` throws instead of reporting failures, the commit fails with a `SubjectTransactionException` that reports every change as failed; the transaction becomes terminal and must be disposed, not retried (its sources may be left un-reverted).
+The built-in `SourceTransactionWriter` never throws: a source that fails or throws is reported as a failed write and reverted through the normal failure handling. Only a custom `ITransactionWriter` that throws instead of reporting violates this contract. In that case the commit fails with a `SubjectTransactionException` reporting every change as failed, applies nothing to the local model, and the transaction becomes terminal (it must be disposed, not retried). Its sources are not reverted then, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. A commit timeout (`OperationCanceledException`) is the one exception and stays retryable.
 
 ### SubjectTransactionConflictException
 
