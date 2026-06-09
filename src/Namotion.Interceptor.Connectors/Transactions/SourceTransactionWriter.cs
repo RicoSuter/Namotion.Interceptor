@@ -6,8 +6,8 @@ namespace Namotion.Interceptor.Connectors.Transactions;
 
 /// <summary>
 /// Handler that writes transaction changes to their associated external sources.
-/// Only handles changes that have an associated source; local changes are returned
-/// to the caller for handling.
+/// Only writes changes that have an associated source; local (no-source) changes are
+/// skipped and left for the transaction to apply.
 /// </summary>
 internal sealed class SourceTransactionWriter : ITransactionWriter
 {

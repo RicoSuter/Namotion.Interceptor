@@ -193,7 +193,7 @@ internal static class SubjectPropertyChangeOperations
 
         var excluded = new HashSet<PropertyReference>(
             excludeFirst.Count + excludeSecond.Count, PropertyReference.Comparer);
-      
+
         foreach (var change in excludeFirst)
         {
             excluded.Add(change.Property);
