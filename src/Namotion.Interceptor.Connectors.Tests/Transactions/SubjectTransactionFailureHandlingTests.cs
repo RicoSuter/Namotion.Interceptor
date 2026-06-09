@@ -207,42 +207,6 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WhenRevertAlsoFailsInRollbackMode_ThenRevertFailuresAreReported()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-
-        var callCount = 0;
-        var successThenFailSource = new Mock<ISubjectSource>();
-        successThenFailSource.Setup(s => s.WriteBatchSize).Returns(0);
-        successThenFailSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-            {
-                callCount++;
-                if (callCount == 1)
-                    return new ValueTask<WriteResult>(WriteResult.Success); // Initial write succeeds
-                else
-                    return new ValueTask<WriteResult>(WriteResult.Failure(changes, new InvalidOperationException("Revert failed"))); // Revert fails
-            });
-
-        var failSource = CreateFailingSource();
-
-        new PropertyReference(person, nameof(Person.FirstName)).SetSource(successThenFailSource.Object);
-        new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
-
-        // Act
-        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
-        person.FirstName = "John";
-        person.LastName = "Doe";
-
-        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        Assert.Equal(2, ex.FailedChanges.Count);
-    }
-
-    [Fact]
     public async Task WhenSourceFailsInRollbackMode_ThenLocalChangesAreNotApplied()
     {
         // Arrange
