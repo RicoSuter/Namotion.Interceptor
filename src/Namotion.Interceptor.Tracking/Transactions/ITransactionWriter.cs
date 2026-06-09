@@ -17,10 +17,12 @@ public interface ITransactionWriter
     /// </summary>
     /// <remarks>
     /// Implementations must REPORT per-source failures via <see cref="SourceWriteResult"/> rather than
-    /// throwing. This contract is load-bearing: if an implementation throws, the transaction has no
-    /// <see cref="SourceWriteResult"/> to revert with, so it treats the commit as a full failure (every
-    /// change reported failed, nothing applied to the local model) and becomes terminal; any writes that
-    /// already reached other sources are left applied and un-reverted.
+    /// throwing. This contract is load-bearing: on a reported failure the transaction reverts the
+    /// successful source writes via <see cref="RevertSourceWritesAsync"/>, using the written set and
+    /// revert state returned here. A throw returns neither, so there is nothing to revert from: the
+    /// transaction treats the commit as a full failure (every change reported failed, nothing applied to
+    /// the local model) and becomes terminal, but any writes that already reached other sources cannot be
+    /// reverted.
     /// </remarks>
     /// <param name="changes">The property changes to classify and write.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
