@@ -395,7 +395,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                 // Simulate slow write that will be cancelled by timeout
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(10), ct);
+                    await Task.Delay(Timeout.Infinite, ct);
                     return WriteResult.Success;
                 }
                 catch (OperationCanceledException)
@@ -845,8 +845,15 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
     private static async Task<bool> WaitWithTimeout(Task task, TimeSpan timeout)
     {
-        var completed = await Task.WhenAny(task, Task.Delay(timeout)).ConfigureAwait(false);
-        return completed == task;
+        try
+        {
+            await task.WaitAsync(timeout).ConfigureAwait(false);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

@@ -23,43 +23,36 @@ public class SubjectTransactionOptimisticLockingTests
     public async Task WhenMultipleOptimisticTransactionsBegin_ThenNoneBlocks()
     {
         // Arrange
-        // Optimistic transactions should not block each other at start time
         var context = CreateContext();
-        var startTimes = new List<DateTimeOffset>();
+        var allBegan = new CountdownEvent(5);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var tasks = new List<Task>();
 
-        // Act
-        // Start 5 optimistic transactions concurrently in separate execution contexts
-        for (int i = 0; i < 5; i++)
+        // Act: each flow begins an optimistic transaction and holds it open until all five have begun.
+        for (var i = 0; i < 5; i++)
         {
             Task task;
             using (ExecutionContext.SuppressFlow())
             {
                 task = Task.Run(async () =>
                 {
-                    var startTime = DateTimeOffset.UtcNow;
-                    var tx = await context.BeginTransactionAsync(
+                    var transaction = await context.BeginTransactionAsync(
                         TransactionFailureHandling.BestEffort,
                         TransactionLocking.Optimistic);
-                    lock (startTimes)
-                    {
-                        startTimes.Add(startTime);
-                    }
-                    // Hold briefly then dispose
-                    await Task.Delay(50);
-                    tx.Dispose();
+                    allBegan.Signal();
+                    await release.Task;
+                    transaction.Dispose();
                 });
             }
             tasks.Add(task);
         }
 
+        // Assert: the countdown reaches zero only if every begin completed while the other four
+        // transactions were still open; if optimistic begin took the per-context lock, it never would.
+        Assert.True(allBegan.Wait(TimeSpan.FromSeconds(10)),
+            "Optimistic transactions blocked each other at begin.");
+        release.SetResult(true);
         await Task.WhenAll(tasks);
-
-        // Assert
-        // All transactions should have started within a very short window
-        var startRange = startTimes.Max() - startTimes.Min();
-        Assert.True(startRange < TimeSpan.FromMilliseconds(200),
-            $"Optimistic transactions should start concurrently, but took {startRange.TotalMilliseconds}ms");
     }
 
     [Fact]
