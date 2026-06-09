@@ -1,5 +1,7 @@
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -10,6 +12,56 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 /// </summary>
 public class SubjectTransactionFailureHandlingTests : TransactionTestBase
 {
+    private sealed class ThrowingTransactionWriter : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            ReadOnlyMemory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Writer boom");
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
+    }
+
+    [Fact]
+    public async Task WhenWriterThrows_ThenAllChangesFailAndTransactionIsTerminal()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithTransactions()
+            .WithFullPropertyTracking();
+        context.AddService<ITransactionWriter>(new ThrowingTransactionWriter());
+
+        var person = new Person(context);
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(2, exception.FailedChanges.Count);
+        Assert.IsType<InvalidOperationException>(exception.InnerException);
+        Assert.Equal("Writer boom", exception.InnerException!.Message);
+        Assert.Null(person.FirstName); // local model untouched (writer threw before apply)
+        Assert.Null(person.LastName);
+
+        // A second commit is rejected: the transaction is terminal, not retryable.
+        var second = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        Assert.Contains("already been committed", second.Message);
+    }
+
     [Fact]
     public async Task BestEffortMode_AppliesSuccessfulChanges_WhenSomeSourcesFail()
     {

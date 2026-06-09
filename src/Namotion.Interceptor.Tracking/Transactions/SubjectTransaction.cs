@@ -382,9 +382,28 @@ public sealed class SubjectTransaction : IDisposable
         CancellationToken cancellationToken)
     {
         // The writer is contractually expected to report failures via SourceWriteResult, not throw.
-        // A throwing writer propagates here and bypasses source-revert (matches prior behavior).
-        var (written, failedSource, sourceErrors, revertState) = await writer
-            .WriteToSourcesAsync(changes, _requirement, cancellationToken).ConfigureAwait(false);
+        // If it throws anyway (and this is not our commit timeout), there is no SourceWriteResult, so we
+        // have neither the written set nor the revertState needed to revert; sources cannot be reverted.
+        // The local model is untouched (apply runs only after this returns), so report every change as
+        // failed. Returning a failure routes through FinishCommit() in the caller, making the transaction
+        // terminal (non-retryable) and consistent with a reported full source failure.
+        SourceWriteResult writeResult;
+        try
+        {
+            writeResult = await writer
+                .WriteToSourcesAsync(changes, _requirement, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new SubjectTransactionException(
+                "The transaction writer threw an exception during commit. Sources may be in an undefined, " +
+                "un-reverted state; the transaction is terminal and must be disposed, not retried.",
+                appliedChanges: [],
+                failedChanges: changes.ToArray(),
+                errors: [exception]);
+        }
+
+        var (written, failedSource, sourceErrors, revertState) = writeResult;
 
         // Rollback with any source-write failure: nothing is applied to the local model; revert what reached
         // a source and report. The local (no-source) changes are never applied, but they are still
@@ -498,9 +517,10 @@ public sealed class SubjectTransaction : IDisposable
         {
             // Reset so CommitAsync can be called again, but only for failures that occur BEFORE any
             // change is applied to the local model (conflict detected, optimistic lock acquisition failed,
-            // commit timeout, or the writer threw). Once the apply pass runs, FinishCommit has marked
-            // the transaction committed and this branch is skipped, so an apply/validation failure is
-            // terminal and cannot be retried.
+            // or the commit timed out). A writer that throws is converted to a full failure that runs
+            // through FinishCommit, so it is terminal and not retried. Once the apply pass runs,
+            // FinishCommit has marked the transaction committed and this branch is skipped, so an
+            // apply/validation failure is terminal and cannot be retried.
             Volatile.Write(ref _commitStarted, 0);
         }
     }
