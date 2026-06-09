@@ -459,8 +459,8 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected â€
 - `BeginTransactionAsync()` uses `AsyncLocal<T>` to store the current transaction
 - Exclusive transactions use a per-context semaphore
 - Each async execution context has its own transaction scope
-- The transaction is automatically cleared on `Dispose()` (only if it is the current transaction in the disposing flow)
-- A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws (see [Single Async Flow](#single-async-flow))
+- The transaction is automatically cleared on `Dispose()`
+- A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws
 - Concurrent `CommitAsync` calls on the same transaction instance are rejected
 
 ## Best Practices
@@ -469,7 +469,7 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected â€
 2. **Keep transactions short** - Long transactions hold pending changes in memory
 3. **Register transactions before notifications** - Call `WithTransactions()` before `WithPropertyChangeObservable()`
 4. **Handle exceptions from CommitAsync** - Commits can fail partially
-5. **Use a transaction within a single async flow** - Begin, use, commit, and dispose it in the same flow; don't begin it in a helper and return it, or commit/dispose it from another flow (committing from a different flow throws)
+5. **Don't share transactions across threads** - Each async context should have its own transaction
 
 ## API Reference
 
@@ -543,24 +543,6 @@ using var tx1 = await context.BeginTransactionAsync(TransactionFailureHandling.B
 
 // THROWS: "Nested transactions are not supported."
 using var tx2 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-```
-
-### Single Async Flow
-
-A transaction is tracked in the current async flow via `AsyncLocal<T>`, which flows into awaited calls but not back out of them. Begin, use, commit, and dispose a transaction within the same async flow. In particular, do not begin a transaction inside a helper that returns it to the caller: the caller's flow will not see it, property writes will silently bypass the transaction and hit the model directly, and the commit will capture nothing.
-
-To catch this, committing a transaction from a different flow than the one it is active in throws `InvalidOperationException`:
-
-```csharp
-// WRONG: begin runs in the helper's flow, so the caller's flow never sees the transaction.
-static async Task<SubjectTransaction> StartAsync(IInterceptorSubjectContext ctx)
-    => await ctx.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-var tx = await StartAsync(context);
-person.FirstName = "John";              // bypasses the transaction (writes the model directly)
-await tx.CommitAsync(CancellationToken.None);
-// THROWS InvalidOperationException:
-// "Transaction is being committed from a different async flow than the one it is active in. ..."
 ```
 
 ### Optimistic Concurrency - ABA Problem

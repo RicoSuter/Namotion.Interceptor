@@ -16,11 +16,8 @@ public static class SubjectTransactionExtensions
     /// Begins a new transaction bound to this context.
     /// </summary>
     /// <remarks>
-    /// A transaction must be begun, used, committed, and disposed within the same async flow. The current
-    /// transaction is tracked in an async-local slot that flows into awaited calls but not back out of
-    /// them, so beginning a transaction inside a helper that returns it to the caller leaves the caller's
-    /// flow without it: property writes then bypass the transaction, and <c>CommitAsync</c> throws an
-    /// <see cref="InvalidOperationException"/>.
+    /// Begin, use, commit, and dispose a transaction within the same async flow; committing from a
+    /// different flow throws <see cref="InvalidOperationException"/>.
     /// </remarks>
     /// <param name="context">The context to bind the transaction to.</param>
     /// <param name="failureHandling">The failure handling mode controlling what happens when writes fail.</param>
