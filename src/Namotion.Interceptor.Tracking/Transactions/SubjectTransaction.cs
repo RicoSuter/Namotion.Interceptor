@@ -637,7 +637,12 @@ public sealed class SubjectTransaction : IDisposable
                 }
             }
 
-            CurrentTransaction.Value = null;
+            // Only clear the slot if this transaction is the one active in the disposing flow, so disposing
+            // in a different flow cannot clobber an unrelated transaction's current-transaction slot.
+            if (CurrentTransaction.Value == this)
+            {
+                CurrentTransaction.Value = null;
+            }
 
             // A commit in flight (reachable only by misuse: disposing without awaiting CommitAsync) still owns
             // the pooled buffer and the exclusive lock, so skip both here: returning the buffer would corrupt

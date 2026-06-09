@@ -537,4 +537,27 @@ public class SubjectTransactionTests
             transaction.Dispose();
         }
     }
+
+    [Fact]
+    public async Task WhenDisposingFromDifferentAsyncFlow_ThenOtherTransactionSlotIsNotCleared()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+
+        // transaction1 is begun in a separate flow, so its SetCurrent does not reach this flow.
+        // Optimistic locking means neither transaction takes the lock at begin, so they can coexist.
+        var transaction1 = await Task.Run(async () =>
+            await context.BeginTransactionAsync(
+                TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic));
+
+        using var transaction2 = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
+        Assert.Same(transaction2, SubjectTransaction.Current);
+
+        // Act: disposing transaction1 from transaction2's flow must not clear transaction2's slot.
+        transaction1.Dispose();
+
+        // Assert
+        Assert.Same(transaction2, SubjectTransaction.Current);
+    }
 }
