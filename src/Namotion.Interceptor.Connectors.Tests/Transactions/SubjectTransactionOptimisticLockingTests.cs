@@ -151,7 +151,7 @@ public class SubjectTransactionOptimisticLockingTests
         await Task.Yield();
         Assert.False(tx2Task.IsCompleted, "tx2 should wait for tx1 to complete");
 
-        // Release tx1 to commit; tx2 then unblocks and commits within its own flow.
+        // Release tx1 to commit; tx2 then unblocks and commits.
         tx1CanCommit.SetResult(true);
         await tx1Task;
         await tx2Task;
