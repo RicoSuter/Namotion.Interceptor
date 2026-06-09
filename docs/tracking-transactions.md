@@ -329,7 +329,7 @@ Note that "terminal" describes the transaction, not the result: a successful com
 
 The tables below list every flow and its end state per property. "Old" means the pre-transaction value, "new" means the transaction's value.
 
-**Local-only commits** (no `WithSourceTransactions()`):
+**Local-only commits** (no `WithSourceTransactions()`). There is only the local model, so nothing can diverge; the only question is which properties end old and which end new:
 
 | Scenario | Mode | Local model ends as | Outcome |
 |----------|------|---------------------|---------|
@@ -338,7 +338,9 @@ The tables below list every flow and its end state per property. "Old" means the
 | Some applies fail, reverts succeed | Rollback | all old | terminal failure |
 | Some applies fail, a revert also fails | Rollback | mixed, despite Rollback | terminal failure, stuck properties are in `FailedChanges` |
 
-**Commits with source writes** (`WithSourceTransactions()` or a custom `ITransactionWriter`) split into two groups. First, the flows where source and local model end consistent. The commit either fully succeeds, fails before anything is written, or every needed revert succeeds:
+Commits with source writes (`WithSourceTransactions()` or a custom `ITransactionWriter`) involve two models that must agree: the external source and the local model. The next two tables split these flows by how they end.
+
+**Source writes, consistent end state.** The commit fully succeeds, fails before anything is written, or every needed revert succeeds, so source and local model agree on every property:
 
 | Scenario | Mode | Source ends | Local ends | Outcome |
 |----------|------|-------------|------------|---------|
@@ -349,7 +351,7 @@ The tables below list every flow and its end state per property. "Old" means the
 | A local apply fails, all reverts succeed | Rollback | all old | all old | terminal failure |
 | A local apply fails, its source revert succeeds | BestEffort | applied new, failed-apply old | matches source | terminal failure |
 
-Second, the flows where the two models can end diverged. The end state is the same regardless of which stage triggered the revert, so each row covers every path that reaches it. Diverged properties are always reported in `FailedChanges` and `Errors`, except for a throwing writer where the transaction cannot know which sources were touched:
+**Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Diverged properties are always reported in `FailedChanges` and `Errors`, except for a throwing writer where the transaction cannot know which sources were touched:
 
 | Scenario | Mode | Source ends | Local ends | Outcome | Divergence |
 |----------|------|-------------|------------|---------|------------|
