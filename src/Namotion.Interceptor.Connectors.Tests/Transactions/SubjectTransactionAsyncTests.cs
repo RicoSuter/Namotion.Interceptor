@@ -370,6 +370,49 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
+    public async Task WhenConflictPersists_ThenRetryFailsAgainWithConflict()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithTransactions()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        person.FirstName = "Original";
+
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+
+        person.FirstName = "TransactionValue";
+
+        // External change that is never resolved.
+        Task externalTask;
+        var asyncFlowControl = ExecutionContext.SuppressFlow();
+        try
+        {
+            externalTask = Task.Run(() => person.FirstName = "ExternalChange");
+        }
+        finally
+        {
+            asyncFlowControl.Undo();
+        }
+        await externalTask;
+
+        // Act & Assert: first commit fails with a conflict and stays retryable.
+        await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        Assert.Single(transaction.GetPendingChanges());
+
+        // The retry detects the same unresolved conflict and fails the same way; pending changes survive.
+        await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        Assert.Single(transaction.GetPendingChanges());
+    }
+
+    [Fact]
     public async Task WhenCommitFailsWithConflict_ThenPendingChangesRemainIntact()
     {
         // Arrange
