@@ -20,42 +20,6 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task WhenValueChangedExternallyInOptimisticTransaction_ThenCommitThrowsConflict()
-    {
-        // Arrange
-        // Optimistic transaction should detect conflicts when underlying value changes
-        var context = CreateContext();
-        var person = new Person(context);
-        person.FirstName = "Original";
-
-        using var tx = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort,
-            TransactionLocking.Optimistic,
-            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
-
-        // Change within transaction captures OldValue = "Original"
-        person.FirstName = "FromTx";
-
-        // Simulate external change by running outside transaction's AsyncLocal context
-        Task externalTask;
-        var asyncFlowControl = ExecutionContext.SuppressFlow();
-        try
-        {
-            externalTask = Task.Run(() => person.FirstName = "ExternalChange");
-        }
-        finally
-        {
-            asyncFlowControl.Undo();
-        }
-        await externalTask;
-
-        // Act & Assert
-        // CommitAsync should throw because current value != captured OldValue
-        var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(() => tx.CommitAsync(CancellationToken.None).AsTask());
-        Assert.Contains(nameof(Person.FirstName), ex.Message);
-    }
-
-    [Fact]
     public async Task WhenMultipleOptimisticTransactionsBegin_ThenNoneBlocks()
     {
         // Arrange
@@ -162,45 +126,6 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task WhenConflictIgnoredInOptimisticTransaction_ThenCommitSucceeds()
-    {
-        // Arrange
-        // Optimistic transaction with Ignore conflict behavior should succeed even with conflicts
-        var context = CreateContext();
-        var person = new Person(context);
-        person.FirstName = "Original";
-
-        // Start optimistic transaction
-        using var tx = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort,
-            TransactionLocking.Optimistic,
-            conflictBehavior: TransactionConflictBehavior.Ignore);
-
-        person.FirstName = "FromTx";
-
-        // Simulate external change outside transaction
-        Task externalTask;
-        var asyncFlowControl = ExecutionContext.SuppressFlow();
-        try
-        {
-            externalTask = Task.Run(() => person.FirstName = "ExternalChange");
-        }
-        finally
-        {
-            asyncFlowControl.Undo();
-        }
-        await externalTask;
-
-        // Act
-        // Should NOT throw because ConflictBehavior is Ignore
-        await tx.CommitAsync(CancellationToken.None);
-
-        // Assert
-        // Transaction value should overwrite the external change
-        Assert.Equal("FromTx", person.FirstName);
-    }
-
-    [Fact]
     public async Task WhenOptimisticTransactionBegun_ThenLockingIsOptimistic()
     {
         // Arrange
@@ -274,43 +199,6 @@ public class SubjectTransactionOptimisticLockingTests
         await tx2.CommitAsync(CancellationToken.None);
 
         Assert.Equal("NewValue", person.FirstName);
-    }
-
-    [Fact]
-    public async Task WhenMultipleOptimisticTransactionsInSeparateFlows_ThenAllCanCoexist()
-    {
-        // Arrange
-        // Multiple optimistic transactions in separate contexts should coexist without blocking
-        var context = CreateContext();
-        var transactionCount = 0;
-        var tasks = new List<Task>();
-
-        // Act
-        // Start multiple optimistic transactions in different execution contexts
-        for (int i = 0; i < 3; i++)
-        {
-            Task task;
-            using (ExecutionContext.SuppressFlow())
-            {
-                task = Task.Run(async () =>
-                {
-                    var tx = await context.BeginTransactionAsync(
-                        TransactionFailureHandling.BestEffort,
-                        TransactionLocking.Optimistic);
-                    Interlocked.Increment(ref transactionCount);
-                    Assert.Equal(TransactionLocking.Optimistic, tx.Locking);
-                    await Task.Delay(50);
-                    tx.Dispose();
-                });
-            }
-            tasks.Add(task);
-        }
-
-        await Task.WhenAll(tasks);
-
-        // Assert
-        // All transactions should have been created
-        Assert.Equal(3, transactionCount);
     }
 
     [Fact]

@@ -90,26 +90,6 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WhenSamePropertyWrittenMultipleTimes_ThenLastWriteWins()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "John";
-        person.FirstName = "Jane";
-        person.FirstName = "Jack";
-
-        // Assert
-        Assert.Single(transaction.GetPendingChanges());
-        var change = transaction.GetPendingChanges().First();
-        Assert.Equal("Jack", change.GetNewValue<string>());
-        Assert.Null(change.GetOldValue<string>());
-    }
-
-    [Fact]
     public async Task WhenChangeCapturedWithChangeContext_ThenSourceAndTimestampsArePreserved()
     {
         // Arrange

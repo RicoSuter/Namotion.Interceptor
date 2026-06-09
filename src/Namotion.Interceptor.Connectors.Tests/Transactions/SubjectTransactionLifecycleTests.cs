@@ -49,34 +49,6 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WhenNestedTransactionAttempted_ThenThrows()
-    {
-        // Arrange
-        var context = CreateContext();
-        using var transaction1 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-        // Act
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () => await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort));
-
-        // Assert
-        Assert.Contains("Nested transactions are not supported", exception.Message);
-    }
-
-    [Fact]
-    public async Task WhenCommittedWithNoChanges_ThenReturnsImmediately()
-    {
-        // Arrange
-        var context = CreateContext();
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-        // Act
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Empty(transaction.GetPendingChanges());
-    }
-
-    [Fact]
     public async Task WhenCommitted_ThenChangesAreAppliedToModel()
     {
         // Arrange
@@ -120,58 +92,6 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
         // Assert
         Assert.Null(SubjectTransaction.Current);
         Assert.Empty(capturedTransaction.GetPendingChanges());
-    }
-
-    [Fact]
-    public async Task WhenCommitCalledAfterDispose_ThenThrowsObjectDisposed()
-    {
-        // Arrange
-        var context = CreateContext();
-        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        transaction.Dispose();
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(
-            async () => await transaction.CommitAsync(CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task WhenCommitCalledTwice_ThenThrows()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-
-        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-        {
-            person.FirstName = "John";
-            await transaction.CommitAsync(CancellationToken.None);
-
-            // Act
-            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-            // Assert
-            Assert.Contains("already been committed", exception.Message);
-        }
-    }
-
-    [Fact]
-    public async Task WhenDisposeCalledMultipleTimes_ThenIsIdempotent()
-    {
-        // Arrange
-        var context = CreateContext();
-        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        Assert.NotNull(SubjectTransaction.Current);
-
-        // Act
-        transaction.Dispose();
-        Assert.Null(SubjectTransaction.Current);
-
-        transaction.Dispose();
-
-        // Assert
-        Assert.Null(SubjectTransaction.Current);
     }
 
     [Fact]

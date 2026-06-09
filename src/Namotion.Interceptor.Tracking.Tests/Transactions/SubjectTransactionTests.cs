@@ -134,7 +134,10 @@ public class SubjectTransactionTests
         // Act & Assert
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
-            await transaction.CommitAsync(CancellationToken.None);
+            var commitTask = transaction.CommitAsync(CancellationToken.None);
+            Assert.True(commitTask.IsCompletedSuccessfully, "Empty commit should complete synchronously.");
+            await commitTask;
+            Assert.Empty(transaction.GetPendingChanges());
         }
     }
 
@@ -160,6 +163,7 @@ public class SubjectTransactionTests
 
             Assert.Single(ex.ConflictingProperties);
             Assert.Equal(nameof(Person.FirstName), ex.ConflictingProperties[0].Name);
+            Assert.Contains(nameof(Person.FirstName), ex.Message);
             Assert.Empty(ex.AppliedChanges);
             Assert.Empty(ex.FailedChanges);
         }
@@ -200,8 +204,9 @@ public class SubjectTransactionTests
             await transaction.CommitAsync(CancellationToken.None);
 
             // Act & Assert
-            await Assert.ThrowsAsync<InvalidOperationException>(
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
                 () => transaction.CommitAsync(CancellationToken.None).AsTask());
+            Assert.Contains("already been committed", exception.Message);
         }
     }
 
@@ -227,10 +232,11 @@ public class SubjectTransactionTests
         using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             // Act & Assert
-            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             {
                 await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
             });
+            Assert.Contains("Nested transactions are not supported", exception.Message);
         }
     }
 
@@ -395,10 +401,14 @@ public class SubjectTransactionTests
         // Arrange
         var context = CreateTransactionContext();
         var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        Assert.Same(transaction, SubjectTransaction.Current);
 
         // Act & Assert
         transaction.Dispose();
+        Assert.Null(SubjectTransaction.Current);
+
         transaction.Dispose();
+        Assert.Null(SubjectTransaction.Current);
     }
 
     [Fact]

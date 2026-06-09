@@ -67,43 +67,6 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WhenDisposeCalledMultipleTimes_ThenIsIdempotent()
-    {
-        // Arrange
-        var context = CreateContext();
-        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        Assert.NotNull(SubjectTransaction.Current);
-
-        // Act - dispose multiple times (simulates concurrent/repeated dispose)
-        transaction.Dispose();
-        Assert.Null(SubjectTransaction.Current);
-
-        // Should not throw on subsequent disposes
-        transaction.Dispose();
-        transaction.Dispose();
-
-        // Assert
-        AssertNoActiveTransaction();
-    }
-
-    [Fact]
-    public async Task WhenCommittedWithNoChanges_ThenCompletesImmediately()
-    {
-        // Arrange
-        var context = CreateContext();
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-        // Act
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        await transaction.CommitAsync(CancellationToken.None);
-        stopwatch.Stop();
-
-        // Assert
-        Assert.Empty(transaction.GetPendingChanges());
-        Assert.True(stopwatch.ElapsedMilliseconds < 100, "Empty commit should be fast");
-    }
-
-    [Fact]
     public async Task WhenTransactionBeginsAndEnds_ThenHasActiveTransactionTracksIt()
     {
         // Arrange
@@ -150,49 +113,6 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
         Assert.NotEmpty(exception.AppliedChanges);
         Assert.NotEmpty(exception.FailedChanges);
         Assert.True(exception.IsPartialSuccess);
-    }
-
-    [Fact]
-    public async Task WhenDerivedPropertyChangesDuringTransaction_ThenItIsNotCaptured()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-        // Act - set base properties (FullName is derived from FirstName and LastName)
-        person.FirstName = "John";
-        person.LastName = "Doe";
-
-        // Assert - only FirstName and LastName should be in pending changes
-        // FullName is a derived property and should not be captured
-        var pendingPropertyNames = transaction.GetPendingChanges()
-            .Select(c => c.Property.Name)
-            .ToList();
-
-        Assert.Contains("FirstName", pendingPropertyNames);
-        Assert.Contains("LastName", pendingPropertyNames);
-        Assert.DoesNotContain("FullName", pendingPropertyNames);
-    }
-
-    [Fact]
-    public async Task WhenCommitCalledSecondTime_ThenThrowsAlreadyCommitted()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "John";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Act
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await transaction.CommitAsync(CancellationToken.None));
-
-        // Assert
-        Assert.Contains("already been committed", exception.Message);
     }
 
     [Fact]
