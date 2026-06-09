@@ -156,7 +156,7 @@ public class SubjectTransactionTests
 
             // Act & Assert
             var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
-                () => transaction.CommitAsync(CancellationToken.None));
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
 
             Assert.Single(ex.ConflictingProperties);
             Assert.Equal(nameof(Person.FirstName), ex.ConflictingProperties[0].Name);
@@ -201,7 +201,7 @@ public class SubjectTransactionTests
 
             // Act & Assert
             await Assert.ThrowsAsync<InvalidOperationException>(
-                () => transaction.CommitAsync(CancellationToken.None));
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
         }
     }
 
@@ -215,7 +215,7 @@ public class SubjectTransactionTests
 
         // Act & Assert
         await Assert.ThrowsAsync<ObjectDisposedException>(
-            () => transaction.CommitAsync(CancellationToken.None));
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
     }
 
     [Fact]
@@ -488,7 +488,7 @@ public class SubjectTransactionTests
 
             // Act & Assert
             var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
-                () => transaction.CommitAsync(CancellationToken.None));
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
 
             Assert.Equal(2, ex.ConflictingProperties.Count);
             Assert.Contains(ex.ConflictingProperties, p => p.Name == nameof(Person.FirstName));

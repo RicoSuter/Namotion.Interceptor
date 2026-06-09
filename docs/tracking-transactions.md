@@ -4,7 +4,7 @@ The `Namotion.Interceptor.Tracking` package provides transaction support for bat
 
 ## When to Use Transactions
 
-Without transactions, property changes are applied to the in-process model immediately, while external sources synchronize asynchronously in the background. This is suitable when the local model is the source of truth, or eventual consistency is acceptable.
+Without transactions, property changes are applied to the local model immediately, while external sources synchronize asynchronously in the background. This is suitable when the local model is the source of truth, or eventual consistency is acceptable.
 
 Use transactions when you need guarantees about what was actually persisted to external sources.
 
@@ -14,7 +14,7 @@ Transactions provide:
 - **Configurable commit modes**: Choose between best-effort or rollback behavior on partial failures
 - **Read-your-writes consistency**: Reading a property inside a transaction returns the pending value
 - **Notification suppression**: Change notifications are suppressed during the transaction and fired after commit
-- **External source integration**: Changes can be written to external sources before being applied to the in-process model
+- **External source integration**: Changes can be written to external sources before being applied to the local model
 - **Rollback on dispose**: Uncommitted changes are discarded when the transaction is disposed
 
 ## Setup
@@ -172,8 +172,10 @@ Controls how optimistic transactions detect concurrent modifications.
 
 | Value | Description |
 |-------|-------------|
-| `FailOnConflict` | Throw `TransactionConflictException` if values changed since transaction started. (default) |
+| `FailOnConflict` | Throw `SubjectTransactionConflictException` if values changed since transaction started. (default) |
 | `Ignore` | Overwrite any concurrent changes without checking. |
+
+Conflict detection is best-effort and not atomic with respect to non-transactional writes that happen between detection and apply. Transactions are serialized against each other, but a raw property write or an external source callback can still interleave during that window.
 
 ### Requirements
 
@@ -196,7 +198,7 @@ using var tx = await context.BeginTransactionAsync(
 
 ### Commit Timeout
 
-**Default: 30-second timeout** for all commits. Throws `TaskCanceledException` if exceeded.
+**Default: 30-second timeout**, applied only to the external source write/revert phase (commits with no sources are not timed). If a source write exceeds it, that write is reported as a failure in a `SubjectTransactionException`; if a revert is in progress when it fires, an `OperationCanceledException` is thrown.
 
 ```csharp
 // Custom timeout
@@ -220,27 +222,23 @@ When `CommitAsync()` is called, changes are processed in stages. The exact flow 
 
 When only `WithTransactions()` is configured (no external sources):
 
-1. **Apply all changes** to the in-process model (calls property setters, triggers `OnChanging/OnChanged` methods)
+1. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
 2. If any apply fails and `Rollback` mode: revert successful applies
 3. Fire change notifications
 
 ### With Source Transactions
 
-When `WithSourceTransactions()` is configured, commits execute in three stages:
+When `WithSourceTransactions()` is configured, commits execute in two stages:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│  Stage 1: External Sources (parallel)                                     │
-│  Write to OPC UA, MQTT, databases, etc.                                   │
-│  Properties with SetSource() are processed here                           │
+│  Stage 1: External sources (parallel when multiple)                       │
+│  Write source-bound changes to OPC UA, MQTT, databases, etc.              │
+│  Nothing is applied to the local model yet.                               │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  Stage 2: Source-Bound Properties                                         │
-│  Apply source-bound values to in-process model                            │
-│  (After external writes succeed, triggers OnChanging/OnChanged hooks)     │
-├───────────────────────────────────────────────────────────────────────────┤
-│  Stage 3: Local Properties                                                │
-│  Apply changes to properties WITHOUT sources                              │
-│  (Calls to OnChanging/OnChanged partial methods can throw exceptions)     │
+│  Stage 2: Apply to the local model in a single pass                       │
+│  Source-bound and local changes are applied together, excluding           │
+│  any whose source write failed (triggers OnChanging/OnChanged).           │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -248,9 +246,8 @@ When `WithSourceTransactions()` is configured, commits execute in three stages:
 
 | Failure Stage | BestEffort | Rollback |
 |---------------|------------|----------|
-| External sources fail | Only successful ones applied | All sources reverted, nothing applied |
-| Source-bound apply fails | Successful applied, failed sources reverted | All reverted |
-| Local properties fail | Successful applied, failed sources reverted | All reverted |
+| Source write fails | Successful sources written and applied | All sources reverted, nothing applied |
+| Local apply fails (source-bound or local) | Successful kept, failed sources reverted | All reverted |
 
 Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
 
@@ -267,7 +264,11 @@ propertyReference.SetSource(this);
 // On commit, WriteChangesInBatchesAsync is called on the source
 ```
 
-Properties without an associated source are applied directly in Stage 3.
+Properties without an associated source are applied in Stage 2 alongside source-bound properties.
+
+**Changing a source while a commit runs:** the source a property writes to is decided when the transaction commits, not when you set the value. So if you call `SetSource` or `RemoveSource` on a property at the same time a commit is running, it is undefined whether that commit uses the old or the new binding for that property.
+
+Rollback is not affected by this: a revert always undoes the writes at the sources they were actually written to, even if the binding changed in the meantime.
 
 ## Error Handling
 
@@ -312,7 +313,7 @@ catch (SubjectTransactionConflictException ex)
 |-----------|-------|
 | `InvalidOperationException` | Nested transactions, already committed, transactions not enabled |
 | `ObjectDisposedException` | Using a disposed transaction |
-| `TaskCanceledException` | Commit timeout exceeded |
+| `OperationCanceledException` | Commit timeout during source revert (source-write timeouts are reported via `SubjectTransactionException`) |
 
 ## Advanced Topics
 
@@ -556,4 +557,4 @@ For strict atomicity, use a single source per transaction or implement applicati
 
 ### Rollback is Best-Effort
 
-Rollback operations can also fail. If revert fails, `TransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case.
+Rollback operations can also fail. If revert fails, `SubjectTransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case.
