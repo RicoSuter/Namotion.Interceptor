@@ -292,6 +292,8 @@ catch (SubjectTransactionException ex)
 }
 ```
 
+The built-in `SourceTransactionWriter` never throws: a source that fails or throws is reported as a failed write and reverted through the normal failure handling. Only a custom `ITransactionWriter` that throws instead of reporting violates this contract. In that case the commit fails with a `SubjectTransactionException` reporting every change as failed, applies nothing to the local model, and the transaction becomes terminal (it must be disposed, not retried). Its sources are not reverted then, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. A custom writer that throws from `RevertSourceWritesAsync` is handled the same way: the changes it was asked to revert are reported as failed reverts and the commit fails terminally. A commit timeout (`OperationCanceledException`) is the one exception and stays retryable.
+
 ### SubjectTransactionConflictException
 
 Thrown when optimistic locking detects concurrent modifications:
@@ -311,9 +313,58 @@ catch (SubjectTransactionConflictException ex)
 
 | Exception | Cause |
 |-----------|-------|
-| `InvalidOperationException` | Nested transactions, already committed, transactions not enabled |
+| `InvalidOperationException` | Nested transactions, already committed, transactions not enabled, committing from a different async flow |
 | `ObjectDisposedException` | Using a disposed transaction |
 | `OperationCanceledException` | Commit timeout during source revert (source-write timeouts are reported via `SubjectTransactionException`) |
+
+### Failure Flows and Consistency
+
+A commit attempt ends in one of three states:
+
+- **Committed**: the commit succeeded. The transaction is finished and must be disposed.
+- **Failed, retryable**: the commit aborted before the local model was touched, either before anything was written at all (conflict detected, optimistic lock not acquired) or because a commit timeout interrupted it. The pending changes remain intact and `CommitAsync` can be called again on the same transaction. See [Retry After Conflict Detection](#retry-after-conflict-detection).
+- **Failed, terminal**: the commit got past the source-write stage, so writes may have reached sources or the local model, and compensation (reverts) already ran once. The pending changes are cleared, a second `CommitAsync` throws `InvalidOperationException`, and the transaction must be disposed and replaced with a new one. Retrying would replay the snapshot onto state that has already moved, for example re-pushing values to a source that already accepted them.
+
+Note that "terminal" describes the transaction, not the result: a successful commit is also terminal. Transactions are one-shot once anything has moved.
+
+The tables below list every flow and its end state per property. "Old" means the pre-transaction value, "new" means the transaction's value.
+
+**Local-only commits** (no `WithSourceTransactions()`). There is only the local model, so nothing can diverge; the only question is which properties end old and which end new:
+
+| Scenario | Mode | Local model ends as | Outcome |
+|----------|------|---------------------|---------|
+| All applies succeed | any | new | committed |
+| Some applies fail | BestEffort | applied keep new, failed keep old | terminal failure, reported per change |
+| Some applies fail, reverts succeed | Rollback | all old | terminal failure |
+| Some applies fail, a revert also fails | Rollback | mixed, despite Rollback | terminal failure, stuck properties are in `FailedChanges` |
+
+Commits with source writes (`WithSourceTransactions()` or a custom `ITransactionWriter`) involve two models that must agree: the external source and the local model. The next two tables split these flows by how they end.
+
+**Source writes, consistent end state.** The commit fully succeeds, fails before anything is written, or every needed revert succeeds, so source and local model agree on every property:
+
+| Scenario | Mode | Source ends | Local ends | Outcome |
+|----------|------|-------------|------------|---------|
+| All source writes and applies succeed | any | new | new | committed |
+| Conflict detected or optimistic lock not acquired (nothing written yet) | any | old | old | retryable failure |
+| A source write fails or times out, reverts succeed | Rollback | all old | all old | terminal failure |
+| A source write fails or times out | BestEffort | succeeded new, failed old | matches source | terminal failure |
+| A local apply fails, all reverts succeed | Rollback | all old | all old | terminal failure |
+| A local apply fails, its source revert succeeds | BestEffort | applied new, failed-apply old | matches source | terminal failure |
+
+**Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Diverged properties are always reported in `FailedChanges` and `Errors`, except for a throwing writer where the transaction cannot know which sources were touched:
+
+| Scenario | Mode | Source ends | Local ends | Outcome | Divergence |
+|----------|------|-------------|------------|---------|------------|
+| Commit timeout during source revert | Rollback | partially reverted | old | retryable failure | transient, a successful retry re-pushes everything |
+| A source revert fails or throws | any | new on the stuck source | old | terminal failure | source ahead of local |
+| A local revert fails after a failed apply | Rollback | old | new | terminal failure | local ahead of source |
+| Custom writer throws from `WriteToSourcesAsync` | any | unknown, never reverted | old | terminal failure | unknown and unreported |
+
+Three root causes account for every divergence:
+
+1. **A compensating write failed.** Reverts are inverse writes, not an undo. A source that just failed or timed out is asked to accept another write, so this is the most likely divergence in practice. It is always terminal and always reported through `FailedChanges` and `Errors`, so the caller knows exactly which properties are stuck.
+2. **The writer threw instead of reporting.** Only a custom `ITransactionWriter` can cause this (the built-in writer always reports). The transaction has no written set and no revert state, so it cannot compensate and cannot tell which sources were touched. See [SubjectTransactionException](#subjecttransactionexception).
+3. **The inherent in-flight window.** Sources are written before the local model is applied, so even a fully successful commit has a moment where a source holds the new value and the local model does not, and during Rollback compensation a source briefly holds a value that is then taken back. Transactions provide quiescent consistency (both sides agree once the commit settles), not isolation from external observers of the source.
 
 ## Advanced Topics
 
@@ -458,6 +509,7 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected â€
 - Exclusive transactions use a per-context semaphore
 - Each async execution context has its own transaction scope
 - The transaction is automatically cleared on `Dispose()`
+- A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws
 - Concurrent `CommitAsync` calls on the same transaction instance are rejected
 
 ## Best Practices
@@ -557,4 +609,4 @@ For strict atomicity, use a single source per transaction or implement applicati
 
 ### Rollback is Best-Effort
 
-Rollback operations can also fail. If revert fails, `SubjectTransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case.
+Rollback operations can also fail. If revert fails, `SubjectTransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case. See [Failure Flows and Consistency](#failure-flows-and-consistency) for the full matrix of end states.

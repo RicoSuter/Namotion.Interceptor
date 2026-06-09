@@ -16,10 +16,10 @@ public interface ITransactionWriter
     /// Local (no-source) changes are neither written nor returned; the transaction applies them.
     /// </summary>
     /// <remarks>
-    /// Implementations must REPORT per-source failures via <see cref="SourceWriteResult"/> rather than
-    /// throwing. This contract is load-bearing: a thrown exception propagates past the transaction's
-    /// reconcile logic and bypasses source revert, leaving already-succeeded writes from other sources
-    /// applied at their sources.
+    /// Implementations must report per-source failures via <see cref="SourceWriteResult"/> rather than
+    /// throwing: reverting requires the written set and revert state returned here. A throw returns
+    /// neither, so the transaction fails terminally with every change reported as failed and any writes
+    /// that already reached other sources left un-reverted.
     /// </remarks>
     /// <param name="changes">The property changes to classify and write.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
@@ -37,6 +37,10 @@ public interface ITransactionWriter
     /// Reverts previously-written changes at their sources (for rollback) by writing the inverse
     /// values back to each source.
     /// </summary>
+    /// <remarks>
+    /// Implementations must report revert failures via <see cref="SourceRevertResult"/> rather than
+    /// throwing. A throw is treated as if every requested revert failed and the commit fails terminally.
+    /// </remarks>
     /// <param name="written">The previously-written changes to revert, as returned in <see cref="SourceWriteResult.Written"/>.</param>
     /// <param name="revertState">The opaque writer-owned state from <see cref="SourceWriteResult.RevertState"/> identifying the original target sources.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
