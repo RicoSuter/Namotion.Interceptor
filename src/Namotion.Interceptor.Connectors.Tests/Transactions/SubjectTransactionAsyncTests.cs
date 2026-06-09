@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionAsyncTests
 {
     [Fact]
-    public async Task BeginTransactionAsync_SerializesConcurrentTransactions()
+    public async Task WhenExclusiveTransactionActive_ThenSecondBeginWaitsUntilFirstEnds()
     {
         // Arrange
         // Test that BeginTransactionAsync serializes concurrent transactions
@@ -53,7 +53,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task BeginTransactionAsync_ReturnsTransaction()
+    public async Task WhenTransactionBegun_ThenItIsBoundToTheContext()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -71,7 +71,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task BeginTransactionAsync_SerializesTransactionsPerContext()
+    public async Task WhenExclusiveTransactionActive_ThenSecondBeginWaitsUntilDisposed()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -128,7 +128,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task WriteProperty_ToDifferentContext_ThrowsInvalidOperationException()
+    public async Task WhenWritingSubjectOfDifferentContext_ThenThrows()
     {
         // Arrange
         var context1 = InterceptorSubjectContext
@@ -160,7 +160,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task WriteProperty_ToSameContext_Succeeds()
+    public async Task WhenWritingTwoSubjectsOfSameContext_ThenBothChangesAreCaptured()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -192,7 +192,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task BeginTransactionAsync_WithConflictBehavior_StoresBehavior()
+    public async Task WhenConflictBehaviorSpecified_ThenTransactionStoresIt()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -211,7 +211,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task DisposeAsync_ReleasesLock_AllowsNewTransaction()
+    public async Task WhenTransactionDisposed_ThenLockIsReleasedForNewTransaction()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -233,7 +233,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task CommitAsync_WithFailOnConflict_ThrowsWhenValueChangedExternally()
+    public async Task WhenValueChangedExternallyWithFailOnConflict_ThenCommitThrowsConflict()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -282,7 +282,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task CommitAsync_WithIgnoreConflict_DoesNotThrowWhenValueChangedExternally()
+    public async Task WhenValueChangedExternallyWithIgnoreConflict_ThenCommitSucceeds()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -325,7 +325,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task CommitAsync_WithFailOnConflict_SucceedsWhenNoConflict()
+    public async Task WhenNoExternalChangeWithFailOnConflict_ThenCommitSucceeds()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -355,7 +355,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task CommitAsync_WithFailOnConflict_SucceedsWhenStartingFromNull()
+    public async Task WhenOldValueIsNullAndUnchanged_ThenFailOnConflictCommitSucceeds()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -385,7 +385,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task WriteProperty_CapturesOriginalOldValue_ForConflictDetection()
+    public async Task WhenSamePropertyWrittenTwice_ThenOriginalOldValueIsKept()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -416,7 +416,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task CommitAsync_AfterConflictFailure_CanRetrySuccessfully()
+    public async Task WhenConflictResolvedExternally_ThenSameTransactionRetrySucceeds()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -481,7 +481,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task CommitAsync_AfterConflictFailure_PendingChangesRemainIntact()
+    public async Task WhenCommitFailsWithConflict_ThenPendingChangesRemainIntact()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -528,7 +528,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task CommitAsync_AfterAlreadyCommitted_ThrowsInvalidOperation()
+    public async Task WhenTransactionAlreadyCommitted_ThenSecondCommitThrows()
     {
         // Arrange
         var context = InterceptorSubjectContext

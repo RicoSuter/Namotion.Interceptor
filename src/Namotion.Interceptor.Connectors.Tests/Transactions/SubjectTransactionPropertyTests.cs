@@ -16,7 +16,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionPropertyTests : TransactionTestBase
 {
     [Fact]
-    public async Task WriteProperty_WhenTransactionActive_CapturesChange()
+    public async Task WhenPropertyWrittenDuringTransaction_ThenChangeIsCaptured()
     {
         // Arrange
         var context = CreateContext();
@@ -34,7 +34,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public void WriteProperty_WhenNoTransaction_PassesThrough()
+    public void WhenNoTransactionActive_ThenWritePassesThrough()
     {
         // Arrange
         var context = CreateContext();
@@ -49,7 +49,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WriteProperty_WhenIsCommittingTrue_PassesThrough()
+    public async Task WhenCommitting_ThenApplyWritesPassThroughToModel()
     {
         // Arrange
         var context = CreateContext();
@@ -71,7 +71,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WriteProperty_DerivedPropertySkipped_NotCaptured()
+    public async Task WhenDerivedPropertyChangesDuringTransaction_ThenOnlyBasePropertiesAreCaptured()
     {
         // Arrange
         var context = CreateContext();
@@ -90,7 +90,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WriteProperty_SamePropertyMultipleTimes_LastWriteWins()
+    public async Task WhenSamePropertyWrittenMultipleTimes_ThenLastWriteWins()
     {
         // Arrange
         var context = CreateContext();
@@ -110,7 +110,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WriteProperty_PreservesChangeContext_SourceAndTimestamps()
+    public async Task WhenChangeCapturedWithChangeContext_ThenSourceAndTimestampsArePreserved()
     {
         // Arrange
         var context = CreateContext();
@@ -135,7 +135,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_PreservesChangeContext_SourceAndTimestamps()
+    public async Task WhenCommitted_ThenNotificationsPreserveSourceAndTimestamps()
     {
         // Arrange
         var context = CreateContext();
@@ -168,7 +168,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task ReadProperty_WhenTransactionActive_ReturnsPendingValue()
+    public async Task WhenReadingDuringTransaction_ThenPendingValueIsReturned()
     {
         // Arrange
         var context = CreateContext();
@@ -190,7 +190,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public void ReadProperty_WhenNoTransaction_ReturnsActualValue()
+    public void WhenNoTransactionActive_ThenReadReturnsActualValue()
     {
         // Arrange
         var context = CreateContext();
@@ -205,7 +205,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task ReadProperty_WhenNoPendingChange_ReturnsActualValue()
+    public async Task WhenNoPendingChangeForProperty_ThenReadReturnsActualValue()
     {
         // Arrange
         var context = CreateContext();
@@ -222,7 +222,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task ReadProperty_WhenIsCommittingTrue_ReturnsActualValue()
+    public async Task WhenReadingDuringCommitNotification_ThenAppliedValueIsReturned()
     {
         // Arrange
         var context = CreateContext();
@@ -253,7 +253,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_FiresChangeNotifications()
+    public async Task WhenCommitted_ThenChangeNotificationsFire()
     {
         // Arrange
         var context = CreateContext();
@@ -281,7 +281,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task DisposeWithoutCommit_DoesNotFireChangeNotifications()
+    public async Task WhenDisposedWithoutCommit_ThenNoChangeNotificationsFire()
     {
         // Arrange
         var context = CreateContext();
@@ -302,7 +302,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithMultipleSubjects_AppliesAllChanges()
+    public async Task WhenMultipleSubjectsModified_ThenAllChangesAreApplied()
     {
         // Arrange
         var context = CreateContext();
@@ -326,7 +326,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task Integration_DerivedPropertyUpdates_AfterCommit()
+    public async Task WhenCommitted_ThenDerivedPropertyReflectsNewValues()
     {
         // Arrange
         var context = CreateContext();
@@ -419,7 +419,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithDependentProperties_CommitsInInsertionOrder()
+    public async Task WhenDependentPropertiesCommitted_ThenInsertionOrderIsPreserved()
     {
         // Arrange: Motor with MaxAllowedSpeed=100 and a validator that rejects MotorSpeed > MaxAllowedSpeed.
         // Setting MotorSpeed=150 requires MaxAllowedSpeed to be raised first.
@@ -439,7 +439,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithDependentProperties_ValidatorRejectsInvalidSpeedDuringCapture()
+    public async Task WhenDependentPropertyInvalidDuringCapture_ThenValidatorRejectsWrite()
     {
         // Arrange: Motor with MaxAllowedSpeed=100
         var context = CreateContextWithMotorValidation();

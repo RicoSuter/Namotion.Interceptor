@@ -122,7 +122,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BestEffortMode_AppliesSuccessfulChanges_WhenSomeSourcesFail()
+    public async Task WhenSomeSourcesFailInBestEffortMode_ThenSuccessfulChangesAreApplied()
     {
         // Arrange
         var context = CreateContext();
@@ -148,7 +148,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_AppliesAllChanges_WhenAllSourcesSucceed()
+    public async Task WhenAllSourcesSucceedInRollbackMode_ThenAllChangesAreApplied()
     {
         // Arrange
         var context = CreateContext();
@@ -173,7 +173,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_RevertsSuccessfulSources_WhenAnySourceFails()
+    public async Task WhenAnySourceFailsInRollbackMode_ThenSuccessfulSourceWritesAreReverted()
     {
         // Arrange
         var context = CreateContext();
@@ -207,7 +207,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_ReportsRevertFailures_WhenRevertAlsoFails()
+    public async Task WhenRevertAlsoFailsInRollbackMode_ThenRevertFailuresAreReported()
     {
         // Arrange
         var context = CreateContext();
@@ -243,7 +243,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_ChangesWithoutSource_NotApplied_WhenSourceFails()
+    public async Task WhenSourceFailsInRollbackMode_ThenLocalChangesAreNotApplied()
     {
         // Arrange
         // Tests that in Rollback mode, when source writes fail,
@@ -274,7 +274,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BestEffortMode_ChangesWithoutSource_AlwaysApplied_WhenSourceFails()
+    public async Task WhenSourceFailsInBestEffortMode_ThenLocalChangesAreStillApplied()
     {
         // Arrange
         // Tests that changes without source are applied in BestEffort mode

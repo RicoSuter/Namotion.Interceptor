@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionAdditionalTests : TransactionTestBase
 {
     [Fact]
-    public async Task CommitAsync_WithInfiniteTimeout_DoesNotTimeout()
+    public async Task WhenCommitTimeoutIsInfinite_ThenSlowSourceCommitSucceeds()
     {
         // Arrange
         var context = CreateContext();
@@ -33,7 +33,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BeginTransactionAsync_DefaultTimeout_Is30Seconds()
+    public async Task WhenNoTimeoutSpecified_ThenDefaultCommitTimeoutIs30Seconds()
     {
         // Arrange & Assert
         // Verify the default timeout constant is 30 seconds
@@ -49,7 +49,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BeginTransactionAsync_WithCancelledToken_ThrowsOperationCanceledException()
+    public async Task WhenBeginCalledWithCancelledToken_ThenThrows()
     {
         // Arrange
         var context = CreateContext();
@@ -67,7 +67,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task Dispose_CalledMultipleTimes_IsIdempotent()
+    public async Task WhenDisposeCalledMultipleTimes_ThenIsIdempotent()
     {
         // Arrange
         var context = CreateContext();
@@ -87,7 +87,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithNoChanges_CompletesImmediately()
+    public async Task WhenCommittedWithNoChanges_ThenCompletesImmediately()
     {
         // Arrange
         var context = CreateContext();
@@ -104,7 +104,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task HasActiveTransaction_TracksCorrectly()
+    public async Task WhenTransactionBeginsAndEnds_ThenHasActiveTransactionTracksIt()
     {
         // Arrange
         var context = CreateContext();
@@ -128,7 +128,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task TransactionException_IsPartialSuccess_ReturnsCorrectValue()
+    public async Task WhenSomeChangesApplied_ThenIsPartialSuccessIsTrue()
     {
         // Arrange
         var context = CreateContext();
@@ -153,7 +153,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WriteProperty_DerivedProperty_NotCapturedInTransaction()
+    public async Task WhenDerivedPropertyChangesDuringTransaction_ThenItIsNotCaptured()
     {
         // Arrange
         var context = CreateContext();
@@ -177,7 +177,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_CalledSecondTime_ThrowsWithClearMessage()
+    public async Task WhenCommitCalledSecondTime_ThenThrowsAlreadyCommitted()
     {
         // Arrange
         var context = CreateContext();
@@ -196,7 +196,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public void WriteResult_IsPartialFailure_DistinguishesFromFullFailure()
+    public void WhenWriteResultIsPartialFailure_ThenItIsDistinctFromFullFailure()
     {
         // Arrange - create a dummy change for testing
         var dummyChanges = new SubjectPropertyChange[1];
@@ -215,7 +215,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public void WriteResult_Success_IsZeroAllocation()
+    public void WhenWriteResultSuccessReused_ThenBothValuesAreFullySuccessful()
     {
         // Act
         var success1 = WriteResult.Success;

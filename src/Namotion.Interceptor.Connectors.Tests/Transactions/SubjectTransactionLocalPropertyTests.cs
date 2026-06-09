@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionLocalPropertyTests : TransactionTestBase
 {
     [Fact]
-    public async Task BestEffortMode_LocalPropertyThrows_AppliesSuccessfulChanges()
+    public async Task WhenLocalPropertyThrowsInBestEffortMode_ThenSuccessfulChangesAreApplied()
     {
         // Arrange - PropertyB throws during commit, PropertyA succeeds
         var context = CreateContext();
@@ -41,7 +41,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_LocalPropertyThrows_RevertsAllChanges()
+    public async Task WhenLocalPropertyThrowsInRollbackMode_ThenAllChangesAreReverted()
     {
         // Arrange - PropertyB throws during commit, PropertyA succeeds initially
         var context = CreateContext();
@@ -67,7 +67,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_LocalPropertyThrows_RevertsExternalSources()
+    public async Task WhenLocalPropertyThrowsInRollbackMode_ThenExternalSourcesAreReverted()
     {
         // Arrange - FirstName has external source, PropertyB (local) throws during commit
         var context = CreateContext();
@@ -107,7 +107,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_LocalPropertyRevertThrows_ReportsMultipleFailures()
+    public async Task WhenLocalRevertAlsoThrowsInRollbackMode_ThenMultipleFailuresAreReported()
     {
         // Arrange - PropertyA applies successfully then throws on its revert; PropertyB throws on apply,
         // which triggers the rollback. The throw is sequence-based so PropertyA's apply succeeds (first
@@ -149,7 +149,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_LocalPropertyRevertThrows_ReportsForwardChangeNotInvertedRollback()
+    public async Task WhenLocalRevertThrowsInRollbackMode_ThenForwardChangeIsReportedNotInvertedRollback()
     {
         // Arrange - PropertyA applies successfully (false -> true) then throws on its revert; PropertyB
         // throws on apply (triggering the rollback). The throw is sequence-based so PropertyA's apply
@@ -198,7 +198,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task NoWriter_BestEffortMode_LocalPropertyThrows_AppliesSuccessfulChanges()
+    public async Task WhenLocalPropertyThrowsInBestEffortModeWithoutWriter_ThenSuccessfulChangesAreApplied()
     {
         // Arrange - Context without WithSourceTransactions(), only WithTransactions()
         var context = InterceptorSubjectContext
@@ -228,7 +228,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task NoWriter_RollbackMode_LocalPropertyThrows_RevertsSuccessfulChanges()
+    public async Task WhenLocalPropertyThrowsInRollbackModeWithoutWriter_ThenSuccessfulChangesAreReverted()
     {
         // Arrange - Context without WithSourceTransactions(), only WithTransactions()
         var context = InterceptorSubjectContext
@@ -258,7 +258,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task AllLocalPropertiesSucceed_NoException()
+    public async Task WhenAllLocalPropertiesSucceed_ThenCommitSucceeds()
     {
         // Arrange - No properties throw
         var context = CreateContext();
@@ -280,7 +280,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task MixedSourceAndLocal_SourceFails_LocalNotApplied_InRollbackMode()
+    public async Task WhenSourceFailsWithMixedChangesInRollbackMode_ThenLocalChangesAreNotApplied()
     {
         // Arrange - External source fails, local should not be applied in rollback mode
         var context = CreateContext();
@@ -306,7 +306,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task StagedExecution_ExternalSourcesWrittenBeforeLocalProperties()
+    public async Task WhenCommitting_ThenExternalSourcesAreWrittenBeforeLocalApplies()
     {
         // Arrange - Verify that external sources are written BEFORE local OnSet* methods are called
         var executionOrder = new List<string>();
@@ -351,7 +351,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task StagedExecution_SourceBoundPropertyOnSetThrows_RevertsExternalSources()
+    public async Task WhenSourceBoundApplyThrows_ThenExternalSourcesAreReverted()
     {
         // Arrange - Tests Stage 3 failure: source-bound property's OnSet* throws after external write succeeds
         // This is different from local property failure - it's when applying source-bound values to the local model fails
@@ -386,7 +386,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BestEffortMode_SourceBoundPropertyOnSetThrows_RevertsFailedSourceOnly()
+    public async Task WhenSourceBoundApplyThrowsInBestEffortMode_ThenOnlyFailedSourceIsReverted()
     {
         // Arrange - BestEffort mode should rollback failed property's source to maintain per-property consistency
         var context = CreateContext();
@@ -440,7 +440,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BestEffortMode_SourceBoundPropertyOnSetThrows_MaintainsPerPropertyConsistency()
+    public async Task WhenSourceBoundApplyThrowsInBestEffortMode_ThenPerPropertyConsistencyIsMaintained()
     {
         // Arrange - Verifies that each property stays in sync with its source
         var context = CreateContext();
@@ -480,7 +480,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_SingleSourceWithLocal_SourceBoundApplyThrows_RevertsEverything()
+    public async Task WhenSourceBoundApplyThrowsInRollbackModeWithSingleSource_ThenEverythingIsReverted()
     {
         // Arrange - One source bound to two device properties (PropertyA throws on apply,
         // PropertyB applies fine) plus a local (no-source) change. In Rollback mode an apply
@@ -542,7 +542,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BestEffortMode_SingleSourceWithLocal_SourceBoundApplyThrows_KeepsSuccessfulAndRevertsFailedSource()
+    public async Task WhenSourceBoundApplyThrowsInBestEffortModeWithSingleSource_ThenSuccessfulKeptAndFailedSourceReverted()
     {
         // Arrange - One source bound to two device properties (PropertyA throws on apply,
         // PropertyB applies fine) plus a local (no-source) change. In BestEffort mode the

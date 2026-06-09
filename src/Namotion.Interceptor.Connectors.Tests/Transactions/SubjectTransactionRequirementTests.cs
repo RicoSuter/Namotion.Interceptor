@@ -12,7 +12,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionRequirementTests : TransactionTestBase
 {
     [Fact]
-    public async Task SingleWriteRequirement_ThrowsException_WhenMultipleSources()
+    public async Task WhenSingleWriteRequirementWithMultipleSources_ThenCommitFails()
     {
         // Arrange
         var context = CreateContext();
@@ -53,7 +53,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task SingleWriteRequirement_ThrowsException_WhenChangesExceedBatchSize()
+    public async Task WhenSingleWriteRequirementExceedsBatchSize_ThenCommitFails()
     {
         // Arrange
         var context = CreateContext();
@@ -87,7 +87,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task SingleWriteRequirement_Succeeds_WhenRequirementsMet()
+    public async Task WhenSingleWriteRequirementIsMet_ThenCommitSucceeds()
     {
         // Arrange
         var context = CreateContext();
@@ -118,7 +118,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task SingleWriteRequirement_Succeeds_WithUnlimitedBatchSize()
+    public async Task WhenSingleWriteRequirementWithUnlimitedBatchSize_ThenCommitSucceeds()
     {
         // Arrange
         var context = CreateContext();
@@ -145,7 +145,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task SingleWriteRequirement_AllowsChangesWithoutSource()
+    public async Task WhenSingleWriteRequirementWithOnlyLocalChanges_ThenCommitSucceeds()
     {
         // Arrange
         var context = CreateContext();
@@ -167,7 +167,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task SingleWriteRequirement_AllowsMixedSourceAndNoSource()
+    public async Task WhenSingleWriteRequirementWithMixedChanges_ThenCommitSucceeds()
     {
         // Arrange
         var context = CreateContext();
@@ -194,7 +194,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [Theory]
     [InlineData(true)]  // Explicit TransactionRequirement.None
     [InlineData(false)] // Default (no requirement specified)
-    public async Task NoneRequirement_AllowsMultipleSources(bool explicitRequirement)
+    public async Task WhenNoneRequirementWithMultipleSources_ThenCommitSucceeds(bool explicitRequirement)
     {
         // Arrange
         var context = CreateContext();
@@ -222,7 +222,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task SingleWriteWithRollback_RevertsOnFailure_WithSingleSource()
+    public async Task WhenSingleWriteRequirementFailsInRollbackMode_ThenSingleSourceIsReverted()
     {
         // Arrange
         var context = CreateContext();
@@ -255,7 +255,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task SingleWriteRequirement_ValidationFailure_ReturnsChangesWithoutSourceAsSuccessful()
+    public async Task WhenSingleWriteRequirementValidationFails_ThenLocalChangesAreStillReportedSuccessful()
     {
         // Arrange
         // Tests that when SingleWrite validation fails (multiple sources),
@@ -312,7 +312,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task SingleWriteRequirement_BatchSizeViolation_ReturnsChangesWithoutSourceAsSuccessful()
+    public async Task WhenBatchSizeValidationFails_ThenLocalChangesAreStillReportedSuccessful()
     {
         // Arrange
         // Tests that when SingleWrite validation fails due to batch size,

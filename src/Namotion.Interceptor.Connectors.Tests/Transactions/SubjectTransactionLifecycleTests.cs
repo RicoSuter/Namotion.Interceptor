@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionLifecycleTests : TransactionTestBase
 {
     [Fact]
-    public async Task BeginTransaction_CreatesActiveTransaction()
+    public async Task WhenTransactionBegun_ThenItBecomesCurrent()
     {
         // Arrange
         var context = CreateContext();
@@ -24,7 +24,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task Dispose_CleansUpWithoutCommit_ImplicitRollback()
+    public async Task WhenDisposedWithoutCommit_ThenPendingChangesAreDiscarded()
     {
         // Arrange
         var context = CreateContext();
@@ -49,7 +49,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BeginTransaction_WhenNested_ThrowsInvalidOperationException()
+    public async Task WhenNestedTransactionAttempted_ThenThrows()
     {
         // Arrange
         var context = CreateContext();
@@ -63,7 +63,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithNoChanges_ReturnsImmediately()
+    public async Task WhenCommittedWithNoChanges_ThenReturnsImmediately()
     {
         // Arrange
         var context = CreateContext();
@@ -77,7 +77,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_AppliesChangesToModel()
+    public async Task WhenCommitted_ThenChangesAreAppliedToModel()
     {
         // Arrange
         var context = CreateContext();
@@ -97,7 +97,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_CleansUpPendingChanges()
+    public async Task WhenCommitted_ThenPendingChangesAreCleared()
     {
         // Arrange
         var context = CreateContext();
@@ -123,7 +123,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_AfterDispose_ThrowsObjectDisposedException()
+    public async Task WhenCommitCalledAfterDispose_ThenThrowsObjectDisposed()
     {
         // Arrange
         var context = CreateContext();
@@ -136,7 +136,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WhenCalledTwice_ThrowsInvalidOperationException()
+    public async Task WhenCommitCalledTwice_ThenThrows()
     {
         // Arrange
         var context = CreateContext();
@@ -157,7 +157,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task Dispose_CalledMultipleTimes_IsIdempotent()
+    public async Task WhenDisposeCalledMultipleTimes_ThenIsIdempotent()
     {
         // Arrange
         var context = CreateContext();
@@ -175,7 +175,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task AsyncLocalBehavior_CurrentClearedAfterUsingBlock()
+    public async Task WhenUsingBlockEnds_ThenCurrentTransactionIsCleared()
     {
         // Arrange
         var context = CreateContext();
@@ -193,7 +193,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public void InterceptorRegistration_TransactionBeforeObservable()
+    public void WhenContextCreated_ThenTransactionInterceptorPrecedesObservable()
     {
         // Arrange
         var context = CreateContext();

@@ -20,7 +20,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task OptimisticLocking_ConflictDetection_ThrowsWhenValueChangedExternally()
+    public async Task WhenValueChangedExternallyInOptimisticTransaction_ThenCommitThrowsConflict()
     {
         // Arrange
         // Optimistic transaction should detect conflicts when underlying value changes
@@ -56,7 +56,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task OptimisticLocking_AllowsConcurrentTransactionStart()
+    public async Task WhenMultipleOptimisticTransactionsBegin_ThenNoneBlocks()
     {
         // Arrange
         // Optimistic transactions should not block each other at start time
@@ -99,7 +99,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task ExclusiveLocking_BlocksOtherExclusiveTransactions()
+    public async Task WhenExclusiveTransactionActive_ThenOtherExclusiveTransactionWaits()
     {
         // Arrange
         // Exclusive transactions should serialize (one at a time)
@@ -162,7 +162,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task OptimisticLocking_WithConflictBehaviorIgnore_DoesNotThrowOnConflict()
+    public async Task WhenConflictIgnoredInOptimisticTransaction_ThenCommitSucceeds()
     {
         // Arrange
         // Optimistic transaction with Ignore conflict behavior should succeed even with conflicts
@@ -201,7 +201,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task OptimisticLocking_TransactionHasCorrectLockingValue()
+    public async Task WhenOptimisticTransactionBegun_ThenLockingIsOptimistic()
     {
         // Arrange
         var context = CreateContext();
@@ -216,7 +216,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task ExclusiveLocking_TransactionHasCorrectLockingValue()
+    public async Task WhenExclusiveTransactionBegun_ThenLockingIsExclusive()
     {
         // Arrange
         var context = CreateContext();
@@ -231,7 +231,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task DefaultLocking_IsExclusive()
+    public async Task WhenLockingNotSpecified_ThenDefaultIsExclusive()
     {
         // Arrange
         // The default locking mode should be Exclusive
@@ -245,7 +245,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task OptimisticLocking_DisposeCleansUpWithoutHoldingLock()
+    public async Task WhenOptimisticTransactionDisposedWithoutCommit_ThenNothingIsAppliedAndNewTransactionCanBegin()
     {
         // Arrange
         // Optimistic transactions should be disposable even if never committed
@@ -277,7 +277,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task OptimisticLocking_MultipleOptimisticCanCoexistInDifferentContexts()
+    public async Task WhenMultipleOptimisticTransactionsInSeparateFlows_ThenAllCanCoexist()
     {
         // Arrange
         // Multiple optimistic transactions in separate contexts should coexist without blocking
@@ -314,7 +314,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task OptimisticLocking_CommitSerializesWithExclusive()
+    public async Task WhenOptimisticCommitsWhileExclusiveActive_ThenCommitWaitsForExclusive()
     {
         // Arrange
         // When an optimistic transaction commits, it should wait for any exclusive transaction
@@ -386,7 +386,7 @@ public class SubjectTransactionOptimisticLockingTests
     }
 
     [Fact]
-    public async Task ExclusiveLocking_WaitsForOptimisticCommit()
+    public async Task WhenOptimisticCommitInProgress_ThenExclusiveBeginWaits()
     {
         // Arrange
         // An exclusive transaction should wait for an optimistic commit that's in progress
