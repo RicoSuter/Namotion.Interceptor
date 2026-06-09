@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionReconcileRegressionTests : TransactionTestBase
 {
     [Fact]
-    public async Task BestEffortMode_WhenSourceWriteFailsAndAnotherApplyFails_KeepsSuccessAndRevertsOnlyAppliedThenFailed()
+    public async Task WhenSourceWriteAndAnotherApplyFailInBestEffortMode_ThenSuccessIsKeptAndOnlyAppliedThenFailedIsReverted()
     {
         // Arrange - Three source-bound properties so the reconcile path sees BOTH a source-write
         // failure (failedSource.Count > 0) AND a local apply failure (applyFailed.Count > 0)
@@ -92,7 +92,7 @@ public class SubjectTransactionReconcileRegressionTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task OptimisticMode_WhenLockAcquireCancelled_TransactionRemainsRetryable()
+    public async Task WhenOptimisticLockAcquireCancelled_ThenTransactionRemainsRetryable()
     {
         // Arrange - Context with WithTransactions() but NOT WithSourceTransactions(): no writer, so
         // commit goes through the local path where the optimistic lock is acquired at commit time

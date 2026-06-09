@@ -26,7 +26,7 @@ public class SubjectPropertyChangeOperationsTests
     }
 
     [Fact]
-    public void ApplyAllChanges_Span_NoExclude_AppliesAll()
+    public void WhenApplyLocalChangesWithoutExclude_ThenAllChangesAreApplied()
     {
         // Arrange
         var context = CreateContext();
@@ -55,7 +55,7 @@ public class SubjectPropertyChangeOperationsTests
     }
 
     [Fact]
-    public void ApplyAllChanges_Span_WithExclude_SkipsExcluded()
+    public void WhenApplyLocalChangesWithExclude_ThenExcludedChangesAreSkipped()
     {
         // Arrange
         var context = CreateContext();
@@ -82,7 +82,7 @@ public class SubjectPropertyChangeOperationsTests
     }
 
     [Fact]
-    public void ApplyAllChanges_Span_WithOutOfOrderExclude_SkipsExcludedViaHashSet()
+    public void WhenExcludeIsOutOfOrder_ThenExcludedChangesAreStillSkipped()
     {
         // Arrange
         var context = CreateContext();
@@ -111,7 +111,7 @@ public class SubjectPropertyChangeOperationsTests
     }
 
     [Fact]
-    public void ApplyAllChanges_Span_WhenApplyFails_ReportsFailedAndErrors()
+    public void WhenApplyFails_ThenFailedChangesAndErrorsAreReported()
     {
         // Arrange
         var context = CreateContext();
@@ -137,7 +137,7 @@ public class SubjectPropertyChangeOperationsTests
     }
 
     [Fact]
-    public void ApplyAllChanges_Span_WithExcludeAndApplyFailure_PartitionsCorrectly()
+    public void WhenExcludeAndApplyFailureCombine_ThenChangesArePartitionedCorrectly()
     {
         // Arrange
         var context = CreateContext();

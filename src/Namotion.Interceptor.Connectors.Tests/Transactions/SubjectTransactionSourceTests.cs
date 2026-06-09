@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionSourceTests : TransactionTestBase
 {
     [Fact]
-    public void SetSource_StoresSourceReference()
+    public void WhenSetSourceCalled_ThenSourceReferenceIsStored()
     {
         // Arrange
         var context = CreateContext();
@@ -32,7 +32,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public void TryGetSource_WhenNoSourceSet_ReturnsFalse()
+    public void WhenNoSourceSet_ThenTryGetSourceReturnsFalse()
     {
         // Arrange
         var context = CreateContext();
@@ -48,7 +48,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public void SetSource_WhenCalledWithDifferentSource_ReturnsFalse()
+    public void WhenSetSourceCalledWithDifferentSource_ThenReturnsFalse()
     {
         // Arrange
         var context = CreateContext();
@@ -69,7 +69,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public void SetSource_WhenCalledWithSameSource_ReturnsTrue()
+    public void WhenSetSourceCalledWithSameSource_ThenReturnsTrue()
     {
         // Arrange
         var context = CreateContext();
@@ -87,7 +87,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public void RemoveSource_WithMatchingSource_ClearsSourceReference()
+    public void WhenRemoveSourceCalledWithMatchingSource_ThenSourceReferenceIsCleared()
     {
         // Arrange
         var context = CreateContext();
@@ -105,7 +105,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public void RemoveSource_WithDifferentSource_DoesNotClearSourceReference()
+    public void WhenRemoveSourceCalledWithDifferentSource_ThenSourceReferenceIsKept()
     {
         // Arrange
         var context = CreateContext();
@@ -125,7 +125,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithSourceBoundProperty_WritesToSource()
+    public async Task WhenSourceBoundPropertyCommitted_ThenSourceIsWritten()
     {
         // Arrange
         var context = CreateContext();
@@ -152,7 +152,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithSourceWriteFailure_ThrowsTransactionException()
+    public async Task WhenSourceWriteFails_ThenCommitThrowsTransactionException()
     {
         // Arrange
         var context = CreateContext();
@@ -181,7 +181,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithMixedSourceAndLocal_InBestEffortMode_AppliesLocalAndSuccessfulSource()
+    public async Task WhenMixedChangesCommittedInBestEffortMode_ThenLocalAndSuccessfulSourceChangesAreApplied()
     {
         // Arrange
         var context = CreateContext();
@@ -211,7 +211,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithMultipleSources_GroupsBySource()
+    public async Task WhenMultipleSourcesCommitted_ThenChangesAreGroupedBySource()
     {
         // Arrange
         var context = CreateContext();
@@ -258,7 +258,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithMultipleSourcesAndLocal_WritesSourcesAndAppliesLocal()
+    public async Task WhenMultipleSourcesAndLocalCommitted_ThenSourcesAreWrittenAndLocalApplied()
     {
         // Arrange - two distinct sources plus a local (no-source) change in one transaction;
         // exercises the grouped path with a non-empty local set.
@@ -307,7 +307,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithSingleSourceAndLocal_WritesOnlySourceBoundAndAppliesLocal()
+    public async Task WhenSingleSourceAndLocalCommitted_ThenOnlySourceBoundChangesAreWrittenToSource()
     {
         // Arrange - two source-bound changes on one source plus a local change interleaved between
         // them; directly exercises the single-source path's source/local separation (two-pointer).
@@ -351,7 +351,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_UserCancellationIsIgnored_CommitSucceeds()
+    public async Task WhenUserTokenCancelledDuringCommit_ThenCommitStillSucceeds()
     {
         // Arrange
         var context = CreateContext();
@@ -381,7 +381,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithCommitTimeout_TimesOutAndFails()
+    public async Task WhenSourceWriteExceedsCommitTimeout_ThenCommitFails()
     {
         // Arrange
         var context = CreateContext();
@@ -395,7 +395,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                 // Simulate slow write that will be cancelled by timeout
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(10), ct);
+                    await Task.Delay(Timeout.Infinite, ct);
                     return WriteResult.Success;
                 }
                 catch (OperationCanceledException)
@@ -425,7 +425,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task Integration_WithMockSource_VerifyWriteChangesAsyncCalled()
+    public async Task WhenSourceBoundPropertyCommitted_ThenWriteChangesAsyncIsCalledOnce()
     {
         // Arrange
         var context = CreateContext();
@@ -470,7 +470,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithMultipleContexts_ResolvesCallbacksPerContext()
+    public async Task WhenSubjectsFromMultipleContextsCommitted_ThenCallbacksResolvePerContext()
     {
         // Arrange
         var context1 = CreateContext();
@@ -524,7 +524,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithPartialWriteFailure_ReportsOnlyFailedChanges()
+    public async Task WhenSourcePartiallyFails_ThenOnlyFailedChangesAreReported()
     {
         // Arrange
         // Tests the path where WriteResult.FailedChanges contains specific failed changes
@@ -580,7 +580,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithPartialWriteFailure_InRollbackMode_RevertsSuccessfulChanges()
+    public async Task WhenSourcePartiallyFailsInRollbackMode_ThenSuccessfulChangesAreReverted()
     {
         // Arrange
         // Tests that partial failure triggers rollback for successful changes
@@ -632,7 +632,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_WhenSourceRemovedDuringWrite_StillRevertsToOriginalSource()
+    public async Task WhenSourceRemovedDuringWriteInRollbackMode_ThenRevertStillTargetsOriginalSource()
     {
         // Arrange - A source S is bound to a property. A local property fails to apply during commit,
         // which (in Rollback mode) triggers a revert of the already-written source change. The source's
@@ -686,7 +686,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task Dispose_DuringInFlightCommit_DoesNotReturnLiveBufferToPool()
+    public async Task WhenDisposedDuringInFlightCommit_ThenLiveBufferIsNotReturnedToPool()
     {
         // Arrange - Reproduces the genuine interleaving the pool-return guard protects against:
         //   A (transaction A) parks inside its source writer with _isCommitting == true and its pending
@@ -776,7 +776,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task Dispose_DuringInFlightExclusiveCommit_ReleasesLockAfterCommitCompletes()
+    public async Task WhenDisposedDuringInFlightExclusiveCommit_ThenLockIsReleasedAfterCommitCompletes()
     {
         // A disposed-but-still-committing transaction holds the exclusive (per-context) transaction lock
         // until its commit actually finishes; Dispose defers releasing it to EndCommit. This verifies:
@@ -845,8 +845,15 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
     private static async Task<bool> WaitWithTimeout(Task task, TimeSpan timeout)
     {
-        var completed = await Task.WhenAny(task, Task.Delay(timeout)).ConfigureAwait(false);
-        return completed == task;
+        try
+        {
+            await task.WaitAsync(timeout).ConfigureAwait(false);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -873,7 +880,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_MultiSource_SourceReappearsAfterSwitch_PreservesGroupingAndOrder()
+    public async Task WhenSourceReappearsAfterSwitch_ThenGroupingAndOrderArePreserved()
     {
         // Arrange - commit order A, B, A: P0 (FirstName) and P2 (FirstName_MaxLength_Unit) bind to sourceA,
         // P1 (LastName) binds to sourceB. The trailing A change must route into the EXISTING sourceA group
@@ -913,7 +920,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_MultiSource_LateSwitchWithInterleavedLocals_GroupsSourceBoundOnly()
+    public async Task WhenLateSourceSwitchWithInterleavedLocals_ThenOnlySourceBoundChangesAreGrouped()
     {
         // Arrange - commit order: P0 (FirstName) -> sourceA, P1 (FirstName_MaxLength) local (no source),
         // P2 (FirstName_MaxLength_Unit) -> sourceA, P3 (LastName) -> sourceB. The interleaved local must be
@@ -958,7 +965,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_SingleSource_WithTrailingLocals_WritesExactlySourceBound()
+    public async Task WhenSingleSourceWithTrailingLocals_ThenExactlySourceBoundChangesAreWritten()
     {
         // Arrange - P0 (FirstName) and P1 (LastName) bind to sourceA; P2 (FirstName_MaxLength) and
         // P3 (FirstName_MaxLength_Unit) are local. The single-source buffer is sized to the full change
