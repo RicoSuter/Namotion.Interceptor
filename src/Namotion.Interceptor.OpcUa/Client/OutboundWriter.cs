@@ -16,6 +16,12 @@ internal sealed class OutboundWriter
     private readonly ThroughputCounter _outgoingThroughput;
     private readonly ILogger _logger;
 
+    // Tracks NodeIds already reported as permanently dropped so the warning fires once per node per session.
+    // Cleared on session change via ClearReportedDroppedNodes; lock protects the rare write-path Add against
+    // the session-change clear, which runs from the SessionManager drain loop on a different task.
+    private readonly Lock _reportedDroppedNodeIdsLock = new();
+    private readonly HashSet<NodeId> _reportedDroppedNodeIds = [];
+
     public OutboundWriter(
         SessionManager sessionManager,
         OpcUaClientConfiguration configuration,
@@ -31,6 +37,17 @@ internal sealed class OutboundWriter
     }
 
     public int WriteBatchSize => (int)(_sessionManager.CurrentSession?.OperationLimits?.MaxNodesPerWrite ?? 0);
+
+    // Called by OpcUaSubjectClientSource.OnCurrentSessionChanged. A new session can have different permissions,
+    // address-space membership, and AccessLevel attributes, so previously-dropped NodeIds may now write
+    // successfully (or still fail and deserve a fresh log line for operator visibility).
+    internal void ClearReportedDroppedNodes()
+    {
+        lock (_reportedDroppedNodeIdsLock)
+        {
+            _reportedDroppedNodeIds.Clear();
+        }
+    }
 
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
@@ -49,14 +66,7 @@ internal sealed class OutboundWriter
             }
 
             var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
-            var result = ProcessWriteResults(writeResponse.Results, changes);
-            if (result.IsFullySuccessful || result.IsPartialFailure)
-            {
-                _outgoingThroughput.Add(writeValues.Count - (result.FailedChanges.IsDefault ? 0 : result.FailedChanges.Length));
-                NotifyPropertiesWritten(changes);
-            }
-
-            return result;
+            return ProcessWriteResults(writeResponse.Results, changes);
         }
         catch (InvalidCastException ex)
         {
@@ -84,6 +94,15 @@ internal sealed class OutboundWriter
         return StatusCode.IsBad(statusCode);
     }
 
+    // Permanent within a session per OPC UA spec for schema/type codes; spec-allowed but rare in practice
+    // for the state-dependent codes (BadNodeIdUnknown, BadUserAccessDenied, BadNotWritable). All six are
+    // dropped by default; OpcUaClientConfiguration.DropPermanentWriteFailures lets users opt back into retry.
+    internal static bool IsPermanentWriteError(StatusCode statusCode)
+        => StatusCode.IsBad(statusCode) && !IsTransientWriteError(statusCode);
+
+    internal static bool ShouldDropFailedWrite(StatusCode statusCode, bool dropPermanentWriteFailures)
+        => dropPermanentWriteFailures && IsPermanentWriteError(statusCode);
+
     private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
     {
         var failureCount = 0;
@@ -97,39 +116,75 @@ internal sealed class OutboundWriter
 
         if (failureCount == 0)
         {
+            _outgoingThroughput.Add(results.Count);
+            NotifyPropertiesWritten(allChanges);
             return WriteResult.Success;
         }
 
-        var failedChanges = new List<SubjectPropertyChange>(failureCount);
+        var dropPermanent = _configuration.DropPermanentWriteFailures;
+        var retryableFailures = new List<SubjectPropertyChange>(failureCount);
+        List<NodeId>? newlyDroppedNodeIds = null;
+        var droppedPermanentCount = 0;
         var transientCount = 0;
         var resultIndex = 0;
         var span = allChanges.Span;
         for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
         {
             var change = span[i];
-            if (!TryGetWritableNodeId(change, out _, out _))
+            if (!TryGetWritableNodeId(change, out var nodeId, out _))
                 continue;
 
-            if (!StatusCode.IsGood(results[resultIndex]))
+            var status = results[resultIndex];
+            if (!StatusCode.IsGood(status))
             {
-                failedChanges.Add(change);
-                if (IsTransientWriteError(results[resultIndex]))
-                    transientCount++;
+                if (ShouldDropFailedWrite(status, dropPermanent))
+                {
+                    droppedPermanentCount++;
+                    bool isFirstOccurrence;
+                    lock (_reportedDroppedNodeIdsLock)
+                    {
+                        isFirstOccurrence = _reportedDroppedNodeIds.Add(nodeId);
+                    }
+                    if (isFirstOccurrence)
+                    {
+                        newlyDroppedNodeIds ??= [];
+                        newlyDroppedNodeIds.Add(nodeId);
+                    }
+                }
+                else
+                {
+                    retryableFailures.Add(change);
+                    if (IsTransientWriteError(status))
+                        transientCount++;
+                }
             }
             resultIndex++;
         }
 
-        var successCount = results.Count - failedChanges.Count;
-        var permanentCount = failedChanges.Count - transientCount;
+        var permanentCount = retryableFailures.Count - transientCount + droppedPermanentCount;
+        var successCount = results.Count - (retryableFailures.Count + droppedPermanentCount);
+
+        if (newlyDroppedNodeIds is not null)
+        {
+            _logger.LogWarning(
+                "OPC UA write: dropping {Count} permanently-failing write(s) from retry queue (first occurrence for these NodeIds). NodeIds: {NodeIds}.",
+                newlyDroppedNodeIds.Count, newlyDroppedNodeIds);
+        }
 
         _logger.LogWarning(
             "OPC UA write batch partial failure: {SuccessCount} succeeded, {TransientCount} transient, {PermanentCount} permanent out of {TotalCount}.",
             successCount, transientCount, permanentCount, results.Count);
 
+        if (successCount > 0)
+        {
+            _outgoingThroughput.Add(successCount);
+            NotifyPropertiesWritten(allChanges);
+        }
+
         var error = new OpcUaWriteException(transientCount, permanentCount, results.Count);
         return successCount > 0
-            ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
-            : WriteResult.Failure(failedChanges.ToArray(), error);
+            ? WriteResult.PartialFailure(retryableFailures.ToArray(), error)
+            : WriteResult.Failure(retryableFailures.ToArray(), error);
     }
 
     private bool TryGetWritableNodeId(SubjectPropertyChange change, out NodeId nodeId, out RegisteredSubjectProperty registeredProperty)
