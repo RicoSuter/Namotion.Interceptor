@@ -248,7 +248,15 @@ public sealed class SubjectTransaction : IDisposable
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
-    /// <exception cref="SubjectTransactionException">Thrown when one or more changes failed to commit.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when commit is called from a different async flow than the one the transaction is active in,
+    /// when the transaction was already committed, or when another commit is already in progress.
+    /// </exception>
+    /// <exception cref="SubjectTransactionException">
+    /// Thrown when one or more changes failed to commit. If a registered <see cref="ITransactionWriter"/>
+    /// throws instead of reporting failures, all changes are reported as failed and the transaction becomes
+    /// terminal (it cannot be retried and must be disposed); its sources may be left un-reverted.
+    /// </exception>
     public ValueTask CommitAsync(CancellationToken cancellationToken)
     {
         ValidateCanCommit();

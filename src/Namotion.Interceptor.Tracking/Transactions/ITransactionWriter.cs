@@ -17,9 +17,10 @@ public interface ITransactionWriter
     /// </summary>
     /// <remarks>
     /// Implementations must REPORT per-source failures via <see cref="SourceWriteResult"/> rather than
-    /// throwing. This contract is load-bearing: a thrown exception propagates past the transaction's
-    /// reconcile logic and bypasses source revert, leaving already-succeeded writes from other sources
-    /// applied at their sources.
+    /// throwing. This contract is load-bearing: if an implementation throws, the transaction has no
+    /// <see cref="SourceWriteResult"/> to revert with, so it treats the commit as a full failure (every
+    /// change reported failed, nothing applied to the local model) and becomes terminal; any writes that
+    /// already reached other sources are left applied and un-reverted.
     /// </remarks>
     /// <param name="changes">The property changes to classify and write.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
