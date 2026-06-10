@@ -160,6 +160,7 @@ internal static class SubjectPropertyChangeOperations
             return;
         }
 
+        // Linear scan stays allocation-free; O(n*m) is fine for m <= 8 and typical commits are smaller.
         if (replacements.Count <= 8)
         {
             for (var i = 0; i < changes.Length; i++)

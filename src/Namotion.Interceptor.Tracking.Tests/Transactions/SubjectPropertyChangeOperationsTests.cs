@@ -173,7 +173,7 @@ public class SubjectPropertyChangeOperationsTests
     public void WhenSubstituteByPropertyWithFewReplacements_ThenMatchingEntriesAreReplacedInPlace()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var context = CreateContext();
         var person = new Person(context);
         var firstName = new PropertyReference(person, nameof(Person.FirstName));
         var lastName = new PropertyReference(person, nameof(Person.LastName));
@@ -198,7 +198,7 @@ public class SubjectPropertyChangeOperationsTests
     public void WhenSubstituteByPropertyWithManyReplacements_ThenOrderIsPreserved()
     {
         // Arrange: more than 8 replacements forces the dictionary path
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var context = CreateContext();
         var source = new object();
         var changes = new SubjectPropertyChange[10];
         var people = new Person[10];
@@ -226,7 +226,7 @@ public class SubjectPropertyChangeOperationsTests
     public void WhenSubstituteByPropertyWithEmptyReplacements_ThenNothingChanges()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var context = CreateContext();
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var changes = new[] { SubjectPropertyChange.Create(property, null, DateTimeOffset.UtcNow, null, "a", "b") };
