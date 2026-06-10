@@ -1,3 +1,4 @@
+using System.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -166,5 +167,74 @@ public class SubjectPropertyChangeOperationsTests
         Assert.Contains(third, successful);
         Assert.DoesNotContain(failing, successful);
         Assert.DoesNotContain(excluded, successful);
+    }
+
+    [Fact]
+    public void WhenSubstituteByPropertyWithFewReplacements_ThenMatchingEntriesAreReplacedInPlace()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context);
+        var firstName = new PropertyReference(person, nameof(Person.FirstName));
+        var lastName = new PropertyReference(person, nameof(Person.LastName));
+        var changes = new[]
+        {
+            SubjectPropertyChange.Create(firstName, null, DateTimeOffset.UtcNow, null, "a", "b"),
+            SubjectPropertyChange.Create(lastName, null, DateTimeOffset.UtcNow, null, "c", "d"),
+        };
+        var source = new object();
+        var replacements = new[] { changes[0].WithSource(source) };
+
+        // Act
+        SubjectPropertyChangeOperations.SubstituteByProperty(changes.AsSpan(), replacements);
+
+        // Assert
+        Assert.Same(source, changes[0].Source);
+        Assert.Equal("b", changes[0].GetNewValue<string>());
+        Assert.Null(changes[1].Source);
+    }
+
+    [Fact]
+    public void WhenSubstituteByPropertyWithManyReplacements_ThenOrderIsPreserved()
+    {
+        // Arrange: more than 8 replacements forces the dictionary path
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var source = new object();
+        var changes = new SubjectPropertyChange[10];
+        var people = new Person[10];
+        for (var i = 0; i < 10; i++)
+        {
+            people[i] = new Person(context);
+            var property = new PropertyReference(people[i], nameof(Person.FirstName));
+            changes[i] = SubjectPropertyChange.Create(property, null, DateTimeOffset.UtcNow, null, "old" + i, "new" + i);
+        }
+        var replacements = changes.Select(c => c.WithSource(source)).ToArray();
+
+        // Act
+        SubjectPropertyChangeOperations.SubstituteByProperty(changes.AsSpan(), replacements);
+
+        // Assert: every slot replaced, order and values unchanged
+        for (var i = 0; i < 10; i++)
+        {
+            Assert.Same(source, changes[i].Source);
+            Assert.Equal("new" + i, changes[i].GetNewValue<string>());
+            Assert.Same(people[i], changes[i].Property.Subject);
+        }
+    }
+
+    [Fact]
+    public void WhenSubstituteByPropertyWithEmptyReplacements_ThenNothingChanges()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        var changes = new[] { SubjectPropertyChange.Create(property, null, DateTimeOffset.UtcNow, null, "a", "b") };
+
+        // Act
+        SubjectPropertyChangeOperations.SubstituteByProperty(changes.AsSpan(), []);
+
+        // Assert
+        Assert.Null(changes[0].Source);
     }
 }

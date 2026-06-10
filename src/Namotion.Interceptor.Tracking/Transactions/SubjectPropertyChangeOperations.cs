@@ -145,6 +145,54 @@ internal static class SubjectPropertyChangeOperations
             newValue: change.GetOldValue<object?>());
 
     /// <summary>
+    /// Replaces entries in <paramref name="changes"/> with the variant from
+    /// <paramref name="replacements"/> that has the same <see cref="SubjectPropertyChange.Property"/>,
+    /// preserving the span's order. Used to swap the writer's source-marked written changes into the
+    /// commit snapshot so the apply pass publishes them with the confirming source. Small replacement
+    /// sets use a linear scan to stay allocation-free for typical transaction sizes.
+    /// </summary>
+    internal static void SubstituteByProperty(
+        Span<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> replacements)
+    {
+        if (replacements.Count == 0)
+        {
+            return;
+        }
+
+        if (replacements.Count <= 8)
+        {
+            for (var i = 0; i < changes.Length; i++)
+            {
+                for (var j = 0; j < replacements.Count; j++)
+                {
+                    if (PropertyReference.Comparer.Equals(changes[i].Property, replacements[j].Property))
+                    {
+                        changes[i] = replacements[j];
+                        break;
+                    }
+                }
+            }
+            return;
+        }
+
+        var byProperty = new Dictionary<PropertyReference, SubjectPropertyChange>(
+            replacements.Count, PropertyReference.Comparer);
+        foreach (var replacement in replacements)
+        {
+            byProperty[replacement.Property] = replacement;
+        }
+
+        for (var i = 0; i < changes.Length; i++)
+        {
+            if (byProperty.TryGetValue(changes[i].Property, out var replacement))
+            {
+                changes[i] = replacement;
+            }
+        }
+    }
+
+    /// <summary>
     /// Returns the subset of <paramref name="written"/> whose property also appears in
     /// <paramref name="failed"/> (matched by <see cref="SubjectPropertyChange.Property"/>).
     /// </summary>
