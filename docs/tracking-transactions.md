@@ -501,16 +501,16 @@ try
 }
 catch (SubjectTransactionConflictException ex)
 {
-    // Conflict detected before any writes — pending changes are still intact.
+    // Conflict detected before any writes: pending changes are still intact.
     // Re-read current state, adjust, and retry.
     motor.MaxAllowedSpeed = 250;
     await transaction.CommitAsync(cancellationToken);
 }
 ```
 
-Post-write failures (`SubjectTransactionException` from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible — dispose the transaction and start a new one.
+Post-write failures (`SubjectTransactionException` from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible. Dispose the transaction and start a new one.
 
-Note that concurrent `CommitAsync` calls on the same transaction are rejected — only one commit attempt can be in progress at a time.
+Note that concurrent `CommitAsync` calls on the same transaction are rejected: only one commit attempt can be in progress at a time.
 
 ### Thread Safety
 
