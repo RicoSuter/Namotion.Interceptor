@@ -20,25 +20,25 @@ public interface ITransactionWriter
     /// throwing: reverting requires the written set and revert state returned here. A throw returns
     /// neither, so the transaction fails terminally with every change reported as failed and any writes
     /// that already reached other sources left un-reverted.
-    /// Each written change must be returned with its <see cref="SubjectPropertyChange.Source"/> set
-    /// to the source that accepted it, so the commit's local apply is recognized as an echo by outbound
-    /// connector queues. Changes returned without that source are not recognized as echoes, and the
-    /// background change queue pushes their committed values to the source again.
-    /// Each written change must also carry its snapshot index in <see cref="SourceWriteResult.WrittenIndices"/>:
-    /// <c>WrittenIndices[k]</c> is the position of <c>Written[k]</c> in <paramref name="changes"/>. The commit
-    /// substitutes the source-marked variants by index; an index that is out of range or addresses a
-    /// different property fails the commit terminally.
+    /// For each change a source accepts, the implementation must replace that slot in <paramref name="changes"/>
+    /// with the same change marked by the accepting source (<see cref="SubjectPropertyChange.WithSource"/>),
+    /// and only after the source write succeeded. Marking a slot lets the commit's local apply and any local
+    /// revert publish notifications that the outbound connector queue for that source recognizes as echoes;
+    /// failed and never-written slots must be left untouched. The implementation must change only the
+    /// <see cref="SubjectPropertyChange.Source"/> of a slot, never move a change to a different slot.
+    /// <paramref name="changes"/> is a pooled buffer owned by the commit: it must not be retained or mutated
+    /// after the returned task completes. When writing to multiple sources in parallel, each writer must
+    /// touch only the slots of the changes bound to its own source.
     /// </remarks>
-    /// <param name="changes">The property changes to classify and write.</param>
+    /// <param name="changes">The commit snapshot to classify, write, and mark in place.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>
     /// The result reporting which source-bound changes reached their source (<see cref="SourceWriteResult.Written"/>),
-    /// their snapshot indices (<see cref="SourceWriteResult.WrittenIndices"/>), which failed
-    /// (<see cref="SourceWriteResult.Failed"/>), and the corresponding errors.
+    /// which failed (<see cref="SourceWriteResult.Failed"/>), and the corresponding errors.
     /// </returns>
     ValueTask<SourceWriteResult> WriteToSourcesAsync(
-        ReadOnlyMemory<SubjectPropertyChange> changes,
+        Memory<SubjectPropertyChange> changes,
         TransactionRequirement requirement,
         CancellationToken cancellationToken);
 

@@ -389,6 +389,11 @@ public sealed class SubjectTransaction : IDisposable
         Memory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
+        // The writer marks each accepted snapshot slot with the confirming source, so the local apply and
+        // any local revert publish notifications that the outbound connector queue for that source
+        // recognizes as echoes instead of re-pushing committed values (#343).
+        var integrityCheck = CaptureSnapshotIntegrity(changes.Span);
+
         // A writer that throws instead of reporting via SourceWriteResult returns neither the written
         // set nor the revert state, so sources cannot be reverted. Report a full failure instead; the
         // caller routes it through FinishCommit(), making the transaction terminal. Only the commit
@@ -409,27 +414,9 @@ public sealed class SubjectTransaction : IDisposable
                 errors: [exception]);
         }
 
-        var (written, writtenIndices, failedSource, sourceErrors, revertState) = writeResult;
+        VerifySnapshotIntegrity(integrityCheck, changes.Span);
 
-        // Swap the writer's source-marked variants into the snapshot so the local apply and any
-        // local revert publish notifications carrying the confirming source; outbound connector
-        // queues then recognize them as echoes instead of re-pushing committed values (#343).
-        // The writer cannot mark the snapshot itself: it receives it read-only and returns the
-        // written set with each entry's snapshot index, since flattening per source loses positions.
-        if (!SubjectPropertyChangeOperations.TrySubstituteAtIndices(changes.Span, written, writtenIndices))
-        {
-            // Writer contract violation discovered after sources were written: the indices do not
-            // locate the written changes in the snapshot. The written set and revert state are still
-            // trustworthy, so revert what reached a source, then fail terminally (do not throw out of
-            // this method, which would leave the transaction retryable with sources already written).
-            var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
-            return new SubjectTransactionException(
-                "The transaction writer returned indices that do not match the commit snapshot. " +
-                "Source writes were reverted; the transaction is terminal and must be disposed, not retried.",
-                appliedChanges: [],
-                failedChanges: SubjectPropertyChangeOperations.Concat(changes.ToArray(), revert.Failed),
-                errors: SubjectPropertyChangeOperations.Concat(sourceErrors, revert.Errors));
-        }
+        var (written, failedSource, sourceErrors, revertState) = writeResult;
 
         // Rollback with any source-write failure: nothing is applied to the local model; revert what reached
         // a source and report. The local (no-source) changes are never applied, but they are still
@@ -486,6 +473,50 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Captures the property of every snapshot slot before the writer runs, so the post-write sweep can
+    /// confirm the writer only changed Source fields and never moved a change to a different slot.
+    /// Returns null in release builds so the sweep compiles away and costs nothing.
+    /// </summary>
+    private static PropertyReference[]? CaptureSnapshotIntegrity(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+#if DEBUG
+        var properties = new PropertyReference[changes.Length];
+        for (var i = 0; i < changes.Length; i++)
+        {
+            properties[i] = changes[i].Property;
+        }
+        return properties;
+#else
+        return null;
+#endif
+    }
+
+    /// <summary>
+    /// Verifies that every snapshot slot still holds the property captured before the writer ran, catching
+    /// a writer that violates the in-place marking contract by writing a different property into a slot.
+    /// Runs only in debug builds (test and CI runs build Debug by default).
+    /// </summary>
+    [System.Diagnostics.Conditional("DEBUG")]
+    private static void VerifySnapshotIntegrity(PropertyReference[]? captured, ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        if (captured is null)
+        {
+            return;
+        }
+
+        for (var i = 0; i < changes.Length; i++)
+        {
+            if (!PropertyReference.Comparer.Equals(changes[i].Property, captured[i]))
+            {
+                throw new InvalidOperationException(
+                    "The transaction writer violated its contract: it changed the property at snapshot slot " +
+                    $"{i} instead of only marking the accepting source. A writer must change only the Source " +
+                    "of an accepted slot and must never move a change to a different slot.");
+            }
+        }
     }
 
     /// <summary>

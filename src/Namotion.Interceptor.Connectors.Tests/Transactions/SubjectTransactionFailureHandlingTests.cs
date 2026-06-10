@@ -15,7 +15,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     private sealed class ThrowingTransactionWriter : ITransactionWriter
     {
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            ReadOnlyMemory<SubjectPropertyChange> changes,
+            Memory<SubjectPropertyChange> changes,
             TransactionRequirement requirement,
             CancellationToken cancellationToken)
             => throw new InvalidOperationException("Writer boom");
@@ -65,7 +65,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     private sealed class ThrowingRevertTransactionWriter : ITransactionWriter
     {
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            ReadOnlyMemory<SubjectPropertyChange> changes,
+            Memory<SubjectPropertyChange> changes,
             TransactionRequirement requirement,
             CancellationToken cancellationToken)
         {
@@ -74,7 +74,6 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
             var span = changes.Span;
             return new(new SourceWriteResult(
                 Written: [span[0]],
-                WrittenIndices: [0],
                 Failed: [span[1]],
                 Errors: [new InvalidOperationException("Source boom")],
                 RevertState: null));

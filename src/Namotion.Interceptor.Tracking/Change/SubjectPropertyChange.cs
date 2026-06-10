@@ -199,11 +199,11 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     /// <summary>
-    /// Copies this change with a different source, without re-boxing the values. Lets the transaction
-    /// writer mark written changes as confirmed by the source that accepted them.
+    /// Copies this change with a different source, without re-boxing the values. A transaction writer
+    /// uses this to mark an accepted change with the source that confirmed it.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal SubjectPropertyChange WithSource(object? source) =>
+    public SubjectPropertyChange WithSource(object? source) =>
         new(Property,
             source,
             ChangedTimestamp,

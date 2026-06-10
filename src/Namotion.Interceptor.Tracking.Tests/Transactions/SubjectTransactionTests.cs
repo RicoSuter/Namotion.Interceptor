@@ -577,78 +577,97 @@ public class SubjectTransactionTests
     }
 
     /// <summary>
-    /// Reports every change as written but with each change's snapshot index shifted onto a different
-    /// property (a left rotation), so the indices do not locate the written changes. Records the written
-    /// set it was asked to revert.
+    /// Writes nothing to any source but marks each accepted snapshot slot with a fixed source in place,
+    /// emulating a custom writer fulfilling the in-place marking contract.
     /// </summary>
-    private sealed class WrongIndicesTransactionWriter : ITransactionWriter
+    private sealed class MarkingTransactionWriter(object source) : ITransactionWriter
     {
-        public IReadOnlyList<SubjectPropertyChange>? RevertedWritten { get; private set; }
-
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            ReadOnlyMemory<SubjectPropertyChange> changes,
+            Memory<SubjectPropertyChange> changes,
             TransactionRequirement requirement,
             CancellationToken cancellationToken)
         {
             var span = changes.Span;
-            var written = new SubjectPropertyChange[span.Length];
-            var indices = new int[span.Length];
             for (var i = 0; i < span.Length; i++)
             {
-                written[i] = span[i];
-                // Rotate indices left by one so each written change is pointed at a neighbour with a
-                // different property (with at least two changes this guarantees a property mismatch).
-                indices[i] = (i + 1) % span.Length;
+                span[i] = span[i].WithSource(source);
             }
-
-            return new ValueTask<SourceWriteResult>(new SourceWriteResult(
-                Written: written,
-                WrittenIndices: indices,
-                Failed: [],
-                Errors: [],
-                RevertState: new object()));
+            return new ValueTask<SourceWriteResult>(new SourceWriteResult([], [], [], RevertState: null));
         }
 
         public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
             IReadOnlyList<SubjectPropertyChange> written,
             object? revertState,
             CancellationToken cancellationToken)
-        {
-            RevertedWritten = written;
-            return new ValueTask<SourceRevertResult>(new SourceRevertResult([], []));
-        }
+            => new(new SourceRevertResult([], []));
     }
 
     [Fact]
-    public async Task WhenWriterReturnsMismatchedIndices_ThenCommitFailsTerminallyAfterReverting()
+    public async Task WhenCustomWriterMarksSnapshotInPlace_ThenApplyNotificationsCarryThatSource()
+    {
+        // Arrange
+        var source = new object();
+        var changes = new List<SubjectPropertyChange>();
+        var context = CreateTransactionContext();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        context.AddService<ITransactionWriter>(new MarkingTransactionWriter(source));
+
+        var person = new Person(context);
+        changes.Clear();
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert: the local apply published the FirstName change carrying the writer's source.
+        var firstNameChange = Assert.Single(changes, c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Same(source, firstNameChange.Source);
+        Assert.Equal("John", firstNameChange.GetNewValue<string?>());
+    }
+
+    /// <summary>
+    /// Violates the in-place marking contract: instead of only marking the source, it overwrites the first
+    /// snapshot slot with a change for a DIFFERENT property, which the debug integrity sweep must catch.
+    /// </summary>
+    private sealed class SlotCorruptingTransactionWriter : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+        {
+            var span = changes.Span;
+            // Overwrite slot 0 with the change that belongs to slot 1, so slot 0 now holds a different property.
+            span[0] = span[1];
+            return new ValueTask<SourceWriteResult>(new SourceWriteResult([], [], [], RevertState: null));
+        }
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
+    }
+
+    [Fact]
+    public async Task WhenWriterCorruptsSnapshotSlot_ThenCommitThrowsWriterContractViolation()
     {
         // Arrange
         var context = CreateTransactionContext();
-        var writer = new WrongIndicesTransactionWriter();
-        context.AddService<ITransactionWriter>(writer);
+        context.AddService<ITransactionWriter>(new SlotCorruptingTransactionWriter());
 
         var person = new Person(context);
 
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        // Act
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        Assert.Contains("indices", exception.Message);
-        Assert.Empty(exception.AppliedChanges);
-        Assert.Equal(2, exception.FailedChanges.Count); // every snapshot change reported as failed
-        Assert.NotNull(writer.RevertedWritten); // reverts were attempted with the written set
-        Assert.Equal(2, writer.RevertedWritten!.Count);
-        Assert.Null(person.FirstName); // local model untouched (nothing applied)
-        Assert.Null(person.LastName);
-
-        // Terminal: a second commit is rejected, not retried.
-        var second = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        Assert.Contains("already been committed", second.Message);
+        Assert.Contains("contract", exception.Message);
     }
 }

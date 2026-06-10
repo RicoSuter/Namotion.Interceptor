@@ -145,43 +145,6 @@ internal static class SubjectPropertyChangeOperations
             newValue: change.GetOldValue<object?>());
 
     /// <summary>
-    /// Substitutes <paramref name="replacements"/> into <paramref name="changes"/> at
-    /// <paramref name="indices"/> after validating that every index is in range and addresses the
-    /// entry with the same <see cref="SubjectPropertyChange.Property"/>. Validates everything before
-    /// writing anything, so a contract violation leaves the span untouched. Returns false on any
-    /// mismatch (count, range, or property identity).
-    /// </summary>
-    internal static bool TrySubstituteAtIndices(
-        Span<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange> replacements,
-        IReadOnlyList<int> indices)
-    {
-        if (replacements.Count != indices.Count)
-        {
-            return false;
-        }
-
-        // Validate every slot before writing any, so a contract violation leaves the span untouched
-        // and the caller can compensate without a half-substituted snapshot.
-        for (var k = 0; k < replacements.Count; k++)
-        {
-            var index = indices[k];
-            if ((uint)index >= (uint)changes.Length
-                || !PropertyReference.Comparer.Equals(changes[index].Property, replacements[k].Property))
-            {
-                return false;
-            }
-        }
-
-        for (var k = 0; k < replacements.Count; k++)
-        {
-            changes[indices[k]] = replacements[k];
-        }
-
-        return true;
-    }
-
-    /// <summary>
     /// Returns the subset of <paramref name="written"/> whose property also appears in
     /// <paramref name="failed"/> (matched by <see cref="SubjectPropertyChange.Property"/>).
     /// </summary>
