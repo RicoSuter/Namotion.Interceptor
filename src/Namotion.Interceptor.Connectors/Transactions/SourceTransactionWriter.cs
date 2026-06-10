@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -146,12 +147,12 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         if (writeResult.Error is null)
         {
             // Mark in place: the buffer is privately owned and sourceChanges is a view over it.
-            MarkConfirmedBySource(buffer, count, source);
+            MarkConfirmedBySource(buffer.AsSpan(0, count), source);
             return new SourceWriteResult(sourceChanges, [], [], RevertState: source);
         }
 
         var written = ExcludeFailed(sourceChanges, writeResult.FailedChanges);
-        MarkConfirmedBySource(written, source);
+        MarkConfirmedBySource(CollectionsMarshal.AsSpan(written), source);
         return new SourceWriteResult(
             written,
             [.. writeResult.FailedChanges],
@@ -268,18 +269,9 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     /// Marks changes as confirmed by the source that accepted them, so the commit's local apply is
     /// recognized as an echo by outbound connector queues. Must run only after a successful write.
     /// </summary>
-    private static void MarkConfirmedBySource(SubjectPropertyChange[] changes, int count, ISubjectSource source)
+    private static void MarkConfirmedBySource(Span<SubjectPropertyChange> changes, ISubjectSource source)
     {
-        for (var i = 0; i < count; i++)
-        {
-            changes[i] = changes[i].WithSource(source);
-        }
-    }
-
-    /// <inheritdoc cref="MarkConfirmedBySource(SubjectPropertyChange[], int, ISubjectSource)"/>
-    private static void MarkConfirmedBySource(List<SubjectPropertyChange> changes, ISubjectSource source)
-    {
-        for (var i = 0; i < changes.Count; i++)
+        for (var i = 0; i < changes.Length; i++)
         {
             changes[i] = changes[i].WithSource(source);
         }
@@ -337,14 +329,14 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         if (result.Error is not null)
         {
             var written = ExcludeFailed(sourceChanges, result.FailedChanges);
-            MarkConfirmedBySource(written, source);
+            MarkConfirmedBySource(CollectionsMarshal.AsSpan(written), source);
             var error = new SourceTransactionWriteException(source, [.. result.FailedChanges], result.Error);
             return (written, [.. result.FailedChanges], error);
         }
 
         // Safe to mark the shared group list in place: the source already received the unmarked copy
         // via 'memory', and the revert path copying the source into rollback changes is intended.
-        MarkConfirmedBySource(sourceChanges, source);
+        MarkConfirmedBySource(CollectionsMarshal.AsSpan(sourceChanges), source);
         return (sourceChanges, [], null);
     }
 

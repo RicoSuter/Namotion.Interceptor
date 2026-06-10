@@ -159,35 +159,40 @@ internal static class SubjectPropertyChangeOperations
             return;
         }
 
-        // Linear scan stays allocation-free; O(n*m) is fine for m <= 8 and typical commits are smaller.
-        if (replacements.Count <= 8)
+        // Fast path for the dominant fully successful commit: the replacements are then the
+        // snapshot's source-bound changes in snapshot order, so equal counts mean positional
+        // alignment. Replacing as we verify is safe (same property means correct replacement);
+        // on a mismatch the general scan below finishes the rest.
+        if (replacements.Count == changes.Length)
         {
+            var aligned = true;
             for (var i = 0; i < changes.Length; i++)
             {
-                for (var j = 0; j < replacements.Count; j++)
+                if (!PropertyReference.Comparer.Equals(changes[i].Property, replacements[i].Property))
                 {
-                    if (PropertyReference.Comparer.Equals(changes[i].Property, replacements[j].Property))
-                    {
-                        changes[i] = replacements[j];
-                        break;
-                    }
+                    aligned = false;
+                    break;
                 }
+                changes[i] = replacements[i];
             }
-            return;
+
+            if (aligned)
+            {
+                return;
+            }
         }
 
-        var byProperty = new Dictionary<PropertyReference, SubjectPropertyChange>(
-            replacements.Count, PropertyReference.Comparer);
-        foreach (var replacement in replacements)
-        {
-            byProperty[replacement.Property] = replacement;
-        }
-
+        // General case (partial failures, mixed local and source-bound commits): allocation-free
+        // O(n*m) scan; the written subset is small in practice.
         for (var i = 0; i < changes.Length; i++)
         {
-            if (byProperty.TryGetValue(changes[i].Property, out var replacement))
+            for (var j = 0; j < replacements.Count; j++)
             {
-                changes[i] = replacement;
+                if (PropertyReference.Comparer.Equals(changes[i].Property, replacements[j].Property))
+                {
+                    changes[i] = replacements[j];
+                    break;
+                }
             }
         }
     }

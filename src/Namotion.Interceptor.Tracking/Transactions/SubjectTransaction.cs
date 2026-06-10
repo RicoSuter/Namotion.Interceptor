@@ -414,6 +414,8 @@ public sealed class SubjectTransaction : IDisposable
         // Swap the writer's source-marked variants into the snapshot so the local apply and any
         // local revert publish notifications carrying the confirming source; outbound connector
         // queues then recognize them as echoes instead of re-pushing committed values (#343).
+        // The writer cannot mark the snapshot itself: it receives it read-only and returns the
+        // written set flattened per source.
         SubjectPropertyChangeOperations.SubstituteByProperty(changes.Span, written);
 
         // Rollback with any source-write failure: nothing is applied to the local model; revert what reached

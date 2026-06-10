@@ -195,9 +195,9 @@ public class SubjectPropertyChangeOperationsTests
     }
 
     [Fact]
-    public void WhenSubstituteByPropertyWithManyReplacements_ThenOrderIsPreserved()
+    public void WhenSubstituteByPropertyWithEqualCounts_ThenAlignedEntriesAreReplacedPositionally()
     {
-        // Arrange: more than 8 replacements forces the dictionary path
+        // Arrange: equal counts in matching order exercise the positional fast path
         var context = CreateContext();
         var source = new object();
         var changes = new SubjectPropertyChange[10];
@@ -220,6 +220,35 @@ public class SubjectPropertyChangeOperationsTests
             Assert.Equal("new" + i, changes[i].GetNewValue<string>());
             Assert.Same(people[i], changes[i].Property.Subject);
         }
+    }
+
+    [Fact]
+    public void WhenSubstituteByPropertyWithEqualCountsButDifferentOrder_ThenEntriesAreReplacedByProperty()
+    {
+        // Arrange: equal counts but reversed order break the positional alignment, so the
+        // general by-property scan must take over.
+        var context = CreateContext();
+        var person = new Person(context);
+        var firstName = new PropertyReference(person, nameof(Person.FirstName));
+        var lastName = new PropertyReference(person, nameof(Person.LastName));
+        var changes = new[]
+        {
+            SubjectPropertyChange.Create(firstName, null, DateTimeOffset.UtcNow, null, "a", "b"),
+            SubjectPropertyChange.Create(lastName, null, DateTimeOffset.UtcNow, null, "c", "d"),
+        };
+        var source = new object();
+        var replacements = new[] { changes[1].WithSource(source), changes[0].WithSource(source) };
+
+        // Act
+        SubjectPropertyChangeOperations.SubstituteByProperty(changes.AsSpan(), replacements);
+
+        // Assert: each entry got the replacement for its own property, order preserved
+        Assert.Same(source, changes[0].Source);
+        Assert.Equal("b", changes[0].GetNewValue<string>());
+        Assert.Equal(firstName, changes[0].Property);
+        Assert.Same(source, changes[1].Source);
+        Assert.Equal("d", changes[1].GetNewValue<string>());
+        Assert.Equal(lastName, changes[1].Property);
     }
 
     [Fact]
