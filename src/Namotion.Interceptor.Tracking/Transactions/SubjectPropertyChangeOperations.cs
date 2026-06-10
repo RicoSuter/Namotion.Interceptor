@@ -183,8 +183,11 @@ internal static class SubjectPropertyChangeOperations
         }
 
         // Small written sets (partial failures, mixed local and source-bound commits):
-        // allocation-free scan.
-        if (replacements.Count <= 8)
+        // allocation-free scan. The scan beats the hash join up to roughly this size because the
+        // comparer is reference-based and the dictionary copies large structs per entry (measured
+        // via SubjectTransactionBenchmark); the hash join below only guards very large commits
+        // against quadratic cost.
+        if (replacements.Count <= 64)
         {
             for (var i = 0; i < changes.Length; i++)
             {

@@ -225,13 +225,13 @@ public class SubjectPropertyChangeOperationsTests
     [Fact]
     public void WhenSubstituteByPropertyWithManyMisorderedReplacements_ThenEntriesAreReplacedByProperty()
     {
-        // Arrange: more than 8 replacements in reversed order miss the positional fast path
+        // Arrange: more than 64 replacements in reversed order miss the positional fast path
         // and exercise the hash-join path.
         var context = CreateContext();
         var source = new object();
-        var changes = new SubjectPropertyChange[10];
-        var people = new Person[10];
-        for (var i = 0; i < 10; i++)
+        var changes = new SubjectPropertyChange[70];
+        var people = new Person[70];
+        for (var i = 0; i < 70; i++)
         {
             people[i] = new Person(context);
             var property = new PropertyReference(people[i], nameof(Person.FirstName));
@@ -243,7 +243,7 @@ public class SubjectPropertyChangeOperationsTests
         SubjectPropertyChangeOperations.SubstituteByProperty(changes.AsSpan(), replacements);
 
         // Assert: each entry got the replacement for its own property, order preserved
-        for (var i = 0; i < 10; i++)
+        for (var i = 0; i < 70; i++)
         {
             Assert.Same(source, changes[i].Source);
             Assert.Equal("new" + i, changes[i].GetNewValue<string>());
