@@ -307,6 +307,66 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
     }
 
     [Fact]
+    public async Task WhenCommitAppliedChangeTriggersDerivedRecalculation_ThenDerivedNotificationStaysLocallySourced()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var writtenBatches = new List<SubjectPropertyChange[]>();
+        // CreateSucceedingSource sets WriteBatchSize = 0 (unbatched); the Setup below overrides
+        // only WriteChangesAsync to capture the written batches.
+        var sourceMock = CreateSucceedingSource();
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback((ReadOnlyMemory<SubjectPropertyChange> batch, CancellationToken _) =>
+                writtenBatches.Add(batch.ToArray()))
+            .Returns(new ValueTask<WriteResult>(WriteResult.Success));
+
+        // Only FirstName is source-bound; FullName is a derived property that recalculates
+        // when FirstName changes and is never part of the transactional source write.
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Sentinel: use a sibling subject so the sentinel property is unambiguous and cannot be
+        // confused with any notification produced by the commit or the derived recalculation.
+        var sentinel = new Person(context);
+        sentinel.LastName = "Sentinel";
+
+        var changes = DrainUntilSentinelProperty(subscription, nameof(Person.LastName));
+
+        // Assert 1: the FullName recalculation notification carries a null source even though the
+        // triggering apply ran under the confirming source scope. DerivedPropertyChangeHandler
+        // publishes recalculations under an explicit WithSource(null) scope: a derived value is
+        // computed locally and no source confirmed it. Consequence: derived recalculations are
+        // never echo-suppressed, so a source-bound derived property still gets pushed.
+        var fullNameChanges = changes.Where(c => c.Property.Name == nameof(Person.FullName)).ToList();
+        Assert.Single(fullNameChanges);
+        Assert.Null(fullNameChanges[0].Source);
+
+        // Assert 2 (sanity): FirstName change also carries the source.
+        var firstNameChanges = changes.Where(c => c.Property.Name == nameof(Person.FirstName)).ToList();
+        Assert.Single(firstNameChanges);
+        Assert.Same(sourceMock.Object, firstNameChanges[0].Source);
+
+        // Assert 3: stage 1 (source write) contained exactly one batch with exactly one change
+        // for FirstName; the derived FullName recalculation is never submitted to the source.
+        Assert.Single(writtenBatches);
+        Assert.Single(writtenBatches[0]);
+        Assert.Equal(nameof(Person.FirstName), writtenBatches[0][0].Property.Name);
+    }
+
+    [Fact]
     public async Task WhenSourceBoundChangeCommitted_ThenServerSideProcessorStillReceivesIt()
     {
         // Arrange

@@ -245,8 +245,9 @@ When `WithSourceTransactions()` is configured, commits execute in two stages:
 Stage 2 applies source-bound changes marked with the source that accepted them in stage 1, so
 their change notifications carry that source and outbound connector queues treat them as echoes:
 a committed value is written to its source exactly once, by the commit itself. Cascade writes
-and derived recalculations triggered by the apply inherit the source scope, matching how inbound
-source values behave (see Change notification source semantics in connectors.md). Note that a
+triggered by the apply inherit the source scope, matching how inbound source values behave;
+derived property recalculations are always published with a null source and are therefore still
+pushed to a bound source (see Change notification source semantics in connectors.md). Note that a
 write interceptor that transforms values would make the locally applied value differ from the
 value written in stage 1; value-transforming interceptors are not supported together with
 source transactions.

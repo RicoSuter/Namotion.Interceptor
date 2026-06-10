@@ -111,11 +111,17 @@ transaction also carry their owning source, because the source accepted the valu
 local model was updated; this is what prevents the outbound change queue from writing committed
 values to the source a second time. Purely local writes (no associated source) carry `null`.
 
-Synchronous consequences of a source-scoped apply, such as `OnChanged` cascade writes and
-derived property recalculations, inherit the source scope. They are therefore not pushed back
-to that source, for inbound updates and transactional commits alike. If a cascade-computed
-value must reach the source, write it explicitly (inside the transaction when using one) or do
-not associate the computed property with a source.
+Cascade writes from `OnChanging`/`OnChanged` handlers run synchronously inside a source-scoped
+apply and inherit the source scope. They are therefore not pushed back to that source, for
+inbound updates and transactional commits alike. If a cascade-computed value must reach the
+source, write it explicitly (inside the transaction when using one) or do not associate the
+cascade target with a source.
+
+Derived property recalculations behave differently: they are always published with a `null`
+source, regardless of what triggered them, because a derived value is computed by the local
+model and no source confirmed it. As a consequence, a derived property associated with a source
+is still pushed to that source whenever it recalculates, including recalculations triggered by
+inbound updates or transactional commits.
 
 ### Write Retry Queue
 
