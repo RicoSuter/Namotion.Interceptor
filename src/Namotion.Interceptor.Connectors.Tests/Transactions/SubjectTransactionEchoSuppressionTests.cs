@@ -19,8 +19,9 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 /// </summary>
 public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 {
-    // Drains changes from the subscription until a sentinel is received (or the timeout fires).
+    // Drains changes from the subscription until a sentinel is received.
     // The sentinel itself is not included in the returned list.
+    // Throws TimeoutException if the sentinel does not arrive within 10 seconds.
     private static List<SubjectPropertyChange> DrainUntil(
         PropertyChangeQueueSubscription subscription, Func<SubjectPropertyChange, bool> isSentinel)
     {
@@ -30,11 +31,11 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         {
             if (isSentinel(change))
             {
-                break;
+                return changes;
             }
             changes.Add(change);
         }
-        return changes;
+        throw new TimeoutException("Sentinel notification was not received within 10 seconds.");
     }
 
     private static List<SubjectPropertyChange> DrainUntilSentinelProperty(
@@ -133,8 +134,9 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
         // Act - capture writes during transaction body (no notifications yet); throw fires at commit.
-        // Dispose the transaction before writing the sentinel: while the transaction is open (even after a
-        // failed CommitAsync) the AsyncLocal still points to it, so writes are captured, not published.
+        // Dispose the transaction before writing the sentinel: while the transaction is open the
+        // SubjectTransaction.Current AsyncLocal still holds it, so property writes are captured into
+        // the pending set, not published to the change queue.
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
         {
             device.PropertyA = true;
@@ -144,7 +146,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 
             await Assert.ThrowsAsync<SubjectTransactionException>(
                 () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        } // Dispose clears the AsyncLocal so subsequent writes are published immediately.
+        } // Dispose clears SubjectTransaction.Current so subsequent writes are published immediately.
 
         // Sentinel: write to the sibling subject; this is outside any transaction so it fires immediately.
         sentinel.LastName = "Sentinel";
@@ -156,6 +158,8 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         var propertyAChanges = changes.Where(c => c.Property.Name == nameof(ThrowingDevice.PropertyA)).ToList();
         Assert.Equal(2, propertyAChanges.Count);
         Assert.All(propertyAChanges, change => Assert.Same(sourceMock.Object, change.Source));
+        Assert.True(propertyAChanges[0].GetNewValue<bool>());   // forward apply: true
+        Assert.False(propertyAChanges[1].GetNewValue<bool>());  // rollback revert: false
     }
 
     [Fact]
@@ -256,10 +260,12 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
             try { await processTask; } catch (OperationCanceledException) { }
         }
 
-        // Assert: the server-side processor received a FirstName change (not suppressed by echo filter).
+        // Assert: the server-side processor received the FirstName change with the confirming source
+        // stamped on it. Its own echo filter does not suppress it because serverSource != sourceMock.Object.
         lock (serverReceived)
         {
-            Assert.Contains(serverReceived, c => c.Property.Name == nameof(Person.FirstName));
+            var change = serverReceived.First(c => c.Property.Name == nameof(Person.FirstName));
+            Assert.Same(sourceMock.Object, change.Source);
         }
     }
 }
