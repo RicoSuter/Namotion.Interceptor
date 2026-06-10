@@ -22,8 +22,8 @@ public interface ITransactionWriter
     /// that already reached other sources left un-reverted.
     /// Each written change should be returned with its <see cref="SubjectPropertyChange.Source"/> set
     /// to the source that accepted it, so the commit's local apply is recognized as an echo by outbound
-    /// connector queues and committed values are not pushed to the source a second time. Returning the
-    /// original changes keeps the legacy double-push behavior.
+    /// connector queues. Changes returned without that source are not recognized as echoes, and the
+    /// background change queue pushes their committed values to the source again.
     /// </remarks>
     /// <param name="changes">The property changes to classify and write.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
