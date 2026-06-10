@@ -20,17 +20,22 @@ public interface ITransactionWriter
     /// throwing: reverting requires the written set and revert state returned here. A throw returns
     /// neither, so the transaction fails terminally with every change reported as failed and any writes
     /// that already reached other sources left un-reverted.
-    /// Each written change should be returned with its <see cref="SubjectPropertyChange.Source"/> set
+    /// Each written change must be returned with its <see cref="SubjectPropertyChange.Source"/> set
     /// to the source that accepted it, so the commit's local apply is recognized as an echo by outbound
     /// connector queues. Changes returned without that source are not recognized as echoes, and the
     /// background change queue pushes their committed values to the source again.
+    /// Each written change must also carry its snapshot index in <see cref="SourceWriteResult.WrittenIndices"/>:
+    /// <c>WrittenIndices[k]</c> is the position of <c>Written[k]</c> in <paramref name="changes"/>. The commit
+    /// substitutes the source-marked variants by index; an index that is out of range or addresses a
+    /// different property fails the commit terminally.
     /// </remarks>
     /// <param name="changes">The property changes to classify and write.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>
     /// The result reporting which source-bound changes reached their source (<see cref="SourceWriteResult.Written"/>),
-    /// which failed (<see cref="SourceWriteResult.Failed"/>), and the corresponding errors.
+    /// their snapshot indices (<see cref="SourceWriteResult.WrittenIndices"/>), which failed
+    /// (<see cref="SourceWriteResult.Failed"/>), and the corresponding errors.
     /// </returns>
     ValueTask<SourceWriteResult> WriteToSourcesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,

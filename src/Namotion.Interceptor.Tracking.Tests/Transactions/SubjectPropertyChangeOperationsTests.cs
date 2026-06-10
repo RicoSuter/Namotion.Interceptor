@@ -1,4 +1,3 @@
-using System.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -170,9 +169,41 @@ public class SubjectPropertyChangeOperationsTests
     }
 
     [Fact]
-    public void WhenSubstituteByPropertyWithFewReplacements_ThenMatchingEntriesAreReplacedInPlace()
+    public void WhenTrySubstituteAtScatteredIndices_ThenAddressedEntriesAreReplaced()
     {
-        // Arrange
+        // Arrange: source-bound changes sit at indices 0 and 2; index 1 is a local change left untouched.
+        var context = CreateContext();
+        var person = new Person(context);
+        var car = new Car(context);
+        var firstName = new PropertyReference(person, nameof(Person.FirstName));
+        var lastName = new PropertyReference(person, nameof(Person.LastName));
+        var carName = new PropertyReference(car, nameof(Car.Name));
+        var changes = new[]
+        {
+            SubjectPropertyChange.Create(firstName, null, DateTimeOffset.UtcNow, null, "a", "b"),
+            SubjectPropertyChange.Create(lastName, null, DateTimeOffset.UtcNow, null, "c", "d"),
+            SubjectPropertyChange.Create(carName, null, DateTimeOffset.UtcNow, null, "e", "f"),
+        };
+        var source = new object();
+        var replacements = new[] { changes[0].WithSource(source), changes[2].WithSource(source) };
+        var indices = new[] { 0, 2 };
+
+        // Act
+        var result = SubjectPropertyChangeOperations.TrySubstituteAtIndices(changes.AsSpan(), replacements, indices);
+
+        // Assert
+        Assert.True(result);
+        Assert.Same(source, changes[0].Source);
+        Assert.Equal("b", changes[0].GetNewValue<string>());
+        Assert.Null(changes[1].Source);
+        Assert.Same(source, changes[2].Source);
+        Assert.Equal("f", changes[2].GetNewValue<string>());
+    }
+
+    [Fact]
+    public void WhenTrySubstituteWithCountMismatch_ThenReturnsFalseAndLeavesSpanUntouched()
+    {
+        // Arrange: one replacement but two indices.
         var context = CreateContext();
         var person = new Person(context);
         var firstName = new PropertyReference(person, nameof(Person.FirstName));
@@ -184,78 +215,44 @@ public class SubjectPropertyChangeOperationsTests
         };
         var source = new object();
         var replacements = new[] { changes[0].WithSource(source) };
+        var indices = new[] { 0, 1 };
 
         // Act
-        SubjectPropertyChangeOperations.SubstituteByProperty(changes.AsSpan(), replacements);
+        var result = SubjectPropertyChangeOperations.TrySubstituteAtIndices(changes.AsSpan(), replacements, indices);
 
         // Assert
-        Assert.Same(source, changes[0].Source);
-        Assert.Equal("b", changes[0].GetNewValue<string>());
+        Assert.False(result);
+        Assert.Null(changes[0].Source);
         Assert.Null(changes[1].Source);
     }
 
     [Fact]
-    public void WhenSubstituteByPropertyWithEqualCounts_ThenAlignedEntriesAreReplacedPositionally()
+    public void WhenTrySubstituteWithOutOfRangeIndex_ThenReturnsFalseAndLeavesSpanUntouched()
     {
-        // Arrange: equal counts in matching order exercise the positional fast path
+        // Arrange: the index addresses a slot past the end of the span.
         var context = CreateContext();
-        var source = new object();
-        var changes = new SubjectPropertyChange[10];
-        var people = new Person[10];
-        for (var i = 0; i < 10; i++)
+        var person = new Person(context);
+        var firstName = new PropertyReference(person, nameof(Person.FirstName));
+        var changes = new[]
         {
-            people[i] = new Person(context);
-            var property = new PropertyReference(people[i], nameof(Person.FirstName));
-            changes[i] = SubjectPropertyChange.Create(property, null, DateTimeOffset.UtcNow, null, "old" + i, "new" + i);
-        }
-        var replacements = changes.Select(c => c.WithSource(source)).ToArray();
+            SubjectPropertyChange.Create(firstName, null, DateTimeOffset.UtcNow, null, "a", "b"),
+        };
+        var source = new object();
+        var replacements = new[] { changes[0].WithSource(source) };
+        var indices = new[] { 5 };
 
         // Act
-        SubjectPropertyChangeOperations.SubstituteByProperty(changes.AsSpan(), replacements);
+        var result = SubjectPropertyChangeOperations.TrySubstituteAtIndices(changes.AsSpan(), replacements, indices);
 
-        // Assert: every slot replaced, order and values unchanged
-        for (var i = 0; i < 10; i++)
-        {
-            Assert.Same(source, changes[i].Source);
-            Assert.Equal("new" + i, changes[i].GetNewValue<string>());
-            Assert.Same(people[i], changes[i].Property.Subject);
-        }
+        // Assert
+        Assert.False(result);
+        Assert.Null(changes[0].Source);
     }
 
     [Fact]
-    public void WhenSubstituteByPropertyWithManyMisorderedReplacements_ThenEntriesAreReplacedByProperty()
+    public void WhenTrySubstituteWithPropertyMismatch_ThenReturnsFalseAndLeavesSpanUntouched()
     {
-        // Arrange: more than 64 replacements in reversed order miss the positional fast path
-        // and exercise the hash-join path.
-        var context = CreateContext();
-        var source = new object();
-        var changes = new SubjectPropertyChange[70];
-        var people = new Person[70];
-        for (var i = 0; i < 70; i++)
-        {
-            people[i] = new Person(context);
-            var property = new PropertyReference(people[i], nameof(Person.FirstName));
-            changes[i] = SubjectPropertyChange.Create(property, null, DateTimeOffset.UtcNow, null, "old" + i, "new" + i);
-        }
-        var replacements = changes.Reverse().Select(c => c.WithSource(source)).ToArray();
-
-        // Act
-        SubjectPropertyChangeOperations.SubstituteByProperty(changes.AsSpan(), replacements);
-
-        // Assert: each entry got the replacement for its own property, order preserved
-        for (var i = 0; i < 70; i++)
-        {
-            Assert.Same(source, changes[i].Source);
-            Assert.Equal("new" + i, changes[i].GetNewValue<string>());
-            Assert.Same(people[i], changes[i].Property.Subject);
-        }
-    }
-
-    [Fact]
-    public void WhenSubstituteByPropertyWithEqualCountsButDifferentOrder_ThenEntriesAreReplacedByProperty()
-    {
-        // Arrange: equal counts but reversed order break the positional alignment, so the
-        // general by-property scan must take over.
+        // Arrange: the index addresses an entry with a different property than the replacement.
         var context = CreateContext();
         var person = new Person(context);
         var firstName = new PropertyReference(person, nameof(Person.FirstName));
@@ -266,18 +263,44 @@ public class SubjectPropertyChangeOperationsTests
             SubjectPropertyChange.Create(lastName, null, DateTimeOffset.UtcNow, null, "c", "d"),
         };
         var source = new object();
-        var replacements = new[] { changes[1].WithSource(source), changes[0].WithSource(source) };
+        // Replacement carries firstName but the index points at lastName.
+        var replacements = new[] { changes[0].WithSource(source) };
+        var indices = new[] { 1 };
 
         // Act
-        SubjectPropertyChangeOperations.SubstituteByProperty(changes.AsSpan(), replacements);
+        var result = SubjectPropertyChangeOperations.TrySubstituteAtIndices(changes.AsSpan(), replacements, indices);
 
-        // Assert: each entry got the replacement for its own property, order preserved
-        Assert.Same(source, changes[0].Source);
-        Assert.Equal("b", changes[0].GetNewValue<string>());
-        Assert.Equal(firstName, changes[0].Property);
-        Assert.Same(source, changes[1].Source);
-        Assert.Equal("d", changes[1].GetNewValue<string>());
-        Assert.Equal(lastName, changes[1].Property);
+        // Assert
+        Assert.False(result);
+        Assert.Null(changes[0].Source);
+        Assert.Null(changes[1].Source);
     }
 
+    [Fact]
+    public void WhenSecondEntryMismatches_ThenFirstEntryIsLeftUntouched()
+    {
+        // Arrange: the first entry validates, the second mismatches (property identity). Validation runs
+        // before any write, so the first entry must remain untouched.
+        var context = CreateContext();
+        var person = new Person(context);
+        var firstName = new PropertyReference(person, nameof(Person.FirstName));
+        var lastName = new PropertyReference(person, nameof(Person.LastName));
+        var changes = new[]
+        {
+            SubjectPropertyChange.Create(firstName, null, DateTimeOffset.UtcNow, null, "a", "b"),
+            SubjectPropertyChange.Create(lastName, null, DateTimeOffset.UtcNow, null, "c", "d"),
+        };
+        var source = new object();
+        // First replacement aligns at index 0; second carries lastName but is pointed at index 0 (mismatch).
+        var replacements = new[] { changes[0].WithSource(source), changes[1].WithSource(source) };
+        var indices = new[] { 0, 0 };
+
+        // Act
+        var result = SubjectPropertyChangeOperations.TrySubstituteAtIndices(changes.AsSpan(), replacements, indices);
+
+        // Assert
+        Assert.False(result);
+        Assert.Null(changes[0].Source); // first entry untouched despite aligning, because validation failed first
+        Assert.Null(changes[1].Source);
+    }
 }

@@ -409,14 +409,27 @@ public sealed class SubjectTransaction : IDisposable
                 errors: [exception]);
         }
 
-        var (written, failedSource, sourceErrors, revertState) = writeResult;
+        var (written, writtenIndices, failedSource, sourceErrors, revertState) = writeResult;
 
         // Swap the writer's source-marked variants into the snapshot so the local apply and any
         // local revert publish notifications carrying the confirming source; outbound connector
         // queues then recognize them as echoes instead of re-pushing committed values (#343).
         // The writer cannot mark the snapshot itself: it receives it read-only and returns the
-        // written set flattened per source.
-        SubjectPropertyChangeOperations.SubstituteByProperty(changes.Span, written);
+        // written set with each entry's snapshot index, since flattening per source loses positions.
+        if (!SubjectPropertyChangeOperations.TrySubstituteAtIndices(changes.Span, written, writtenIndices))
+        {
+            // Writer contract violation discovered after sources were written: the indices do not
+            // locate the written changes in the snapshot. The written set and revert state are still
+            // trustworthy, so revert what reached a source, then fail terminally (do not throw out of
+            // this method, which would leave the transaction retryable with sources already written).
+            var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
+            return new SubjectTransactionException(
+                "The transaction writer returned indices that do not match the commit snapshot. " +
+                "Source writes were reverted; the transaction is terminal and must be disposed, not retried.",
+                appliedChanges: [],
+                failedChanges: SubjectPropertyChangeOperations.Concat(changes.ToArray(), revert.Failed),
+                errors: SubjectPropertyChangeOperations.Concat(sourceErrors, revert.Errors));
+        }
 
         // Rollback with any source-write failure: nothing is applied to the local model; revert what reached
         // a source and report. The local (no-source) changes are never applied, but they are still

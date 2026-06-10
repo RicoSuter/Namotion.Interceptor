@@ -575,4 +575,80 @@ public class SubjectTransactionTests
         // Assert
         Assert.Same(transaction2, SubjectTransaction.Current);
     }
+
+    /// <summary>
+    /// Reports every change as written but with each change's snapshot index shifted onto a different
+    /// property (a left rotation), so the indices do not locate the written changes. Records the written
+    /// set it was asked to revert.
+    /// </summary>
+    private sealed class WrongIndicesTransactionWriter : ITransactionWriter
+    {
+        public IReadOnlyList<SubjectPropertyChange>? RevertedWritten { get; private set; }
+
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            ReadOnlyMemory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+        {
+            var span = changes.Span;
+            var written = new SubjectPropertyChange[span.Length];
+            var indices = new int[span.Length];
+            for (var i = 0; i < span.Length; i++)
+            {
+                written[i] = span[i];
+                // Rotate indices left by one so each written change is pointed at a neighbour with a
+                // different property (with at least two changes this guarantees a property mismatch).
+                indices[i] = (i + 1) % span.Length;
+            }
+
+            return new ValueTask<SourceWriteResult>(new SourceWriteResult(
+                Written: written,
+                WrittenIndices: indices,
+                Failed: [],
+                Errors: [],
+                RevertState: new object()));
+        }
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+        {
+            RevertedWritten = written;
+            return new ValueTask<SourceRevertResult>(new SourceRevertResult([], []));
+        }
+    }
+
+    [Fact]
+    public async Task WhenWriterReturnsMismatchedIndices_ThenCommitFailsTerminallyAfterReverting()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var writer = new WrongIndicesTransactionWriter();
+        context.AddService<ITransactionWriter>(writer);
+
+        var person = new Person(context);
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Contains("indices", exception.Message);
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(2, exception.FailedChanges.Count); // every snapshot change reported as failed
+        Assert.NotNull(writer.RevertedWritten); // reverts were attempted with the written set
+        Assert.Equal(2, writer.RevertedWritten!.Count);
+        Assert.Null(person.FirstName); // local model untouched (nothing applied)
+        Assert.Null(person.LastName);
+
+        // Terminal: a second commit is rejected, not retried.
+        var second = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        Assert.Contains("already been committed", second.Message);
+    }
 }

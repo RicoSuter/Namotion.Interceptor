@@ -145,80 +145,40 @@ internal static class SubjectPropertyChangeOperations
             newValue: change.GetOldValue<object?>());
 
     /// <summary>
-    /// Replaces entries in <paramref name="changes"/> with the variant from
-    /// <paramref name="replacements"/> that has the same <see cref="SubjectPropertyChange.Property"/>,
-    /// preserving the span's order. Used to swap the writer's source-marked written changes into the
-    /// commit snapshot before the apply pass.
+    /// Substitutes <paramref name="replacements"/> into <paramref name="changes"/> at
+    /// <paramref name="indices"/> after validating that every index is in range and addresses the
+    /// entry with the same <see cref="SubjectPropertyChange.Property"/>. Validates everything before
+    /// writing anything, so a contract violation leaves the span untouched. Returns false on any
+    /// mismatch (count, range, or property identity).
     /// </summary>
-    internal static void SubstituteByProperty(
+    internal static bool TrySubstituteAtIndices(
         Span<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange> replacements)
+        IReadOnlyList<SubjectPropertyChange> replacements,
+        IReadOnlyList<int> indices)
     {
-        if (replacements.Count == 0)
+        if (replacements.Count != indices.Count)
         {
-            return;
+            return false;
         }
 
-        // Fast path for the dominant fully successful commit: the replacements are then the
-        // snapshot's source-bound changes in snapshot order, so equal counts mean positional
-        // alignment. Replacing as we verify is safe (same property means correct replacement);
-        // on a mismatch the general scan below finishes the rest.
-        if (replacements.Count == changes.Length)
+        // Validate every slot before writing any, so a contract violation leaves the span untouched
+        // and the caller can compensate without a half-substituted snapshot.
+        for (var k = 0; k < replacements.Count; k++)
         {
-            var aligned = true;
-            for (var i = 0; i < changes.Length; i++)
+            var index = indices[k];
+            if ((uint)index >= (uint)changes.Length
+                || !PropertyReference.Comparer.Equals(changes[index].Property, replacements[k].Property))
             {
-                if (!PropertyReference.Comparer.Equals(changes[i].Property, replacements[i].Property))
-                {
-                    aligned = false;
-                    break;
-                }
-                changes[i] = replacements[i];
-            }
-
-            if (aligned)
-            {
-                return;
+                return false;
             }
         }
 
-        // Small written sets (partial failures, mixed local and source-bound commits):
-        // allocation-free scan. The scan beats the hash join up to roughly this size because the
-        // comparer is reference-based and the dictionary copies large structs per entry (measured
-        // via SubjectTransactionBenchmark); the hash join below only guards very large commits
-        // against quadratic cost.
-        if (replacements.Count <= 64)
+        for (var k = 0; k < replacements.Count; k++)
         {
-            for (var i = 0; i < changes.Length; i++)
-            {
-                for (var j = 0; j < replacements.Count; j++)
-                {
-                    if (PropertyReference.Comparer.Equals(changes[i].Property, replacements[j].Property))
-                    {
-                        changes[i] = replacements[j];
-                        break;
-                    }
-                }
-            }
-            return;
+            changes[indices[k]] = replacements[k];
         }
 
-        // Large written sets: a hash join keeps the commit path linear regardless of transaction
-        // size; one dictionary allocation is negligible at this scale.
-        var byProperty = new Dictionary<PropertyReference, SubjectPropertyChange>(
-            replacements.Count, PropertyReference.Comparer);
-        foreach (var replacement in replacements)
-        {
-            byProperty[replacement.Property] = replacement;
-        }
-
-        for (var i = 0; i < changes.Length; i++)
-        {
-            if (byProperty.TryGetValue(changes[i].Property, out var replacement))
-            {
-                changes[i] = replacement;
-            }
-        }
+        return true;
     }
 
     /// <summary>

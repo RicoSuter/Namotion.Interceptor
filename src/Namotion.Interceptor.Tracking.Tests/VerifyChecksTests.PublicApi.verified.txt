@@ -226,11 +226,12 @@ namespace Namotion.Interceptor.Tracking.Transactions
     }
     public readonly struct SourceWriteResult : System.IEquatable<Namotion.Interceptor.Tracking.Transactions.SourceWriteResult>
     {
-        public SourceWriteResult(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Written, System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed, System.Collections.Generic.IReadOnlyList<System.Exception> Errors, object? RevertState) { }
+        public SourceWriteResult(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Written, System.Collections.Generic.IReadOnlyList<int> WrittenIndices, System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed, System.Collections.Generic.IReadOnlyList<System.Exception> Errors, object? RevertState) { }
         public System.Collections.Generic.IReadOnlyList<System.Exception> Errors { get; init; }
         public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed { get; init; }
         public object? RevertState { get; init; }
         public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Written { get; init; }
+        public System.Collections.Generic.IReadOnlyList<int> WrittenIndices { get; init; }
     }
     public sealed class SubjectTransaction : System.IDisposable
     {

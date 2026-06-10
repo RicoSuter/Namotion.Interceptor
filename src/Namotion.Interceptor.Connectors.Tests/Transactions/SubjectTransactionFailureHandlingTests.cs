@@ -74,6 +74,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
             var span = changes.Span;
             return new(new SourceWriteResult(
                 Written: [span[0]],
+                WrittenIndices: [0],
                 Failed: [span[1]],
                 Errors: [new InvalidOperationException("Source boom")],
                 RevertState: null));

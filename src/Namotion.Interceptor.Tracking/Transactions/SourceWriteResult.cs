@@ -11,7 +11,14 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// The source-bound changes that reached their source and can therefore be reverted there. The
 /// transaction holds this list opaquely and passes it back to <see cref="ITransactionWriter.RevertSourceWritesAsync"/>
 /// on rollback.
-/// Each change should carry the source that accepted it as its Source; see the remarks on <see cref="ITransactionWriter.WriteToSourcesAsync"/>.
+/// Each change must carry the source that accepted it as its Source; see the remarks on <see cref="ITransactionWriter.WriteToSourcesAsync"/>.
+/// </param>
+/// <param name="WrittenIndices">
+/// The snapshot index of each entry in <paramref name="Written"/>, in the same order:
+/// <c>WrittenIndices[k]</c> is the position of <c>Written[k]</c> in the <c>changes</c> snapshot passed to
+/// <see cref="ITransactionWriter.WriteToSourcesAsync"/>. Has the same count as <paramref name="Written"/>
+/// (both empty when nothing was written). The commit uses these indices to substitute the source-marked
+/// variants into its snapshot without re-matching by property.
 /// </param>
 /// <param name="Failed">
 /// The source-bound changes whose source write failed. These are excluded from the local apply
@@ -27,6 +34,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// </param>
 public readonly record struct SourceWriteResult(
     IReadOnlyList<SubjectPropertyChange> Written,
+    IReadOnlyList<int> WrittenIndices,
     IReadOnlyList<SubjectPropertyChange> Failed,
     IReadOnlyList<Exception> Errors,
     object? RevertState);
