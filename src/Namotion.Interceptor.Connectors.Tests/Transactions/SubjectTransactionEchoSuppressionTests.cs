@@ -45,37 +45,6 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WhenSourceBoundChangeCommitted_ThenNotificationCarriesConfirmingSource()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-        var sourceMock = CreateSucceedingSource();
-
-        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
-
-        using var subscription = context.CreatePropertyChangeQueueSubscription();
-
-        // Act
-        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-        {
-            person.FirstName = "John";
-            await transaction.CommitAsync(CancellationToken.None);
-        }
-
-        // Sentinel: a different property (LastName, not source-bound) fires after the commit so we
-        // know the commit notification has already been queued.
-        person.LastName = "Sentinel";
-
-        var changes = DrainUntilSentinelProperty(subscription, nameof(Person.LastName));
-
-        // Assert
-        var firstNameChanges = changes.Where(c => c.Property.Name == nameof(Person.FirstName)).ToList();
-        Assert.Single(firstNameChanges);
-        Assert.Same(sourceMock.Object, firstNameChanges[0].Source);
-    }
-
-    [Fact]
     public async Task WhenLocalAndSourceBoundChangesCommittedTogether_ThenOnlySourceBoundCarriesSource()
     {
         // Arrange

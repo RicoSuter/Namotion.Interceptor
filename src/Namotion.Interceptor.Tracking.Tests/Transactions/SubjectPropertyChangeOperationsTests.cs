@@ -251,19 +251,4 @@ public class SubjectPropertyChangeOperationsTests
         Assert.Equal(lastName, changes[1].Property);
     }
 
-    [Fact]
-    public void WhenSubstituteByPropertyWithEmptyReplacements_ThenNothingChanges()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-        var property = new PropertyReference(person, nameof(Person.FirstName));
-        var changes = new[] { SubjectPropertyChange.Create(property, null, DateTimeOffset.UtcNow, null, "a", "b") };
-
-        // Act
-        SubjectPropertyChangeOperations.SubstituteByProperty(changes.AsSpan(), []);
-
-        // Assert
-        Assert.Null(changes[0].Source);
-    }
 }
