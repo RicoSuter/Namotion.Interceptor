@@ -148,8 +148,7 @@ internal static class SubjectPropertyChangeOperations
     /// Replaces entries in <paramref name="changes"/> with the variant from
     /// <paramref name="replacements"/> that has the same <see cref="SubjectPropertyChange.Property"/>,
     /// preserving the span's order. Used to swap the writer's source-marked written changes into the
-    /// commit snapshot so the apply pass publishes them with the confirming source. Small replacement
-    /// sets use a linear scan to stay allocation-free for typical transaction sizes.
+    /// commit snapshot before the apply pass.
     /// </summary>
     internal static void SubstituteByProperty(
         Span<SubjectPropertyChange> changes,

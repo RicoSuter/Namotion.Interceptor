@@ -20,12 +20,10 @@ public interface ITransactionWriter
     /// throwing: reverting requires the written set and revert state returned here. A throw returns
     /// neither, so the transaction fails terminally with every change reported as failed and any writes
     /// that already reached other sources left un-reverted.
-    /// Implementations should return each written change re-marked with the source that accepted it
-    /// (its <see cref="SubjectPropertyChange.Source"/> set to that source, preserving values and
-    /// timestamps). The commit substitutes these marked changes into its snapshot so the local apply
-    /// publishes notifications that outbound connector queues recognize as echoes of that source.
-    /// Implementations that return the original changes keep the legacy behavior where committed
-    /// values are also re-pushed to the source by the background change queue.
+    /// Each written change should be returned with its <see cref="SubjectPropertyChange.Source"/> set
+    /// to the source that accepted it, so the commit's local apply is recognized as an echo by outbound
+    /// connector queues and committed values are not pushed to the source a second time. Returning the
+    /// original changes keeps the legacy double-push behavior.
     /// </remarks>
     /// <param name="changes">The property changes to classify and write.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>

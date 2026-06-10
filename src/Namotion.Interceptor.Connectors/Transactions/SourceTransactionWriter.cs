@@ -265,9 +265,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     }
 
     /// <summary>
-    /// Marks changes as confirmed by the source that accepted them. The commit substitutes these
-    /// into its snapshot so the local apply publishes notifications the outbound change queue
-    /// recognizes as echoes of that source (#343). Runs only after a successful write.
+    /// Marks changes as confirmed by the source that accepted them, so the commit's local apply is
+    /// recognized as an echo by outbound connector queues. Must run only after a successful write.
     /// </summary>
     private static void MarkConfirmedBySource(SubjectPropertyChange[] changes, int count, ISubjectSource source)
     {
@@ -343,10 +342,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             return (written, [.. result.FailedChanges], error);
         }
 
-        // Mark the group list in place. The original (unmarked) values were already copied into memory
-        // before the write, so the source received clean structs. Marked group lists are intentional
-        // here: the revert path reads them via ToRollbackChange, which copies the source, so rollback
-        // changes also carry the confirming source as desired by the echo-suppression substitution (#343).
+        // Safe to mark the shared group list in place: the source already received the unmarked copy
+        // via 'memory', and the revert path copying the source into rollback changes is intended.
         MarkConfirmedBySource(sourceChanges, source);
         return (sourceChanges, [], null);
     }

@@ -411,10 +411,9 @@ public sealed class SubjectTransaction : IDisposable
 
         var (written, failedSource, sourceErrors, revertState) = writeResult;
 
-        // Swap the writer's source-marked variants into the snapshot (same property, values and
-        // timestamps; Source = the accepting source). The local apply and any local revert then
-        // publish notifications carrying the confirming source, which outbound connector queues
-        // recognize as echoes instead of re-pushing them to the source (#343).
+        // Swap the writer's source-marked variants into the snapshot so the local apply and any
+        // local revert publish notifications carrying the confirming source; outbound connector
+        // queues then recognize them as echoes instead of re-pushing committed values (#343).
         SubjectPropertyChangeOperations.SubstituteByProperty(changes.Span, written);
 
         // Rollback with any source-write failure: nothing is applied to the local model; revert what reached

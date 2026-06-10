@@ -105,23 +105,22 @@ Choose based on your consistency requirements: local-first for responsiveness, t
 
 #### Change notification source semantics
 
-The `Source` of a change notification identifies the system that confirmed the value. Inbound
-updates carry the source they came from. Source-bound changes committed through a source
-transaction also carry their owning source, because the source accepted the value before the
-local model was updated; this is what prevents the outbound change queue from writing committed
-values to the source a second time. Purely local writes (no associated source) carry `null`.
+The `Source` of a change notification identifies the system that confirmed the value: inbound
+updates carry the source they came from, source-bound changes committed through a source
+transaction carry their owning source (the source accepted the value before the local model was
+updated), and purely local writes carry `null`. The outbound change queue skips changes whose
+source is the target source itself, so a committed value is written to its source exactly once,
+by the commit.
 
-Cascade writes from `OnChanging`/`OnChanged` handlers run synchronously inside a source-scoped
-apply and inherit the source scope. They are therefore not pushed back to that source, for
-inbound updates and transactional commits alike. If a cascade-computed value must reach the
-source, write it explicitly (inside the transaction when using one) or do not associate the
-cascade target with a source.
+Writes that happen as a consequence of a source-scoped apply differ by kind:
 
-Derived property recalculations behave differently: they are always published with a `null`
-source, regardless of what triggered them, because a derived value is computed by the local
-model and no source confirmed it. As a consequence, a derived property associated with a source
-is still pushed to that source whenever it recalculates, including recalculations triggered by
-inbound updates or transactional commits.
+- **Cascade writes** from `OnChanging`/`OnChanged` handlers inherit the source scope and are not
+  pushed back to that source, for inbound updates and transactional commits alike. If a
+  cascade-computed value must reach the source, write it explicitly or do not source-bind the
+  cascade target.
+- **Derived property recalculations** always publish with a `null` source (the local model
+  computed the value, no source confirmed it) and are therefore still pushed to a bound source,
+  whatever triggered the recalculation.
 
 ### Write Retry Queue
 

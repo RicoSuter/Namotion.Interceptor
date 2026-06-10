@@ -199,10 +199,8 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     /// <summary>
-    /// Creates a copy of this change with a different source, preserving the property, values and
-    /// timestamps without re-boxing. Used by transaction commit to mark a source-bound change as
-    /// confirmed by the source that accepted it, so the local apply publishes a notification that
-    /// outbound connector queues recognize as an echo of that source.
+    /// Copies this change with a different source, without re-boxing the values. Lets the transaction
+    /// writer mark written changes as confirmed by the source that accepted them.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal SubjectPropertyChange WithSource(object? source) =>
