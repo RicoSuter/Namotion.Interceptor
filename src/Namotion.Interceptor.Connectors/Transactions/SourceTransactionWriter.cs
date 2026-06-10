@@ -277,6 +277,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         }
     }
 
+    /// <inheritdoc cref="MarkConfirmedBySource(SubjectPropertyChange[], int, ISubjectSource)"/>
     private static void MarkConfirmedBySource(List<SubjectPropertyChange> changes, ISubjectSource source)
     {
         for (var i = 0; i < changes.Count; i++)

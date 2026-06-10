@@ -207,6 +207,8 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         var device = new CascadingDevice(context);
 
         var writtenBatches = new List<SubjectPropertyChange[]>();
+        // CreateSucceedingSource sets WriteBatchSize = 0 (unbatched); the Setup below overrides
+        // only WriteChangesAsync to capture the written batches.
         var sourceMock = CreateSucceedingSource();
         sourceMock
             .Setup(s => s.WriteChangesAsync(
@@ -222,14 +224,13 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
         // Act
-        int secondaryAfterCommit;
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             device.Primary = 5;
             await transaction.CommitAsync(CancellationToken.None);
         }
 
-        secondaryAfterCommit = device.Secondary;
+        var secondaryAfterCommit = device.Secondary;
 
         // Sentinel: use a sibling subject so the sentinel property is unambiguous.
         var sentinel = new Person(context);
@@ -256,6 +257,10 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         // The mock source received exactly one WriteChangesAsync call and that call contained
         // only the Primary change; the cascade (Secondary) is NOT submitted to the source because
         // it was not part of the transaction's pending set.
+
+        // writtenBatches is fully populated here: the mock's WriteChangesAsync returns a
+        // completed ValueTask, so the callback fires synchronously inside CommitAsync (stage 1)
+        // before the local apply (stage 2) or the method return.
         Assert.Single(writtenBatches);
         Assert.Single(writtenBatches[0]);
         Assert.Equal(nameof(CascadingDevice.Primary), writtenBatches[0][0].Property.Name);

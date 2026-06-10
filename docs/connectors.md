@@ -103,6 +103,20 @@ await tx.CommitAsync(ct);   // Writes to source first, then applies locally
 
 Choose based on your consistency requirements: local-first for responsiveness, transactions for confirmed delivery.
 
+#### Change notification source semantics
+
+The `Source` of a change notification identifies the system that confirmed the value. Inbound
+updates carry the source they came from. Source-bound changes committed through a source
+transaction also carry their owning source, because the source accepted the value before the
+local model was updated; this is what prevents the outbound change queue from writing committed
+values to the source a second time. Purely local writes (no associated source) carry `null`.
+
+Synchronous consequences of a source-scoped apply, such as `OnChanged` cascade writes and
+derived property recalculations, inherit the source scope. They are therefore not pushed back
+to that source, for inbound updates and transactional commits alike. If a cascade-computed
+value must reach the source, write it explicitly (inside the transaction when using one) or do
+not associate the computed property with a source.
+
 ### Write Retry Queue
 
 `SubjectSourceBase` provides a write retry queue that buffers writes during disconnection. Each connector exposes the queue size through its own configuration (for example, `OpcUaClientConfiguration.WriteRetryQueueSize`); when implementing a custom source, pass `writeRetryQueueSize` to the `SubjectSourceBase` constructor (default: 1000, pass 0 to disable).
