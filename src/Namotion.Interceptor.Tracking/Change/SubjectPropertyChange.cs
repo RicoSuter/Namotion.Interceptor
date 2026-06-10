@@ -199,6 +199,23 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     /// <summary>
+    /// Creates a copy of this change with a different source, preserving the property, values and
+    /// timestamps without re-boxing. Used by transaction commit to mark a source-bound change as
+    /// confirmed by the source that accepted it, so the local apply publishes a notification that
+    /// outbound connector queues recognize as an echo of that source.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal SubjectPropertyChange WithSource(object? source) =>
+        new(Property,
+            source,
+            ChangedTimestamp,
+            ReceivedTimestamp,
+            _oldValueStorage,
+            _newValueStorage,
+            _oldBoxedHolder,
+            _newBoxedHolder);
+
+    /// <summary>
     /// Equality based on PropertyReference only for efficient HashSet/Dictionary usage.
     /// </summary>
     public bool Equals(SubjectPropertyChange other) => Property.Equals(other.Property);
