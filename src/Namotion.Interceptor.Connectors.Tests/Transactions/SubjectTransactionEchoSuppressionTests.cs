@@ -200,6 +200,108 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
     }
 
     [Fact]
+    public async Task WhenCommitAppliedChangeTriggersCascade_ThenCascadeInheritsSourceScope()
+    {
+        // Arrange
+        var context = CreateContext();
+        var device = new CascadingDevice(context);
+
+        var writtenBatches = new List<SubjectPropertyChange[]>();
+        var sourceMock = CreateSucceedingSource();
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback((ReadOnlyMemory<SubjectPropertyChange> batch, CancellationToken _) =>
+                writtenBatches.Add(batch.ToArray()))
+            .Returns(new ValueTask<WriteResult>(WriteResult.Success));
+
+        new PropertyReference(device, nameof(CascadingDevice.Primary)).SetSource(sourceMock.Object);
+        new PropertyReference(device, nameof(CascadingDevice.Secondary)).SetSource(sourceMock.Object);
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        int secondaryAfterCommit;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            device.Primary = 5;
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        secondaryAfterCommit = device.Secondary;
+
+        // Sentinel: use a sibling subject so the sentinel property is unambiguous.
+        var sentinel = new Person(context);
+        sentinel.LastName = "Sentinel";
+
+        var changes = DrainUntilSentinelProperty(subscription, nameof(Person.LastName));
+
+        // Assert: the cascade produced Secondary = 10.
+        Assert.Equal(10, secondaryAfterCommit);
+
+        var primaryChanges = changes.Where(c => c.Property.Name == nameof(CascadingDevice.Primary)).ToList();
+        var secondaryChanges = changes.Where(c => c.Property.Name == nameof(CascadingDevice.Secondary)).ToList();
+
+        // Primary change carries the source.
+        Assert.Single(primaryChanges);
+        Assert.Equal(5, primaryChanges[0].GetNewValue<int>());
+        Assert.Same(sourceMock.Object, primaryChanges[0].Source);
+
+        // Secondary change (the cascade) also carries the source, inheriting the scope.
+        Assert.Single(secondaryChanges);
+        Assert.Equal(10, secondaryChanges[0].GetNewValue<int>());
+        Assert.Same(sourceMock.Object, secondaryChanges[0].Source);
+
+        // The mock source received exactly one WriteChangesAsync call and that call contained
+        // only the Primary change; the cascade (Secondary) is NOT submitted to the source because
+        // it was not part of the transaction's pending set.
+        Assert.Single(writtenBatches);
+        Assert.Single(writtenBatches[0]);
+        Assert.Equal(nameof(CascadingDevice.Primary), writtenBatches[0][0].Property.Name);
+    }
+
+    [Fact]
+    public async Task WhenInboundSourceValueTriggersCascade_ThenCascadeInheritsSourceScope()
+    {
+        // Arrange
+        var context = CreateContext();
+        var device = new CascadingDevice(context);
+        var sourceMock = CreateSucceedingSource();
+
+        new PropertyReference(device, nameof(CascadingDevice.Primary)).SetSource(sourceMock.Object);
+        new PropertyReference(device, nameof(CascadingDevice.Secondary)).SetSource(sourceMock.Object);
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        new PropertyReference(device, nameof(CascadingDevice.Primary))
+            .SetValueFromSource(sourceMock.Object, DateTimeOffset.UtcNow, null, 7);
+
+        // Sentinel: use a sibling subject so the sentinel property is unambiguous.
+        var sentinel = new Person(context);
+        sentinel.LastName = "Sentinel";
+
+        var changes = DrainUntilSentinelProperty(subscription, nameof(Person.LastName));
+
+        // Assert: the cascade produced Secondary = 14.
+        Assert.Equal(14, device.Secondary);
+
+        var primaryChanges = changes.Where(c => c.Property.Name == nameof(CascadingDevice.Primary)).ToList();
+        var secondaryChanges = changes.Where(c => c.Property.Name == nameof(CascadingDevice.Secondary)).ToList();
+
+        // Primary change carries the inbound source.
+        Assert.Single(primaryChanges);
+        Assert.Equal(7, primaryChanges[0].GetNewValue<int>());
+        Assert.Same(sourceMock.Object, primaryChanges[0].Source);
+
+        // Secondary change (the cascade) also carries the inbound source, inheriting the scope.
+        Assert.Single(secondaryChanges);
+        Assert.Equal(14, secondaryChanges[0].GetNewValue<int>());
+        Assert.Same(sourceMock.Object, secondaryChanges[0].Source);
+    }
+
+    [Fact]
     public async Task WhenSourceBoundChangeCommitted_ThenServerSideProcessorStillReceivesIt()
     {
         // Arrange
