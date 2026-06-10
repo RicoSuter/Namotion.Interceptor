@@ -111,6 +111,12 @@ The existing inconsistency that `DerivedPropertyChangeHandler.NotifyDerivedPrope
 - `generator.md`: note the null-source scope where hooks are described.
 - Callback-purity guidance: INPC handlers should react, not mutate; if they do mutate, the writes are local-origin. Re-entrancy and stack-overflow risks of mutating from change handlers exist regardless of source semantics.
 
+## Forward compatibility: ChangeOrigin (#342)
+
+The null-source scope is the placeholder encoding of "local origin". When #342 introduces the typed `ChangeOrigin` discriminator, the semantic decision here stands: a hook-computed or INPC-written value is neither sent by a source (`FromSource`) nor accepted by one in stage 1 (`Confirmed`), so its only truthful kind is `Local`, and routing follows from the kind. What the discriminator improves is the encoding. `WithSource(null)` fixes routing by erasing information: the fact that a cascade was triggered by a value from a specific source is real provenance that null throws away. A future local-origin scope can set `Kind = Local` while retaining the triggering source as causal metadata, useful for diagnostics, loop analysis, and provenance-aware validation (which should validate locally computed values strictly, unlike source truth).
+
+The generated callback scopes in this design mark exactly the boundary "framework-invoked callback body starts here", which the write pipeline cannot detect on its own; that boundary is where the future swap happens. Expected rework when `ChangeOrigin` lands: one scope API call in the generated code, test assertions moving from `Source == null` to `Kind == Local`, and the documentation tables. No redesign.
+
 ## Out of scope
 
 - Arbitrary user code running inside a `WithState` scope (for example code called from a custom source implementation) keeps ambient inheritance. The rule is scoped to framework-invoked consequence callbacks.
