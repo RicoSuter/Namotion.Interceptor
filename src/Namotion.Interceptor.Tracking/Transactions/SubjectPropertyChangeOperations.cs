@@ -182,17 +182,38 @@ internal static class SubjectPropertyChangeOperations
             }
         }
 
-        // General case (partial failures, mixed local and source-bound commits): allocation-free
-        // O(n*m) scan; the written subset is small in practice.
+        // Small written sets (partial failures, mixed local and source-bound commits):
+        // allocation-free scan.
+        if (replacements.Count <= 8)
+        {
+            for (var i = 0; i < changes.Length; i++)
+            {
+                for (var j = 0; j < replacements.Count; j++)
+                {
+                    if (PropertyReference.Comparer.Equals(changes[i].Property, replacements[j].Property))
+                    {
+                        changes[i] = replacements[j];
+                        break;
+                    }
+                }
+            }
+            return;
+        }
+
+        // Large written sets: a hash join keeps the commit path linear regardless of transaction
+        // size; one dictionary allocation is negligible at this scale.
+        var byProperty = new Dictionary<PropertyReference, SubjectPropertyChange>(
+            replacements.Count, PropertyReference.Comparer);
+        foreach (var replacement in replacements)
+        {
+            byProperty[replacement.Property] = replacement;
+        }
+
         for (var i = 0; i < changes.Length; i++)
         {
-            for (var j = 0; j < replacements.Count; j++)
+            if (byProperty.TryGetValue(changes[i].Property, out var replacement))
             {
-                if (PropertyReference.Comparer.Equals(changes[i].Property, replacements[j].Property))
-                {
-                    changes[i] = replacements[j];
-                    break;
-                }
+                changes[i] = replacement;
             }
         }
     }
