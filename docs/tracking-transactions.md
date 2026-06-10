@@ -242,12 +242,7 @@ When `WithSourceTransactions()` is configured, commits execute in two stages:
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-Stage 2 applies source-bound changes marked with the source that accepted them in stage 1, so
-the outbound change queue treats their notifications as echoes and a committed value is written
-to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics)
-for the full contract, including cascade and derived property behavior. Value-transforming write
-interceptors are not supported with source transactions: the source would receive the stage 1
-value while the local model applies the transformed one.
+Stage 2 applies source-bound changes marked with the source that accepted them in stage 1, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior. Value-transforming write interceptors are not supported with source transactions: the source would receive the stage 1 value while the local model applies the transformed one.
 
 **Rollback behavior on failure:**
 

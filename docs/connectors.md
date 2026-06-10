@@ -105,22 +105,12 @@ Choose based on your consistency requirements: local-first for responsiveness, t
 
 #### Change notification source semantics
 
-The `Source` of a change notification identifies the system that confirmed the value: inbound
-updates carry the source they came from, source-bound changes committed through a source
-transaction carry their owning source (the source accepted the value before the local model was
-updated), and purely local writes carry `null`. The outbound change queue skips changes whose
-source is the target source itself, so a committed value is written to its source exactly once,
-by the commit.
+The `Source` of a change notification identifies the system that confirmed the value: inbound updates carry the source they came from, source-bound changes committed through a source transaction carry their owning source (the source accepted the value before the local model was updated), and purely local writes carry `null`. The outbound change queue skips changes whose source is the target source itself, so a committed value is written to its source exactly once, by the commit.
 
 Writes that happen as a consequence of a source-scoped apply differ by kind:
 
-- **Cascade writes** from `OnChanging`/`OnChanged` handlers inherit the source scope and are not
-  pushed back to that source, for inbound updates and transactional commits alike. If a
-  cascade-computed value must reach the source, write it explicitly or do not source-bind the
-  cascade target.
-- **Derived property recalculations** always publish with a `null` source (the local model
-  computed the value, no source confirmed it) and are therefore still pushed to a bound source,
-  whatever triggered the recalculation.
+- **Cascade writes** from `OnChanging`/`OnChanged` handlers inherit the source scope and are not pushed back to that source, for inbound updates and transactional commits alike. If a cascade-computed value must reach the source, write it explicitly or do not source-bind the cascade target.
+- **Derived property recalculations** always publish with a `null` source (the local model computed the value, no source confirmed it) and are therefore still pushed to a bound source, whatever triggered the recalculation.
 
 ### Write Retry Queue
 
