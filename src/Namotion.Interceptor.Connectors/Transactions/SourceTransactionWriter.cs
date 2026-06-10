@@ -145,10 +145,13 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var writeResult = await source.WriteChangesInBatchesAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
         if (writeResult.Error is null)
         {
+            // Mark in place: the buffer is privately owned and sourceChanges is a view over it.
+            MarkConfirmedBySource(buffer, count, source);
             return new SourceWriteResult(sourceChanges, [], [], RevertState: source);
         }
 
-        IReadOnlyList<SubjectPropertyChange> written = ExcludeFailed(sourceChanges, writeResult.FailedChanges);
+        var written = ExcludeFailed(sourceChanges, writeResult.FailedChanges);
+        MarkConfirmedBySource(written, source);
         return new SourceWriteResult(
             written,
             [.. writeResult.FailedChanges],
@@ -262,6 +265,27 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     }
 
     /// <summary>
+    /// Marks changes as confirmed by the source that accepted them. The commit substitutes these
+    /// into its snapshot so the local apply publishes notifications the outbound change queue
+    /// recognizes as echoes of that source (#343). Runs only after a successful write.
+    /// </summary>
+    private static void MarkConfirmedBySource(SubjectPropertyChange[] changes, int count, ISubjectSource source)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            changes[i] = changes[i].WithSource(source);
+        }
+    }
+
+    private static void MarkConfirmedBySource(List<SubjectPropertyChange> changes, ISubjectSource source)
+    {
+        for (var i = 0; i < changes.Count; i++)
+        {
+            changes[i] = changes[i].WithSource(source);
+        }
+    }
+
+    /// <summary>
     /// Writes to all external sources in parallel.
     /// </summary>
     private static async Task<(Dictionary<ISubjectSource, List<SubjectPropertyChange>> Successful, List<SubjectPropertyChange> Failed, List<Exception> Errors)>
@@ -313,10 +337,16 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         if (result.Error is not null)
         {
             var written = ExcludeFailed(sourceChanges, result.FailedChanges);
+            MarkConfirmedBySource(written, source);
             var error = new SourceTransactionWriteException(source, [.. result.FailedChanges], result.Error);
             return (written, [.. result.FailedChanges], error);
         }
 
+        // Mark the group list in place. The original (unmarked) values were already copied into memory
+        // before the write, so the source received clean structs. Marked group lists are intentional
+        // here: the revert path reads them via ToRollbackChange, which copies the source, so rollback
+        // changes also carry the confirming source as desired by the echo-suppression substitution (#343).
+        MarkConfirmedBySource(sourceChanges, source);
         return (sourceChanges, [], null);
     }
 
