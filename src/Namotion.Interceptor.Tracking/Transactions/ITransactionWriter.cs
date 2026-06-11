@@ -29,6 +29,9 @@ public interface ITransactionWriter
     /// <paramref name="changes"/> is a pooled buffer owned by the commit: it must not be retained or mutated
     /// after the returned task completes. When writing to multiple sources in parallel, each writer must
     /// touch only the slots of the changes bound to its own source.
+    /// Enable <see cref="SubjectTransaction.ValidateWriterContract"/> while developing an implementation:
+    /// the commit then verifies after every write that no slot was moved or replaced and fails terminally
+    /// on a violation.
     /// </remarks>
     /// <param name="changes">The commit snapshot to classify, write, and mark in place.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>

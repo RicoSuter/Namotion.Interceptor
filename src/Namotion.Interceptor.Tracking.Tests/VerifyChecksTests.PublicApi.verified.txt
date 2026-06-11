@@ -239,6 +239,7 @@ namespace Namotion.Interceptor.Tracking.Transactions
         public Namotion.Interceptor.IInterceptorSubjectContext Context { get; }
         public Namotion.Interceptor.Tracking.Transactions.TransactionLocking Locking { get; }
         public static Namotion.Interceptor.Tracking.Transactions.SubjectTransaction? Current { get; }
+        public static bool ValidateWriterContract { get; set; }
         public System.Threading.Tasks.ValueTask CommitAsync(System.Threading.CancellationToken cancellationToken) { }
         public void Dispose() { }
         public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> GetPendingChanges() { }

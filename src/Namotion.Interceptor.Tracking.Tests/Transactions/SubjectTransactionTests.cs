@@ -630,7 +630,7 @@ public class SubjectTransactionTests
 
     /// <summary>
     /// Violates the in-place marking contract: instead of only marking the source, it overwrites the first
-    /// snapshot slot with a change for a DIFFERENT property, which the debug integrity sweep must catch.
+    /// snapshot slot with a change for a DIFFERENT property, which the opt-in contract validation must catch.
     /// </summary>
     private sealed class SlotCorruptingTransactionWriter : ITransactionWriter
     {
@@ -653,9 +653,43 @@ public class SubjectTransactionTests
     }
 
     [Fact]
-    public async Task WhenWriterCorruptsSnapshotSlot_ThenCommitThrowsWriterContractViolation()
+    public async Task WhenWriterCorruptsSnapshotSlotAndValidationIsEnabled_ThenCommitFailsTerminally()
     {
-        // Arrange
+        // Arrange. Mutating the static switch is safe: xUnit runs tests of the same class sequentially.
+        var context = CreateTransactionContext();
+        context.AddService<ITransactionWriter>(new SlotCorruptingTransactionWriter());
+
+        var person = new Person(context);
+
+        SubjectTransaction.ValidateWriterContract = true;
+        try
+        {
+            using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+            person.FirstName = "John";
+            person.LastName = "Doe";
+
+            // Act & Assert
+            var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+            Assert.Contains(exception.Errors, error =>
+                error is InvalidOperationException && error.Message.Contains("contract"));
+
+            // The violation is detected after source writes already happened and nothing was reverted,
+            // so the transaction must be terminal: a retry would write to the sources a second time.
+            var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+            Assert.Contains("already been committed", retryException.Message);
+        }
+        finally
+        {
+            SubjectTransaction.ValidateWriterContract = false;
+        }
+    }
+
+    [Fact]
+    public async Task WhenWriterCorruptsSnapshotSlotAndValidationIsDisabled_ThenCommitSucceeds()
+    {
+        // Arrange. Validation is off by default (opt-in diagnostic), so the corruption goes undetected.
         var context = CreateTransactionContext();
         context.AddService<ITransactionWriter>(new SlotCorruptingTransactionWriter());
 
@@ -665,9 +699,13 @@ public class SubjectTransactionTests
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        Assert.Contains("contract", exception.Message);
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert: the commit completed and applied the corrupted snapshot as-is. Slot 0 was overwritten
+        // with the LastName change, so FirstName was never applied; this pins that disabled validation
+        // means undetected corruption, which is why the docs require enabling it during writer development.
+        Assert.Null(person.FirstName);
+        Assert.Equal("Doe", person.LastName);
     }
 }
