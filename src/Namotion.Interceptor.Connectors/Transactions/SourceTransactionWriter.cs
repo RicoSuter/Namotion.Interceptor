@@ -364,15 +364,15 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var errors = new List<Exception>();
 
         var taskIndex = 0;
-        var writeTasks = new Task<(ISubjectSource Source, SourceGroup Group, (List<SubjectPropertyChange> Written, List<SubjectPropertyChange> Failed, Exception? Error) Result)>[changesBySource.Count];
+        var writeTasks = new Task<(List<SubjectPropertyChange> Written, List<SubjectPropertyChange> Failed, Exception? Error)>[changesBySource.Count];
         foreach (var kvp in changesBySource)
         {
-            writeTasks[taskIndex++] = WriteToSourceWithResultAsync(snapshot, kvp.Key, kvp.Value, cancellationToken);
+            writeTasks[taskIndex++] = TryWriteToSourceAsync(snapshot, kvp.Key, kvp.Value, cancellationToken);
         }
 
         var results = await Task.WhenAll(writeTasks).ConfigureAwait(false);
 
-        foreach (var (_, _, (writtenList, failList, error)) in results)
+        foreach (var (writtenList, failList, error) in results)
         {
             written.AddRange(writtenList);
             failed.AddRange(failList);
@@ -521,19 +521,5 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         }
 
         return changes;
-    }
-
-    /// <summary>
-    /// Wraps TryWriteToSourceAsync to include source and group in result for parallel execution.
-    /// </summary>
-    private static async Task<(ISubjectSource Source, SourceGroup Group, (List<SubjectPropertyChange> Written, List<SubjectPropertyChange> Failed, Exception? Error) Result)>
-        WriteToSourceWithResultAsync(
-            Memory<SubjectPropertyChange> snapshot,
-            ISubjectSource source,
-            SourceGroup group,
-            CancellationToken cancellationToken)
-    {
-        var result = await TryWriteToSourceAsync(snapshot, source, group, cancellationToken).ConfigureAwait(false);
-        return (source, group, result);
     }
 }
