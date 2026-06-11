@@ -404,4 +404,99 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
             Assert.Same(sourceMock.Object, change.Source);
         }
     }
+
+    [Fact]
+    public async Task WhenSingleSourceWritePartiallyFails_ThenWrittenChangeCarriesSourceAndFailedChangeIsNotApplied()
+    {
+        // Arrange: both properties bound to one source that accepts FirstName but rejects LastName,
+        // pinning the partial-failure marking path of the single-source writer: accepted slots are
+        // marked with the source, rejected slots stay unmarked and are excluded from the local apply.
+        var context = CreateContext();
+        var person = new Person(context);
+        var sourceMock = CreatePartialFailureSource(change => change.Property.Name == nameof(Person.LastName));
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceMock.Object);
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        SubjectTransactionException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            person.LastName = "Doe";
+            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Sentinel: FirstName_MaxLength is a distinct property, not involved in the commit.
+        person.FirstName_MaxLength = 77;
+
+        var changes = DrainUntilSentinelProperty(subscription, nameof(Person.FirstName_MaxLength));
+
+        // Assert: the accepted change was applied and its notification carries the accepting source.
+        var firstNameChanges = changes.Where(c => c.Property.Name == nameof(Person.FirstName)).ToList();
+        Assert.Single(firstNameChanges);
+        Assert.Same(sourceMock.Object, firstNameChanges[0].Source);
+        Assert.Equal("John", person.FirstName);
+
+        // The rejected change was neither applied nor notified, and the commit reported partial success.
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(Person.LastName));
+        Assert.Null(person.LastName);
+        Assert.True(exception.IsPartialSuccess);
+    }
+
+    [Fact]
+    public async Task WhenMultiSourceCommitPartiallyFails_ThenWrittenChangesCarryTheirOwnSources()
+    {
+        // Arrange: FirstName is bound to a fully succeeding source; LastName and FirstName_MaxLength are
+        // bound to a second source that rejects FirstName_MaxLength, pinning the partial-failure marking
+        // path of the parallel multi-source writer.
+        var context = CreateContext();
+        var person = new Person(context);
+        var sourceA = CreateSucceedingSource();
+        var sourceB = CreatePartialFailureSource(change => change.Property.Name == nameof(Person.FirstName_MaxLength));
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceA.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceB.Object);
+        new PropertyReference(person, nameof(Person.FirstName_MaxLength)).SetSource(sourceB.Object);
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        SubjectTransactionException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            person.LastName = "Doe";
+            person.FirstName_MaxLength = 99;
+            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Sentinel: a sibling subject, matched by subject AND name because the committed LastName change
+        // on 'person' shares the property name and must not terminate the drain early.
+        var sentinel = new Person(context);
+        sentinel.LastName = "Sentinel";
+
+        var changes = DrainUntil(subscription, change =>
+            ReferenceEquals(change.Property.Subject, sentinel) && change.Property.Name == nameof(Person.LastName));
+        var personChanges = changes.Where(c => ReferenceEquals(c.Property.Subject, person)).ToList();
+
+        // Assert: each accepted change carries its own accepting source.
+        var firstNameChanges = personChanges.Where(c => c.Property.Name == nameof(Person.FirstName)).ToList();
+        var lastNameChanges = personChanges.Where(c => c.Property.Name == nameof(Person.LastName)).ToList();
+        Assert.Single(firstNameChanges);
+        Assert.Single(lastNameChanges);
+        Assert.Same(sourceA.Object, firstNameChanges[0].Source);
+        Assert.Same(sourceB.Object, lastNameChanges[0].Source);
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+
+        // The rejected change was neither applied nor notified, and the commit reported partial success.
+        Assert.DoesNotContain(personChanges, c => c.Property.Name == nameof(Person.FirstName_MaxLength));
+        Assert.Equal(123, person.FirstName_MaxLength);
+        Assert.True(exception.IsPartialSuccess);
+    }
 }
