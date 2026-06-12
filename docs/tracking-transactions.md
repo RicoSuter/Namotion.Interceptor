@@ -244,13 +244,13 @@ When `WithSourceTransactions()` is configured, commits execute in two stages:
 
 Stage 2 applies source-bound changes marked with the source that accepted them in stage 1, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior. Value-transforming write interceptors are not supported with source transactions: the source would receive the stage 1 value while the local model applies the transformed one.
 
-**Implementing a custom writer:** a custom `ITransactionWriter` must follow the in-place marking contract documented in the xml docs of `ITransactionWriter.WriteToSourcesAsync`. The two ways to deviate have very different consequences. Moving or replacing a snapshot slot is not detected by default and silently corrupts the local apply (the wrong change is applied and echo suppression misfires). Not marking accepted slots is harmless but keeps the legacy behavior: the apply notifications carry no source, so the change queue pushes each committed value to its source a second time. During development and testing of a custom writer, enable the runtime contract validation:
+**Implementing a custom writer:** a custom `ITransactionWriter` must follow the in-place marking contract documented in the xml docs of `ITransactionWriter.WriteToSourcesAsync`. Moving or replacing a snapshot slot silently corrupts the local apply; not marking accepted slots is harmless but keeps the legacy double write (the apply notifications carry no source and are pushed to the source again). While developing a writer, enable the runtime contract validation:
 
 ```csharp
 SubjectTransaction.ValidateWriterContract = true;
 ```
 
-With validation enabled, every commit with a writer verifies after the write that no snapshot slot was moved or replaced and fails terminally with a `SubjectTransactionException` on a violation (sources may already have been written, so the commit cannot be retried). The validation checks slot identity only, not values, timestamps, or sources: it cannot detect missing marks (the double write above) or marks on slots whose write actually failed. Leave it disabled in production once the writer is verified, since it costs one array allocation and sweep per commit; the built-in `SourceTransactionWriter` does not need it.
+The commit then fails terminally with a `SubjectTransactionException` if a slot was moved or replaced (sources may already have been written, so no retry). The check covers slot identity only: missing or wrong-source marks are not detected. Leave it disabled in production (one array allocation and sweep per commit); the built-in `SourceTransactionWriter` does not need it.
 
 **Rollback behavior on failure:**
 

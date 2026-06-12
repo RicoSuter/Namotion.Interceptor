@@ -24,8 +24,7 @@ public class SubjectTransactionException : Exception
 
     /// <summary>
     /// Gets the changes that were successfully written to source and applied to local model.
-    /// The <see cref="SubjectPropertyChange.Source"/> of an entry is the source that accepted the write,
-    /// as marked by the transaction writer, not the source captured when the change was made.
+    /// Entries carry the source that accepted the write, not the capture-time source.
     /// </summary>
     public IReadOnlyList<SubjectPropertyChange> AppliedChanges { get; }
 
@@ -33,9 +32,8 @@ public class SubjectTransactionException : Exception
     /// Gets the changes that did not commit: source-write failures, changes that threw while being applied
     /// to or reverted from the local model, and, under <see cref="TransactionFailureHandling.Rollback"/>,
     /// local (no-source) changes that were never applied. A change can appear more than once if it failed at
-    /// more than one stage. The <see cref="SubjectPropertyChange.Source"/> of an entry carries no guarantee
-    /// here: on terminal writer failures the snapshot may already be partially marked by accepting sources,
-    /// so a non-null source does not mean the change was applied or reverted.
+    /// more than one stage. The <see cref="SubjectPropertyChange.Source"/> of an entry carries no
+    /// guarantee here: terminal writer failures may leave the snapshot partially marked.
     /// </summary>
     public IReadOnlyList<SubjectPropertyChange> FailedChanges { get; }
 

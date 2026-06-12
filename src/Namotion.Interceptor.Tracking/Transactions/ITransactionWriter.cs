@@ -11,30 +11,22 @@ public interface ITransactionWriter
 {
     /// <summary>
     /// Writes every source-bound change to its source (best-effort per source) and reports the
-    /// per-change outcome. Does not apply anything to the local model. Performs classification (source vs
-    /// local) and the SingleWrite requirement check, since it alone knows the SetSource mappings.
-    /// Local (no-source) changes are neither written nor returned; the transaction applies them.
+    /// per-change outcome. Does not apply anything to the local model. Local (no-source) changes are
+    /// neither written nor returned; the transaction applies them. Also enforces the SingleWrite
+    /// requirement, since only the writer knows the source mappings.
     /// </summary>
     /// <remarks>
-    /// Implementations must report per-source failures via <see cref="SourceWriteResult"/> rather than
-    /// throwing: reverting requires the written set and revert state returned here. A throw returns
-    /// neither, so the transaction fails terminally with every change reported as failed and any writes
-    /// that already reached other sources left un-reverted.
-    /// For each change a source accepts, the implementation must replace that slot in <paramref name="changes"/>
+    /// Report failures via <see cref="SourceWriteResult"/>, never throw: a throw returns neither the
+    /// written set nor the revert state, so the transaction fails terminally with nothing reverted.
+    /// After (and only after) a source accepts a change, replace that slot in <paramref name="changes"/>
     /// with the same change marked by the accepting source (<see cref="SubjectPropertyChange.WithSource"/>),
-    /// and only after the source write succeeded. Marking a slot lets the commit's local apply and any local
-    /// revert publish notifications that the outbound connector queue for that source recognizes as echoes;
-    /// failed and never-written slots must be left untouched. The implementation must change only the
-    /// <see cref="SubjectPropertyChange.Source"/> of a slot, never move a change to a different slot.
-    /// An implementation that does not mark accepted slots still commits correctly but degrades gracefully
-    /// to the pre-marking behavior: the apply notifications carry no source, so the outbound connector
-    /// queue does not recognize them as echoes and pushes each committed value to its source a second time.
-    /// <paramref name="changes"/> is a pooled buffer owned by the commit: it must not be retained or mutated
-    /// after the returned task completes. When writing to multiple sources in parallel, each writer must
-    /// touch only the slots of the changes bound to its own source.
-    /// Enable <see cref="SubjectTransaction.ValidateWriterContract"/> while developing an implementation:
-    /// the commit then verifies after every write that no slot was moved or replaced and fails terminally
-    /// on a violation.
+    /// so the commit's local apply and revert notifications are recognized as echoes by that source's
+    /// outbound queue. Change only the slot's <see cref="SubjectPropertyChange.Source"/>, never move a
+    /// change to a different slot, and leave failed slots untouched. Not marking at all is harmless but
+    /// keeps the legacy double write (the queue re-pushes each committed value).
+    /// <paramref name="changes"/> is a pooled buffer owned by the commit: do not retain or mutate it after
+    /// the returned task completes. Parallel per-source writers must touch only their own source's slots.
+    /// Enable <see cref="SubjectTransaction.ValidateWriterContract"/> while developing an implementation.
     /// </remarks>
     /// <param name="changes">The commit snapshot to classify, write, and mark in place.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>

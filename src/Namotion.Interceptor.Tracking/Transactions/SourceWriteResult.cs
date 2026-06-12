@@ -10,8 +10,8 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// <param name="Written">
 /// The source-bound changes that reached their source and can therefore be reverted there. The
 /// transaction holds this list opaquely and passes it back to <see cref="ITransactionWriter.RevertSourceWritesAsync"/>
-/// on rollback. It identifies what reached sources for compensation and reporting; its entries do not
-/// need to carry the accepting source (the snapshot is marked in place; see <see cref="ITransactionWriter.WriteToSourcesAsync"/>).
+/// on rollback. Entries need not carry the accepting source; the snapshot is marked in place instead
+/// (see <see cref="ITransactionWriter.WriteToSourcesAsync"/>).
 /// </param>
 /// <param name="Failed">
 /// The source-bound changes whose source write failed. These are excluded from the local apply
@@ -19,9 +19,8 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// </param>
 /// <param name="Errors">
 /// The errors that occurred while writing to sources, typically one per source that failed.
-/// Any error fails the commit, even with an empty <paramref name="Failed"/>; an error without
-/// enumerated failed changes condemns no specific change, so writers should enumerate the
-/// failed changes whenever possible.
+/// Any error fails the commit, even with an empty <paramref name="Failed"/>, but an unenumerated
+/// error condemns no specific change, so writers should enumerate the failed changes whenever possible.
 /// </param>
 /// <param name="RevertState">
 /// Opaque writer-owned state that identifies which source each written change was written to, handed

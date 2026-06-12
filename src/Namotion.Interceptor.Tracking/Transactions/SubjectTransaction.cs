@@ -53,12 +53,9 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Enables runtime validation that a custom <see cref="ITransactionWriter"/> fulfills the in-place
-    /// marking contract of <see cref="ITransactionWriter.WriteToSourcesAsync"/> (default: false).
-    /// When enabled, the commit captures every snapshot slot's property before the writer runs and fails
-    /// terminally with a <see cref="SubjectTransactionException"/> if the writer moved or replaced a change
-    /// instead of only marking its accepting source. Turn this on while developing and testing a custom
-    /// writer; leave it off in production once the writer is verified, since validation costs one array
-    /// allocation and sweep per commit. The built-in writer does not need it.
+    /// marking contract of <see cref="ITransactionWriter.WriteToSourcesAsync"/>: the commit then fails
+    /// terminally if the writer moved or replaced a snapshot slot. Intended for developing custom writers
+    /// (costs one array allocation and sweep per commit); process-wide, set once at startup.
     /// </summary>
     public static bool ValidateWriterContract { get; set; }
 
@@ -400,19 +397,15 @@ public sealed class SubjectTransaction : IDisposable
         Memory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
-        // The writer marks each accepted snapshot slot with the confirming source, so the local apply and
-        // any local revert publish notifications that the outbound connector queue for that source
-        // recognizes as echoes instead of re-pushing committed values (#343).
+        // The writer marks accepted snapshot slots with the confirming source so the local apply and
+        // revert notifications are echo-suppressed by the outbound connector queue (#343).
         var capturedProperties = ValidateWriterContract ? CaptureSnapshotProperties(changes.Span) : null;
 
-        // A writer that throws instead of reporting via SourceWriteResult returns neither the written
-        // set nor the revert state, so sources cannot be reverted. Report a full failure instead; the
-        // caller routes it through FinishCommit(), making the transaction terminal. A detected contract
-        // violation takes the same terminal path: source writes already happened, so a retry would write
-        // them a second time. Only a commit-timeout OperationCanceledException propagates and stays
-        // retryable; the built-in writer converts write-phase cancellation into a reported failure
-        // (terminal), so this escape hatch fires only for its revert phase and for custom writers that
-        // throw OperationCanceledException themselves.
+        // A throwing writer returns neither the written set nor the revert state, so sources cannot be
+        // reverted: report a full failure, which the caller makes terminal. A contract violation is
+        // terminal too (source writes already happened, a retry would repeat them). Only a commit-timeout
+        // OperationCanceledException propagates and stays retryable; the built-in writer throws it
+        // only from its revert phase (write-phase cancellation is reported as a failure).
         SourceWriteResult writeResult;
         try
         {
@@ -482,8 +475,8 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         // Apply succeeded. Report any remaining source failure or writer error (BestEffort; Rollback
-        // returned above). ApplyLocalChanges returns an empty Successful set on the no-exclude path,
-        // so materialize the snapshot to report what was applied.
+        // returned above). On the no-exclude path ApplyLocalChanges returned an empty Successful set,
+        // so materialize the snapshot as the applied set.
         if (failedSource.Count > 0 || sourceErrors.Count > 0)
         {
             var appliedChanges = exclude is null ? changes.ToArray() : applied;
@@ -493,11 +486,6 @@ public sealed class SubjectTransaction : IDisposable
         return null;
     }
 
-    /// <summary>
-    /// Captures the property of every snapshot slot before the writer runs, so the post-write sweep can
-    /// confirm the writer never moved or replaced a change. Only called when
-    /// <see cref="ValidateWriterContract"/> is enabled.
-    /// </summary>
     private static PropertyReference[] CaptureSnapshotProperties(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         var properties = new PropertyReference[changes.Length];
@@ -509,10 +497,8 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Verifies that every snapshot slot still holds the property captured before the writer ran, catching
-    /// a writer that violates the in-place marking contract by moving or replacing a change. Checks slot
-    /// identity only; a writer that keeps the property but tampers with values or timestamps is not detected.
-    /// No-op when <paramref name="capturedProperties"/> is null (validation disabled).
+    /// Verifies no snapshot slot was moved or replaced by the writer. Checks slot identity only; tampered
+    /// values or timestamps are not detected. No-op when validation is disabled (null capture).
     /// </summary>
     private static void VerifySnapshotIntegrity(PropertyReference[]? capturedProperties, ReadOnlySpan<SubjectPropertyChange> changes)
     {

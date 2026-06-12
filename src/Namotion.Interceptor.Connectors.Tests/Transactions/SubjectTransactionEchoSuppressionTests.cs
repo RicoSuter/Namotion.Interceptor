@@ -12,16 +12,13 @@ using Xunit;
 namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 
 /// <summary>
-/// Tests pinning the echo-suppression contract: source-bound commit applies carry the
-/// accepting source's identity so outbound ChangeQueueProcessor instances that belong to
-/// that same source recognize the notification as an echo and drop it. Server-side
-/// processors (different source identity) must still receive every notification.
+/// Pins the echo-suppression contract: source-bound commit applies carry the accepting source's
+/// identity so that source's outbound queue drops them as echoes, while other processors still
+/// receive every notification.
 /// </summary>
 public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 {
-    // Drains changes from the subscription until a sentinel is received.
-    // The sentinel itself is not included in the returned list.
-    // Throws TimeoutException if the sentinel does not arrive within 10 seconds.
+    // Drains until the sentinel arrives (excluded from the result); throws TimeoutException after 10s.
     private static List<SubjectPropertyChange> DrainUntil(
         PropertyChangeQueueSubscription subscription, Func<SubjectPropertyChange, bool> isSentinel)
     {
@@ -95,17 +92,14 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).SetSource(sourceMock.Object);
         new PropertyReference(device, nameof(ThrowingDevice.PropertyB)).SetSource(sourceMock.Object);
 
-        // Use a separate Person on the same context as the sentinel carrier. After rollback,
-        // PropertyA is already false again (reverted), so writing false would be suppressed by
-        // the equality check; a string property on a sibling subject avoids that.
+        // Sentinel on a sibling subject: re-writing the reverted PropertyA value would be
+        // suppressed by the equality check.
         var sentinel = new Person(context);
 
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
-        // Act - capture writes during transaction body (no notifications yet); throw fires at commit.
-        // Dispose the transaction before writing the sentinel: while the transaction is open the
-        // SubjectTransaction.Current AsyncLocal still holds it, so property writes are captured into
-        // the pending set, not published to the change queue.
+        // Act. Dispose before writing the sentinel: writes inside the open transaction are
+        // captured into the pending set, not published.
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
         {
             device.PropertyA = true;
@@ -115,15 +109,13 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 
             await Assert.ThrowsAsync<SubjectTransactionException>(
                 () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        } // Dispose clears SubjectTransaction.Current so subsequent writes are published immediately.
+        }
 
-        // Sentinel: write to the sibling subject; this is outside any transaction so it fires immediately.
         sentinel.LastName = "Sentinel";
 
         var changes = DrainUntilSentinelProperty(subscription, nameof(Person.LastName));
 
-        // Assert: exactly 2 PropertyA notifications: the forward apply (true) and the rollback revert (false).
-        // Both must carry the source identity so the outbound filter on that source treats them as echoes.
+        // Assert: both the forward apply and the rollback revert carry the source identity.
         var propertyAChanges = changes.Where(c => c.Property.Name == nameof(ThrowingDevice.PropertyA)).ToList();
         Assert.Equal(2, propertyAChanges.Count);
         Assert.All(propertyAChanges, change => Assert.Same(sourceMock.Object, change.Source));
@@ -176,8 +168,6 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         var device = new CascadingDevice(context);
 
         var writtenBatches = new List<SubjectPropertyChange[]>();
-        // CreateSucceedingSource sets WriteBatchSize = 0 (unbatched); the Setup below overrides
-        // only WriteChangesAsync to capture the written batches.
         var sourceMock = CreateSucceedingSource();
         sourceMock
             .Setup(s => s.WriteChangesAsync(
@@ -201,7 +191,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 
         var secondaryAfterCommit = device.Secondary;
 
-        // Sentinel: use a sibling subject so the sentinel property is unambiguous.
+        // Sentinel on a sibling subject so the property is unambiguous.
         var sentinel = new Person(context);
         sentinel.LastName = "Sentinel";
 
@@ -223,13 +213,8 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         Assert.Equal(10, secondaryChanges[0].GetNewValue<int>());
         Assert.Same(sourceMock.Object, secondaryChanges[0].Source);
 
-        // The mock source received exactly one WriteChangesAsync call and that call contained
-        // only the Primary change; the cascade (Secondary) is NOT submitted to the source because
-        // it was not part of the transaction's pending set.
-
-        // writtenBatches is fully populated here: the mock's WriteChangesAsync returns a
-        // completed ValueTask, so the callback fires synchronously inside CommitAsync (stage 1)
-        // before the local apply (stage 2) or the method return.
+        // Only Primary was submitted to the source; the cascade was not in the pending set.
+        // writtenBatches is populated: the synchronous mock completed inside CommitAsync.
         Assert.Single(writtenBatches);
         Assert.Single(writtenBatches[0]);
         Assert.Equal(nameof(CascadingDevice.Primary), writtenBatches[0][0].Property.Name);
@@ -283,8 +268,6 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         var person = new Person(context);
 
         var writtenBatches = new List<SubjectPropertyChange[]>();
-        // CreateSucceedingSource sets WriteBatchSize = 0 (unbatched); the Setup below overrides
-        // only WriteChangesAsync to capture the written batches.
         var sourceMock = CreateSucceedingSource();
         sourceMock
             .Setup(s => s.WriteChangesAsync(
