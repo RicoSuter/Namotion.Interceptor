@@ -16,6 +16,7 @@ public class RegistryBenchmark
     private Car _object;
     private IInterceptorSubjectContext? _context;
     private ISubjectRegistry? _registry;
+    private RegisteredSubject? _tireRegistered;
     private int _writeCounter;
 
     [Params(
@@ -42,6 +43,7 @@ public class RegistryBenchmark
                 _object = new Car(_context);
                 AddLotsOfPreviousCars();
                 _registry = _context.TryGetService<ISubjectRegistry>();
+                _tireRegistered = _registry!.TryGetRegisteredSubject(_object.Tires[0]);
                 break;
         }
     }
@@ -162,5 +164,23 @@ public class RegistryBenchmark
     public int KnownSubjectsSnapshot()
     {
         return _registry!.KnownSubjects.Count;
+    }
+
+    /// <summary>
+    /// Hot-path microbench for the lock-free <see cref="RegisteredSubject.Parents"/> getter.
+    /// Calls .Parents on a registered subject 256 times per op so per-call cost dominates
+    /// the loop overhead. The cached snapshot is hit on every call after the first; this
+    /// measures steady-state inlining behavior of the fast path.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = 256)]
+    public int ReadParents()
+    {
+        var registered = _tireRegistered!;
+        var sum = 0;
+        for (var i = 0; i < 256; i++)
+        {
+            sum += registered.Parents.Length;
+        }
+        return sum;
     }
 }

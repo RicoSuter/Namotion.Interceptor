@@ -1,6 +1,7 @@
 ﻿using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -13,7 +14,17 @@ public class RegisteredSubject
     private readonly Lock _lock = new();
 
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
-    private ImmutableArray<SubjectPropertyParent> _parents = [];
+
+    // Most subjects have exactly one parent, so the first is stored inline and the
+    // overflow list is allocated only on the second. Empty sentinel:
+    // _firstParent.Property is null (a real entry never has a null Property).
+    private SubjectPropertyParent _firstParent;
+    private List<SubjectPropertyParent>? _additionalParents;
+
+    // Raw array instead of ImmutableArray because the struct can't be read atomically;
+    // the Volatile.Write publish (under _lock) pairs with the lock-free Volatile.Read
+    // in the getter so readers see fully built contents.
+    private SubjectPropertyParent[]? _parentsSnapshot;
 
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
@@ -25,16 +36,52 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the properties which reference this subject.
-    /// Thread-safe: lock ensures atomic struct copy during read.
+    /// Thread-safe; reads are lock-free once the snapshot is cached.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            lock (_lock)
-                return _parents;
+            var snapshot = Volatile.Read(ref _parentsSnapshot);
+            return snapshot is not null
+                ? ImmutableCollectionsMarshal.AsImmutableArray(snapshot)
+                : GetParentsSlow();
         }
     }
+
+    private ImmutableArray<SubjectPropertyParent> GetParentsSlow()
+    {
+        lock (_lock)
+        {
+            var snapshot = _parentsSnapshot;
+            if (snapshot is null)
+            {
+                snapshot = BuildParentsSnapshot();
+                Volatile.Write(ref _parentsSnapshot, snapshot);
+            }
+            return ImmutableCollectionsMarshal.AsImmutableArray(snapshot);
+        }
+    }
+
+    // Must be called under _lock. Published snapshots are never mutated in place because
+    // lock-free readers rely on it: mutators invalidate and the next reader rebuilds.
+    private SubjectPropertyParent[] BuildParentsSnapshot()
+    {
+        if (_firstParent.Property is null)
+            return [];
+
+        if (_additionalParents is null || _additionalParents.Count == 0)
+            return [_firstParent];
+
+        var array = new SubjectPropertyParent[1 + _additionalParents.Count];
+        array[0] = _firstParent;
+        _additionalParents.CopyTo(array, 1);
+        return array;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void InvalidateParentsSnapshot() => Volatile.Write(ref _parentsSnapshot, null);
 
     /// <summary>
     /// Gets all registered properties.
@@ -101,7 +148,17 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            _parents = _parents.Add(new SubjectPropertyParent { Property = parent, Index = index });
+            var entry = new SubjectPropertyParent { Property = parent, Index = index };
+            if (_firstParent.Property is null)
+            {
+                _firstParent = entry;
+            }
+            else
+            {
+                _additionalParents ??= [];
+                _additionalParents.Add(entry);
+            }
+            InvalidateParentsSnapshot();
         }
     }
 
@@ -109,7 +166,22 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            _parents = _parents.Remove(new SubjectPropertyParent { Property = parent, Index = index });
+            var entry = new SubjectPropertyParent { Property = parent, Index = index };
+            if (_firstParent.Property is not null && _firstParent.Equals(entry))
+            {
+                PromoteFirstParentFromAdditional();
+                return;
+            }
+
+            if (_additionalParents is not null)
+            {
+                var indexInList = _additionalParents.IndexOf(entry);
+                if (indexInList >= 0)
+                {
+                    _additionalParents.RemoveAt(indexInList);
+                    InvalidateParentsSnapshot();
+                }
+            }
         }
     }
 
@@ -117,16 +189,30 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            var parents = _parents;
-            for (var i = parents.Length - 1; i >= 0; i--)
+            var changed = false;
+
+            if (_additionalParents is not null && _additionalParents.Count > 0)
             {
-                if (parents[i].Property == parent)
+                for (var i = _additionalParents.Count - 1; i >= 0; i--)
                 {
-                    parents = parents.RemoveAt(i);
+                    if (_additionalParents[i].Property == parent)
+                    {
+                        _additionalParents.RemoveAt(i);
+                        changed = true;
+                    }
                 }
             }
 
-            _parents = parents;
+            if (_firstParent.Property == parent)
+            {
+                PromoteFirstParentFromAdditional();
+                changed = true;
+            }
+
+            if (changed)
+            {
+                InvalidateParentsSnapshot();
+            }
         }
     }
 
@@ -134,13 +220,40 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            var oldParent = new SubjectPropertyParent { Property = property, Index = oldIndex };
-            var idx = _parents.IndexOf(oldParent);
-            if (idx >= 0)
+            var oldEntry = new SubjectPropertyParent { Property = property, Index = oldIndex };
+            if (_firstParent.Property is not null && _firstParent.Equals(oldEntry))
             {
-                _parents = _parents.SetItem(idx, new SubjectPropertyParent { Property = property, Index = newIndex });
+                _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
+                InvalidateParentsSnapshot();
+                return;
+            }
+
+            if (_additionalParents is not null)
+            {
+                var indexInList = _additionalParents.IndexOf(oldEntry);
+                if (indexInList >= 0)
+                {
+                    _additionalParents[indexInList] = new SubjectPropertyParent { Property = property, Index = newIndex };
+                    InvalidateParentsSnapshot();
+                }
             }
         }
+    }
+
+    // Promotes the head (not the tail) of the overflow list so the surviving parents
+    // keep their insertion order. Caller must hold _lock.
+    private void PromoteFirstParentFromAdditional()
+    {
+        if (_additionalParents is not null && _additionalParents.Count > 0)
+        {
+            _firstParent = _additionalParents[0];
+            _additionalParents.RemoveAt(0);
+        }
+        else
+        {
+            _firstParent = default;
+        }
+        InvalidateParentsSnapshot();
     }
 
     /// <summary>
