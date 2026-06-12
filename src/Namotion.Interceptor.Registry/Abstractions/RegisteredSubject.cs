@@ -15,19 +15,15 @@ public class RegisteredSubject
 
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
 
-    // Inline single-parent storage. Most subjects have exactly one parent; the
-    // overflow list is allocated only on the second parent. Empty sentinel:
-    // _firstParent.Property is null (Property is a class, never null on a real entry).
+    // Most subjects have exactly one parent, so the first is stored inline and the
+    // overflow list is allocated only on the second. Empty sentinel:
+    // _firstParent.Property is null (a real entry never has a null Property).
     private SubjectPropertyParent _firstParent;
     private List<SubjectPropertyParent>? _additionalParents;
 
-    // Lazily built cache of Parents. null = not cached. Stored as a raw array
-    // (wrapped to ImmutableArray on read via ImmutableCollectionsMarshal) so
-    // we can use Volatile.Read/Write for a lock-free read fast path; the
-    // ImmutableArray<T> struct can't be read atomically. Mutations invalidate
-    // under _lock; build-and-publish happens under _lock with Volatile.Write,
-    // pairing with the lock-free Volatile.Read so the array contents are
-    // visible to readers that bypass the lock.
+    // Raw array instead of ImmutableArray because the struct can't be read atomically;
+    // the Volatile.Write publish (under _lock) pairs with the lock-free Volatile.Read
+    // in the getter so readers see fully built contents.
     private SubjectPropertyParent[]? _parentsSnapshot;
 
     [JsonIgnore] public IInterceptorSubject Subject { get; }
@@ -40,8 +36,7 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the properties which reference this subject.
-    /// Thread-safe: lock-free read on the cache hit; falls into the lock to
-    /// build and publish on the cache miss.
+    /// Thread-safe; reads are lock-free once the snapshot is cached.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
     {
@@ -69,10 +64,8 @@ public class RegisteredSubject
         }
     }
 
-    // Builds a fresh array snapshot of the current parent set. Must be called under _lock.
-    // The returned array is treated as immutable once published via Volatile.Write; mutators
-    // must invalidate (write null) and let the next reader build a new array, never mutate
-    // a published snapshot in place — readers that bypass the lock rely on this.
+    // Must be called under _lock. Published snapshots are never mutated in place because
+    // lock-free readers rely on it: mutators invalidate and the next reader rebuilds.
     private SubjectPropertyParent[] BuildParentsSnapshot()
     {
         if (_firstParent.Property is null)
@@ -176,7 +169,7 @@ public class RegisteredSubject
             var entry = new SubjectPropertyParent { Property = parent, Index = index };
             if (_firstParent.Property is not null && _firstParent.Equals(entry))
             {
-                PromoteFirstFromAdditional();
+                PromoteFirstParentFromAdditional();
                 return;
             }
 
@@ -212,7 +205,7 @@ public class RegisteredSubject
 
             if (_firstParent.Property == parent)
             {
-                PromoteFirstFromAdditional();
+                PromoteFirstParentFromAdditional();
                 changed = true;
             }
 
@@ -247,10 +240,9 @@ public class RegisteredSubject
         }
     }
 
-    // Clears the inline first-parent slot, promoting the head of the overflow list if
-    // any so insertion order of survivors is preserved (matches the original
-    // ImmutableArray.Remove semantics). Caller must hold _lock.
-    private void PromoteFirstFromAdditional()
+    // Promotes the head (not the tail) of the overflow list so the surviving parents
+    // keep their insertion order. Caller must hold _lock.
+    private void PromoteFirstParentFromAdditional()
     {
         if (_additionalParents is not null && _additionalParents.Count > 0)
         {
