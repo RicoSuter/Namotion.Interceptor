@@ -407,9 +407,12 @@ public sealed class SubjectTransaction : IDisposable
 
         // A writer that throws instead of reporting via SourceWriteResult returns neither the written
         // set nor the revert state, so sources cannot be reverted. Report a full failure instead; the
-        // caller routes it through FinishCommit(), making the transaction terminal. Only the commit
-        // timeout propagates and stays retryable. A detected contract violation takes the same terminal
-        // path: source writes already happened, so a retry would write them a second time.
+        // caller routes it through FinishCommit(), making the transaction terminal. A detected contract
+        // violation takes the same terminal path: source writes already happened, so a retry would write
+        // them a second time. Only a commit-timeout OperationCanceledException propagates and stays
+        // retryable; the built-in writer converts write-phase cancellation into a reported failure
+        // (terminal), so this escape hatch fires only for its revert phase and for custom writers that
+        // throw OperationCanceledException themselves.
         SourceWriteResult writeResult;
         try
         {

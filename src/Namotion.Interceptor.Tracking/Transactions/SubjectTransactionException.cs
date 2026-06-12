@@ -24,6 +24,8 @@ public class SubjectTransactionException : Exception
 
     /// <summary>
     /// Gets the changes that were successfully written to source and applied to local model.
+    /// The <see cref="SubjectPropertyChange.Source"/> of an entry is the source that accepted the write,
+    /// as marked by the transaction writer, not the source captured when the change was made.
     /// </summary>
     public IReadOnlyList<SubjectPropertyChange> AppliedChanges { get; }
 

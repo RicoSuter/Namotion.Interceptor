@@ -26,6 +26,9 @@ public interface ITransactionWriter
     /// revert publish notifications that the outbound connector queue for that source recognizes as echoes;
     /// failed and never-written slots must be left untouched. The implementation must change only the
     /// <see cref="SubjectPropertyChange.Source"/> of a slot, never move a change to a different slot.
+    /// An implementation that does not mark accepted slots still commits correctly but degrades gracefully
+    /// to the pre-marking behavior: the apply notifications carry no source, so the outbound connector
+    /// queue does not recognize them as echoes and pushes each committed value to its source a second time.
     /// <paramref name="changes"/> is a pooled buffer owned by the commit: it must not be retained or mutated
     /// after the returned task completes. When writing to multiple sources in parallel, each writer must
     /// touch only the slots of the changes bound to its own source.
