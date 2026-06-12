@@ -66,6 +66,7 @@ public static class SubjectSourceExtensions
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
+        var confirmedCount = 0;
         try
         {
             var count = changes.Length;
@@ -109,6 +110,8 @@ public static class SubjectSourceExtensions
                     return WriteResult.PartialFailure(
                         ImmutableCollectionsMarshal.AsImmutableArray(failedChanges), batchResult.Error);
                 }
+
+                confirmedCount = i + currentBatchSize;
             }
 
             // All batches succeeded (zero allocation)
@@ -116,7 +119,11 @@ public static class SubjectSourceExtensions
         }
         catch (Exception ex)
         {
-            return WriteResult.Failure(changes, ex);
+            // Batches confirmed before the throw are written and must not be condemned; only the
+            // throwing batch (outcome unknown) and the unprocessed remainder are unconfirmed.
+            return confirmedCount == 0
+                ? WriteResult.Failure(changes, ex)
+                : WriteResult.PartialFailure(changes.Slice(confirmedCount), ex);
         }
     }
 
