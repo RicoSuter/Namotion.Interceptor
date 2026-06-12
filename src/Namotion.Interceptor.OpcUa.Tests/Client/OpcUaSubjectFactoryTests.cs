@@ -2,7 +2,6 @@ using Moq;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
 using Opc.Ua.Client;
 

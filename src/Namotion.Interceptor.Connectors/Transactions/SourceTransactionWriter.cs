@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -5,131 +6,259 @@ namespace Namotion.Interceptor.Connectors.Transactions;
 
 /// <summary>
 /// Handler that writes transaction changes to their associated external sources.
-/// Only handles changes that have an associated source; local changes are returned
-/// to the caller for handling.
+/// Only writes changes that have an associated source; local (no-source) changes are
+/// skipped and left for the transaction to apply.
 /// </summary>
 internal sealed class SourceTransactionWriter : ITransactionWriter
 {
-    public async Task<TransactionWriteResult> WriteChangesAsync(
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    public async ValueTask<SourceWriteResult> WriteToSourcesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
-        TransactionFailureHandling failureHandling,
         TransactionRequirement requirement,
         CancellationToken cancellationToken)
     {
-        // 1. Separate source-bound vs local changes
-        var (localChanges, externalChangesBySource) = GroupChangesBySourceType(changes.Span);
+        // Single pass that reads each property's source exactly once (so a concurrent SetSource/RemoveSource
+        // can't be observed inconsistently) and classifies single- vs multi-source. The buffer (single source)
+        // and the per-source dictionary (multi source) are allocated lazily, so the common single-source case
+        // never allocates the dictionary. Source-less (local) changes are skipped; the transaction applies them.
 
-        // 2. Validate SingleWrite requirement (only applies to source-bound changes)
-        if (requirement == TransactionRequirement.SingleWrite)
+        ISubjectSource? singleSource = null;
+        Dictionary<ISubjectSource, List<SubjectPropertyChange>>? changesBySource = null;
+
+        SubjectPropertyChange firstChange = default;   // the first source-bound change, held until we know single vs multi
+        SubjectPropertyChange[]? buffer = null;        // allocated only once a 2nd same-source change confirms single-source
+
+        var count = 0;
+        foreach (var change in changes.Span)
         {
-            var validationError = ValidateSingleWriteRequirement(externalChangesBySource);
-            if (validationError != null)
+            if (!change.Property.TryGetSource(out var source))
             {
-                var allSourceChanges = FlattenChanges(externalChangesBySource);
-                return new TransactionWriteResult([], allSourceChanges, [validationError], localChanges);
-            }
-        }
-
-        // 3. If no source-bound changes, just return local changes for caller to handle
-        if (externalChangesBySource.Count == 0)
-        {
-            return new TransactionWriteResult([], [], [], localChanges);
-        }
-
-        var allSuccessful = new List<SubjectPropertyChange>();
-        var allFailed = new List<SubjectPropertyChange>();
-        var allErrors = new List<Exception>();
-
-        // 4. Write to external sources in parallel
-        var (successfulBySource, failed, errors) = await WriteToExternalSourcesAsync(externalChangesBySource, cancellationToken);
-        allFailed.AddRange(failed);
-        allErrors.AddRange(errors);
-
-        // If any source failed and rollback mode, revert successful sources
-        if (failureHandling == TransactionFailureHandling.Rollback && allFailed.Count > 0)
-        {
-            await TryRevertSourceWritesAsync(successfulBySource, allFailed, allErrors, cancellationToken);
-            return new TransactionWriteResult([], allFailed, allErrors, localChanges);
-        }
-
-        // 5. Apply source-bound values to in-process model
-        var sourceBoundChanges = FlattenChanges(successfulBySource);
-        var (applied, applyFailed, applyErrors) = sourceBoundChanges.ApplyAllChanges();
-        allSuccessful.AddRange(applied);
-        allFailed.AddRange(applyFailed);
-        allErrors.AddRange(applyErrors);
-
-        // If in-process apply failed, rollback sources to maintain consistency
-        if (applyFailed.Count > 0)
-        {
-            if (failureHandling == TransactionFailureHandling.Rollback)
-            {
-                // Rollback mode: revert everything (all-or-nothing)
-                TryRevertAppliedChanges(applied, allFailed, allErrors);
-                await TryRevertSourceWritesAsync(successfulBySource, allFailed, allErrors, cancellationToken);
-                return new TransactionWriteResult([], allFailed, allErrors, localChanges);
+                continue;
             }
 
-            // BestEffort mode: rollback only sources for failed local applies (keep each property in sync)
-            var sourcesToRollback = GroupChangesBySource(applyFailed);
-            if (sourcesToRollback.Count > 0)
+            if (changesBySource is not null)
             {
-                await TryRevertSourceWritesAsync(sourcesToRollback, allFailed, allErrors, cancellationToken);
+                AddToSourceGroup(changesBySource, source, change);
             }
-        }
-
-        return new TransactionWriteResult(allSuccessful, allFailed, allErrors, localChanges);
-    }
-
-    /// <summary>
-    /// Groups changes by their associated source (ignores changes without sources).
-    /// </summary>
-    private static Dictionary<ISubjectSource, List<SubjectPropertyChange>> GroupChangesBySource(
-        IEnumerable<SubjectPropertyChange> changes)
-    {
-        var result = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();
-        foreach (var change in changes)
-        {
-            if (change.Property.TryGetSource(out var source))
+            else if (singleSource is null)
             {
-                if (!result.TryGetValue(source, out var list))
+                // First source-bound change: remember it. The buffer is deferred until a 2nd same-source change
+                // confirms single-source, so a multi-source transaction never allocates a buffer it abandons.
+                singleSource = source;
+                firstChange = change;
+            }
+            else if (ReferenceEquals(source, singleSource))
+            {
+                if (buffer is null)
                 {
-                    list = [];
-                    result[source] = list;
+                    buffer = new SubjectPropertyChange[changes.Length];
+                    buffer[count++] = firstChange;
                 }
-                list.Add(change);
-            }
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Groups changes into local (no source) and external (has source) categories.
-    /// </summary>
-    private static (List<SubjectPropertyChange> Local, Dictionary<ISubjectSource, List<SubjectPropertyChange>> External)
-        GroupChangesBySourceType(ReadOnlySpan<SubjectPropertyChange> changes)
-    {
-        var local = new List<SubjectPropertyChange>();
-        var external = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();
-
-        foreach (var change in changes)
-        {
-            if (change.Property.TryGetSource(out var source))
-            {
-                if (!external.TryGetValue(source, out var list))
-                {
-                    list = [];
-                    external[source] = list;
-                }
-                list.Add(change);
+                buffer[count++] = change;
             }
             else
             {
-                local.Add(change);
+                // Second distinct source: switch to multi-source, seeding the dict with the single-source
+                // prefix (everything seen so far belonged to singleSource since no other source appeared yet).
+                var prefix = new List<SubjectPropertyChange>(buffer is null ? 1 : count);
+                if (buffer is null)
+                {
+                    prefix.Add(firstChange);
+                }
+                else
+                {
+                    for (var i = 0; i < count; i++)
+                    {
+                        prefix.Add(buffer[i]);
+                    }
+                }
+                changesBySource = new Dictionary<ISubjectSource, List<SubjectPropertyChange>> { [singleSource] = prefix };
+                AddToSourceGroup(changesBySource, source, change);
             }
         }
 
-        return (local, external);
+        // No source-bound changes: nothing to write. The transaction applies the local changes.
+        if (singleSource is null)
+        {
+            return new SourceWriteResult([], [], [], RevertState: null);
+        }
+
+        if (changesBySource is not null)
+        {
+            return await WriteToMultipleSourcesAsync(changesBySource, requirement, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Single source. If only one source-bound change was seen, the buffer was never allocated.
+        if (buffer is null)
+        {
+            buffer = [firstChange];
+            count = 1;
+        }
+
+        return await WriteToSingleSourceAsync(singleSource, buffer, count, requirement, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void AddToSourceGroup(Dictionary<ISubjectSource, List<SubjectPropertyChange>> changesBySource, ISubjectSource source, SubjectPropertyChange change)
+    {
+        if (!changesBySource.TryGetValue(source, out var list))
+        {
+            list = [];
+            changesBySource[source] = list;
+        }
+        list.Add(change);
+    }
+
+    /// <summary>
+    /// Fast path when every source-bound change targets the same source: one write, no grouping or parallel
+    /// dispatch. Applies nothing to the local model. <paramref name="buffer"/> holds the source-bound changes in
+    /// its first <paramref name="count"/> slots (privately owned, not the pooled snapshot), passed without copying.
+    /// </summary>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<SourceWriteResult> WriteToSingleSourceAsync(
+        ISubjectSource source,
+        SubjectPropertyChange[] buffer,
+        int count,
+        TransactionRequirement requirement,
+        CancellationToken cancellationToken)
+    {
+        // Expose buffer[0..count] without copying: the whole array when exactly full, else an ArraySegment view.
+        IReadOnlyList<SubjectPropertyChange> sourceChanges =
+            count == buffer.Length ? buffer : new ArraySegment<SubjectPropertyChange>(buffer, 0, count);
+
+        if (requirement == TransactionRequirement.SingleWrite)
+        {
+            var batchSize = source.WriteBatchSize;
+            if (batchSize > 0 && count > batchSize)
+            {
+                // Nothing was written (validation failed first), so there is no revert state.
+                return new SourceWriteResult(
+                    [],
+                    sourceChanges,
+                    [new InvalidOperationException(
+                        $"SingleWrite requirement violated: Transaction contains {count} changes for source '{source.GetType().Name}', but WriteBatchSize is {batchSize}.")],
+                    RevertState: null);
+            }
+        }
+
+        // On a reported error only the non-failed changes reached the source; otherwise the whole set did
+        // (reused as the written set, no copy). RevertState is the source itself: every written change belongs to it.
+        var writeResult = await source.WriteChangesInBatchesAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+        if (writeResult.Error is null)
+        {
+            return new SourceWriteResult(sourceChanges, [], [], RevertState: source);
+        }
+
+        IReadOnlyList<SubjectPropertyChange> written = ExcludeFailed(sourceChanges, writeResult.FailedChanges);
+        return new SourceWriteResult(
+            written,
+            [.. writeResult.FailedChanges],
+            [new SourceTransactionWriteException(source, [.. writeResult.FailedChanges], writeResult.Error)],
+            RevertState: source);
+    }
+
+    /// <summary>
+    /// Writes source-bound changes grouped per source and dispatched in parallel. Applies nothing
+    /// to the local model. Receives the per-source grouping already built by the single pass; local (no-source)
+    /// changes are neither written nor returned.
+    /// </summary>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<SourceWriteResult> WriteToMultipleSourcesAsync(
+        Dictionary<ISubjectSource, List<SubjectPropertyChange>> changesBySource,
+        TransactionRequirement requirement,
+        CancellationToken cancellationToken)
+    {
+        if (requirement == TransactionRequirement.SingleWrite)
+        {
+            var validationError = ValidateSingleWriteRequirement(changesBySource);
+            if (validationError != null)
+            {
+                // Nothing was written (validation failed before any source write), so there is no revert state.
+                return new SourceWriteResult([], FlattenChanges(changesBySource), [validationError], RevertState: null);
+            }
+        }
+
+        if (changesBySource.Count == 0)
+        {
+            return new SourceWriteResult([], [], [], RevertState: null);
+        }
+
+        // RevertState is the per-source grouping already built above (reused as-is, no extra allocation):
+        // revert resolves each written change to its original source from this map instead of re-deriving.
+        var (successfulBySource, failed, errors) = await WriteToExternalSourcesAsync(changesBySource, cancellationToken).ConfigureAwait(false);
+        return new SourceWriteResult(FlattenChanges(successfulBySource), failed, errors, RevertState: changesBySource);
+    }
+
+    public async ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+        IReadOnlyList<SubjectPropertyChange> written,
+        object? revertState,
+        CancellationToken cancellationToken)
+    {
+        if (written.Count == 0 || revertState is null)
+        {
+            return new SourceRevertResult([], []);
+        }
+
+        var failed = new List<SubjectPropertyChange>();
+        var errors = new List<Exception>();
+
+        if (revertState is ISubjectSource source)
+        {
+            // Single-source write path: every written change belongs to this exact source.
+            // Revert by writing the inverse values (ToRollbackChange) back, without re-deriving the source.
+            var single = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>(1)
+            {
+                [source] = [.. written]
+            };
+            await TryRevertSourceWritesAsync(single, failed, errors, cancellationToken).ConfigureAwait(false);
+            return new SourceRevertResult(failed, errors);
+        }
+
+        if (revertState is Dictionary<ISubjectSource, List<SubjectPropertyChange>> groups)
+        {
+            // Multi-source path: revert only the passed 'written' subset, to the ORIGINAL sources recorded at
+            // write time (per group, revert the intersection with 'written' so a partial revert hits the right sources).
+            var writtenSet = new HashSet<PropertyReference>(written.Count, PropertyReference.Comparer);
+            foreach (var change in written)
+            {
+                writtenSet.Add(change.Property);
+            }
+
+            var toRevert = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>(groups.Count);
+            foreach (var (groupSource, groupChanges) in groups)
+            {
+                List<SubjectPropertyChange>? subset = null;
+                foreach (var change in groupChanges)
+                {
+                    if (writtenSet.Contains(change.Property))
+                    {
+                        (subset ??= []).Add(change);
+                    }
+                }
+                if (subset is not null)
+                {
+                    toRevert[groupSource] = subset;
+                }
+            }
+
+            await TryRevertSourceWritesAsync(toRevert, failed, errors, cancellationToken).ConfigureAwait(false);
+        }
+
+        return new SourceRevertResult(failed, errors);
+    }
+
+    private static List<SubjectPropertyChange> ExcludeFailed(
+        IReadOnlyList<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange> failed)
+    {
+        var failedSet = new HashSet<SubjectPropertyChange>(failed);
+        var result = new List<SubjectPropertyChange>(changes.Count - failed.Count);
+        foreach (var change in changes)
+        {
+            if (!failedSet.Contains(change))
+            {
+                result.Add(change);
+            }
+        }
+        return result;
     }
 
     /// <summary>
@@ -151,7 +280,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             writeTasks[taskIndex++] = WriteToSourceWithResultAsync(kvp.Key, kvp.Value, cancellationToken);
         }
 
-        var results = await Task.WhenAll(writeTasks);
+        var results = await Task.WhenAll(writeTasks).ConfigureAwait(false);
 
         foreach (var (source, (successList, failList, error)) in results)
         {
@@ -179,19 +308,11 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             CancellationToken cancellationToken)
     {
         var memory = new ReadOnlyMemory<SubjectPropertyChange>(sourceChanges.ToArray());
-        var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
+        var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
 
         if (result.Error is not null)
         {
-            var failedSet = new HashSet<SubjectPropertyChange>(result.FailedChanges);
-            var written = new List<SubjectPropertyChange>(sourceChanges.Count);
-            foreach (var change in sourceChanges)
-            {
-                if (!failedSet.Contains(change))
-                {
-                    written.Add(change);
-                }
-            }
+            var written = ExcludeFailed(sourceChanges, result.FailedChanges);
             var error = new SourceTransactionWriteException(source, [.. result.FailedChanges], result.Error);
             return (written, [.. result.FailedChanges], error);
         }
@@ -212,10 +333,12 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var rollbackChanges = originalChanges.ToRollbackChanges().ToArray();
+            var rollbackChanges = Enumerable.Reverse(originalChanges)
+                .Select(c => c.ToRollbackChange())
+                .ToArray();
 
             var memory = new ReadOnlyMemory<SubjectPropertyChange>(rollbackChanges);
-            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
+            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
 
             if (result.Error is not null)
             {
@@ -231,42 +354,29 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     }
 
     /// <summary>
-    /// Attempts to revert in-process model changes by applying rollback changes.
-    /// </summary>
-    private static void TryRevertAppliedChanges(
-        List<SubjectPropertyChange> successfulChanges,
-        List<SubjectPropertyChange> failedChanges,
-        List<Exception> errors)
-    {
-        var (_, revertFailed, revertErrors) = successfulChanges.ToRollbackChanges().ApplyAllChanges();
-        failedChanges.AddRange(revertFailed);
-        errors.AddRange(revertErrors);
-    }
-
-    /// <summary>
     /// Validates that the SingleWrite requirement is satisfied.
     /// </summary>
     private static Exception? ValidateSingleWriteRequirement(
-        Dictionary<ISubjectSource, List<SubjectPropertyChange>> externalChangesBySource)
+        Dictionary<ISubjectSource, List<SubjectPropertyChange>> changesBySource)
     {
-        if (externalChangesBySource.Count == 0)
+        if (changesBySource.Count == 0)
             return null;
 
-        if (externalChangesBySource.Count > 1)
+        if (changesBySource.Count > 1)
         {
-            var sourceNames = new string[externalChangesBySource.Count];
+            var sourceNames = new string[changesBySource.Count];
             var nameIndex = 0;
-            foreach (var kvp in externalChangesBySource)
+            foreach (var kvp in changesBySource)
             {
                 sourceNames[nameIndex++] = kvp.Key.GetType().Name;
             }
             return new InvalidOperationException(
-                $"SingleWrite requirement violated: Transaction spans {externalChangesBySource.Count} sources ({string.Join(", ", sourceNames)}), but only 1 is allowed.");
+                $"SingleWrite requirement violated: Transaction spans {changesBySource.Count} sources ({string.Join(", ", sourceNames)}), but only 1 is allowed.");
         }
 
         ISubjectSource? source = null;
         List<SubjectPropertyChange>? sourceChanges = null;
-        foreach (var kvp in externalChangesBySource)
+        foreach (var kvp in changesBySource)
         {
             source = kvp.Key;
             sourceChanges = kvp.Value;
@@ -316,7 +426,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             List<SubjectPropertyChange> sourceChanges,
             CancellationToken cancellationToken)
     {
-        var result = await TryWriteToSourceAsync(source, sourceChanges, cancellationToken);
+        var result = await TryWriteToSourceAsync(source, sourceChanges, cancellationToken).ConfigureAwait(false);
         return (source, result);
     }
 }

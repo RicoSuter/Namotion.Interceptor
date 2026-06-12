@@ -107,11 +107,4 @@ public abstract class TransactionTestBase
         Assert.Empty(transaction.GetPendingChanges());
     }
 
-    /// <summary>
-    /// Asserts that no transaction is currently active in the execution context.
-    /// </summary>
-    protected static void AssertNoActiveTransaction()
-    {
-        Assert.Null(SubjectTransaction.Current);
-    }
 }

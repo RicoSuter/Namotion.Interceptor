@@ -5,7 +5,7 @@ using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Performance;
+using Namotion.Interceptor.Tracking.Performance;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -376,14 +376,17 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets the requested sampling interval for a property from its OPC UA attribute or configuration default.
+    /// Gets the requested sampling interval for a property from the mapper or configuration default.
     /// </summary>
     private int? GetRequestedSamplingInterval(RegisteredSubjectProperty property)
     {
-        var attribute = property.TryGetOpcUaNodeAttribute();
-        return attribute != null && attribute.SamplingInterval != int.MinValue
-            ? attribute.SamplingInterval
-            : _configuration.DefaultSamplingInterval;
+        if (_configuration.Mapper.TryGetMapping(property, _source.RootSubject, out var mapping) &&
+            mapping.SamplingInterval.HasValue)
+        {
+            return mapping.SamplingInterval;
+        }
+
+        return _configuration.DefaultSamplingInterval;
     }
 
     public async ValueTask DisposeAsync()

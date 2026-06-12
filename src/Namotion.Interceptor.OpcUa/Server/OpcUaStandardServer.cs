@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Opc.Ua;
 using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
@@ -12,7 +11,6 @@ internal class OpcUaStandardServer : StandardServer
     private IServerInternal? _server;
     private SessionEventHandler? _sessionCreatedHandler;
     private SessionEventHandler? _sessionClosingHandler;
-    private List<ITransportListener>? _savedTransportListeners;
 
     public OpcUaStandardServer(IInterceptorSubject subject, OpcUaSubjectServer source, OpcUaServerConfiguration configuration, ILogger logger)
     {
@@ -21,51 +19,21 @@ internal class OpcUaStandardServer : StandardServer
         AddNodeManager(_nodeManagerFactory);
     }
 
-    // TODO: Remove saved listener workaround when https://github.com/OPCFoundation/UA-.NETStandard/pull/3561 is released.
-    // Workaround: ServerBase.StopAsync calls Close() then Clear() on the listener list.
-    // TcpTransportListener.Close() only stops listening sockets — it does NOT call Dispose().
-    // ServerBase.Dispose() later iterates TransportListeners to dispose them, but the list is
-    // already empty. So TcpTransportListener.Dispose() never runs, leaking timers, channels,
-    // and buffer managers. We save listener references before StopAsync clears the list,
-    // then manually dispose them after shutdown.
-
     /// <summary>
     /// Closes all transport listeners to stop accepting new connections.
     /// Must be called before closing sessions during shutdown to prevent
     /// clients from reconnecting while the server is shutting down.
-    /// Also saves references so they can be properly disposed later,
-    /// since the SDK's StopAsync clears the TransportListeners list
-    /// before Dispose can process them.
     /// </summary>
+    /// <remarks>
+    /// The SDK's StopAsync disposes the listeners itself (close, dispose, then clear),
+    /// so no manual disposal is needed here. See OPCFoundation/UA-.NETStandard#3561.
+    /// </remarks>
     public void CloseTransportListeners()
     {
-        _savedTransportListeners ??= [.. TransportListeners];
-        foreach (var listener in _savedTransportListeners)
+        foreach (var listener in TransportListeners)
         {
             try { listener.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing transport listener."); }
         }
-    }
-
-    /// <summary>
-    /// Disposes all saved transport listeners. Must be called after shutdown
-    /// because the SDK's StopAsync clears the TransportListeners list before
-    /// Dispose can process them, causing TcpTransportListener.Dispose() to
-    /// never run (leaking timers, channels, and buffer managers).
-    /// </summary>
-    public void DisposeTransportListeners()
-    {
-        if (_savedTransportListeners is null)
-        {
-            return;
-        }
-
-        foreach (var listener in _savedTransportListeners)
-        {
-            try { (listener as IDisposable)?.Dispose(); }
-            catch (Exception ex) { _logger.LogDebug(ex, "Error disposing transport listener."); }
-        }
-
-        _savedTransportListeners = null;
     }
 
     /// <summary>

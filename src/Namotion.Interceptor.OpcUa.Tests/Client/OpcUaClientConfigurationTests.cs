@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 

@@ -1,5 +1,5 @@
 using System.Collections;
-using Namotion.Interceptor.Registry.Performance;
+using Namotion.Interceptor.Tracking.Performance;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
@@ -16,15 +16,15 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildCollectionComplete(
         SubjectPropertyUpdate update,
-        IEnumerable<IInterceptorSubject>? collection,
+        object? collectionValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
-        if (collection is null)
+        if (collectionValue is null)
             return;
 
-        var items = collection as IReadOnlyList<IInterceptorSubject> ?? collection.ToList();
+        var items = SubjectValueConvert.ToSubjectList(collectionValue);
         update.Count = items.Count;
         update.Items = new List<SubjectPropertyItemUpdate>(items.Count);
 
@@ -47,17 +47,17 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildCollectionDiff(
         SubjectPropertyUpdate update,
-        IEnumerable<IInterceptorSubject>? oldCollection,
-        IEnumerable<IInterceptorSubject>? newCollection,
+        object? oldCollectionValue,
+        object? newCollectionValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
-        if (newCollection is null)
+        if (newCollectionValue is null)
             return;
 
-        var oldItems = oldCollection as IReadOnlyList<IInterceptorSubject> ?? oldCollection?.ToList() ?? [];
-        var newItems = newCollection as IReadOnlyList<IInterceptorSubject> ?? newCollection.ToList();
+        var oldItems = oldCollectionValue is not null ? SubjectValueConvert.ToSubjectList(oldCollectionValue) : (IReadOnlyList<IInterceptorSubject>)[];
+        var newItems = SubjectValueConvert.ToSubjectList(newCollectionValue);
         update.Count = newItems.Count;
 
         var changeBuilder = ChangeBuilderPool.Rent();
@@ -104,7 +104,7 @@ internal static class SubjectItemsUpdateFactory
 
             // Generate sparse updates for common items with property changes
             List<SubjectPropertyItemUpdate>? updates = null;
-            foreach (var item in changeBuilder.GetCommonItems())
+            foreach (var item in changeBuilder.GetRetainedItems())
             {
                 if (builder.SubjectHasUpdates(item))
                 {
@@ -134,31 +134,32 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildDictionaryComplete(
         SubjectPropertyUpdate update,
-        IDictionary? dictionary,
+        object? dictionaryValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
-        if (dictionary is null)
+        if (dictionaryValue is null)
             return;
 
-        update.Count = dictionary.Count;
+        var dictionary = SubjectValueConvert.ToSubjectDictionary(dictionaryValue);
         update.Items = new List<SubjectPropertyItemUpdate>(dictionary.Count);
 
         foreach (DictionaryEntry entry in dictionary)
         {
-            if (entry.Value is IInterceptorSubject item)
-            {
-                var itemId = builder.GetOrCreateId(item);
-                SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
+            if (entry.Value is not IInterceptorSubject subject) continue;
 
-                update.Items.Add(new SubjectPropertyItemUpdate
-                {
-                    Index = entry.Key,
-                    Id = itemId
-                });
-            }
+            var itemId = builder.GetOrCreateId(subject);
+            SubjectUpdateFactory.ProcessSubjectComplete(subject, builder);
+
+            update.Items.Add(new SubjectPropertyItemUpdate
+            {
+                Index = entry.Key,
+                Id = itemId
+            });
         }
+
+        update.Count = update.Items.Count;
     }
 
     /// <summary>
@@ -166,25 +167,30 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildDictionaryDiff(
         SubjectPropertyUpdate update,
-        IDictionary? oldDict,
-        IDictionary? newDict,
+        object? oldDictionaryValue,
+        object? newDictionaryValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
-        if (newDict is null)
+        if (newDictionaryValue is null)
             return;
 
-        update.Count = newDict.Count;
+        var oldDictionary = oldDictionaryValue is not null ? SubjectValueConvert.ToSubjectDictionary(oldDictionaryValue) : null;
+        var newDictionary = SubjectValueConvert.ToSubjectDictionary(newDictionaryValue);
 
         var changeBuilder = ChangeBuilderPool.Rent();
         try
         {
             changeBuilder.GetDictionaryChanges(
-                oldDict, newDict,
+                oldDictionary, newDictionary,
                 out var operations,
                 out var newItemsToProcess,
                 out var removedKeys);
+
+            // Subject-only count, matching the apply side's filtered view and Collection semantics:
+            // every subject-valued entry in newDictionary is either a new insert or a retained common item.
+            update.Count = (newItemsToProcess?.Count ?? 0) + changeBuilder.GetRetainedDictionaryItems().Count;
 
             // Add Insert operations for new items
             if (newItemsToProcess is not null)
@@ -218,37 +224,22 @@ internal static class SubjectItemsUpdateFactory
                 }
             }
 
-            // Check for property updates on existing items
-            // Build HashSet for O(1) lookup instead of O(n) Any() per iteration
-            HashSet<object>? newKeysSet = null;
-            if (newItemsToProcess is not null)
-            {
-                newKeysSet = new HashSet<object>(newItemsToProcess.Count);
-                foreach (var (key, _) in newItemsToProcess)
-                    newKeysSet.Add(key);
-            }
-
+            // Generate sparse updates for entries retained by reference (common items).
+            // changeBuilder already partitioned new-vs-retained during GetDictionaryChanges,
+            // so iterate that output instead of re-walking newDictionary.
             List<SubjectPropertyItemUpdate>? updates = null;
-            foreach (DictionaryEntry entry in newDict)
+            foreach (var (key, item) in changeBuilder.GetRetainedDictionaryItems())
             {
-                var key = entry.Key;
-                if (entry.Value is not IInterceptorSubject item)
+                if (!builder.SubjectHasUpdates(item))
                     continue;
 
-                // Skip if this is a new item (already handled above)
-                if (newKeysSet?.Contains(key) == true)
-                    continue;
-
-                if (builder.SubjectHasUpdates(item))
+                var itemId = builder.GetOrCreateId(item);
+                updates ??= [];
+                updates.Add(new SubjectPropertyItemUpdate
                 {
-                    var itemId = builder.GetOrCreateId(item);
-                    updates ??= [];
-                    updates.Add(new SubjectPropertyItemUpdate
-                    {
-                        Index = key,
-                        Id = itemId
-                    });
-                }
+                    Index = key,
+                    Id = itemId
+                });
             }
 
             update.Operations = operations;
