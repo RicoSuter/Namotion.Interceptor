@@ -431,10 +431,10 @@ public sealed class SubjectTransaction : IDisposable
 
         var (written, failedSource, sourceErrors, revertState) = writeResult;
 
-        // Rollback with any source-write failure: nothing is applied to the local model; revert what reached
-        // a source and report. The local (no-source) changes are never applied, but they are still
-        // reported as failed (they did not commit), matching the all-or-nothing contract.
-        if (_failureHandling == TransactionFailureHandling.Rollback && failedSource.Count > 0)
+        // Rollback with any source-write failure or reported error: nothing is applied to the local model;
+        // revert what reached a source and report. Local (no-source) changes did not commit either and are
+        // reported as failed. An error without failed changes (custom writers only) must not be swallowed.
+        if (_failureHandling == TransactionFailureHandling.Rollback && (failedSource.Count > 0 || sourceErrors.Count > 0))
         {
             var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
             var notApplied = SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, written);
@@ -478,11 +478,13 @@ public sealed class SubjectTransaction : IDisposable
                 SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
         }
 
-        // Apply succeeded. If sources partially failed (BestEffort, since Rollback handled above),
-        // report the partial success.
-        if (failedSource.Count > 0)
+        // Apply succeeded. Report any remaining source failure or writer error (BestEffort; Rollback
+        // returned above). ApplyLocalChanges returns an empty Successful set on the no-exclude path,
+        // so materialize the snapshot to report what was applied.
+        if (failedSource.Count > 0 || sourceErrors.Count > 0)
         {
-            return CreateFailureException(applied, failedSource, sourceErrors);
+            var appliedChanges = exclude is null ? changes.ToArray() : applied;
+            return CreateFailureException(appliedChanges, failedSource, sourceErrors);
         }
 
         return null;

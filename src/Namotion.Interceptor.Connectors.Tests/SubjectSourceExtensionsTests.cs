@@ -254,6 +254,67 @@ public class SubjectSourceExtensionsTests
     }
 
     [Fact]
+    public async Task WhenSingleBatchFailsWithoutEnumeratedFailedChanges_ThenAllChangesAreReportedFailed()
+    {
+        // Arrange: the source fails wholesale (error, no enumerated failed changes) on the
+        // single-batch fast path.
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(
+                    ReadOnlyMemory<SubjectPropertyChange>.Empty, new InvalidOperationException("Wholesale boom"))));
+
+        var changes = CreateChanges(3);
+
+        // Act
+        var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None);
+
+        // Assert: the choke point normalizes the unattributed error into "the whole batch failed".
+        Assert.NotNull(result.Error);
+        Assert.Equal("Wholesale boom", result.Error!.Message);
+        Assert.Equal(3, result.FailedChanges.Length);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.Equal($"Property{i}", result.FailedChanges[i].Property.Name);
+        }
+    }
+
+    [Fact]
+    public async Task WhenFirstItemOfBatchFails_ThenFailedChangesContainTheActualFailedChange()
+    {
+        // Arrange: 6 changes, batch size 3. The first batch [0,1,2] fails item 0 only;
+        // items 1 and 2 are written.
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(3);
+
+        var changes = CreateChanges(6);
+        var failedChange = changes.Span[0];
+
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.PartialFailure(
+                    new[] { failedChange }, new InvalidOperationException("Item 0 failed"))));
+
+        // Act
+        var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None);
+
+        // Assert: failed = the actually failed change plus the unprocessed remainder [3,4,5];
+        // the written items 1 and 2 must not be reported as failed.
+        Assert.NotNull(result.Error);
+        Assert.Equal(4, result.FailedChanges.Length);
+        var failedNames = result.FailedChanges.Select(change => change.Property.Name).ToArray();
+        Assert.Contains("Property0", failedNames);
+        Assert.DoesNotContain("Property1", failedNames);
+        Assert.DoesNotContain("Property2", failedNames);
+        Assert.Contains("Property3", failedNames);
+        Assert.Contains("Property4", failedNames);
+        Assert.Contains("Property5", failedNames);
+    }
+
+    [Fact]
     public async Task WriteChangesInBatchesAsync_RegularSource_SerializesWrites()
     {
         // Arrange

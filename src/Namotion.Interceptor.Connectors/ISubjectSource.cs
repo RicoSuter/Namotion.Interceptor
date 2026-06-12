@@ -25,6 +25,7 @@ public interface ISubjectSource : ISubjectConnector
     /// Implement <see cref="ISupportsConcurrentWrites"/> to opt-out of automatic synchronization.
     /// Do not retain <paramref name="changes"/> after the returned task completes: the caller may
     /// reuse or mutate the underlying buffer.
+    /// When reporting an error, enumerate the failed changes; see <see cref="WriteResult.FailedChanges"/>.
     /// </remarks>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>

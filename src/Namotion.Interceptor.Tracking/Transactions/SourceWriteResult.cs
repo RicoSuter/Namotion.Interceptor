@@ -19,6 +19,9 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// </param>
 /// <param name="Errors">
 /// The errors that occurred while writing to sources, typically one per source that failed.
+/// Any error fails the commit, even with an empty <paramref name="Failed"/>; an error without
+/// enumerated failed changes condemns no specific change, so writers should enumerate the
+/// failed changes whenever possible.
 /// </param>
 /// <param name="RevertState">
 /// Opaque writer-owned state that identifies which source each written change was written to, handed

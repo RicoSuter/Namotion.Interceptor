@@ -150,12 +150,9 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         TransactionRequirement requirement,
         CancellationToken cancellationToken)
     {
-        // Expose buffer[0..count] / indices[0..count] without copying: the whole array when exactly full,
-        // else an ArraySegment view.
+        // Expose buffer[0..count] without copying: the whole array when exactly full, else an ArraySegment view.
         IReadOnlyList<SubjectPropertyChange> sourceChanges =
             count == buffer.Length ? buffer : new ArraySegment<SubjectPropertyChange>(buffer, 0, count);
-        IReadOnlyList<int> sourceIndices =
-            count == indices.Length ? indices : new ArraySegment<int>(indices, 0, count);
 
         if (requirement == TransactionRequirement.SingleWrite)
         {
@@ -172,8 +169,9 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             }
         }
 
-        // On a reported error only the non-failed changes reached the source; otherwise the whole set did
-        // (reused as the written set, no copy). RevertState is the source itself: every written change belongs to it.
+        // On a reported error only the non-failed changes reached the source (FailedChanges is complete,
+        // see WriteChangesInBatchesAsync); on success the whole set did, reused as the written set without
+        // copying. RevertState is the source itself: every written change belongs to it.
         var writeResult = await source.WriteChangesInBatchesAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
         if (writeResult.Error is null)
         {
@@ -182,6 +180,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             return new SourceWriteResult(sourceChanges, [], [], RevertState: source);
         }
 
+        IReadOnlyList<int> sourceIndices =
+            count == indices.Length ? indices : new ArraySegment<int>(indices, 0, count);
         var failedSet = ToPropertySet(writeResult.FailedChanges);
         MarkSnapshotSlotsExcept(snapshot.Span, sourceChanges, sourceIndices, failedSet, source);
         var written = ExcludeFailed(sourceChanges, failedSet);
@@ -304,7 +304,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     private static List<SubjectPropertyChange> ExcludeFailed(
         IReadOnlyList<SubjectPropertyChange> changes, HashSet<PropertyReference> failed)
     {
-        var written = new List<SubjectPropertyChange>(changes.Count - failed.Count);
+        // Math.Max: a contract-violating source can report failures for properties it was never given.
+        var written = new List<SubjectPropertyChange>(Math.Max(0, changes.Count - failed.Count));
         foreach (var change in changes)
         {
             if (!failed.Contains(change.Property))
