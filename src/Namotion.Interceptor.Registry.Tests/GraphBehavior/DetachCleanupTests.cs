@@ -330,4 +330,45 @@ public class DetachCleanupTests
         // Assert: old parent's property children are cleared
         Assert.Empty(oldParentMotherProp.Children);
     }
+
+    [Fact]
+    public void WhenSubjectDetaches_ThenRegistrySnapshotCachesDoNotRetainIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var registry = context.GetService<ISubjectRegistry>();
+        var root = new Person(context) { FirstName = "Root" };
+
+        // Act: attach a child, populate the lazily cached KnownSubjects and Parents
+        // snapshots while it is attached, then detach it. A missed snapshot
+        // invalidation would keep the detached child strongly reachable.
+        var weakChild = AttachReadAndDetachChild(root, registry);
+
+        for (var i = 0; i < 10 && weakChild.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+
+        // Assert
+        Assert.False(weakChild.IsAlive);
+    }
+
+    // NoInlining so the child local cannot be kept alive by the caller's frame.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference AttachReadAndDetachChild(Person root, ISubjectRegistry registry)
+    {
+        var child = new Person { FirstName = "Child" };
+        root.Father = child;
+
+        // Populate every snapshot cache that could pin the child.
+        _ = registry.KnownSubjects.Count;
+        _ = registry.TryGetRegisteredSubject(child)!.Parents;
+
+        root.Father = null;
+        return new WeakReference(child);
+    }
 }
