@@ -3,6 +3,7 @@
 - Date: 2026-06-13
 - Status: approved design, implementation pending
 - Issues: implements #340 and the reconciliation mechanism of #342 (epic #347, row 5 and part of row 4)
+- PR: #349 (this branch; implementation follows here)
 - Prerequisite: #343 via PR #344 (source-marked commit applies). Implementation must land after PR #344 is merged.
 
 ## 1. Context and scope
@@ -253,3 +254,9 @@ Residual (documented, reported, no repair possible):
 | `Namotion.Interceptor.OpcUa` | `OutboundWriter` failure kinds, `ISupportsPropertyReadBack` implementation, `RequestResynchronization` override into `SessionManager`, resync-completion signal |
 | `Namotion.Interceptor.Mqtt` / `WebSocket` | `RequestResynchronization` overrides into their reconnection handling, failure-kind mapping where determinable |
 | Docs | `docs/tracking-transactions.md` failure matrix, sources docs |
+
+## 14. Planning notes
+
+- **Code-base assumption.** Every code reference in this spec (the `Memory<SubjectPropertyChange>` snapshot, in-place slot marking, `ReconcileWithWriterAsync` exits, the `SourceWriteResult` shape) describes the codebase **after PR #344 is merged**. This branch is currently based on master, which predates #344 and has materially different shapes in `SubjectTransaction`, `ITransactionWriter`, and `SourceTransactionWriter`. Do not plan or implement against the pre-#344 code: first merge master into this branch once #344 has landed, then verify the referenced shapes match.
+- **Suggested implementation order**, each step independently buildable and testable: (1) `WriteFailureKind` and the `WriteResult`/`SourceWriteResult` plumbing with call-site mapping, (2) the `ITransactionWriter.RepairDivergenceAsync` seam and the `ReconcileWithWriterAsync` hook points including the timeout catch, (3) the ladder in `SourceTransactionWriter` (presume, read-back, resync request) behind the seam, (4) `ISubjectSource.RequestResynchronization` with the `SubjectSourceBase` default and `ISupportsPropertyReadBack`, (5) `SourceConsistencyTracker`, `DivergenceRepairOptions`, and the `WithSourceTransactions(configure)` overload, (6) connector work (OPC UA read-back and resync override, MQTT/WebSocket resync overrides, failure-kind mapping), (7) docs and public API snapshot updates.
+- **Verification.** Build and unit tests per repository convention (`dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`); run `Namotion.Interceptor.OpcUa.Tests` targeted when the OPC UA changes land. The public API snapshot tests for Tracking and Connectors will fail until their `.verified.txt` files are updated, which is expected and part of step 7.
