@@ -108,6 +108,28 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
+    public async Task WhenFlushFailsWithoutEnumeratedFailedChanges_ThenWholeBatchIsRequeued()
+    {
+        // Arrange: the source fails wholesale but does not enumerate the failed changes.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var sourceMock = new Mock<ISubjectSource>();
+
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(
+                    ReadOnlyMemory<SubjectPropertyChange>.Empty, new Exception("Connection failed"))));
+
+        // Act
+        queue.Enqueue(CreateChanges(3));
+        var result = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert
+        Assert.False(result);
+        Assert.Equal(3, queue.PendingWriteCount); // the whole attempted batch is re-queued, not dropped
+    }
+
+    [Fact]
     public async Task WhenFlushFailsAtCapacity_ThenRequeueDoesNotDropItems()
     {
         // Arrange

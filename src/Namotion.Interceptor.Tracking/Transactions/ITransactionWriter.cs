@@ -11,17 +11,24 @@ public interface ITransactionWriter
 {
     /// <summary>
     /// Writes every source-bound change to its source (best-effort per source) and reports the
-    /// per-change outcome. Does not apply anything to the local model. Performs classification (source vs
-    /// local) and the SingleWrite requirement check, since it alone knows the SetSource mappings.
-    /// Local (no-source) changes are neither written nor returned; the transaction applies them.
+    /// per-change outcome. Does not apply anything to the local model. Local (no-source) changes are
+    /// neither written nor returned; the transaction applies them. Also enforces the SingleWrite
+    /// requirement, since only the writer knows the source mappings.
     /// </summary>
     /// <remarks>
-    /// Implementations must report per-source failures via <see cref="SourceWriteResult"/> rather than
-    /// throwing: reverting requires the written set and revert state returned here. A throw returns
-    /// neither, so the transaction fails terminally with every change reported as failed and any writes
-    /// that already reached other sources left un-reverted.
+    /// Report failures via <see cref="SourceWriteResult"/>, never throw: a throw returns neither the
+    /// written set nor the revert state, so the transaction fails terminally with nothing reverted.
+    /// After (and only after) a source accepts a change, replace that slot in <paramref name="changes"/>
+    /// with the same change marked by the accepting source (<see cref="SubjectPropertyChange.WithSource"/>),
+    /// so the commit's local apply and revert notifications are recognized as echoes by that source's
+    /// outbound queue. Change only the slot's <see cref="SubjectPropertyChange.Source"/>, never move a
+    /// change to a different slot, and leave failed slots untouched. Not marking at all is harmless but
+    /// keeps the legacy double write (the queue re-pushes each committed value).
+    /// <paramref name="changes"/> is a pooled buffer owned by the commit: do not retain or mutate it after
+    /// the returned task completes. Parallel per-source writers must touch only their own source's slots.
+    /// Enable <see cref="SubjectTransaction.ValidateWriterContract"/> while developing an implementation.
     /// </remarks>
-    /// <param name="changes">The property changes to classify and write.</param>
+    /// <param name="changes">The commit snapshot to classify, write, and mark in place.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>
@@ -29,7 +36,7 @@ public interface ITransactionWriter
     /// which failed (<see cref="SourceWriteResult.Failed"/>), and the corresponding errors.
     /// </returns>
     ValueTask<SourceWriteResult> WriteToSourcesAsync(
-        ReadOnlyMemory<SubjectPropertyChange> changes,
+        Memory<SubjectPropertyChange> changes,
         TransactionRequirement requirement,
         CancellationToken cancellationToken);
 
