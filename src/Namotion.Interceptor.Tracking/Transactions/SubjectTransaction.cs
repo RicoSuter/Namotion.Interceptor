@@ -52,6 +52,14 @@ public sealed class SubjectTransaction : IDisposable
     public static SubjectTransaction? Current => CurrentTransaction.Value;
 
     /// <summary>
+    /// Enables runtime validation that a custom <see cref="ITransactionWriter"/> fulfills the in-place
+    /// marking contract of <see cref="ITransactionWriter.WriteToSourcesAsync"/>: the commit then fails
+    /// terminally if the writer moved or replaced a snapshot slot. Intended for developing custom writers
+    /// (costs one array allocation and sweep per commit); process-wide, set once at startup.
+    /// </summary>
+    public static bool ValidateWriterContract { get; set; }
+
+    /// <summary>
     /// Sets the current transaction in this execution context.
     /// This is needed for async patterns where AsyncLocal must be set in the caller's context.
     /// </summary>
@@ -389,21 +397,29 @@ public sealed class SubjectTransaction : IDisposable
         Memory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
-        // A writer that throws instead of reporting via SourceWriteResult returns neither the written
-        // set nor the revert state, so sources cannot be reverted. Report a full failure instead; the
-        // caller routes it through FinishCommit(), making the transaction terminal. Only the commit
-        // timeout propagates and stays retryable.
+        // The writer marks accepted snapshot slots with the confirming source so the local apply and
+        // revert notifications are echo-suppressed by the outbound connector queue (#343).
+        var capturedProperties = ValidateWriterContract ? CaptureSnapshotProperties(changes.Span) : null;
+
+        // A throwing writer returns neither the written set nor the revert state, so sources cannot be
+        // reverted: report a full failure, which the caller makes terminal. A contract violation is
+        // terminal too (source writes already happened, a retry would repeat them). Only a commit-timeout
+        // OperationCanceledException propagates and stays retryable; the built-in writer throws it
+        // only from its revert phase (write-phase cancellation is reported as a failure).
         SourceWriteResult writeResult;
         try
         {
             writeResult = await writer
                 .WriteToSourcesAsync(changes, _requirement, cancellationToken).ConfigureAwait(false);
+
+            VerifySnapshotIntegrity(capturedProperties, changes.Span);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             return new SubjectTransactionException(
-                "The transaction writer threw an exception during commit. Sources may be in an undefined, " +
-                "un-reverted state; the transaction is terminal and must be disposed, not retried.",
+                "The transaction writer threw an exception or violated its contract during commit. Sources " +
+                "may be in an undefined, un-reverted state; the transaction is terminal and must be disposed, " +
+                "not retried.",
                 appliedChanges: [],
                 failedChanges: changes.ToArray(),
                 errors: [exception]);
@@ -411,10 +427,10 @@ public sealed class SubjectTransaction : IDisposable
 
         var (written, failedSource, sourceErrors, revertState) = writeResult;
 
-        // Rollback with any source-write failure: nothing is applied to the local model; revert what reached
-        // a source and report. The local (no-source) changes are never applied, but they are still
-        // reported as failed (they did not commit), matching the all-or-nothing contract.
-        if (_failureHandling == TransactionFailureHandling.Rollback && failedSource.Count > 0)
+        // Rollback with any source-write failure or reported error: nothing is applied to the local model;
+        // revert what reached a source and report. Local (no-source) changes did not commit either and are
+        // reported as failed. An error without failed changes (custom writers only) must not be swallowed.
+        if (_failureHandling == TransactionFailureHandling.Rollback && (failedSource.Count > 0 || sourceErrors.Count > 0))
         {
             var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
             var notApplied = SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, written);
@@ -458,14 +474,49 @@ public sealed class SubjectTransaction : IDisposable
                 SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
         }
 
-        // Apply succeeded. If sources partially failed (BestEffort, since Rollback handled above),
-        // report the partial success.
-        if (failedSource.Count > 0)
+        // Apply succeeded. Report any remaining source failure or writer error (BestEffort; Rollback
+        // returned above). On the no-exclude path ApplyLocalChanges returned an empty Successful set,
+        // so materialize the snapshot as the applied set.
+        if (failedSource.Count > 0 || sourceErrors.Count > 0)
         {
-            return CreateFailureException(applied, failedSource, sourceErrors);
+            var appliedChanges = exclude is null ? changes.ToArray() : applied;
+            return CreateFailureException(appliedChanges, failedSource, sourceErrors);
         }
 
         return null;
+    }
+
+    private static PropertyReference[] CaptureSnapshotProperties(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        var properties = new PropertyReference[changes.Length];
+        for (var i = 0; i < changes.Length; i++)
+        {
+            properties[i] = changes[i].Property;
+        }
+        return properties;
+    }
+
+    /// <summary>
+    /// Verifies no snapshot slot was moved or replaced by the writer. Checks slot identity only; tampered
+    /// values or timestamps are not detected. No-op when validation is disabled (null capture).
+    /// </summary>
+    private static void VerifySnapshotIntegrity(PropertyReference[]? capturedProperties, ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        if (capturedProperties is null)
+        {
+            return;
+        }
+
+        for (var i = 0; i < changes.Length; i++)
+        {
+            if (!PropertyReference.Comparer.Equals(changes[i].Property, capturedProperties[i]))
+            {
+                throw new InvalidOperationException(
+                    "The transaction writer violated its contract: it changed the property at snapshot slot " +
+                    $"{i} instead of only marking the accepting source. A writer must change only the Source " +
+                    "of an accepted slot and must never move a change to a different slot.");
+            }
+        }
     }
 
     /// <summary>

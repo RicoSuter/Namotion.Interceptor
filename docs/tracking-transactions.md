@@ -242,6 +242,10 @@ When `WithSourceTransactions()` is configured, commits execute in two stages:
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
+Stage 2 applies source-bound changes marked with the source that accepted them in stage 1, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior. Value-transforming write interceptors are not supported with source transactions: the source would receive the stage 1 value while the local model applies the transformed one.
+
+Stage 1 is performed by an `ITransactionWriter`; the built-in `SourceTransactionWriter` is registered by `WithSourceTransactions()`. Replacing it is an advanced scenario, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer).
+
 **Rollback behavior on failure:**
 
 | Failure Stage | BestEffort | Rollback |
@@ -292,7 +296,7 @@ catch (SubjectTransactionException ex)
 }
 ```
 
-The built-in `SourceTransactionWriter` never throws: a source that fails or throws is reported as a failed write and reverted through the normal failure handling. Only a custom `ITransactionWriter` that throws instead of reporting violates this contract. In that case the commit fails with a `SubjectTransactionException` reporting every change as failed, applies nothing to the local model, and the transaction becomes terminal (it must be disposed, not retried). Its sources are not reverted then, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. A custom writer that throws from `RevertSourceWritesAsync` is handled the same way: the changes it was asked to revert are reported as failed reverts and the commit fails terminally. A commit timeout (`OperationCanceledException`) is the one exception and stays retryable.
+The built-in `SourceTransactionWriter` never throws: a source that fails or throws is reported as a failed write and reverted through the normal failure handling. Only a custom `ITransactionWriter` that throws instead of reporting violates this contract. In that case the commit fails with a `SubjectTransactionException` reporting every change as failed, applies nothing to the local model, and the transaction becomes terminal (it must be disposed, not retried). Its sources are not reverted then, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. A custom writer that throws from `RevertSourceWritesAsync` is handled the same way: the changes it was asked to revert are reported as failed reverts and the commit fails terminally. An in-place marking contract violation detected by `SubjectTransaction.ValidateWriterContract` (see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer)) also fails terminally. A commit timeout during a source revert (`OperationCanceledException`) is the one exception and stays retryable; a timeout during a source write is reported as a failed write and handled like any other source failure, which is terminal.
 
 ### SubjectTransactionConflictException
 
@@ -350,6 +354,8 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 | A source write fails or times out | BestEffort | succeeded new, failed old | matches source | terminal failure |
 | A local apply fails, all reverts succeed | Rollback | all old | all old | terminal failure |
 | A local apply fails, its source revert succeeds | BestEffort | applied new, failed-apply old | matches source | terminal failure |
+| Writer reports an error without failed changes (custom writers only), reverts succeed | Rollback | all old | all old | terminal failure |
+| Writer reports an error without failed changes (custom writers only) | BestEffort | new | new | terminal failure, error surfaced in `Errors` |
 
 **Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Diverged properties are always reported in `FailedChanges` and `Errors`, except for a throwing writer where the transaction cannot know which sources were touched:
 
@@ -492,16 +498,16 @@ try
 }
 catch (SubjectTransactionConflictException ex)
 {
-    // Conflict detected before any writes — pending changes are still intact.
+    // Conflict detected before any writes: pending changes are still intact.
     // Re-read current state, adjust, and retry.
     motor.MaxAllowedSpeed = 250;
     await transaction.CommitAsync(cancellationToken);
 }
 ```
 
-Post-write failures (`SubjectTransactionException` from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible — dispose the transaction and start a new one.
+Post-write failures (`SubjectTransactionException` from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible. Dispose the transaction and start a new one.
 
-Note that concurrent `CommitAsync` calls on the same transaction are rejected — only one commit attempt can be in progress at a time.
+Note that concurrent `CommitAsync` calls on the same transaction are rejected: only one commit attempt can be in progress at a time.
 
 ### Thread Safety
 
@@ -610,3 +616,15 @@ For strict atomicity, use a single source per transaction or implement applicati
 ### Rollback is Best-Effort
 
 Rollback operations can also fail. If revert fails, `SubjectTransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case. See [Failure Flows and Consistency](#failure-flows-and-consistency) for the full matrix of end states.
+
+## Implementing a Custom Transaction Writer
+
+Most applications use the built-in `SourceTransactionWriter` registered by `WithSourceTransactions()` and never implement `ITransactionWriter`. A custom writer replaces stage 1 of the commit flow (registered as an `ITransactionWriter` service on the context) and is only needed when source writes require protocol-specific orchestration the built-in writer cannot provide.
+
+A custom writer must follow the in-place marking contract documented in the xml docs of `ITransactionWriter.WriteToSourcesAsync`. Moving or replacing a snapshot slot silently corrupts the local apply; not marking accepted slots is harmless but keeps the legacy double write (the apply notifications carry no source and are pushed to the source again). While developing a writer, enable the runtime contract validation:
+
+```csharp
+SubjectTransaction.ValidateWriterContract = true;
+```
+
+The commit then fails terminally with a `SubjectTransactionException` if a slot was moved or replaced (sources may already have been written, so no retry). The check covers slot identity only: missing or wrong-source marks are not detected. Leave it disabled in production (one array allocation and sweep per commit); the built-in `SourceTransactionWriter` does not need it.
