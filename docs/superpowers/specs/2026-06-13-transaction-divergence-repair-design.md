@@ -4,25 +4,34 @@
 - Status: approved design, implementation pending
 - Issues: implements #340 and the reconciliation mechanism of #342 (epic #347, row 5 and part of row 4)
 - PR: #349 (this branch; implementation follows here)
-- Prerequisite: #343 via PR #344 (source-marked commit applies). Implementation must land after PR #344 is merged.
+- Prerequisite: #343 via PR #344 (source-marked commit applies). Implementation lands on top of PR #344 for code-shape reasons. Note: unlike the original #340 proposal, the repair mechanism here does not depend on source-marked applies, because repair never applies values to the local model directly (see section 4).
 
 ## 1. Context and scope
 
 When a transaction commit fails after writing to external sources, the local model and the sources can end up persistently diverged: a revert write can fail, a transport error can leave the server state unknown, and the commit timeout path currently exits without any repair. Today the thrown `SubjectTransactionException` is the only record; nothing repairs the divergence afterwards.
 
-This design adds a repair mechanism that runs inside the commit failure path and converges the local model to the source. It supersedes three statements in issue #340:
+This design adds a repair mechanism that runs in the commit failure path and converges the local model to the source by triggering a source-wins resynchronization. It supersedes three statements in issue #340:
 
-- the guess-only proposal ("no source read-back API is needed"): this design presumes first where a presumption is sound, then confirms by reading back;
+- the guess-only proposal ("apply the new values of the revert-failed changes to the local model"): this design applies no guess locally; it triggers an authoritative source-wins resync instead;
 - the "no public API drift" constraint: this design deliberately extends `ISubjectSource`, `WriteResult`, `ITransactionWriter`, and `WithSourceTransactions`;
-- the "no connector-specific changes" constraint: OPC UA gets a read-back implementation and a resync override.
+- the "no connector-specific changes" constraint: the transport connectors get a resync override.
 
 The consistency contract wording, the typed `ChangeOrigin` discriminator, and the #338 commit-isolation decision remain in the follow-up #342 design. Success-path races are out of scope here: #346 (stale queued write) and #338 (commit window isolation) have their own rows in epic #347.
+
+### Why resync-only
+
+An earlier revision of this design used a three-rung ladder: presume the source value (no IO), confirm with a targeted read-back (an opt-in `ISupportsPropertyReadBack` capability), then escalate to resync. It was dropped in favor of a single guaranteed action because both upper rungs are only optimizations over resync, which is strictly more correct (it reads the source's actual state rather than guessing, and reads the whole source rather than one property), and the path they optimize almost never runs:
+
+- In Rollback mode the local apply happens only after the source write succeeds, so a full failure (session down, whole batch refused, transport drop before sending) leaves both sides at the old value: consistent, no repair. Permanently rejected items (not writable, wrong type) land in the failed set, are never applied locally, and likewise leave both sides consistent.
+- Divergence therefore arises only from partial acceptance followed by a revert of the accepted items that also fails (a connection that accepted some writes then dropped before the revert landed), or from an indeterminate write (lost response or commit timeout mid-write). Both are connection-timing accidents, rare per connection.
+
+For such a rare cold path, one guaranteed action is the better complexity trade. Targeted read-back (`ISupportsPropertyReadBack`) can be reintroduced later as a pure optimization, without changing the contract, if whole-source resync ever proves too heavy in practice. The success path is untouched either way: a clean one-source, one-batch, all-accepted commit never enters any repair code.
 
 ## 2. The guarantee
 
 After `CommitAsync` returns or throws, every source-bound property satisfies exactly one of:
 
-1. **Consistent**: the local value equals the source value (clean success, clean failure, or repaired).
+1. **Consistent**: the local value equals the source value (clean success, clean failure, or repaired by a completed resync).
 2. **Pending resync**: a divergence-flagged resynchronization is in flight that retries until it completes, escalating to a transport reconnect when needed. The pending state is queryable and raised as an event the whole time.
 3. **Named residual**: one of the documented residuals in section 9, all reported loudly in the thrown exception.
 
@@ -30,7 +39,7 @@ Silent steady-state divergence is eliminated for the built-in `SourceTransaction
 
 ## 3. Failure classification
 
-Repair must know whether divergence is even possible. `WriteResult` (Connectors) cannot express that today, so it gains a classification. The enum is defined once in `Namotion.Interceptor.Tracking` (namespace `Namotion.Interceptor.Tracking.Change`, next to `SubjectPropertyChange`) so both layers share it:
+Repair must know whether divergence is even possible, and whether a clean revert already restored consistency. `WriteResult` (Connectors) cannot express that today, so it gains a classification. The enum is defined once in `Namotion.Interceptor.Tracking` (namespace `Namotion.Interceptor.Tracking.Change`, next to `SubjectPropertyChange`) so both layers share it:
 
 ```csharp
 public enum WriteFailureKind
@@ -53,7 +62,9 @@ Call-site mapping in the OPC UA client (`OutboundWriter`):
 - `ProcessWriteResults` outcomes, including the all-items-rejected case: `Rejected`;
 - the `catch` around `session.WriteAsync`: `Indeterminate`.
 
-Multi-batch simplification: when a middle batch fails, the not-yet-sent tail batches share the overall result's classification. Treating never-sent changes as in-doubt only costs an idempotent read-back that re-applies values the local model already holds. This keeps `WriteResult` a single flat result instead of a per-batch report.
+Multi-batch simplification: when a middle batch fails, the not-yet-sent tail batches share the overall result's classification. Treating never-sent changes as in-doubt only costs a redundant resync request that the source-wins snapshot reconciles anyway. This keeps `WriteResult` a single flat result instead of a per-batch report.
+
+All three kinds earn their keep even though both repair-triggering kinds take the same action: `NothingSent` lets repair be skipped entirely, `Rejected` lets it be skipped when the revert of the known-accepted set succeeded, and `Indeterminate` always repairs because the outcome is unknown.
 
 Classification drives the repair decision:
 
@@ -61,29 +72,28 @@ Classification drives the repair decision:
 |---|---|
 | `NothingSent` | none (no divergence) |
 | `Rejected`, revert succeeded | none (state restored) |
-| `Rejected`, revert failed | ladder, entry at the presume rung |
-| `Indeterminate` | ladder, entry at the read-back rung |
-| Commit timeout during source IO | ladder, entry at the read-back rung (all source-bound changes in doubt) |
+| `Rejected`, revert failed | resync the affected source |
+| `Indeterminate` | resync the affected source |
+| Commit timeout during source IO | resync the affected source (all source-bound changes, outcome unknown) |
 
 ## 4. Repair orchestration in the commit
 
 ### Hook points
 
-All repair runs inside `SubjectTransaction.ReconcileWithWriterAsync`. Its four divergence-capable exits get wired to the ladder:
+All repair runs inside `SubjectTransaction.ReconcileWithWriterAsync`. Its four divergence-capable exits get wired to repair:
 
 1. Rollback branch, source-write failure: repair runs after `RevertSourceWritesSafelyAsync` when the revert reported failures or the write was `Indeterminate`.
 2. Rollback branch, local-apply failure: same treatment after its source revert.
 3. BestEffort branches: same treatment for their targeted reverts.
 4. Commit timeout: the write and revert calls get a catch for the commit-timeout cancellation. All source-bound changes are classified in-doubt, repair runs, then the original timeout exception rethrows. This supersedes the failure-matrix line "commit timeout during source revert: no convergence".
 
-Retryability is unchanged: the timeout path still resets the transaction for retry (repair runs while `_isCommitting` is still true, before the rethrow reaches `EndCommit`). If repair moved local values, a `FailOnConflict` retry now correctly reports a conflict; an `IgnoreConflicts` retry re-pushes onto consistent state. Both are safe and documented.
+Retryability is unchanged: the timeout path still resets the transaction for retry. Because repair applies nothing to the local model (see below), a retry simply re-asserts the intent; a `FailOnConflict` retry behaves exactly as today.
 
-### Division of labor
+### Why repair runs in the background
 
-The placement constraint from #340 holds: the writer cannot touch the local model (`_isCommitting` makes `CaptureChange` reject tracked writes mid-commit), and the transaction cannot talk to sources (Tracking has no source types). Therefore **the writer computes, the transaction applies**:
+The `_isCommitting` flag makes `CaptureChange` reject tracked writes during commit, so neither the writer nor the transaction can apply source values to the local model inside the commit flow. Resync sidesteps this entirely: it converges the local model on a detached flow through the normal inbound path (`StartBuffering` plus `LoadInitialStateAndResumeAsync`), which is already echo-correct independent of this design.
 
-- the writer walks the ladder and returns changes to apply locally, each carrying the owning source as `Source` so the apply publishes echo-suppressed notifications (this is why #343 is the prerequisite);
-- the transaction applies them through `SubjectPropertyChangeOperations.ApplyLocalChanges`, the same primitive used for commit applies, and folds the outcome into the thrown exception.
+Consequently the repair action does not apply anything to the local model during the commit. It only triggers a background resync and records the pending state, then the commit throws. This is why, unlike the original #340 proposal, repair does not depend on #343's source-marked applies: there are no in-commit applies to suppress.
 
 ### The writer seam
 
@@ -97,27 +107,25 @@ ValueTask<SourceRepairResult> RepairDivergenceAsync(
 ```
 
 - `SourceRepairRequest`: the affected changes (revert-failed subset or in-doubt set), the `WriteFailureKind`, the revert outcome, and the opaque revert state (which already carries the per-source grouping).
-- `SourceRepairResult`: `ChangesToApply` (source-marked presumed and/or read-back values), `PendingResyncSources` (sources where reads failed and a resync was requested), and `Errors`.
+- `SourceRepairResult`: the recorded `PendingDivergence` entries and any `Errors`. No values flow back to the transaction; the transaction only reports them.
 
-### Clocks
+The built-in `SourceTransactionWriter` implements it as: consult the repair policy (section 7); if it returns `RepairAutomatically`, call `RequestResynchronization` on each affected source; record the pending entries in the `SourceConsistencyTracker`; return them. The writer owns the policy and tracker interaction because both are Connectors concerns and the writer lives in Connectors; the transaction in Tracking stays oblivious to them.
 
-The repair timeout belongs to the writer, not the transaction. `SourceTransactionWriter` bounds its ladder IO with its configured `RepairTimeout` (default 5 seconds) using an internally created CTS. This keeps the timeout-path repair working even though the commit token is already cancelled, and keeps Tracking free of repair configuration. Worst-case commit blocking is commit timeout plus repair timeout.
+### Latency
+
+`RequestResynchronization` is fire-and-forget: it schedules background work and returns immediately. Repair therefore adds no blocking IO to the commit path, so commit-failure latency is essentially unchanged and there is no repair timeout to configure. The commit-timeout exit likewise just schedules the resync and rethrows; it needs no separate clock.
 
 ### Reporting surface
 
-`SubjectTransactionException` keeps its shape: `FailedChanges` still means "the transaction intent failed". The repair outcome arrives as a `SourceDivergenceException` (a Connectors type) appended to `Errors`, carrying the affected properties, the failure kind, the rung that resolved each property (presumed, read-back, resync-pending, application-handled), and any repair errors.
+`SubjectTransactionException` keeps its shape: `FailedChanges` still means "the transaction intent failed". The repair outcome arrives as a `SourceDivergenceException` (a Connectors type) appended to `Errors`, carrying the affected properties, the failure kind, the per-source resync-pending state, and any repair errors.
 
-## 5. The repair ladder
+## 5. The repair action: resync
 
-The full-state reload cannot run inline during the commit: `LoadInitialStateAsync` returns an opaque apply-action that writes subjects directly, and inside the commit's async flow those writes would be rejected as tracked writes (the same `_isCommitting` constraint). The reload therefore always happens on a detached flow, as part of the resync escalation. The inline ladder has three rungs:
+The single repair action is a source-wins resynchronization, requested per involved source via `RequestResynchronization` (section 6). It reconciles the whole source through the inbound path, which is authoritative and already handles echo semantics and buffering. Multi-source transactions request a resync per source group, reusing the grouping carried in the revert state.
 
-- **Rung A, presume (no IO).** Only for revert-failed changes: the write was `Rejected` with a received response, so the source definitely accepted them, and a failed revert means the source almost certainly still holds the written value. The writer returns the written values as changes to apply; the local model immediately matches the probable source state. Skipped for `Indeterminate`, where there is nothing to presume. This delivers immediate consistency in the dominant failure mode (dropped connection), where the read-back below would only burn its timeout.
-- **Rung B, targeted read-back (bounded IO).** If the source implements `ISupportsPropertyReadBack`, read the affected properties under `RepairTimeout`. Returned values confirm or correct rung A and resolve `Indeterminate` authoritatively. Properties whose read fails (bad status, timeout) escalate to rung C.
-- **Rung C, resync request (fire-and-forget).** When rung B is unsupported, fails, or times out: `source.RequestResynchronization(reason)`, the divergence-pending flag is set, and the commit proceeds to throw. The resync applies values on its own background flow through the normal inbound path, so it is safe regardless of commit state; its completion clears the flag.
+Cost: a resync reconciles the entire source, not just the diverged properties. This is accepted because the path is a rare cold path (section 1) and resync is the guaranteed backstop every source must support anyway. If profiling later shows whole-source resync is too heavy for a real workload, a targeted read-back capability (`ISupportsPropertyReadBack`, returning per-property source values applied through the inbound path) can be added as a strictly-optional fast path ahead of resync, without changing the section 2 guarantee.
 
-Multi-source transactions repair per source group, reusing the grouping carried in the revert state.
-
-## 6. Source interface changes
+## 6. Source interface change
 
 ### `ISubjectSource.RequestResynchronization` (breaking change)
 
@@ -133,25 +141,9 @@ void RequestResynchronization(string reason);
 - In-memory and test sources inherit the base default and are correct for free; for them the resync request is the full reload.
 - This is a breaking interface change for implementors that do not derive from `SubjectSourceBase`. Accepted: the library is in its 0.0.x breaking phase, and the member is required for the guarantee in section 2 (a last resort that is optional is not a last resort).
 
-### `ISupportsPropertyReadBack` (opt-in capability)
-
-```csharp
-public interface ISupportsPropertyReadBack
-{
-    /// Reads current source values for the given properties.
-    ValueTask<PropertyReadBackResult> ReadPropertyValuesAsync(
-        IReadOnlyList<PropertyReference> properties, CancellationToken cancellationToken);
-}
-```
-
-- `PropertyReadBackResult`: successful entries as (property, value, source timestamp), the properties that could not be read, and an optional error.
-- It returns raw values rather than self-applying because the values must flow back through the transaction's `ApplyLocalChanges` during a commit, and through the inbound path when used by the manual converge API. `SourceTransactionWriter` constructs the source-marked `SubjectPropertyChange` entries uniformly.
-- OPC UA implementation: `session.ReadAsync` over the affected node ids, batched by `OperationLimits.MaxNodesPerRead`, mapping per-item status codes (good yields a value, bad lands in the failed set).
-- Follows the existing capability pattern (`ISupportsConcurrentWrites`). Sources without it skip rung B.
-
 ## 7. Configuration and policy
 
-No new extension method. `WithSourceTransactions` gains an optional configure parameter; the parameterless call keeps working and enables automatic repair with defaults:
+No new extension method. `WithSourceTransactions` gains an optional configure parameter; the parameterless call keeps working and enables automatic repair:
 
 ```csharp
 public static IInterceptorSubjectContext WithSourceTransactions(
@@ -162,7 +154,6 @@ public static IInterceptorSubjectContext WithSourceTransactions(
 ```csharp
 public sealed class DivergenceRepairOptions
 {
-    public TimeSpan RepairTimeout { get; set; } = TimeSpan.FromSeconds(5);
     public Func<DivergenceReport, DivergenceRepairDecision> OnDivergence { get; set; }
         = _ => DivergenceRepairDecision.RepairAutomatically;
 }
@@ -174,10 +165,10 @@ public enum DivergenceRepairDecision
 }
 ```
 
-- The callback is the primitive; automatic and manual are its two return values. `SourceTransactionWriter` consults it at the start of `RepairDivergenceAsync`, before any rung runs; it executes inline in the commit failure path and must be fast.
+- The callback is the primitive; automatic and manual are its two return values. `SourceTransactionWriter` consults it at the start of `RepairDivergenceAsync`, before any resync is requested; it executes inline in the commit failure path and must be fast.
 - If the callback throws, the exception is captured into the report and the decision defaults to `RepairAutomatically`: a broken policy hook must not disable the safety mechanism.
-- `HandledByApplication` runs no rungs: the pending state is recorded with the full report, the commit throws, and the application resolves it via one of three supported outs: the manual converge API, its own resync request, or re-asserting its intent with a new transaction.
-- The same `WithSourceTransactions` call registers the `SourceConsistencyTracker` service (section 8).
+- `RepairAutomatically` requests the resync. `HandledByApplication` requests nothing: the pending state is recorded with the full report, the commit throws, and the application resolves it via one of three supported outs: the manual converge API (section 8), its own resync request, or re-asserting its intent with a new transaction.
+- The same `WithSourceTransactions` call registers the `SourceConsistencyTracker` service (section 8) and wires it plus the options into the `SourceTransactionWriter`.
 
 `DivergenceReport` carries the source, the affected changes, the `WriteFailureKind`, the revert errors, and a timestamp.
 
@@ -197,29 +188,27 @@ public sealed class SourceConsistencyTracker
 }
 ```
 
-- `PendingDivergence`: property, source, failure kind, since-timestamp, and whether a presumed (unconfirmed) value was applied.
+- `PendingDivergence`: property, source, failure kind, and since-timestamp.
 - Events fire regardless of policy mode (the "never silent" rule). The commit exception's `SourceDivergenceException` is the in-band report; the tracker events are the out-of-band one. Handlers must be fast; no threading guarantees are given.
-- `ConvergeToSourceAsync` is the manual repair entry point. It runs outside any commit window on the caller's flow and uses the plain inbound apply path: read-back where the source supports it, resync request otherwise.
+- `ConvergeToSourceAsync` is the manual repair entry point. It maps the given properties (or all currently pending ones) to their sources and requests a resync of each; resolution is observed via the events and `GetPending`.
 
-**Clearing rule (unified): any source-confirmed value application to a pending property resolves its entry.** This single mechanism covers a rung B read-back, a subscription echo, an inbound update, a later successful commit write to the same property (its apply is source-marked per #343), and the resync's full-state load. The tracker subscribes to the context's property-change stream only while pending entries exist, so the steady-state cost is zero.
+**Clearing rule (unified): any source-confirmed value application to a pending property resolves its entry.** This single mechanism covers a subscription echo, an inbound update, a later successful commit write to the same property, and the resync's full-state load. The tracker subscribes to the context's property-change stream only while pending entries exist, so the steady-state cost is zero.
 
-Belt and suspenders: when a resync completes (`LoadInitialStateAndResumeAsync` succeeds), the source signals the tracker (resolved from the context when registered) to clear all of its remaining pending entries. This covers a pending property that no longer exists at the source and would otherwise never receive a confirming apply.
+Belt and suspenders: when a resync completes (`LoadInitialStateAndResumeAsync` succeeds), the source signals the tracker (resolved from the context when registered) to clear all of its remaining pending entries for that source. This covers a pending property that no longer exists at the source and would otherwise never receive a confirming apply.
 
-`DivergenceResolution` carries how the entry resolved (read-back, echo, inbound, resync, commit, manual), which later feeds the #342 observability story without new plumbing.
-
-**Pending-flag semantics across rungs:** the flag means "unconfirmed", not only "known-diverged". Presumed values that could not be confirmed (rung B failed, rung C requested) keep the flag set until a source-confirmed apply lands, even though the local value is probably already correct.
+`DivergenceResolution` carries how the entry resolved (echo, inbound, resync, commit, manual), which later feeds the #342 observability story without new plumbing.
 
 ## 9. Edge cases and residual divergence
 
 Handled:
 
-- **Wrong-guess window**: rung A applies a value the source may no longer hold (revert applied but unacknowledged). Corrected by rung B where reads work, by the resync otherwise, and passively by subscription echoes; flagged unconfirmed until then.
-- **Moving target**: a repair read-back can race a concurrent third-party write. That is quiescent consistency, not a defect; subscriptions keep converging afterwards.
-- **Multi-source partial failure**: per-source repair with conservative kind merging.
+- **In-doubt window**: between the failed commit and resync completion the local model holds the pre-commit value, flagged pending and reported via the exception. The resync converges it to the source truth; the caller already knows the commit failed.
+- **Multi-source partial failure**: per-source resync, conservative kind merging.
+- **Concurrent third-party writes during resync**: resync applies a source-wins snapshot through the inbound path; a later third-party write flows in the same way. This is quiescent consistency, not a defect.
 
 Residual (documented, reported, no repair possible):
 
-1. **A local property setter that deterministically throws** during apply or revert. Read-back fetches the correct source value, but applying it re-runs the same throwing setter. Reported in the exception; local-side divergence remains until the setter stops throwing (a later inbound apply retries it naturally).
+1. **A local property setter that deterministically throws** during the resync's inbound apply. The resync fetches the correct source value, but applying it re-runs the throwing setter. Reported via the inbound apply error handling; local-side divergence remains until the setter stops throwing (a later inbound apply retries it naturally).
 2. **A custom `ITransactionWriter` that throws** instead of reporting. It returns neither a written set nor revert state, so nothing can be classified or repaired. Already documented as terminal; the built-in writer never takes this path.
 3. **Reverts can clobber concurrent third-party writes and expose transient values to other clients.** OPC UA has no server-side transactions; the revert writes captured old values, not compare-and-swap. This does not break local/source agreement (both sides end at the old value); it overwrites another client's intent. Documented protocol limit, owned by the #342 contract.
 
@@ -228,20 +217,21 @@ Residual (documented, reported, no repair possible):
 - #346: stale queued non-transactional write overwriting a committed value (flush-time echo filter, epic row 3).
 - #338: commit window isolation against concurrent local writes and inbound updates (decided by the #342 design).
 - Contract wording, `ChangeOrigin` discriminator, and divergence taxonomy: the #342 design.
+- Targeted read-back (`ISupportsPropertyReadBack`): a deferred optimization, only if whole-source resync proves too heavy in practice.
 
 ## 11. Documentation updates
 
-- `docs/tracking-transactions.md` failure matrix: the revert-failure and in-doubt rows change from "diverged, reported" to "repaired or pending-resync"; the commit-timeout row changes from "no convergence" to "in-doubt repair, then retryable"; retry-conflict interplay documented.
-- Sources documentation: `RequestResynchronization` semantics (including coalescing) and `ISupportsPropertyReadBack`.
+- `docs/tracking-transactions.md` failure matrix: the revert-failure and in-doubt rows change from "diverged, reported" to "resync requested, pending until it lands"; the commit-timeout row changes from "no convergence" to "resync requested, then retryable"; the clean-failure rows (full rejection, permanent per-item rejection) documented as consistent-at-old.
+- Sources documentation: `RequestResynchronization` semantics (including coalescing and retry-until-landed).
 - Issue #340: closing notes referencing this spec and the superseded statements.
 
 ## 12. Testing
 
-- **Unit, repair orchestration** (Tracking/Connectors tests, fake sources via the existing `IFaultInjectable` pattern): each failure kind times each handling mode enters the correct rung; presumed values applied on revert failure; read-back corrects a wrong presumption; read-back failure requests resync and sets pending; timeout path walks the ladder on its own clock and stays retryable; `SourceDivergenceException` contents pinned; `FailOnConflict` retry after repair reports a conflict.
-- **Unit, tracker**: every clearing rule (read-back, echo, later commit, resync completion signal, manual converge); events fire in both policy modes; change-stream subscription active only while entries are pending.
-- **Unit, policy**: callback decisions honored; throwing callback captured and defaults to automatic; `HandledByApplication` runs no rungs and records pending state.
+- **Unit, repair orchestration** (Tracking/Connectors tests, fake sources via the existing `IFaultInjectable` pattern): each failure kind under each handling mode requests resync or not as the table in section 3 specifies; full rejection and permanent per-item rejection leave both sides consistent and request no resync; revert-failure and indeterminate request resync and set pending; the timeout path requests resync and stays retryable; `SourceDivergenceException` contents pinned; repair adds no local apply (no spurious change notifications).
+- **Unit, tracker**: every clearing rule (echo, inbound, later commit, resync completion signal, manual converge); events fire in both policy modes; change-stream subscription active only while entries are pending.
+- **Unit, policy**: callback decisions honored; throwing callback captured and defaults to automatic; `HandledByApplication` requests no resync and records pending state.
 - **Unit, base class**: `SubjectSourceBase.RequestResynchronization` default runs the buffer/load/replay choreography, retries on load failure, and coalesces concurrent requests.
-- **Integration, OPC UA** (`Namotion.Interceptor.OpcUa.Tests`, run targeted per repo convention): read-back maps per-item status codes and honors `MaxNodesPerRead`; resync request routes into session supervision; end-to-end revert-failure scenario converges against the server fixture.
+- **Integration, OPC UA** (`Namotion.Interceptor.OpcUa.Tests`, run targeted per repo convention): resync request routes into session supervision; an end-to-end partial-acceptance-with-failed-revert scenario converges against the server fixture.
 - **Public API snapshots**: Connectors and Tracking verified files change; accept new snapshots in the implementation PR.
 - Conventions: `When<Condition>_Then<ExpectedBehavior>` naming, explicit Arrange/Act/Assert, no hardcoded waits (`AsyncTestHelpers.WaitUntilAsync` for eventual paths).
 
@@ -250,13 +240,13 @@ Residual (documented, reported, no repair possible):
 | Component | Change |
 |---|---|
 | `Namotion.Interceptor.Tracking` | `WriteFailureKind`, `SourceWriteResult.FailureKind`, `ITransactionWriter.RepairDivergenceAsync` (default impl), `SourceRepairRequest`/`SourceRepairResult`, `ReconcileWithWriterAsync` hook points incl. timeout amendment |
-| `Namotion.Interceptor.Connectors` | `WriteResult` classification, `SourceTransactionWriter` ladder, `SourceDivergenceException`, `DivergenceRepairOptions`/report/decision, `SourceConsistencyTracker`, `WithSourceTransactions(configure)`, `ISubjectSource.RequestResynchronization`, `SubjectSourceBase` default, `ISupportsPropertyReadBack` |
-| `Namotion.Interceptor.OpcUa` | `OutboundWriter` failure kinds, `ISupportsPropertyReadBack` implementation, `RequestResynchronization` override into `SessionManager`, resync-completion signal |
+| `Namotion.Interceptor.Connectors` | `WriteResult` classification, `SourceTransactionWriter` repair (policy plus resync plus tracker), `SourceDivergenceException`, `DivergenceRepairOptions`/report/decision, `SourceConsistencyTracker`, `WithSourceTransactions(configure)`, `ISubjectSource.RequestResynchronization`, `SubjectSourceBase` default |
+| `Namotion.Interceptor.OpcUa` | `OutboundWriter` failure kinds, `RequestResynchronization` override into `SessionManager`, resync-completion signal |
 | `Namotion.Interceptor.Mqtt` / `WebSocket` | `RequestResynchronization` overrides into their reconnection handling, failure-kind mapping where determinable |
 | Docs | `docs/tracking-transactions.md` failure matrix, sources docs |
 
 ## 14. Planning notes
 
-- **Code-base assumption.** Every code reference in this spec (the `Memory<SubjectPropertyChange>` snapshot, in-place slot marking, `ReconcileWithWriterAsync` exits, the `SourceWriteResult` shape) describes the codebase **after PR #344 is merged**. This branch is currently based on master, which predates #344 and has materially different shapes in `SubjectTransaction`, `ITransactionWriter`, and `SourceTransactionWriter`. Do not plan or implement against the pre-#344 code: first merge master into this branch once #344 has landed, then verify the referenced shapes match.
-- **Suggested implementation order**, each step independently buildable and testable: (1) `WriteFailureKind` and the `WriteResult`/`SourceWriteResult` plumbing with call-site mapping, (2) the `ITransactionWriter.RepairDivergenceAsync` seam and the `ReconcileWithWriterAsync` hook points including the timeout catch, (3) the ladder in `SourceTransactionWriter` (presume, read-back, resync request) behind the seam, (4) `ISubjectSource.RequestResynchronization` with the `SubjectSourceBase` default and `ISupportsPropertyReadBack`, (5) `SourceConsistencyTracker`, `DivergenceRepairOptions`, and the `WithSourceTransactions(configure)` overload, (6) connector work (OPC UA read-back and resync override, MQTT/WebSocket resync overrides, failure-kind mapping), (7) docs and public API snapshot updates.
-- **Verification.** Build and unit tests per repository convention (`dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`); run `Namotion.Interceptor.OpcUa.Tests` targeted when the OPC UA changes land. The public API snapshot tests for Tracking and Connectors will fail until their `.verified.txt` files are updated, which is expected and part of step 7.
+- **Code-base assumption.** Every code reference in this spec (the `Memory<SubjectPropertyChange>` snapshot, `ReconcileWithWriterAsync` exits, the `SourceWriteResult` shape) describes the codebase **after PR #344 is merged**. This branch is currently based on master, which predates #344 and has materially different shapes in `SubjectTransaction`, `ITransactionWriter`, and `SourceTransactionWriter`. Do not plan or implement against the pre-#344 code: first merge master into this branch once #344 has landed, then verify the referenced shapes match. (The repair mechanism itself no longer depends on #343's source-marked applies, since repair applies nothing locally; the dependency is only the shared code shape.)
+- **Suggested implementation order**, each step independently buildable and testable: (1) `WriteFailureKind` and the `WriteResult`/`SourceWriteResult` plumbing with call-site mapping; (2) the `ITransactionWriter.RepairDivergenceAsync` seam and the `ReconcileWithWriterAsync` hook points including the timeout catch, with a no-op default writer behavior; (3) `ISubjectSource.RequestResynchronization` with the `SubjectSourceBase` default; (4) `SourceConsistencyTracker`, `DivergenceRepairOptions`, the `WithSourceTransactions(configure)` overload, and wiring the writer to policy plus tracker plus resync; (5) connector resync overrides (OPC UA into `SessionManager`, MQTT/WebSocket), failure-kind mapping, and the resync-completion signal; (6) docs and public API snapshot updates.
+- **Verification.** Build and unit tests per repository convention (`dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`); run `Namotion.Interceptor.OpcUa.Tests` targeted when the OPC UA changes land. The public API snapshot tests for Tracking and Connectors will fail until their `.verified.txt` files are updated, which is expected and part of step 6.
