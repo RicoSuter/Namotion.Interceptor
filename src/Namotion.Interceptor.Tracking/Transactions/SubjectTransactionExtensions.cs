@@ -15,6 +15,10 @@ public static class SubjectTransactionExtensions
     /// <summary>
     /// Begins a new transaction bound to this context.
     /// </summary>
+    /// <remarks>
+    /// Begin, use, commit, and dispose a transaction within the same async flow; committing from a
+    /// different flow throws <see cref="InvalidOperationException"/>.
+    /// </remarks>
     /// <param name="context">The context to bind the transaction to.</param>
     /// <param name="failureHandling">The failure handling mode controlling what happens when writes fail.</param>
     /// <param name="locking">The locking mode. Exclusive (default) acquires lock at begin; Optimistic acquires only during commit.</param>

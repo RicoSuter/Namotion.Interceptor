@@ -22,6 +22,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
+    /// <summary>
+    /// Gets the number of writes currently queued for retry.
+    /// </summary>
+    public int PendingWriteCount => WriteRetryQueue?.PendingWriteCount ?? 0;
+
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
@@ -151,11 +156,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         try
         {
             var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
-            if (result is { IsFullySuccessful: false, FailedChanges.IsEmpty: false })
+            if (!result.IsFullySuccessful)
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
                     result.FailedChanges.Length);
-                WriteRetryQueue.Enqueue(result.FailedChanges.ToArray());
+                WriteRetryQueue.Enqueue(result.FailedChanges.AsMemory());
             }
         }
         catch (OperationCanceledException)

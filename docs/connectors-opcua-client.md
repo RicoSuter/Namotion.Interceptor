@@ -20,8 +20,8 @@ public partial class Machine
 builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
-    sourceName: "opc",
-    rootName: "MyMachine");
+    connectorName: "opc",
+    rootPath: ["MyMachine"]);
 
 // ...
 var host = builder.Build();
@@ -34,8 +34,8 @@ For multiple client sources, use `AddKeyedOpcUaSubjectClientSource` with a name 
 
 **Parameters:**
 - `serverUrl` - The OPC UA server endpoint (e.g., `"opc.tcp://localhost:4840"`)
-- `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
-- `rootName` - Optional root node name to start browsing from under the Objects folder
+- `connectorName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
+- `rootPath` - Optional path segments to the root node to start browsing from under the Objects folder (e.g., `["MyMachine"]`)
 
 Two DI overloads are available: the simple generic shown above and a full configuration overload (shown below).
 
@@ -141,7 +141,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `CertificateStoreBasePath` | "pki" | Base directory for certificate stores |
 | `SessionFactory` | null | Custom session factory (uses `DefaultSessionFactory` when null) |
 | `TelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
-| `NodeMapper` | CompositeNodeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
+| `Mapper` | OpcUaCompositeMapper | `IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>` that maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
 
 **Subscription Tuning:**
 
@@ -383,7 +383,7 @@ All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ### Write Retry Queue During Disconnection
 
-Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -659,7 +659,7 @@ if (source.CurrentSession is { } session)
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 
-For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires on every transition (including to/from `null`). Method-call consumers usually do not need it — they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
+For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires on every transition (including to/from `null`). Method-call consumers usually do not need it: they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
 
 ```csharp
 opcUaSource.CurrentSessionChanged += (_, args) =>
@@ -683,7 +683,7 @@ opcUaSource.CurrentSessionChanged += (_, args) =>
 };
 ```
 
-The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes — the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers — isolate exceptions in your own handler if multiple must run.
+The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes; the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers, so isolate exceptions in your own handler if multiple must run.
 
 ## Node ID Resolution
 

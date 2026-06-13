@@ -106,7 +106,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     private bool IsPropertyIncluded(PropertyReference propertyReference)
     {
         return propertyReference.TryGetRegisteredProperty() is { } property &&
-               property.IsPropertyIncluded(_configuration.NodeMapper);
+               property.IsPropertyIncluded(_configuration.Mapper, _subject);
     }
 
     private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
@@ -279,16 +279,6 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                 finally
                 {
                     _isForceKill = false;
-
-                    // Dispose transport listeners before server.Dispose().
-                    // The SDK's StopAsync calls Close() on each listener (which only
-                    // stops accepting connections) then clears the TransportListeners list.
-                    // When server.Dispose() later tries to Dispose() listeners, the list
-                    // is empty — so TcpTransportListener.Dispose() never runs, leaving
-                    // per-client channel sockets and inactivity timers alive as GC roots
-                    // that retain the entire server object graph.
-                    try { server.DisposeTransportListeners(); }
-                    catch (Exception ex) { _logger.LogDebug(ex, "Error disposing transport listeners."); }
 
                     try { server.Dispose(); }
                     catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }

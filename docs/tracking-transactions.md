@@ -4,7 +4,7 @@ The `Namotion.Interceptor.Tracking` package provides transaction support for bat
 
 ## When to Use Transactions
 
-Without transactions, property changes are applied to the in-process model immediately, while external sources synchronize asynchronously in the background. This is suitable when the local model is the source of truth, or eventual consistency is acceptable.
+Without transactions, property changes are applied to the local model immediately, while external sources synchronize asynchronously in the background. This is suitable when the local model is the source of truth, or eventual consistency is acceptable.
 
 Use transactions when you need guarantees about what was actually persisted to external sources.
 
@@ -14,7 +14,7 @@ Transactions provide:
 - **Configurable commit modes**: Choose between best-effort or rollback behavior on partial failures
 - **Read-your-writes consistency**: Reading a property inside a transaction returns the pending value
 - **Notification suppression**: Change notifications are suppressed during the transaction and fired after commit
-- **External source integration**: Changes can be written to external sources before being applied to the in-process model
+- **External source integration**: Changes can be written to external sources before being applied to the local model
 - **Rollback on dispose**: Uncommitted changes are discarded when the transaction is disposed
 
 ## Setup
@@ -172,8 +172,10 @@ Controls how optimistic transactions detect concurrent modifications.
 
 | Value | Description |
 |-------|-------------|
-| `FailOnConflict` | Throw `TransactionConflictException` if values changed since transaction started. (default) |
+| `FailOnConflict` | Throw `SubjectTransactionConflictException` if values changed since transaction started. (default) |
 | `Ignore` | Overwrite any concurrent changes without checking. |
+
+Conflict detection is best-effort and not atomic with respect to non-transactional writes that happen between detection and apply. Transactions are serialized against each other, but a raw property write or an external source callback can still interleave during that window.
 
 ### Requirements
 
@@ -196,7 +198,7 @@ using var tx = await context.BeginTransactionAsync(
 
 ### Commit Timeout
 
-**Default: 30-second timeout** for all commits. Throws `TaskCanceledException` if exceeded.
+**Default: 30-second timeout**, applied only to the external source write/revert phase (commits with no sources are not timed). If a source write exceeds it, that write is reported as a failure in a `SubjectTransactionException`; if a revert is in progress when it fires, an `OperationCanceledException` is thrown.
 
 ```csharp
 // Custom timeout
@@ -220,37 +222,36 @@ When `CommitAsync()` is called, changes are processed in stages. The exact flow 
 
 When only `WithTransactions()` is configured (no external sources):
 
-1. **Apply all changes** to the in-process model (calls property setters, triggers `OnChanging/OnChanged` methods)
+1. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
 2. If any apply fails and `Rollback` mode: revert successful applies
 3. Fire change notifications
 
 ### With Source Transactions
 
-When `WithSourceTransactions()` is configured, commits execute in three stages:
+When `WithSourceTransactions()` is configured, commits execute in two stages:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│  Stage 1: External Sources (parallel)                                     │
-│  Write to OPC UA, MQTT, databases, etc.                                   │
-│  Properties with SetSource() are processed here                           │
+│  Stage 1: External sources (parallel when multiple)                       │
+│  Write source-bound changes to OPC UA, MQTT, databases, etc.              │
+│  Nothing is applied to the local model yet.                               │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  Stage 2: Source-Bound Properties                                         │
-│  Apply source-bound values to in-process model                            │
-│  (After external writes succeed, triggers OnChanging/OnChanged hooks)     │
-├───────────────────────────────────────────────────────────────────────────┤
-│  Stage 3: Local Properties                                                │
-│  Apply changes to properties WITHOUT sources                              │
-│  (Calls to OnChanging/OnChanged partial methods can throw exceptions)     │
+│  Stage 2: Apply to the local model in a single pass                       │
+│  Source-bound and local changes are applied together, excluding           │
+│  any whose source write failed (triggers OnChanging/OnChanged).           │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
+
+Stage 2 applies source-bound changes marked with the source that accepted them in stage 1, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior. Value-transforming write interceptors are not supported with source transactions: the source would receive the stage 1 value while the local model applies the transformed one.
+
+Stage 1 is performed by an `ITransactionWriter`; the built-in `SourceTransactionWriter` is registered by `WithSourceTransactions()`. Replacing it is an advanced scenario, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer).
 
 **Rollback behavior on failure:**
 
 | Failure Stage | BestEffort | Rollback |
 |---------------|------------|----------|
-| External sources fail | Only successful ones applied | All sources reverted, nothing applied |
-| Source-bound apply fails | Successful applied, failed sources reverted | All reverted |
-| Local properties fail | Successful applied, failed sources reverted | All reverted |
+| Source write fails | Successful sources written and applied | All sources reverted, nothing applied |
+| Local apply fails (source-bound or local) | Successful kept, failed sources reverted | All reverted |
 
 Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
 
@@ -267,7 +268,11 @@ propertyReference.SetSource(this);
 // On commit, WriteChangesInBatchesAsync is called on the source
 ```
 
-Properties without an associated source are applied directly in Stage 3.
+Properties without an associated source are applied in Stage 2 alongside source-bound properties.
+
+**Changing a source while a commit runs:** the source a property writes to is decided when the transaction commits, not when you set the value. So if you call `SetSource` or `RemoveSource` on a property at the same time a commit is running, it is undefined whether that commit uses the old or the new binding for that property.
+
+Rollback is not affected by this: a revert always undoes the writes at the sources they were actually written to, even if the binding changed in the meantime.
 
 ## Error Handling
 
@@ -291,6 +296,8 @@ catch (SubjectTransactionException ex)
 }
 ```
 
+The built-in `SourceTransactionWriter` never throws: a source that fails or throws is reported as a failed write and reverted through the normal failure handling. Only a custom `ITransactionWriter` that throws instead of reporting violates this contract. In that case the commit fails with a `SubjectTransactionException` reporting every change as failed, applies nothing to the local model, and the transaction becomes terminal (it must be disposed, not retried). Its sources are not reverted then, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. A custom writer that throws from `RevertSourceWritesAsync` is handled the same way: the changes it was asked to revert are reported as failed reverts and the commit fails terminally. An in-place marking contract violation detected by `SubjectTransaction.ValidateWriterContract` (see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer)) also fails terminally. A commit timeout during a source revert (`OperationCanceledException`) is the one exception and stays retryable; a timeout during a source write is reported as a failed write and handled like any other source failure, which is terminal.
+
 ### SubjectTransactionConflictException
 
 Thrown when optimistic locking detects concurrent modifications:
@@ -310,9 +317,60 @@ catch (SubjectTransactionConflictException ex)
 
 | Exception | Cause |
 |-----------|-------|
-| `InvalidOperationException` | Nested transactions, already committed, transactions not enabled |
+| `InvalidOperationException` | Nested transactions, already committed, transactions not enabled, committing from a different async flow |
 | `ObjectDisposedException` | Using a disposed transaction |
-| `TaskCanceledException` | Commit timeout exceeded |
+| `OperationCanceledException` | Commit timeout during source revert (source-write timeouts are reported via `SubjectTransactionException`) |
+
+### Failure Flows and Consistency
+
+A commit attempt ends in one of three states:
+
+- **Committed**: the commit succeeded. The transaction is finished and must be disposed.
+- **Failed, retryable**: the commit aborted before the local model was touched, either before anything was written at all (conflict detected, optimistic lock not acquired) or because a commit timeout interrupted it. The pending changes remain intact and `CommitAsync` can be called again on the same transaction. See [Retry After Conflict Detection](#retry-after-conflict-detection).
+- **Failed, terminal**: the commit got past the source-write stage, so writes may have reached sources or the local model, and compensation (reverts) already ran once. The pending changes are cleared, a second `CommitAsync` throws `InvalidOperationException`, and the transaction must be disposed and replaced with a new one. Retrying would replay the snapshot onto state that has already moved, for example re-pushing values to a source that already accepted them.
+
+Note that "terminal" describes the transaction, not the result: a successful commit is also terminal. Transactions are one-shot once anything has moved.
+
+The tables below list every flow and its end state per property. "Old" means the pre-transaction value, "new" means the transaction's value.
+
+**Local-only commits** (no `WithSourceTransactions()`). There is only the local model, so nothing can diverge; the only question is which properties end old and which end new:
+
+| Scenario | Mode | Local model ends as | Outcome |
+|----------|------|---------------------|---------|
+| All applies succeed | any | new | committed |
+| Some applies fail | BestEffort | applied keep new, failed keep old | terminal failure, reported per change |
+| Some applies fail, reverts succeed | Rollback | all old | terminal failure |
+| Some applies fail, a revert also fails | Rollback | mixed, despite Rollback | terminal failure, stuck properties are in `FailedChanges` |
+
+Commits with source writes (`WithSourceTransactions()` or a custom `ITransactionWriter`) involve two models that must agree: the external source and the local model. The next two tables split these flows by how they end.
+
+**Source writes, consistent end state.** The commit fully succeeds, fails before anything is written, or every needed revert succeeds, so source and local model agree on every property:
+
+| Scenario | Mode | Source ends | Local ends | Outcome |
+|----------|------|-------------|------------|---------|
+| All source writes and applies succeed | any | new | new | committed |
+| Conflict detected or optimistic lock not acquired (nothing written yet) | any | old | old | retryable failure |
+| A source write fails or times out, reverts succeed | Rollback | all old | all old | terminal failure |
+| A source write fails or times out | BestEffort | succeeded new, failed old | matches source | terminal failure |
+| A local apply fails, all reverts succeed | Rollback | all old | all old | terminal failure |
+| A local apply fails, its source revert succeeds | BestEffort | applied new, failed-apply old | matches source | terminal failure |
+| Writer reports an error without failed changes (custom writers only), reverts succeed | Rollback | all old | all old | terminal failure |
+| Writer reports an error without failed changes (custom writers only) | BestEffort | new | new | terminal failure, error surfaced in `Errors` |
+
+**Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Diverged properties are always reported in `FailedChanges` and `Errors`, except for a throwing writer where the transaction cannot know which sources were touched:
+
+| Scenario | Mode | Source ends | Local ends | Outcome | Divergence |
+|----------|------|-------------|------------|---------|------------|
+| Commit timeout during source revert | Rollback | partially reverted | old | retryable failure | transient, a successful retry re-pushes everything |
+| A source revert fails or throws | any | new on the stuck source | old | terminal failure | source ahead of local |
+| A local revert fails after a failed apply | Rollback | old | new | terminal failure | local ahead of source |
+| Custom writer throws from `WriteToSourcesAsync` | any | unknown, never reverted | old | terminal failure | unknown and unreported |
+
+Three root causes account for every divergence:
+
+1. **A compensating write failed.** Reverts are inverse writes, not an undo. A source that just failed or timed out is asked to accept another write, so this is the most likely divergence in practice. It is always terminal and always reported through `FailedChanges` and `Errors`, so the caller knows exactly which properties are stuck.
+2. **The writer threw instead of reporting.** Only a custom `ITransactionWriter` can cause this (the built-in writer always reports). The transaction has no written set and no revert state, so it cannot compensate and cannot tell which sources were touched. See [SubjectTransactionException](#subjecttransactionexception).
+3. **The inherent in-flight window.** Sources are written before the local model is applied, so even a fully successful commit has a moment where a source holds the new value and the local model does not, and during Rollback compensation a source briefly holds a value that is then taken back. Transactions provide quiescent consistency (both sides agree once the commit settles), not isolation from external observers of the source.
 
 ## Advanced Topics
 
@@ -440,16 +498,16 @@ try
 }
 catch (SubjectTransactionConflictException ex)
 {
-    // Conflict detected before any writes — pending changes are still intact.
+    // Conflict detected before any writes: pending changes are still intact.
     // Re-read current state, adjust, and retry.
     motor.MaxAllowedSpeed = 250;
     await transaction.CommitAsync(cancellationToken);
 }
 ```
 
-Post-write failures (`SubjectTransactionException` from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible — dispose the transaction and start a new one.
+Post-write failures (`SubjectTransactionException` from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible. Dispose the transaction and start a new one.
 
-Note that concurrent `CommitAsync` calls on the same transaction are rejected — only one commit attempt can be in progress at a time.
+Note that concurrent `CommitAsync` calls on the same transaction are rejected: only one commit attempt can be in progress at a time.
 
 ### Thread Safety
 
@@ -457,6 +515,7 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected �
 - Exclusive transactions use a per-context semaphore
 - Each async execution context has its own transaction scope
 - The transaction is automatically cleared on `Dispose()`
+- A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws
 - Concurrent `CommitAsync` calls on the same transaction instance are rejected
 
 ## Best Practices
@@ -556,4 +615,16 @@ For strict atomicity, use a single source per transaction or implement applicati
 
 ### Rollback is Best-Effort
 
-Rollback operations can also fail. If revert fails, `TransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case.
+Rollback operations can also fail. If revert fails, `SubjectTransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case. See [Failure Flows and Consistency](#failure-flows-and-consistency) for the full matrix of end states.
+
+## Implementing a Custom Transaction Writer
+
+Most applications use the built-in `SourceTransactionWriter` registered by `WithSourceTransactions()` and never implement `ITransactionWriter`. A custom writer replaces stage 1 of the commit flow (registered as an `ITransactionWriter` service on the context) and is only needed when source writes require protocol-specific orchestration the built-in writer cannot provide.
+
+A custom writer must follow the in-place marking contract documented in the xml docs of `ITransactionWriter.WriteToSourcesAsync`. Moving or replacing a snapshot slot silently corrupts the local apply; not marking accepted slots is harmless but keeps the legacy double write (the apply notifications carry no source and are pushed to the source again). While developing a writer, enable the runtime contract validation:
+
+```csharp
+SubjectTransaction.ValidateWriterContract = true;
+```
+
+The commit then fails terminally with a `SubjectTransactionException` if a slot was moved or replaced (sources may already have been written, so no retry). The check covers slot identity only: missing or wrong-source marks are not detected. Leave it disabled in production (one array allocation and sweep per commit); the built-in `SourceTransactionWriter` does not need it.

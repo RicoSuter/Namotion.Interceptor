@@ -3,6 +3,7 @@ using MQTTnet.Protocol;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Mqtt.Client;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -21,7 +22,7 @@ public sealed class MqttConnectorFactory : IConnectorFactory
             _ => new MqttServerConfiguration
             {
                 BrokerPort = port,
-                PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
+                Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
                 DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                 UseRetainedMessages = true,
                 SourceTimestampSerializer = MqttTickTimestampCodec.Serialize,
@@ -37,7 +38,7 @@ public sealed class MqttConnectorFactory : IConnectorFactory
             {
                 BrokerHost = "localhost",
                 BrokerPort = port,
-                PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
+                Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
                 DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                 UseRetainedMessages = true,
                 SourceTimestampSerializer = MqttTickTimestampCodec.Serialize,

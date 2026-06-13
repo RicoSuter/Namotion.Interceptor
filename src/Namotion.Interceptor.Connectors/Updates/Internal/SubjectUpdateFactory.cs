@@ -1,8 +1,7 @@
-using System.Collections;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Performance;
+using Namotion.Interceptor.Tracking.Performance;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -150,7 +149,7 @@ internal static class SubjectUpdateFactory
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
+                SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value, builder);
             }
         }
         else if (property.IsSubjectCollection)
@@ -162,7 +161,7 @@ internal static class SubjectUpdateFactory
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
+                SubjectItemsUpdateFactory.BuildCollectionComplete(update, value, builder);
             }
         }
         else if (property.IsSubjectReference)
@@ -194,7 +193,7 @@ internal static class SubjectUpdateFactory
 
         if (property.IsSubjectDictionary)
         {
-            var newValue = change.GetNewValue<IDictionary?>();
+            var newValue = change.GetNewValue<object?>();
             if (newValue is null)
             {
                 update.Kind = SubjectPropertyUpdateKind.Value;
@@ -202,13 +201,13 @@ internal static class SubjectUpdateFactory
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
+                SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<object?>(),
                     newValue, builder);
             }
         }
         else if (property.IsSubjectCollection)
         {
-            var newValue = change.GetNewValue<IEnumerable<IInterceptorSubject>?>();
+            var newValue = change.GetNewValue<object?>();
             if (newValue is null)
             {
                 update.Kind = SubjectPropertyUpdateKind.Value;
@@ -216,8 +215,7 @@ internal static class SubjectUpdateFactory
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildCollectionDiff(update,
-                    change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
+                SubjectItemsUpdateFactory.BuildCollectionDiff(update, change.GetOldValue<object?>(),
                     newValue, builder);
             }
         }

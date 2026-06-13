@@ -1,5 +1,7 @@
 using System;
 using MQTTnet.Protocol;
+using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mqtt.Client;
@@ -9,6 +11,11 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// </summary>
 public class MqttClientConfiguration
 {
+    private static readonly IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> DefaultMapper =
+        new MqttCompositeMapper(
+            new MqttPathProviderMapper(new AttributeBasedPathProvider(MqttConstants.DefaultConnectorName, '/')),
+            new MqttAttributeMapper(MqttConstants.DefaultConnectorName));
+
     /// <summary>
     /// Gets or sets the MQTT broker hostname or IP address.
     /// </summary>
@@ -51,9 +58,10 @@ public class MqttClientConfiguration
     public string? TopicPrefix { get; init; }
 
     /// <summary>
-    /// Gets or sets the path provider for property-to-topic mapping.
+    /// Gets or sets the property mapper for property-to-topic mapping.
+    /// Defaults to composite of MqttPathProviderMapper and MqttAttributeMapper, both filtered by the "mqtt" connector name.
     /// </summary>
-    public required PathProviderBase PathProvider { get; init; }
+    public IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> Mapper { get; init; } = DefaultMapper;
 
     // QoS settings
 
@@ -172,9 +180,9 @@ public class MqttClientConfiguration
             throw new ArgumentException($"BrokerPort must be between 1 and 65535, got: {BrokerPort}", nameof(BrokerPort));
         }
 
-        if (PathProvider is null)
+        if (Mapper is null)
         {
-            throw new ArgumentException("PathProvider must be specified.", nameof(PathProvider));
+            throw new ArgumentException("Mapper must be specified.", nameof(Mapper));
         }
 
         if (ConnectTimeout <= TimeSpan.Zero)

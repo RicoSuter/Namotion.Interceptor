@@ -45,6 +45,14 @@
                   OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
+    <MudNumericField @bind-Value="_samplingInterval"
+                     Label="Sampling Interval (ms)"
+                     HelperText="Leave empty for server default, 0 for exception-based monitoring"
+                     Immediate="true"
+                     OnKeyUp="OnFieldChanged"
+                     Clearable="true"
+                     Class="mt-4" />
+
     <MudCheckBox @bind-Value="_isEnabled"
                  @bind-Value:after="OnFieldChanged"
                  Label="Enabled (auto-start on application startup)"
@@ -78,6 +86,7 @@
     private string? _rootPath;
     private string? _username;
     private string? _password;
+    private int? _samplingInterval;
     private bool _isEnabled = true;
 
     private string _originalName = string.Empty;
@@ -85,6 +94,7 @@
     private string? _originalRootPath;
     private string? _originalUsername;
     private string? _originalPassword;
+    private int? _originalSamplingInterval;
     private bool _originalIsEnabled = true;
 
     public bool IsValid => !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_serverUrl);
@@ -94,6 +104,7 @@
                            _rootPath != _originalRootPath ||
                            _username != _originalUsername ||
                            _password != _originalPassword ||
+                           _samplingInterval != _originalSamplingInterval ||
                            _isEnabled != _originalIsEnabled;
 
     public string PreferredDialogSize => "Medium";
@@ -110,6 +121,7 @@
             _rootPath = ClientSubject.RootPath;
             _username = ClientSubject.Username;
             _password = ClientSubject.Password;
+            _samplingInterval = ClientSubject.SamplingInterval;
             _isEnabled = ClientSubject.IsEnabled;
 
             _originalName = _name;
@@ -117,6 +129,7 @@
             _originalRootPath = _rootPath;
             _originalUsername = _username;
             _originalPassword = _password;
+            _originalSamplingInterval = _samplingInterval;
             _originalIsEnabled = _isEnabled;
         }
     }
@@ -136,6 +149,7 @@
             ClientSubject.RootPath = _rootPath;
             ClientSubject.Username = _username;
             ClientSubject.Password = _password;
+            ClientSubject.SamplingInterval = _samplingInterval;
             ClientSubject.IsEnabled = _isEnabled;
 
             _originalName = _name;
@@ -143,6 +157,7 @@
             _originalRootPath = _rootPath;
             _originalUsername = _username;
             _originalPassword = _password;
+            _originalSamplingInterval = _samplingInterval;
             _originalIsEnabled = _isEnabled;
 
             IsDirtyChanged?.Invoke(false);
