@@ -165,7 +165,9 @@ internal sealed class WriteRetryQueue : IDisposable
 
                     _hasFlushWarnings = true;
 
-                    RequeueChanges(result.FailedChanges);
+                    // FailedChanges is complete (see WriteChangesInBatchesAsync), so requeueing it
+                    // never drops dequeued items.
+                    RequeueChanges(result.FailedChanges.AsSpan());
                     Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }
@@ -205,7 +207,7 @@ internal sealed class WriteRetryQueue : IDisposable
         }
     }
 
-    private void RequeueChanges(ImmutableArray<SubjectPropertyChange> changes)
+    private void RequeueChanges(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         lock (_lock)
         {
