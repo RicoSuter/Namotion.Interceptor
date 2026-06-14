@@ -61,7 +61,7 @@ graph LR
     M --> UI[Property history dialog]
 ```
 
-Each store independently subscribes to the change pipeline, filters with the same eligibility predicate, deduplicates within its own buffer window, and records to its backend. Stores expose a `Coverage` window and a `Priority`; a stateless merger discovers all `IHistoryStore` subjects from the registry and stitches their results.
+Each store independently subscribes to the change pipeline, filters with the same eligibility predicate, deduplicates within its own buffer window, and records to its backend. Stores expose a `Coverage` window and a `Priority`; a stateless merger takes the set of `IHistoryStore` (HomeBlaze supplies it from the registry's `KnownSubjects`) and stitches their results.
 
 ### Recent-tail coverage
 
@@ -87,10 +87,24 @@ To avoid a blind window between InMemory eviction and a persistent store's commi
 
 The `get_property_history` MCP tool lives in the existing `HomeBlaze.AI` (it depends on `HomeBlaze.History.Abstractions`); base `Namotion.Interceptor.Mcp` stays free of history concerns. Target framework `net10.0` throughout, matching the HomeBlaze tree.
 
+### Extraction-ready layering
+
+History ships entirely in `HomeBlaze.History.*` for v1. There is no second consumer today, so publishing a separate generic `Namotion.Interceptor.History.*` library now would be premature: it would roughly double the project count and commit a public API on a `0.0.2` library for a hypothetical user. Instead the engine is written **decoupled from HomeBlaze behind three narrow seams**, so a later lift into a generic library (mirroring `Namotion.Interceptor.OpcUa` engine vs `HomeBlaze.OpcUa` subject) is a mechanical move rather than a redesign:
+
+- **Store core operates on path strings and typed values**, never on `[State]` / `StateMetadata` / `SubjectPathResolver` types. Only the thin recording glue touches the graph.
+- **Path + eligibility seam.** Recording resolves paths through the `ISubjectPathResolver` seam and gates on `IsRecordableType` (generic) plus the `[State]` check (HomeBlaze policy). Extraction swaps the `[State]` gate and the resolver for the generic Connectors `IPathProvider` / `TryGetPath` mechanism the other connectors already use.
+- **Discovery seam.** The merger is a pure function over `IEnumerable<IHistoryStore>`; HomeBlaze feeds it from `KnownSubjects`, a future generic host from DI.
+
+Deferral is revisited only if a non-HomeBlaze consumer appears; until then the seams cost almost nothing (they reuse existing patterns, and the path seam doubles as the testability boundary).
+
 ## Abstractions
 
 ```csharp
-public interface IHistoryStore : IInterceptorSubject
+// Plain query interface, deliberately NOT ": IInterceptorSubject", so the recording/query engine
+// stays free of graph coupling and a future generic engine can implement it directly. Stores are
+// consumed as an IEnumerable<IHistoryStore>; HomeBlaze supplies that set from KnownSubjects (its
+// store subjects implement this interface).
+public interface IHistoryStore
 {
     int Priority { get; }                              // higher = preferred for overlapping ranges
     HistoryCoverage Coverage { get; }
@@ -238,12 +252,13 @@ Each store is a `BackgroundService` subject. In `ExecuteAsync` it constructs a `
 var property = change.Property.TryGetRegisteredProperty();
 if (property is null || !property.HasHistory()) continue;
 
-var path = _pathResolver.GetPath(property.Subject, PathStyle.Canonical) + "/" + property.Name;
-DetectMove(property.Subject, path, change.Timestamp);   // see Move Tracking
-Record(path, change);                                    // route by ValueColumnFor(property.Type)
+var path = ResolvePath(property, change.Timestamp);   // cached per property; logs a move on a miss
+Record(path, change);                                  // route by ValueColumnFor(property.Type)
 ```
 
-`_pathResolver` is an `ISubjectPathResolver` (Phase 0, in `HomeBlaze.Abstractions`), resolved from the context service registry and backed by `SubjectPathResolver`, so the store package depends on the lean `HomeBlaze.Abstractions` rather than the heavy `HomeBlaze.Services` layer. The history system only ever requests `PathStyle.Canonical`. Resolution happens only at this boundary: everything below it (ring buffer, retention, aggregation, query, and the move-detection comparison) operates on plain canonical-path strings, so that logic is unit-tested with literal paths and no graph, while the change-to-path glue is verified by an integration test against the real resolver.
+**Path resolution is cached, not recomputed per change.** Resolving a property's canonical path on every change would be a hot-path cost at the spec's scale; the existing connectors avoid it (OPC UA caches the resolved NodeId on the `PropertyReference`; MQTT caches the topic in a `ConcurrentDictionary<PropertyReference, …>`), resolving once and looking up O(1) thereafter. `ResolvePath` does the same: it returns a cached full property path (subject path + `"/"` + property name), computing it through the `ISubjectPathResolver` seam only on a miss. The cache is invalidated coarsely on any structural lifecycle event (attach / detach / property-reference add / remove) and recomputed lazily on the next change. The coarse whole-cache clear is necessary because a *subtree* move changes every descendant's path but fires a lifecycle event only on the directly-moved node (descendants get none); this matches how `SubjectPathResolver` invalidates its own cache. Value changes are not lifecycle events, so during a high-rate telemetry stream the cache stays warm and the per-change cost is one dictionary lookup with no allocation. Move detection rides on the same recompute (see Move tracking).
+
+`_pathResolver` is an `ISubjectPathResolver` (Phase 0, in `HomeBlaze.Abstractions`), resolved from the context service registry and backed by the cached `SubjectPathResolver`, so the store package depends on the lean `HomeBlaze.Abstractions` rather than the heavy `HomeBlaze.Services` layer, and the resolution done on a miss is itself cached by the resolver. The history system only ever requests `PathStyle.Canonical`. Resolution happens only at this seam: everything below it (ring buffer, retention, aggregation, query, and the move-detection comparison) operates on plain canonical-path strings, so that logic is unit-tested with literal paths and no graph, while the change-to-path glue is verified by an integration test against the real resolver. Keeping resolution behind this narrow seam is also what makes a later lift to a generic engine mechanical (see Extraction-ready layering).
 
 `Record` routes the new value into the correct column:
 
@@ -267,7 +282,7 @@ Subjects are identified by canonical path (no stable persistent IDs). When a sub
 
 ### Detection (write side)
 
-Each store already resolves the canonical path of every change it records. Move detection is therefore one extra dictionary comparison: maintain a per-store `Dictionary<IInterceptorSubject, string> _lastKnownPath` (object-reference identity is stable while the app runs). On each recorded change, compare the resolved path to the last known one; if it differs, write a `MoveRecord(timestamp, fromPath, toPath)` to the store's own moves table, stamped with the **change's timestamp**, and update the dictionary. Stamping with the change timestamp (not wall-clock) makes all stores converge on the same move record, so the legs stay consistent at merge time. Lifecycle detach removes the dictionary entry.
+Move detection rides on the path cache rather than re-resolving every change. The per-store path cache (`Dictionary<IInterceptorSubject, string>`, object-reference identity is stable while the app runs) holds the last resolved path. On a cache miss (first sight, or after a structural lifecycle event invalidated the entry) the store recomputes the path and compares it to the cached value; if it differs, that is a move: write a `MoveRecord(timestamp, fromPath, toPath)` to the store's own moves table, stamped with the **change's timestamp**, and update the entry. Stamping with the change timestamp (not wall-clock) makes all stores converge on the same move record, so the legs stay consistent at merge time. Because a subtree move invalidates descendants too (coarse cache clear), a descendant's move is observed the next time it records a change, which is the only moment its history needs the path anyway. Lifecycle detach removes the entry entirely.
 
 **Limitation:** detection depends on in-memory object identity, so moves across app restarts are not detected (subject IDs regenerate on restart). In practice moves are manual actions performed while the app runs.
 
@@ -308,20 +323,25 @@ Numeric aggregations on a `value_json`-stored property (decimal, string, enum) r
 
 ## Cross-store merge
 
-The merger is a stateless extension on the registry: a query-type-specific **planner** plus a shared **executor**.
+The merger is a stateless extension over the store set (with a registry convenience overload): a query-type-specific **planner** plus a shared **executor**.
 
 ```csharp
+// Core merger: a pure function over the store set. The host decides where the set comes from
+// (HomeBlaze: KnownSubjects; a future generic host: DI). This is the extraction-ready seam.
 public static async Task<HistorySeries> QueryHistoryAsync(
-    this ISubjectRegistry registry, HistoryQuery query, CancellationToken ct)
+    this IEnumerable<IHistoryStore> stores, HistoryQuery query, CancellationToken ct)
 {
-    var stores = registry.KnownSubjects.Keys.OfType<IHistoryStore>()
-        .OrderByDescending(s => s.Priority).ToArray();
-
-    CheckEligibility(stores, query);
-    var plan = query.Bucket is null ? PlanRawDispatch(stores, query)
-                                    : PlanBucketedDispatch(stores, query);
+    var ordered = stores.OrderByDescending(s => s.Priority).ToArray();
+    CheckEligibility(ordered, query);
+    var plan = query.Bucket is null ? PlanRawDispatch(ordered, query)
+                                    : PlanBucketedDispatch(ordered, query);
     return await ExecuteWithBudget(plan, query, ct);
 }
+
+// HomeBlaze convenience overload: stores are subjects in the graph.
+public static Task<HistorySeries> QueryHistoryAsync(
+    this ISubjectRegistry registry, HistoryQuery query, CancellationToken ct) =>
+    registry.KnownSubjects.Keys.OfType<IHistoryStore>().QueryHistoryAsync(query, ct);
 ```
 
 - **Eligibility check.** Every part of `[From, To]` must be servable by some store supporting the requested aggregation (universal aggregations `Last`/`Count` skip the check). Otherwise `HistoryAggregationNotSupportedException` carries the `available` set.
@@ -491,6 +511,8 @@ Each store takes periodic whole-graph snapshots on its own `SnapshotInterval` in
 | Decision | Choice | Rationale |
 |---|---|---|
 | Orchestration | Per-subject stores, no central service | Matches the connector pattern and the canonical architecture; no single point of failure; each store self-configures and isolates failures |
+| Layering | HomeBlaze-first, extraction-ready behind seams | One consumer today; defer a published generic library until a second exists; the seams (path-string core, `ISubjectPathResolver`, `IEnumerable<IHistoryStore>`) keep a later lift mechanical |
+| Path resolution | Cache per property, invalidate on structural lifecycle events | Avoids per-change resolution on the hot path; matches the connector pattern (resolved address cached on the reference) |
 | Value storage | Typed columns (`value_long`/`value_double`/`value_json`) | Precision-correct for `long` and `decimal`; maps cleanly across PostgreSQL/SQLite/memory |
 | Cross-bucket aggregation | Per-bucket single-owner dispatch | Eliminates "average of averages"; every aggregation trivially correct per bucket |
 | Recent-tail coverage | InMemory as priority-100 leg + sizing constraint | Live edge always served at full resolution; no central buffer needed |
@@ -520,10 +542,11 @@ Exact paths and signatures the plan-writer needs, verified against current sourc
 | `ChangeQueueProcessor` | `src/Namotion.Interceptor.Connectors/ChangeQueueProcessor.cs` | `ctor(object? source, IInterceptorSubjectContext context, Func<PropertyReference,bool> propertyFilter, Func<ReadOnlyMemory<SubjectPropertyChange>,CancellationToken,ValueTask> writeHandler, TimeSpan? bufferTime, ILogger)`; `Task ProcessAsync(ct)`. Backing queue is an unbounded `ConcurrentQueue`. | Each store constructs one in `ExecuteAsync` and awaits `ProcessAsync`. Phase 0 adds `maxQueueDepth`. |
 | `SubjectSourceBase` | `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs` | `ExecuteAsync` retry-loop that builds a `ChangeQueueProcessor` (filter `propertyReference => ...`, a `writeHandler`) and awaits `ProcessAsync`. | The in-loop template for a store's record loop. |
 | `ThroughputCounter` | `src/Namotion.Interceptor.OpcUa/ThroughputCounter.cs` | `internal sealed`; `void Add(int)`, `double CurrentRate`. | Phase 0 promotes to `Namotion.Interceptor.Connectors` (public); stores reuse for rate metrics. |
-| `SubjectPathResolver`, `PathStyle` | `src/HomeBlaze/HomeBlaze.Services/SubjectPathResolver.cs`, `PathStyle.cs` | `string? GetPath(subject, PathStyle)`, `GetPaths(...)`, `ResolveSubject(...)`; self-registers via `context.AddService(this)`. `enum PathStyle { Canonical, Route }`. | Phase 0 extracts `ISubjectPathResolver` and moves `PathStyle` into `HomeBlaze.Abstractions`. History calls `GetPath(subject, PathStyle.Canonical)`. |
+| `SubjectPathResolver`, `PathStyle` | `src/HomeBlaze/HomeBlaze.Services/SubjectPathResolver.cs`, `PathStyle.cs` | `string? GetPath(subject, PathStyle)`, `GetPaths(...)`, `ResolveSubject(...)`; self-registers via `context.AddService(this)`. Caches subject→paths in a `ConcurrentDictionary` and **clears the whole cache on any lifecycle event** (`ILifecycleHandler.HandleLifecycleChange` → `ClearCaches()`). `enum PathStyle { Canonical, Route }`. | Phase 0 extracts `ISubjectPathResolver` and moves `PathStyle` into `HomeBlaze.Abstractions`. History calls `GetPath(subject, PathStyle.Canonical)` on a path-cache miss; the resolver's own cache absorbs the cost. |
 | `ISubjectRegistry`, `RegisteredSubjectProperty` | `src/Namotion.Interceptor.Registry/Abstractions/ISubjectRegistry.cs`, `RegisteredSubjectProperty.cs` | `KnownSubjects` is `IReadOnlyDictionary<IInterceptorSubject,RegisteredSubject>`. Property exposes `Type`, `Name`, `CanContainSubjects`, `TryGetAttribute(name)`, `GetValue()`. No `IsState` / `HasChildren`. | Merger: `registry.KnownSubjects.Keys.OfType<IHistoryStore>()`. Eligibility: `TryGetAttribute(KnownAttributes.State)` + `CanContainSubjects`. |
 | `KnownAttributes`, `StateMetadata` | `src/HomeBlaze/HomeBlaze.Abstractions/KnownAttributes.cs`, `Metadata/StateMetadata.cs` | `const string State = "HB:State"`. `StateMetadata { Title, StateUnit Unit, int Position, bool IsCumulative, bool IsDiscrete, bool IsEstimated }`. | Eligibility reads the `HB:State` attribute; UI gating reads `IsCumulative`/`IsDiscrete`. `Unit` is a `StateUnit` enum, not a string. |
-| `ILifecycleHandler` | `src/Namotion.Interceptor.Tracking/Lifecycle/ILifecycleHandler.cs` | `void HandleLifecycleChange(SubjectLifecycleChange)`; register via `context.AddService(this)` or implement on the subject. | Stores use detach events to drop per-store `lastKnownPath` entries. |
+| `ILifecycleHandler`, `SubjectLifecycleChange` | `src/Namotion.Interceptor.Tracking/Lifecycle/ILifecycleHandler.cs`, `Lifecycle/SubjectLifecycleChange.cs` | `void HandleLifecycleChange(SubjectLifecycleChange)`; register via `context.AddService(this)` or implement on the subject. `SubjectLifecycleChange` flags: `IsContextAttach`/`IsContextDetach`, `IsPropertyReferenceAdded`/`IsPropertyReferenceRemoved`. A reparent fires events on the **directly-moved node only**, not its descendants. | Stores invalidate their per-property path cache (coarse, like `SubjectPathResolver`) on any structural event, and drop `_pathCache` entries on detach. The descendant-no-event behavior is why the clear must be coarse. |
+| Connector path caching (`PropertyReference.SetPropertyData`) | `src/Namotion.Interceptor.OpcUa/Client/OpcUaSubjectClientSource.cs` (NodeId via `SetPropertyData`/`TryGetPropertyData`), MQTT `MqttSubjectClientSource` (`_propertyToTopic` `ConcurrentDictionary<PropertyReference, …>`) | Both resolve the address/topic **once** and cache it (on the `PropertyReference` or in a per-source dict), look it up O(1) per change, and invalidate on detach. `SubjectPropertyChange`/`PropertyReference` carry no resolved path; `RegisteredSubjectProperty` caches none either. | The model for the store's path cache: resolve once, O(1) per change, invalidate on structural events (coarse, since the path is graph-derived and a subtree move has no per-descendant event). |
 | BackgroundService subject shape | `src/HomeBlaze/HomeBlaze.OpcUa/OpcUaServer.cs` | `[Category][Description][InterceptorSubject] partial class : BackgroundService, IConfigurable`; `[Configuration]`/`[State]` partial properties; DI-injected ctor. | Model each store subject on this. |
 | `McpToolInfo`, `IMcpToolProvider` | `src/Namotion.Interceptor.Mcp/McpToolInfo.cs`, `Abstractions/IMcpToolProvider.cs` | `McpToolInfo { string Name, string Description, JsonElement InputSchema, Func<JsonElement,CancellationToken,Task<object?>> Handler }`; provider `IEnumerable<McpToolInfo> GetTools()`. | `get_property_history` is one `McpToolInfo`. |
 | `GetPropertyTool` (tool template) | `src/Namotion.Interceptor.Mcp/Tools/GetPropertyTool.cs` | Static `JsonElement` schema via `JsonSerializer.SerializeToElement(new { type="object", properties=..., required=... })`; handler reads `input.GetProperty("path")`. | Template for the history tool's schema and handler. |
