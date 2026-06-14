@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.ConnectorTester.Connectors.Mqtt;
 /// Unix milliseconds in production; the connector tester uses ticks so snapshot comparison
 /// observes the same timestamp on both sides without millisecond rounding loss.
 /// </summary>
-public static class MqttTickTimestampCodec
+public static class MqttTickTimestampSerialization
 {
     public static byte[] Serialize(DateTimeOffset timestamp)
     {

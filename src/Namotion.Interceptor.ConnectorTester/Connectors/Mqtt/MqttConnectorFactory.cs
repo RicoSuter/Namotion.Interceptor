@@ -25,8 +25,8 @@ public sealed class MqttConnectorFactory : IConnectorFactory
                 Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
                 DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                 UseRetainedMessages = true,
-                SourceTimestampSerializer = MqttTickTimestampCodec.Serialize,
-                SourceTimestampDeserializer = MqttTickTimestampCodec.Deserialize
+                SourceTimestampSerializer = MqttTickTimestampSerialization.Serialize,
+                SourceTimestampDeserializer = MqttTickTimestampSerialization.Deserialize
             });
     }
 
@@ -41,8 +41,8 @@ public sealed class MqttConnectorFactory : IConnectorFactory
                 Mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
                 DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                 UseRetainedMessages = true,
-                SourceTimestampSerializer = MqttTickTimestampCodec.Serialize,
-                SourceTimestampDeserializer = MqttTickTimestampCodec.Deserialize,
+                SourceTimestampSerializer = MqttTickTimestampSerialization.Serialize,
+                SourceTimestampDeserializer = MqttTickTimestampSerialization.Deserialize,
                 ReconnectDelay = TimeSpan.FromSeconds(1),
                 MaximumReconnectDelay = TimeSpan.FromSeconds(10),
                 HealthCheckInterval = TimeSpan.FromSeconds(5),
