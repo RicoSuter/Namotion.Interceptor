@@ -20,7 +20,7 @@ public abstract class TransactionTestBase
             .WithSourceTransactions();
     }
 
-    protected static Mock<ISubjectSource> CreateSucceedingSource()
+    protected static Mock<ISubjectSource> CreateSucceedingSource(Action? onWrite = null)
     {
         var mock = new Mock<ISubjectSource>();
         mock.Setup(s => s.WriteBatchSize).Returns(0);
@@ -28,7 +28,26 @@ public abstract class TransactionTestBase
                 It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
                 It.IsAny<CancellationToken>()))
             .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
-                new ValueTask<WriteResult>(WriteResult.Success));
+            {
+                onWrite?.Invoke();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+        return mock;
+    }
+
+    /// <summary>
+    /// Creates a source that fails wholesale: it reports an error without enumerating the failed changes.
+    /// </summary>
+    protected static Mock<ISubjectSource> CreateWholesaleFailingSource(string message = "Source write failed")
+    {
+        var mock = new Mock<ISubjectSource>();
+        mock.Setup(s => s.WriteBatchSize).Returns(0);
+        mock.Setup(s => s.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(
+                    ReadOnlyMemory<SubjectPropertyChange>.Empty, new InvalidOperationException(message))));
         return mock;
     }
 
@@ -107,11 +126,4 @@ public abstract class TransactionTestBase
         Assert.Empty(transaction.GetPendingChanges());
     }
 
-    /// <summary>
-    /// Asserts that no transaction is currently active in the execution context.
-    /// </summary>
-    protected static void AssertNoActiveTransaction()
-    {
-        Assert.Null(SubjectTransaction.Current);
-    }
 }

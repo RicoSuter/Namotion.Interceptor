@@ -457,6 +457,41 @@ public class LifecycleEventsTests
         Assert.Equal(person, events[1].subject);
     }
 
+    [Fact]
+    public void WhenSubjectAppearsTwiceInSameCollection_ThenItAttachesAndDetachesOnce()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle();
+
+        var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
+        Assert.NotNull(lifecycleInterceptor);
+
+        var parent = new Person(context) { FirstName = "Parent" };
+        var child = new Person { FirstName = "Child" };
+
+        var attachCount = 0;
+        var detachCount = 0;
+        lifecycleInterceptor.SubjectAttached += _ => attachCount++;
+        lifecycleInterceptor.SubjectDetaching += _ => detachCount++;
+
+        // Act: both collection slots hold the same subject and map to the same
+        // (subject, property) pair, so the second occurrence is a duplicate attach.
+        parent.Children = [child, child];
+
+        // Assert
+        Assert.Equal(1, attachCount);
+        Assert.Equal(1, child.GetReferenceCount());
+
+        // Act: clearing the collection must detach the duplicated subject exactly once.
+        parent.Children = [];
+
+        // Assert
+        Assert.Equal(1, detachCount);
+        Assert.Equal(0, child.GetReferenceCount());
+    }
+
     private class EventOrderTracker : ILifecycleHandler
     {
         private readonly List<(string source, string eventType, IInterceptorSubject subject)> _events;
