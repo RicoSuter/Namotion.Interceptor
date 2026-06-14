@@ -1,6 +1,6 @@
 # Time-Series History Design (Planning Spec)
 
-> **Temporary planning artifact.** This is the working design produced during brainstorming. The permanent architecture doc lives at `src/HomeBlaze/HomeBlaze/Data/Docs/architecture/design/history.md` and is updated to reflect the *actually implemented* design as the final task of Phase A and Phase B (see the implementation plan). This spec supersedes the two earlier planning branches (`docs/history-mvp-plan` and `feature/homeblaze-history`), combining the per-subject store engine from the MVP plan with the SQLite tier, move tracking, and snapshot model from the full-system plan.
+> **Temporary planning artifact.** This is the working design produced during brainstorming. The permanent architecture doc lives at `src/HomeBlaze/HomeBlaze/Data/Docs/architecture/design/history.md`, which is currently an outdated stub (it still lists InfluxDB, lowercase aggregation names, and a single-path `get_property_history`). It is **rewritten from scratch** to reflect the *actually implemented* design as the final task of Phase A and again at the end of Phase B (see the implementation plan). This spec supersedes the two earlier planning branches (`docs/history-mvp-plan` and `feature/homeblaze-history`), combining the per-subject store engine from the MVP plan with the SQLite tier, move tracking, and snapshot model from the full-system plan.
 
 ## Overview
 
@@ -17,7 +17,7 @@ The design is complete end-to-end so the schema, interfaces, and value encoding 
 | Per-subject stores: InMemory, SQLite, TimescaleDB | **v1** |
 | Typed-column recording (`value_long` / `value_double` / `value_json`) | **v1** |
 | Raw + bucketed queries, cross-store merge (per-bucket single-owner dispatch) | **v1** |
-| Aggregations: `Last`, `First`, `Average`, `TimeWeightedAverage`, `Minimum`, `Maximum`, `Sum`, `Count`, `StdDev` | **v1** |
+| Aggregations: `Last`, `First`, `SampleAverage`, `TimeWeightedAverage`, `Minimum`, `Maximum`, `Sum`, `Count`, `StdDev` | **v1** |
 | Move tracking (per-store detection, storage, chain resolution) | **v1** |
 | Property-history chart dialog + `get_property_history` MCP tool | **v1** |
 | Snapshots (periodic whole-graph + backwards scan + replay) | **v1.1** |
@@ -65,7 +65,7 @@ Each store independently subscribes to the change pipeline, filters with the sam
 
 ### Recent-tail coverage
 
-The InMemory store (priority 100, `Coverage.To = now`) is the recent-tail leg: it answers the most recent samples at full resolution while persistent stores trail "now" by roughly their flush interval. Persistent stores (SQLite, TimescaleDB) set `Coverage.To` to their last committed sample's timestamp, so the merger automatically routes the live edge to InMemory.
+The InMemory store (priority 100, `Coverage.To = now`) is the recent-tail leg: it answers the most recent samples at full resolution while persistent stores trail "now" by roughly their flush interval. Persistent stores (SQLite, TimescaleDB) set `Coverage.To` to their last committed sample's timestamp, so the merger automatically routes the live edge to InMemory. Symmetrically they set `Coverage.From` to their oldest retained sample's timestamp (`MIN(ts)`), not the retention horizon `now - MaxAge`: a freshly started or recently pruned store must not claim coverage over a range it has no data for, or it would shadow a lower-priority store that does.
 
 To avoid a blind window between InMemory eviction and a persistent store's commit, the cross-store sizing constraint is `InMemory.MaxAge >= 2 * FlushInterval` of any companion persistent store. The default configs satisfy it. It is documented in the `MaxAge` config doc comment, surfaced as edit-component helper text, and (fast-follow) validated at runtime. InMemory ships in the default configuration so recent queries always have a covering store; the merger surfaces an explicit "recent tail uncovered" signal rather than silently returning a gap if it is ever removed.
 
@@ -117,14 +117,17 @@ public record HistoryQuery(
     DateTimeOffset To,
     TimeSpan? Bucket = null,                            // null => raw query
     string Aggregation = HistoryAggregations.Last,
-    int MaxPoints = 10_000);
+    int MaxPoints = 10_000,
+    HistoryPoint? CarrySeed = null);                    // value held entering From, supplied by the
+                                                        // merger for carry-dependent aggregations
+                                                        // (Last, TimeWeightedAverage); null otherwise
 
 public record HistoryPoint(DateTimeOffset Timestamp, double? Number, JsonElement? Json);
 
 public record HistorySeries(string PropertyPath, ImmutableArray<HistoryPoint> Points, bool Truncated);
 ```
 
-A single `QueryAsync` serves both raw (`Bucket == null`) and bucketed queries; the store dispatches internally. Returning the newest `MaxPoints` results (ascending by timestamp) is the contract every store honors so the merger can compose them.
+A single `QueryAsync` serves both raw (`Bucket == null`) and bucketed queries; the store dispatches internally. Returning the newest `MaxPoints` results (ascending by timestamp) is the contract every store honors so the merger can compose them. `CarrySeed`, when set, is the value held entering the query's left edge; a store uses it as the starting value for carry-dependent aggregations (`Last`, `TimeWeightedAverage`) and ignores it otherwise (raw queries, `SampleAverage`, `Sum`, and so on). The merger populates it; direct callers leave it null.
 
 ### Aggregation identifiers
 
@@ -135,7 +138,7 @@ public static class HistoryAggregations
 {
     public const string Last                = "Last";
     public const string First               = "First";
-    public const string Average             = "Average";              // count-weighted sample mean
+    public const string SampleAverage       = "SampleAverage";        // count-weighted sample mean
     public const string TimeWeightedAverage = "TimeWeightedAverage";  // duration-weighted (UI default for numeric)
     public const string Minimum             = "Minimum";
     public const string Maximum             = "Maximum";
@@ -148,7 +151,7 @@ public static class HistoryAggregations
 }
 ```
 
-`Average` is the count-weighted sample mean; `TimeWeightedAverage` weights each sample by how long its value held. For irregularly-spaced state values (the dominant data shape) time-weighted is the correct mean and is the UI default for numeric properties, labelled "Average"; the sample mean appears lower as "Sample Average".
+`SampleAverage` is the count-weighted sample mean; `TimeWeightedAverage` weights each sample by how long its value held. For irregularly-spaced state values (the dominant data shape) time-weighted is the correct mean and is the UI default for numeric properties, labelled "Average"; the sample mean appears lower as "Sample Average".
 
 ### Eligibility predicate
 
@@ -212,6 +215,8 @@ Typed columns preserve `long` exactly (a single `numeric REAL` column would sile
 ### Look-back primitive
 
 `GetSampleAtOrBeforeAsync` returns the most recent sample at or before `asOf`, following the property's move chain. It serves time-weighted-average integration (the value held entering a bucket), `Last` LOCF gap-fill (carry forward into empty buckets, including from before `query.From`), and (in Phase 2) `Rate`/`Delta` on sparse counters. Returning null is honest: the system never invents history it did not record.
+
+Each store's `GetSampleAtOrBeforeAsync` sees only its own buffer, so a single store can answer "the value held entering this bucket" only when the carrying sample falls inside its own coverage. Resolving the carried value **across** stores is therefore the merger's job, not a single store's (see Carried-value resolution under Cross-store merge). This matters most at the live edge: a property whose last change predates `InMemory.MaxAge` has no sample in InMemory at all, so InMemory's own look-back returns null even though a persistent store still holds the carry. Without cross-store seeding, `Last`/`TimeWeightedAverage` over a recent range would render a spurious gap exactly where the value is most stable and most often viewed.
 
 ### Bucket alignment
 
@@ -290,14 +295,14 @@ For a sub-range, every store returns at most `MaxPoints` results representing th
 |---|---|---|
 | `Last` | LOCF over the carried value | most recent prior value; null before first sample |
 | `First` | first value in bucket | null |
-| `Average` | `avg(<column>)` | null |
+| `SampleAverage` | `avg(<column>)` | null |
 | `TimeWeightedAverage` | `LEAD()`-with-carry integration (toolkit fast-path on Timescale) | held value via look-back; null before first sample |
 | `Minimum` / `Maximum` | `min` / `max` | null |
 | `Sum` | `sum` | null |
 | `Count` | `count(*)` | `0` (a real fact, not a gap) |
 | `StdDev` | `stddev_samp` | null |
 
-Empty buckets are encoded as explicit `null` entries in the wire format (not absent), so consumers do not have to recompute bucket boundaries. `Count` returns 0; `Last` and `TimeWeightedAverage` carry the held value; other aggregations return null and the chart shows a visual gap.
+Empty buckets are encoded as explicit `null` entries in the wire format (not absent), so consumers do not have to recompute bucket boundaries. `Count` returns 0; `Last` and `TimeWeightedAverage` carry the held value; other aggregations return null and the chart shows a visual gap. "The held value" and "null before first sample" are resolved against the property's first sample *anywhere*, not a single store's first sample: the merger supplies the cross-store carry (see Carried-value resolution), so a store returning null for its own leading buckets does not by itself produce a gap.
 
 Numeric aggregations on a `value_json`-stored property (decimal, string, enum) raise `HistoryAggregationNotSupportedException`. For `ulong` properties whose values straddle `long.MaxValue`, a COALESCE-aware SQL variant reads both `value_long` and `value_json`; all other types use the single-column path.
 
@@ -321,18 +326,29 @@ public static async Task<HistorySeries> QueryHistoryAsync(
 
 - **Eligibility check.** Every part of `[From, To]` must be servable by some store supporting the requested aggregation (universal aggregations `Last`/`Count` skip the check). Otherwise `HistoryAggregationNotSupportedException` carries the `available` set.
 - **Raw planner (coverage subtraction).** Higher-priority stores claim their range first; lower-priority stores fill the remaining gaps. Each store gets a non-overlapping sub-range.
-- **Bucketed planner (per-bucket dispatch).** Each bucket is assigned to a single store: the highest-priority store whose `Coverage` fully contains the bucket's effective range. Consecutive same-store buckets group into one ranged sub-query. **No bucket is ever computed from two stores**, which sidesteps the "average of averages" problem entirely. Every aggregation is trivially correct per bucket because each bucket has one source of truth.
-- **Sequential-budget executor.** Stores are queried in priority order, each receiving the *remaining* budget (no over-fetching); newest-first within each store; dedup via `TryAdd` (higher-priority value wins on identical timestamps); `Truncated` set honestly when a sub-query truncates or the budget runs out.
+- **Bucketed planner (per-bucket dispatch).** Each bucket is assigned to a single store: the highest-priority store that both supports the requested aggregation and whose `Coverage` fully contains the bucket's range. Filtering on `SupportedAggregations` here, not only in the global eligibility check, keeps per-bucket assignment from handing a bucket to a store that contains it but cannot compute the aggregation; in v1 every numeric store supports every aggregation via the portable TWA, so this only bites once heterogeneous stores exist. Consecutive same-store buckets group into one ranged sub-query. **No bucket is ever computed from two stores**, which sidesteps the "average of averages" problem entirely. Every aggregation is trivially correct per bucket because each bucket has one source of truth. Carry-dependent aggregations (`Last`, `TimeWeightedAverage`) additionally need the value held *entering* their leftmost bucket; that carry is supplied cross-store by the executor (next bullet), not by stretching a single store's range.
+- **Sequential-budget executor.** Stores are queried in priority order, each receiving the *remaining* budget (no over-fetching); newest-first within each store; dedup via `TryAdd` (higher-priority value wins on identical timestamps); `Truncated` set honestly when a sub-query truncates or the budget runs out. For carry-dependent aggregations it also threads the carried value across store-segments (see Carried-value resolution).
 
 A store that throws during `QueryAsync` propagates the error; the merger never silently swallows it, so a misconfigured TimescaleDB cannot masquerade as "no data".
+
+### Carried-value resolution (`Last` / `TimeWeightedAverage`)
+
+Carry-dependent aggregations make an empty bucket equal to the value already held when the bucket began, so a bucket with no samples of its own is still a real, non-null point. No single store is guaranteed to hold that prior sample for the range it serves (the InMemory live edge is the worst case: a stable property's last change has been evicted, so InMemory holds nothing for it), so the merger owns carry resolution:
+
+1. **Initial seed.** Before executing, the merger resolves the value held entering the whole range with a priority-ordered `GetSampleAtOrBeforeAsync(propertyPath, query.From)` walk across all stores, taking the first non-null result. It is null only when the property has no sample anywhere before `From`.
+2. **Thread oldest to newest.** Buckets are assigned to contiguous store-segments ordered by time. The merger passes the running carried value as the `CarrySeed` of each segment's bucketed sub-query, so a segment's leftmost bucket starts from the value the previous segment left held. After a segment returns, the carried value advances to that segment's last non-null sample.
+3. **Per store.** A store uses `CarrySeed` as the value entering its first bucket and its own samples thereafter; within the segment its own look-back fills interior empty buckets.
+
+The effect: the persistent tier seeds the held value and InMemory's live-edge buckets carry it forward instead of returning a spurious gap. For raw queries and non-carry aggregations `CarrySeed` is unused. When a property changes often (every leg already has a sample) the only extra cost is one at-or-before lookup at `From`.
 
 ### Resulting behaviour
 
 | Query | Routing |
 |---|---|
-| last 30 s | InMemory contains every bucket; persistent stores never touched |
+| last 30 s, raw | InMemory contains every sample; persistent stores never touched |
+| last 30 s, `Last`/TWA | InMemory serves the buckets, but the merger first seeds the held value cross-store, so a stable property whose last change predates InMemory's window shows that value instead of a gap |
 | last 1 h, raw | InMemory serves the recent tail; SQLite/Timescale serve the rest with the remaining budget |
-| last 1 h, bucket = 10 s | Per-bucket dispatch: older buckets from a persistent store, newest from InMemory |
+| last 1 h, bucket = 10 s | Per-bucket dispatch: older buckets from a persistent store, newest from InMemory; for `Last`/TWA the carried value is threaded oldest-to-newest so the live-edge buckets continue the held value |
 | Timescale offline, last 30 s | InMemory still answers; the outage is invisible for ranges it covers |
 | Timescale offline, last 7 d | InMemory answers the tail; Timescale's `Coverage.To` is frozen at last successful flush; the gap is honest empty buckets |
 
@@ -340,7 +356,7 @@ A store that throws during `QueryAsync` propagates the error; the merger never s
 
 Time-weighted average is **universally supported** by every numeric-capable store via a portable implementation, because the portable formulation is needed for SQLite anyway. This is a simplification over toolkit-gated availability: there is no capability gap to advertise and no "TWA not supported" error path.
 
-- **Portable baseline (SQLite, plain PostgreSQL, TimescaleDB).** A `LEAD()`-over-ordered-samples query with a carry sample from before the bucket's left edge, so the first bucket starts with a known value. Each sample's validity interval `[ts, next_ts)` is clipped per bucket; the bucket value is `sum(value * duration) / sum(duration)`. The query also returns `weighted_sum` and `total_duration` so cross-partition and (Phase 2) cross-leg merges combine without re-reading rows.
+- **Portable baseline (SQLite, plain PostgreSQL, TimescaleDB).** A `LEAD()`-over-ordered-samples query with a carry sample from before the bucket's left edge (the store's own prior sample, or the merger-supplied `CarrySeed` for a store-segment's leftmost bucket), so the first bucket starts with a known value. Each sample's validity interval `[ts, next_ts)` is clipped per bucket; the bucket value is `sum(value * duration) / sum(duration)`. The query also returns `weighted_sum` and `total_duration` so cross-partition and (Phase 2) cross-leg merges combine without re-reading rows.
 - **InMemory.** Trapezoidal/step integration with the same look-back semantics.
 - **TimescaleDB toolkit fast-path.** When `timescaledb_toolkit` is present, `average(time_weight('locf', ts, value))` replaces the portable query transparently. The toolkit is a performance optimization only; it never changes which aggregations are available. A `ToolkitAvailable` `[State]` flag remains for observability.
 
@@ -367,7 +383,7 @@ CREATE TABLE history (
 ) WITHOUT ROWID;                       -- clustered B-tree IS the (path, ts) index
 ```
 
-WAL mode for concurrent reads during writes; batched `INSERT OR REPLACE` per partition in one transaction; one open connection per active partition (typically 1-2). Native aggregation via the portable `LEAD()` time-weighted-average SQL. Retention sweeps whole partition files older than `now - MaxAge` (no per-row deletes that would thrash WAL); periodic `PRAGMA wal_checkpoint(TRUNCATE)`. `Coverage.To` tracks the last committed sample; `MinAge ≈ FlushInterval` (default 10 s).
+WAL mode for concurrent reads during writes; batched `INSERT OR REPLACE` per partition in one transaction; one open connection per active partition (typically 1-2). Native aggregation via the portable `LEAD()` time-weighted-average SQL. Retention sweeps whole partition files older than `now - MaxAge` (no per-row deletes that would thrash WAL); periodic `PRAGMA wal_checkpoint(TRUNCATE)`. `Coverage.To` tracks the last committed sample and `Coverage.From` the oldest retained sample (`MIN(ts)` across live partitions, advanced as old partition files are swept); `MinAge ≈ FlushInterval` (default 10 s).
 
 ### TimescaleDbHistoryStore (priority 10)
 
@@ -386,7 +402,7 @@ SELECT create_hypertable('property_history', 'ts',
 CREATE INDEX IF NOT EXISTS ix_property_history_path_ts ON property_history (path, ts DESC);
 ```
 
-Batched binary `COPY` (`NpgsqlBinaryImporter`) per `FlushInterval`; daily chunks make future compression granular; idempotent schema bootstrap with a seeded `history_schema_version`. Retention via `drop_chunks(older_than => now() - MaxAge)`, dropping whole chunks atomically. A toolkit probe (`CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit`) sets `ToolkitAvailable` and is re-run on reconnect; it only toggles the time-weighted-average fast-path. `Coverage.To` is a high-water-mark: seeded at bootstrap from `MAX(ts)`, advanced after each successful `COPY`, frozen during outages so the merger routes around the gap instead of getting silent holes. Shutdown performs a final synchronous `COPY` bounded by `ShutdownFlushTimeout`; on crash, up to `FlushInterval` of samples are lost (documented). Metrics: `Status`, `QueueDepth`, `DropCount`, `OversizeCount`, `RecordedCount`, incoming/recorded rates, `LastFlushUtc`, `LastError`, `ToolkitStatus`, `EstimatedStorageBytes`.
+Batched binary `COPY` (`NpgsqlBinaryImporter`) per `FlushInterval`; daily chunks make future compression granular; idempotent schema bootstrap with a seeded `history_schema_version`. Retention via `drop_chunks(older_than => now() - MaxAge)`, dropping whole chunks atomically. A toolkit probe (`CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit`) sets `ToolkitAvailable` and is re-run on reconnect; it only toggles the time-weighted-average fast-path. `Coverage.From` is seeded at bootstrap from `MIN(ts)` and advanced as `drop_chunks` removes old chunks; `Coverage.To` is a high-water-mark: seeded at bootstrap from `MAX(ts)`, advanced after each successful `COPY`, frozen during outages so the merger routes around the gap instead of getting silent holes. Shutdown performs a final synchronous `COPY` bounded by `ShutdownFlushTimeout`; on crash, up to `FlushInterval` of samples are lost (documented). Metrics: `Status`, `QueueDepth`, `DropCount`, `OversizeCount`, `RecordedCount`, incoming/recorded rates, `LastFlushUtc`, `LastError`, `ToolkitStatus`, `EstimatedStorageBytes`.
 
 The recommended production image is `timescale/timescaledb-ha:pg16-latest` (bundles the toolkit); the base image works with a degraded (still-correct, portable) time-weighted average.
 
@@ -454,7 +470,7 @@ Each store takes periodic whole-graph snapshots on its own `SnapshotInterval` in
 
 ## Tests
 
-**Unit (no Docker):** eligibility over every recordable/refused type; column dispatch including `ulong`; bucket-alignment parity with `time_bucket`; InMemory recording/retention/raw+bucketed/time-weighted look-back/oversize/moves; merger raw planner (disjoint, overlapping, throwing store, empty registry), bucketed planner (per-bucket dispatch, consecutive grouping, right-edge clipping), executor (budget exhaustion, newest-first, dedup, truncation), eligibility check; MCP parameter parsing, case-insensitive aggregation, error shape, `value_type`.
+**Unit (no Docker):** eligibility over every recordable/refused type; column dispatch including `ulong`; bucket-alignment parity with `time_bucket`; InMemory recording/retention/raw+bucketed/time-weighted look-back/oversize/moves; merger raw planner (disjoint, overlapping, throwing store, empty registry), bucketed planner (per-bucket dispatch, consecutive grouping, right-edge clipping, aggregation-aware assignment), executor (budget exhaustion, newest-first, dedup, truncation), cross-store carry resolution (`Last`/TWA on a stable property whose last change predates InMemory's window yields the held value at the live edge rather than a gap; initial seed via priority-ordered at-or-before walk; carry threaded oldest-to-newest across segments), eligibility check; MCP parameter parsing, case-insensitive aggregation, error shape, `value_type`.
 
 **SQLite:** partitioning, `WITHOUT ROWID` schema, retention file sweep, native aggregation, move resolution.
 
@@ -466,6 +482,7 @@ Each store takes periodic whole-graph snapshots on its own `SnapshotInterval` in
 - **Crash data loss.** Up to `FlushInterval` of samples lost on hard crash (SIGKILL/OOM); graceful shutdown drains.
 - **InMemory-only loses history on restart.** It is a hot buffer / dev / test store, not a production substitute.
 - **Live-edge bucket inaccuracy for large buckets.** When `bucket_size > InMemory.MaxAge`, the rightmost bucket may omit up to `FlushInterval` of samples (error `FlushInterval / bucket_size`, ≤1.7% at 5-min buckets). Raise `MaxAge` for pixel-perfect live edges; a combinable-partial-aggregate path is a post-v1 refinement.
+- **Per-property resolution is bounded by `BufferTime`.** The recording `ChangeQueueProcessor` coalesces to the latest value per property per coalesce window (250 ms default), so distinct sub-window changes (`20 → 21 → 22` within one window) record only the last. History fidelity per property is therefore about `BufferTime`; lower it for finer resolution at the cost of more write volume.
 - **Move tracking is runtime-only.** Moves across restarts are not detected (in-memory identity).
 - **Multiple stores against one database duplicate rows.** HA/failover belongs at the Npgsql connection layer, not at the store-instance layer.
 
@@ -477,6 +494,7 @@ Each store takes periodic whole-graph snapshots on its own `SnapshotInterval` in
 | Value storage | Typed columns (`value_long`/`value_double`/`value_json`) | Precision-correct for `long` and `decimal`; maps cleanly across PostgreSQL/SQLite/memory |
 | Cross-bucket aggregation | Per-bucket single-owner dispatch | Eliminates "average of averages"; every aggregation trivially correct per bucket |
 | Recent-tail coverage | InMemory as priority-100 leg + sizing constraint | Live edge always served at full resolution; no central buffer needed |
+| Carried-value resolution | Cross-store carry seed threaded by the merger | Keeps `Last`/TWA correct at the live edge when the carrying sample predates InMemory's window, without breaking per-bucket single-owner dispatch |
 | Time-weighted average | Portable baseline everywhere, toolkit as fast-path | Needed for SQLite anyway; removes capability-gating complexity; one correctness contract |
 | Move tracking | Per-store detection + storage | Reuses the path already resolved for recording; correctly scoped to each store; merger stays move-agnostic |
 | Aggregation identifiers | PascalCase strings | Per-store specialization and additive growth without abstraction churn |
