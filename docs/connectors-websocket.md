@@ -185,6 +185,10 @@ builder.Services.AddWebSocketSubjectClientSource<Device>(configuration =>
     configuration.RetryTime = TimeSpan.FromSeconds(10);           // Retry interval
     configuration.WriteRetryQueueSize = 1000;                     // Buffer size (0 to disable)
 
+    // Circuit breaker
+    configuration.CircuitBreakerFailureThreshold = 5;             // Open after 5 consecutive failures
+    configuration.CircuitBreakerCooldown = TimeSpan.FromSeconds(60); // Wait before retrying
+
     // Path mapping
     configuration.PathProvider = new AttributeBasedPathProvider("ws");
 
@@ -333,40 +337,30 @@ See [Subject Updates](connectors-subject-updates.md) for details on the update f
 
 ### Write Retry Queue
 
-The client automatically queues write operations when disconnected. Queued writes are flushed in FIFO order when the connection is restored.
+Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via the client configuration:
 
 ```csharp
-configuration.WriteRetryQueueSize = 1000;  // Buffer up to 1000 writes
+configuration.WriteRetryQueueSize = 1000;  // Buffer up to 1000 writes (default, 0 to disable)
 configuration.RetryTime = TimeSpan.FromSeconds(10);
 ```
 
-- Ring buffer semantics: drops oldest when full
-- Automatic flush after reconnection
-- Set to 0 to disable
-
 ### Reconnection
 
-The client uses exponential backoff with jitter for reconnection:
+The outer retry loop (buffer → listen → load initial state → replay → process) is handled by `SubjectSourceBase` (see [Pump Lifecycle](connectors.md#pump-lifecycle)). The WebSocket client adds exponential backoff with jitter within its monitor loop:
 
 ```csharp
 configuration.ReconnectDelay = TimeSpan.FromSeconds(5);      // Initial delay
 configuration.MaxReconnectDelay = TimeSpan.FromSeconds(60);  // Maximum delay
 ```
 
-On reconnection, the client follows the buffer-load-replay-reapply pattern (see [Connectors — Initialization Sequence](connectors.md#initialization-sequence)):
+On reconnection, the client performs the Hello/Welcome handshake to obtain a state snapshot from the server. The base class then handles loading initial state, replaying buffered updates, and optimistic retry re-apply (see [Connectors — Initialization Sequence](connectors.md#initialization)).
 
-1. **Buffer**: Start buffering inbound updates (via `SubjectPropertyWriter`)
-2. **Reconnect**: Connect and perform Hello/Welcome handshake (server registers connection, builds snapshot, sends Welcome)
-3. **Load**: Apply the Welcome snapshot as a baseline
-4. **Replay**: Replay all buffered updates received since reconnection (catches up to current state)
-5. **Resume**: Switch to direct update application (buffer mode off)
-6. **Optimistic retry re-apply**: Queued writes from the retry queue are compared against current property values and re-applied locally if the source hasn't changed them (see [Connectors — Write Retry Queue](connectors.md#write-retry-queue))
+The circuit breaker pauses reconnection attempts after repeated failures:
 
-This ensures:
-- No updates are lost during the reconnection window
-- The snapshot provides a consistent baseline
-- Stale queued writes don't overwrite newer source values (source wins on conflict)
-- Client and server converge to the same state (eventual consistency)
+```csharp
+configuration.CircuitBreakerFailureThreshold = 5;               // Open after 5 consecutive failures (default)
+configuration.CircuitBreakerCooldown = TimeSpan.FromSeconds(60); // Wait before retrying (default)
+```
 
 ### Sequence Numbers and Gap Detection
 
@@ -384,7 +378,7 @@ The server maintains a monotonically increasing sequence counter that is increme
 - A null or zero sequence is treated as "unassigned" for client-to-server messages which do not carry sequence numbers.
 
 **Recovery flow on gap detection:**
-Gap detected -> receive loop exits -> `ExecuteAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `LoadInitialStateAndResumeAsync` (buffer-load-replay). No new recovery logic is needed; the existing reconnection flow handles everything.
+Gap detected -> receive loop exits -> `RunMonitorLoopAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `SubjectPropertyWriter.LoadInitialStateAndResumeAsync` calls the source's `LoadInitialStateAsync` to fetch the apply action, runs it under the buffer lock, and replays buffered updates. No new recovery logic is needed; the existing reconnection flow handles everything.
 
 **Why only server-to-client messages carry sequence numbers:**
 Client-to-server writes are covered by the write retry queue (ring buffer, oldest-dropped-when-full) and flush-before-load on reconnection. The server applies updates synchronously under a lock, so silent drops within the server are impossible.

@@ -1,10 +1,10 @@
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Text;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services;
@@ -173,9 +173,8 @@ public class SubjectPathResolver : ILifecycleHandler
             return canonicalPath;
 
         var sb = new StringBuilder(canonicalPath.Length);
-        for (var i = 0; i < canonicalPath.Length; i++)
+        foreach (var ch in canonicalPath)
         {
-            var ch = canonicalPath[i];
             if (ch == '[')
                 sb.Append('/');
             else if (ch != ']')
@@ -232,10 +231,11 @@ public class SubjectPathResolver : ILifecycleHandler
                 if (inlinePathsPropertyName != null)
                 {
                     var childrenProperty = registered?.TryGetProperty(inlinePathsPropertyName);
-                    if (childrenProperty?.GetValue() is IDictionary childrenDictionary &&
-                        childrenDictionary.Contains(segment))
+                    var childrenValue = childrenProperty?.GetValue();
+                    if (childrenValue is not null)
                     {
-                        if (childrenDictionary[segment] is IInterceptorSubject childSubject)
+                        var childSubject = SubjectLookup.FindSubjectInDictionary(childrenValue, segment);
+                        if (childSubject is not null)
                         {
                             current = childSubject;
                             continue;
@@ -272,32 +272,13 @@ public class SubjectPathResolver : ILifecycleHandler
 
             IInterceptorSubject? found = null;
 
-            if (value is IDictionary dict)
+            if (property.IsSubjectDictionary)
             {
-                foreach (DictionaryEntry entry in dict)
-                {
-                    if (entry.Key?.ToString() == index && entry.Value is IInterceptorSubject s)
-                    {
-                        found = s;
-                        break;
-                    }
-                }
+                found = SubjectLookup.FindSubjectInDictionary(value, index);
             }
-            else if (value is IEnumerable enumerable)
+            else if (property.IsSubjectCollection && int.TryParse(index, out var idx))
             {
-                if (int.TryParse(index, out var idx))
-                {
-                    var j = 0;
-                    foreach (var item in enumerable)
-                    {
-                        if (j == idx && item is IInterceptorSubject s)
-                        {
-                            found = s;
-                            break;
-                        }
-                        j++;
-                    }
-                }
+                found = SubjectLookup.FindSubjectInCollection(value, idx);
             }
 
             if (found == null)
@@ -342,6 +323,24 @@ public class SubjectPathResolver : ILifecycleHandler
             }
         }
 
+        if (paths.Count > 1)
+        {
+            // Order by path depth (number of '/' separators) so the shallowest path is first.
+            // OrderBy is a documented stable sort: keys are computed once per element, and equal
+            // keys preserve insertion order so paths at the same depth stay deterministic.
+            paths = paths
+                .OrderBy(static path =>
+                {
+                    var depth = 0;
+                    foreach (var ch in path)
+                    {
+                        if (ch == '/') depth++;
+                    }
+                    return depth;
+                })
+                .ToList();
+        }
+
         return paths.Count > 0 ? paths : Array.Empty<string>();
     }
 
@@ -366,16 +365,10 @@ public class SubjectPathResolver : ILifecycleHandler
             string segment;
             if (parent.Index != null)
             {
-                if (isInlinePathsProperty)
-                {
-                    // InlinePaths: just the key (dots are fine with / separator)
-                    segment = parent.Index.ToString()!;
-                }
-                else
-                {
+                // InlinePaths: just the key (dots are fine with / separator)
+                segment = isInlinePathsProperty ? parent.Index.ToString()! :
                     // Regular collection/dict: PropertyName[index]
-                    segment = $"{parent.Property.Name}[{parent.Index}]";
-                }
+                    $"{parent.Property.Name}[{parent.Index}]";
             }
             else
             {

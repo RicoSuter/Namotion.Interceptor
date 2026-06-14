@@ -131,7 +131,6 @@ switch (configuration.Connector.ToLowerInvariant())
             _ => new MqttServerConfiguration
             {
                 BrokerPort = 1883,
-                PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
                 DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                 UseRetainedMessages = true,
                 SourceTimestampSerializer = SerializeTickTimestamp,
@@ -191,7 +190,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     return new OpcUaClientConfiguration
                     {
                         ServerUrl = $"opc.tcp://localhost:{serverPort}",
-                        RootName = "Root",
+                        RootPath = ["Root"],
                         TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
                         ValueConverter = new OpcUaValueConverter(),
                         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -208,7 +207,6 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                 {
                     BrokerHost = "localhost",
                     BrokerPort = serverPort,
-                    PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
                     DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                     UseRetainedMessages = true,
                     WriteRetryQueueSize = 10000,

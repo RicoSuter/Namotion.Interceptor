@@ -379,3 +379,10 @@ FodyWeavers.xsd
 
 **/pki/own/certs/**
 **/pki/trusted/certs/**
+
+# HomeBlaze plugin output
+src/HomeBlaze/HomeBlaze/Plugins/
+src/HomeBlaze/HomeBlaze/PluginsCache/
+# Performance pass artifacts
+benchmark_*.md
+.claude/scheduled_tasks.lock

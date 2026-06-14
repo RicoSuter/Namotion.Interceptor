@@ -183,7 +183,7 @@ public class SubjectSourceExtensionsTests
 
         sourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> batchChanges, CancellationToken _) =>
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
             {
                 // First batch returns partial failure (1 item failed)
                 return new ValueTask<WriteResult>(WriteResult.PartialFailure(
@@ -254,24 +254,124 @@ public class SubjectSourceExtensionsTests
     }
 
     [Fact]
+    public async Task WhenSingleBatchFailsWithoutEnumeratedFailedChanges_ThenAllChangesAreReportedFailed()
+    {
+        // Arrange: the source fails wholesale (error, no enumerated failed changes) on the
+        // single-batch fast path.
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(
+                    ReadOnlyMemory<SubjectPropertyChange>.Empty, new InvalidOperationException("Wholesale boom"))));
+
+        var changes = CreateChanges(3);
+
+        // Act
+        var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None);
+
+        // Assert: the choke point normalizes the unattributed error into "the whole batch failed".
+        Assert.NotNull(result.Error);
+        Assert.Equal("Wholesale boom", result.Error!.Message);
+        Assert.Equal(3, result.FailedChanges.Length);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.Equal($"Property{i}", result.FailedChanges[i].Property.Name);
+        }
+    }
+
+    [Fact]
+    public async Task WhenSourceThrowsOnSecondBatch_ThenConfirmedFirstBatchIsNotReportedFailed()
+    {
+        // Arrange: 5 changes, batch size 2. The first batch [0,1] is confirmed written,
+        // the second batch [2,3] throws.
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(2);
+
+        var callCount = 0;
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            {
+                callCount++;
+                if (callCount == 2)
+                {
+                    throw new InvalidOperationException("Batch 2 boom");
+                }
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        var changes = CreateChanges(5);
+
+        // Act
+        var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None);
+
+        // Assert: the confirmed first batch counts as written; failed = the throwing batch
+        // (outcome unknown) plus the unprocessed remainder.
+        Assert.NotNull(result.Error);
+        Assert.Equal("Batch 2 boom", result.Error!.Message);
+        Assert.True(result.IsPartialFailure);
+        Assert.Equal(3, result.FailedChanges.Length);
+        var failedNames = result.FailedChanges.Select(change => change.Property.Name).ToArray();
+        Assert.DoesNotContain("Property0", failedNames);
+        Assert.DoesNotContain("Property1", failedNames);
+        Assert.Contains("Property2", failedNames);
+        Assert.Contains("Property3", failedNames);
+        Assert.Contains("Property4", failedNames);
+    }
+
+    [Fact]
+    public async Task WhenFirstItemOfBatchFails_ThenFailedChangesContainTheActualFailedChange()
+    {
+        // Arrange: 6 changes, batch size 3. The first batch [0,1,2] fails item 0 only;
+        // items 1 and 2 are written.
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(3);
+
+        var changes = CreateChanges(6);
+        var failedChange = changes.Span[0];
+
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.PartialFailure(
+                    new[] { failedChange }, new InvalidOperationException("Item 0 failed"))));
+
+        // Act
+        var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None);
+
+        // Assert: failed = the actually failed change plus the unprocessed remainder [3,4,5];
+        // the written items 1 and 2 must not be reported as failed.
+        Assert.NotNull(result.Error);
+        Assert.Equal(4, result.FailedChanges.Length);
+        var failedNames = result.FailedChanges.Select(change => change.Property.Name).ToArray();
+        Assert.Contains("Property0", failedNames);
+        Assert.DoesNotContain("Property1", failedNames);
+        Assert.DoesNotContain("Property2", failedNames);
+        Assert.Contains("Property3", failedNames);
+        Assert.Contains("Property4", failedNames);
+        Assert.Contains("Property5", failedNames);
+    }
+
+    [Fact]
     public async Task WriteChangesInBatchesAsync_RegularSource_SerializesWrites()
     {
         // Arrange
         var concurrentCalls = 0;
         var maxConcurrentCalls = 0;
-        var callCompletionSource = new TaskCompletionSource();
 
         var sourceMock = new Mock<ISubjectSource>();
         sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
         sourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken ct) =>
             {
                 var current = Interlocked.Increment(ref concurrentCalls);
                 maxConcurrentCalls = Math.Max(maxConcurrentCalls, current);
 
                 // Wait a bit to allow potential concurrent calls to overlap
-                await Task.Delay(50);
+                await Task.Delay(50, ct);
 
                 Interlocked.Decrement(ref concurrentCalls);
                 return WriteResult.Success;
@@ -302,42 +402,38 @@ public class SubjectSourceExtensionsTests
         var allStarted = new TaskCompletionSource();
         var canContinue = new TaskCompletionSource();
 
-        var sourceMock = new Mock<ConcurrentTestSource> { CallBase = true };
-        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
-        sourceMock
-            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+        var source = new ConcurrentTestSource(async () =>
+        {
+            var current = Interlocked.Increment(ref concurrentCalls);
+            maxConcurrentCalls = Math.Max(maxConcurrentCalls, current);
+
+            // Signal when all 3 calls have started
+            if (current >= 3)
             {
-                var current = Interlocked.Increment(ref concurrentCalls);
-                maxConcurrentCalls = Math.Max(maxConcurrentCalls, current);
+                allStarted.TrySetResult();
+            }
 
-                // Signal when all 3 calls have started
-                if (current >= 3)
-                {
-                    allStarted.TrySetResult();
-                }
+            // Wait for signal to continue
+            await canContinue.Task;
 
-                // Wait for signal to continue
-                await canContinue.Task;
-
-                Interlocked.Decrement(ref concurrentCalls);
-                return WriteResult.Success;
-            });
+            Interlocked.Decrement(ref concurrentCalls);
+            return WriteResult.Success;
+        });
 
         var changes = CreateChanges(1);
 
         // Act - Start multiple concurrent writes
         var tasks = new[]
         {
-            sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None).AsTask(),
-            sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None).AsTask(),
-            sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None).AsTask()
+            source.WriteChangesInBatchesAsync(changes, CancellationToken.None).AsTask(),
+            source.WriteChangesInBatchesAsync(changes, CancellationToken.None).AsTask(),
+            source.WriteChangesInBatchesAsync(changes, CancellationToken.None).AsTask()
         };
 
         // Wait for all calls to start (or timeout)
         var allStartedTask = allStarted.Task;
         var timeoutTask = Task.Delay(1000);
-        var completedTask = await Task.WhenAny(allStartedTask, timeoutTask);
+        await Task.WhenAny(allStartedTask, timeoutTask);
 
         // Allow all to complete
         canContinue.SetResult();
@@ -398,12 +494,12 @@ public class SubjectSourceExtensionsTests
     /// <summary>
     /// Test source that implements ISupportsConcurrentWrites to opt-out of automatic synchronization.
     /// </summary>
-    public abstract class ConcurrentTestSource : ISubjectSource, ISupportsConcurrentWrites
+    private sealed class ConcurrentTestSource(Func<Task<WriteResult>> writeCallback) : ISubjectSource, ISupportsConcurrentWrites
     {
         public IInterceptorSubject RootSubject => throw new NotSupportedException();
-        public abstract int WriteBatchSize { get; }
-        public abstract ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
-        public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken) => Task.FromResult<IDisposable?>(null);
+        public int WriteBatchSize => 0;
+        public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+            => await writeCallback();
         public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
     }
 
@@ -427,7 +523,6 @@ public class SubjectSourceExtensionsTests
 
         public void UnblockWrite() => _canComplete.TrySetResult();
 
-        public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken) => Task.FromResult<IDisposable?>(null);
         public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
     }
 }

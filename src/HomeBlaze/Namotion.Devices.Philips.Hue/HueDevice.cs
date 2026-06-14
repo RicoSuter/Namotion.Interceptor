@@ -40,7 +40,7 @@ public partial class HueDevice :
     public virtual string? IconName => "QuestionMark";
 
     [Derived]
-    public virtual string? IconColor => IsConnected ? "Default" : "Error";
+    public virtual string? IconColor => null;
 
     [Derived]
     public bool IsConnected =>

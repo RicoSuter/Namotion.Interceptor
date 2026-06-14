@@ -14,6 +14,6 @@ public interface ICameraState
     /// <summary>
     /// The current captured image.
     /// </summary>
-    [State]
+    [State(Position = 270)]
     Image? CurrentImage { get; }
 }

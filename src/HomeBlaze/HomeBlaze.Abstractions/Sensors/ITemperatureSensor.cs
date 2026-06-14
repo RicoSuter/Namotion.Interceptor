@@ -13,6 +13,6 @@ public interface ITemperatureSensor
     /// <summary>
     /// The current temperature reading.
     /// </summary>
-    [State(Unit = StateUnit.DegreeCelsius)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 200)]
     decimal? Temperature { get; }
 }

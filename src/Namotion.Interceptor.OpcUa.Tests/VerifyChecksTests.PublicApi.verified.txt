@@ -1,0 +1,388 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.OpcUa.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
+namespace Microsoft.Extensions.DependencyInjection
+{
+    public static class OpcUaSubjectExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string serverUrl, string connectorName, string[]? rootPath = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string connectorName, string? rootName = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string serverUrl, string connectorName, string[]? rootPath = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string connectorName, string? rootName = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static Namotion.Interceptor.OpcUa.Client.IOpcUaSubjectClientSource CreateOpcUaClientSource(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
+        public static Namotion.Interceptor.OpcUa.Server.IOpcUaSubjectServer CreateOpcUaServer(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
+    }
+}
+namespace Namotion.Interceptor.OpcUa.Attributes
+{
+    public enum DiscardOldestMode
+    {
+        Unset = -1,
+        False = 0,
+        True = 1,
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Property)]
+    public class OpcUaNodeAttribute : Namotion.Interceptor.Registry.Attributes.PathAttribute
+    {
+        public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null, string? connectorName = null) { }
+        public string BrowseName { get; }
+        public string? BrowseNamespaceUri { get; }
+        public Opc.Ua.DataChangeTrigger DataChangeTrigger { get; init; }
+        public string? DataType { get; init; }
+        public string? DataTypeNamespace { get; init; }
+        public Opc.Ua.DeadbandType DeadbandType { get; init; }
+        public double DeadbandValue { get; init; }
+        public string? Description { get; init; }
+        public Namotion.Interceptor.OpcUa.Attributes.DiscardOldestMode DiscardOldest { get; init; }
+        public string? DisplayName { get; init; }
+        public byte EventNotifier { get; init; }
+        public Namotion.Interceptor.OpcUa.Mapping.ModellingRule ModellingRule { get; init; }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaNodeClass NodeClass { get; init; }
+        public string? NodeIdentifier { get; init; }
+        public string? NodeNamespaceUri { get; init; }
+        public uint QueueSize { get; init; }
+        public int SamplingInterval { get; init; }
+        public string? TypeDefinition { get; init; }
+        public string? TypeDefinitionNamespace { get; init; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=false)]
+    public sealed class OpcUaReferenceAttribute : System.Attribute
+    {
+        public OpcUaReferenceAttribute(string referenceType = "HasProperty") { }
+        public string? ItemReferenceType { get; init; }
+        public string? ItemReferenceTypeNamespace { get; init; }
+        public string ReferenceType { get; }
+        public string? ReferenceTypeNamespace { get; init; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=false)]
+    public sealed class OpcUaValueAttribute : System.Attribute
+    {
+        public OpcUaValueAttribute() { }
+    }
+}
+namespace Namotion.Interceptor.OpcUa.Client
+{
+    public interface IOpcUaSubjectClientSource : Microsoft.Extensions.Hosting.IHostedService
+    {
+        Opc.Ua.Client.ISession? CurrentSession { get; }
+        Namotion.Interceptor.OpcUa.Client.OpcUaClientDiagnostics Diagnostics { get; }
+        event System.EventHandler<Namotion.Interceptor.OpcUa.Client.OpcUaCurrentSessionChangedEventArgs>? CurrentSessionChanged;
+        bool TryGetNodeId(Namotion.Interceptor.PropertyReference property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Opc.Ua.NodeId? nodeId);
+    }
+    public class OpcUaClientConfiguration
+    {
+        public OpcUaClientConfiguration() { }
+        public Opc.Ua.Client.ISessionFactory ActualSessionFactory { get; }
+        public string ApplicationName { get; set; }
+        public System.TimeSpan? BufferTime { get; set; }
+        public string CertificateStoreBasePath { get; set; }
+        public System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<Opc.Ua.UserIdentity>>? CreateUserIdentity { get; set; }
+        public Opc.Ua.DataChangeTrigger? DefaultDataChangeTrigger { get; set; }
+        public Opc.Ua.DeadbandType? DefaultDeadbandType { get; set; }
+        public double? DefaultDeadbandValue { get; set; }
+        public bool? DefaultDiscardOldest { get; set; }
+        public string? DefaultNamespaceUri { get; set; }
+        public int DefaultPublishingInterval { get; set; }
+        public uint? DefaultQueueSize { get; set; }
+        public int? DefaultSamplingInterval { get; set; }
+        public bool EnablePollingFallback { get; set; }
+        public bool EnableReadAfterWrite { get; set; }
+        public System.TimeSpan KeepAliveInterval { get; set; }
+        public Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey> Mapper { get; set; }
+        public System.TimeSpan MaxReconnectDuration { get; set; }
+        public int MaximumItemsPerSubscription { get; set; }
+        public uint MaximumReferencesPerNode { get; set; }
+        public int MinPublishRequestCount { get; set; }
+        public System.TimeSpan OperationTimeout { get; set; }
+        public int PollingBatchSize { get; set; }
+        public System.TimeSpan PollingCircuitBreakerCooldown { get; set; }
+        public int PollingCircuitBreakerThreshold { get; set; }
+        public System.TimeSpan PollingDisposalTimeout { get; set; }
+        public System.TimeSpan PollingInterval { get; set; }
+        public System.TimeSpan ReadAfterWriteBuffer { get; set; }
+        public System.TimeSpan ReconnectHandlerTimeout { get; set; }
+        public System.TimeSpan ReconnectInterval { get; set; }
+        public Opc.Ua.ITelemetryContext ResolvedTelemetryContext { get; }
+        public System.TimeSpan? RetryTime { get; set; }
+        public string[]? RootPath { get; set; }
+        public required string ServerUrl { get; set; }
+        public System.TimeSpan SessionDisposalTimeout { get; set; }
+        public Opc.Ua.Client.ISessionFactory? SessionFactory { get; set; }
+        public System.TimeSpan SessionTimeout { get; set; }
+        public System.Func<Opc.Ua.ReferenceDescription, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>>? ShouldAddDynamicAttribute { get; set; }
+        public System.Func<Opc.Ua.ReferenceDescription, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>>? ShouldAddDynamicProperty { get; set; }
+        public Namotion.Interceptor.OpcUa.OpcUaSubjectFactory SubjectFactory { get; set; }
+        public System.TimeSpan SubscriptionHealthCheckInterval { get; set; }
+        public uint SubscriptionKeepAliveCount { get; set; }
+        public uint SubscriptionLifetimeCount { get; set; }
+        public uint SubscriptionMaximumNotificationsPerPublish { get; set; }
+        public byte SubscriptionPriority { get; set; }
+        public bool SubscriptionSequentialPublishing { get; set; }
+        public Opc.Ua.ITelemetryContext? TelemetryContext { get; set; }
+        public Namotion.Interceptor.OpcUa.Client.OpcUaTypeResolver? TypeResolver { get; set; }
+        public bool UseSecurity { get; set; }
+        public Namotion.Interceptor.OpcUa.OpcUaValueConverter ValueConverter { get; set; }
+        public int WriteRetryQueueSize { get; set; }
+        public virtual System.Threading.Tasks.Task<Opc.Ua.Configuration.ApplicationInstance> CreateApplicationInstanceAsync() { }
+        public void Validate() { }
+    }
+    public class OpcUaClientDiagnostics
+    {
+        public long AbandonedReconnections { get; }
+        public long FailedReconnections { get; }
+        public double IncomingChangesPerSecond { get; }
+        public bool IsConnected { get; }
+        public bool IsReconnecting { get; }
+        public System.DateTimeOffset? LastConnectedAt { get; }
+        public System.Exception? LastError { get; }
+        public int MonitoredItemCount { get; }
+        public double OutgoingChangesPerSecond { get; }
+        public int? PendingReadAfterWrites { get; }
+        public int PendingWriteCount { get; }
+        public Namotion.Interceptor.OpcUa.Client.PollingDiagnostics? Polling { get; }
+        public int PollingItemCount { get; }
+        public Namotion.Interceptor.OpcUa.Client.ReadAfterWriteDiagnostics? ReadAfterWrite { get; }
+        public string? SessionId { get; }
+        public int SubscriptionCount { get; }
+        public long SuccessfulReconnections { get; }
+        public long TotalReconnectionAttempts { get; }
+    }
+    public sealed class OpcUaCurrentSessionChangedEventArgs : System.EventArgs
+    {
+        public OpcUaCurrentSessionChangedEventArgs(Opc.Ua.Client.ISession? previousSession, Opc.Ua.Client.ISession? currentSession) { }
+        public Opc.Ua.Client.ISession? CurrentSession { get; }
+        public Opc.Ua.Client.ISession? PreviousSession { get; }
+    }
+    public class OpcUaTypeResolver
+    {
+        public OpcUaTypeResolver(Microsoft.Extensions.Logging.ILogger logger) { }
+        public virtual System.Attribute[] GetDynamicPropertyAttributes(Opc.Ua.ReferenceDescription reference, Opc.Ua.Client.ISession session) { }
+        public virtual System.Threading.Tasks.Task<System.Type?> TryGetTypeForNodeAsync(Opc.Ua.Client.ISession session, Opc.Ua.ReferenceDescription reference, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class OpcUaWriteException : System.InvalidOperationException
+    {
+        public OpcUaWriteException(int transientFailureCount, int permanentFailureCount, int totalWrites) { }
+        public int PermanentFailureCount { get; }
+        public int TotalFailureCount { get; }
+        public int TotalWrites { get; }
+        public int TransientFailureCount { get; }
+    }
+    public class PollingDiagnostics
+    {
+        public long CircuitBreakerTrips { get; }
+        public long FailedReads { get; }
+        public bool IsCircuitBreakerOpen { get; }
+        public bool IsRunning { get; }
+        public int ItemCount { get; }
+        public long SlowPolls { get; }
+        public long TotalReads { get; }
+        public long ValueChanges { get; }
+    }
+    public class ReadAfterWriteDiagnostics
+    {
+        public long Coalesced { get; }
+        public long Executed { get; }
+        public long Failed { get; }
+        public long Scheduled { get; }
+    }
+}
+namespace Namotion.Interceptor.OpcUa.Mapping
+{
+    public enum ModellingRule
+    {
+        Unset = -1,
+        Mandatory = 0,
+        Optional = 1,
+        MandatoryPlaceholder = 2,
+        OptionalPlaceholder = 3,
+        ExposesItsArray = 4,
+    }
+    public class OpcUaAdditionalReference : System.IEquatable<Namotion.Interceptor.OpcUa.Mapping.OpcUaAdditionalReference>
+    {
+        public OpcUaAdditionalReference() { }
+        public bool IsForward { get; init; }
+        public required string ReferenceType { get; init; }
+        public string? ReferenceTypeNamespace { get; init; }
+        public string? TargetNamespaceUri { get; init; }
+        public required string TargetNodeId { get; init; }
+    }
+    public class OpcUaAttributeMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
+    {
+        public OpcUaAttributeMapper(string? connectorName = null, string? defaultNamespaceUri = null) { }
+        public bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
+        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class OpcUaCompositeMapper : Namotion.Interceptor.Connectors.Mapping.ReverseCompositeMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
+    {
+        public OpcUaCompositeMapper(params Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>[] mappers) { }
+    }
+    public sealed class OpcUaFluentMapper : Namotion.Interceptor.OpcUa.Mapping.OpcUaPathProviderMapper
+    {
+        public OpcUaFluentMapper(Namotion.Interceptor.Connectors.Mapping.FluentMappingRegistry<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping> registry, char pathSeparator = .) { }
+        public override bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
+    }
+    public sealed class OpcUaFluentMapperBuilder<TRoot>
+        where TRoot : Namotion.Interceptor.IInterceptorSubject
+    {
+        public OpcUaFluentMapperBuilder() { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapper Build(char pathSeparator = .) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentTypeBuilder<TRoot, T> ForType<T>() { }
+    }
+    public sealed class OpcUaFluentPropertyBuilder
+    {
+        public OpcUaFluentPropertyBuilder() { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder AdditionalReference(string referenceType, string? referenceTypeNamespace, string targetNodeId, string? targetNamespaceUri = null, bool isForward = true) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder BrowseName(string value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder BrowseNamespaceUri(string value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder DataChangeTrigger(Opc.Ua.DataChangeTrigger value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder DataType(string identifier, string? namespaceUri = null) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder DeadbandType(Opc.Ua.DeadbandType value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder DeadbandValue(double value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder Description(string value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder DiscardOldest(bool value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder DisplayName(string value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder EventNotifier(byte value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder IsValue(bool value = true) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder ItemReferenceType(string identifier, string? namespaceUri = null) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder ModellingRule(Namotion.Interceptor.OpcUa.Mapping.ModellingRule value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder NodeClass(Namotion.Interceptor.OpcUa.Mapping.OpcUaNodeClass value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder NodeIdentifier(string value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder NodeNamespaceUri(string value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder QueueSize(uint value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder ReferenceType(string identifier, string? namespaceUri = null) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder SamplingInterval(int value) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder TypeDefinition(string identifier, string? namespaceUri = null) { }
+    }
+    public sealed class OpcUaFluentTypeBuilder<TRoot, TSubject>
+        where TRoot : Namotion.Interceptor.IInterceptorSubject
+    {
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentMapper Build(char pathSeparator = .) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentTypeBuilder<TRoot, TSubject> Configure(System.Action<Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder> configure) { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentTypeBuilder<TRoot, TOther> ForType<TOther>() { }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentTypeBuilder<TRoot, TSubject> Map<TValue>(System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> selector, System.Action<Namotion.Interceptor.OpcUa.Mapping.OpcUaFluentPropertyBuilder> configure) { }
+    }
+    public readonly struct OpcUaLookupKey : System.IEquatable<Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
+    {
+        public OpcUaLookupKey(Opc.Ua.ReferenceDescription Reference, Opc.Ua.Client.ISession Session, Namotion.Interceptor.IInterceptorSubject RootSubject) { }
+        public Opc.Ua.ReferenceDescription Reference { get; init; }
+        public Namotion.Interceptor.IInterceptorSubject RootSubject { get; init; }
+        public Opc.Ua.Client.ISession Session { get; init; }
+    }
+    public enum OpcUaNodeClass
+    {
+        Auto = 0,
+        Object = 1,
+        Variable = 2,
+    }
+    public class OpcUaPathProviderMapper : Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey>
+    {
+        public OpcUaPathProviderMapper(Namotion.Interceptor.Registry.Paths.IPathProvider pathProvider) { }
+        public virtual bool TryGetMapping(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject rootSubject, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping? mapping) { }
+        public System.Threading.Tasks.ValueTask<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?> TryGetPropertyAsync(Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey key, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public class OpcUaPropertyMapping : Namotion.Interceptor.Connectors.Mapping.IPropertyMapping<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>, System.IEquatable<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping>
+    {
+        public OpcUaPropertyMapping() { }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.OpcUa.Mapping.OpcUaAdditionalReference>? AdditionalReferences { get; init; }
+        public string? BrowseName { get; init; }
+        public string? BrowseNamespaceUri { get; init; }
+        public Opc.Ua.DataChangeTrigger? DataChangeTrigger { get; init; }
+        public string? DataType { get; init; }
+        public string? DataTypeNamespace { get; init; }
+        public Opc.Ua.DeadbandType? DeadbandType { get; init; }
+        public double? DeadbandValue { get; init; }
+        public string? Description { get; init; }
+        public bool? DiscardOldest { get; init; }
+        public string? DisplayName { get; init; }
+        public byte? EventNotifier { get; init; }
+        public bool? IsValue { get; init; }
+        public string? ItemReferenceType { get; init; }
+        public string? ItemReferenceTypeNamespace { get; init; }
+        public Namotion.Interceptor.OpcUa.Mapping.ModellingRule? ModellingRule { get; init; }
+        public Namotion.Interceptor.OpcUa.Mapping.OpcUaNodeClass? NodeClass { get; init; }
+        public string? NodeIdentifier { get; init; }
+        public string? NodeNamespaceUri { get; init; }
+        public uint? QueueSize { get; init; }
+        public string? ReferenceType { get; init; }
+        public string? ReferenceTypeNamespace { get; init; }
+        public int? SamplingInterval { get; init; }
+        public string? TypeDefinition { get; init; }
+        public string? TypeDefinitionNamespace { get; init; }
+        public static Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping Merge(Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping primary, Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping fallback) { }
+    }
+}
+namespace Namotion.Interceptor.OpcUa
+{
+    public sealed class NullTelemetryContext : Opc.Ua.ITelemetryContext
+    {
+        public static readonly Namotion.Interceptor.OpcUa.NullTelemetryContext Instance;
+        public System.Diagnostics.ActivitySource ActivitySource { get; }
+        public Microsoft.Extensions.Logging.ILoggerFactory LoggerFactory { get; }
+        public System.Diagnostics.Metrics.Meter CreateMeter() { }
+    }
+    public static class OpcUaConstants
+    {
+        public const string DefaultConnectorName = "opc";
+    }
+    public class OpcUaSubjectFactory
+    {
+        public OpcUaSubjectFactory(Namotion.Interceptor.Connectors.ISubjectFactory subjectFactory) { }
+        public virtual System.Threading.Tasks.Task<Namotion.Interceptor.IInterceptorSubject> CreateCollectionSubjectAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty collectionProperty, Opc.Ua.ReferenceDescription node, object? index, Opc.Ua.Client.ISession session, System.Threading.CancellationToken cancellationToken) { }
+        public virtual System.Threading.Tasks.Task<Namotion.Interceptor.IInterceptorSubject> CreateSubjectAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Opc.Ua.ReferenceDescription node, Opc.Ua.Client.ISession session, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public class OpcUaValueConverter
+    {
+        public OpcUaValueConverter() { }
+        public virtual object? ConvertToNodeValue(object? propertyValue, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public virtual object? ConvertToPropertyValue(object? nodeValue, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public virtual Opc.Ua.TypeInfo GetNodeTypeInfo(System.Type propertyType) { }
+    }
+}
+namespace Namotion.Interceptor.OpcUa.Server
+{
+    public interface IOpcUaSubjectServer : Microsoft.Extensions.Hosting.IHostedService
+    {
+        Opc.Ua.Server.StandardServer? CurrentServer { get; }
+        Namotion.Interceptor.OpcUa.Server.OpcUaServerDiagnostics Diagnostics { get; }
+        bool TryGetVariableNode(Namotion.Interceptor.PropertyReference property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Opc.Ua.BaseDataVariableState? variable);
+    }
+    public class OpcUaServerConfiguration
+    {
+        public OpcUaServerConfiguration() { }
+        public string ApplicationName { get; set; }
+        public bool AutoAcceptUntrustedCertificates { get; set; }
+        public string BaseAddress { get; set; }
+        public System.TimeSpan? BufferTime { get; set; }
+        public string CertificateStoreBasePath { get; set; }
+        public bool CleanCertificateStore { get; set; }
+        public Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping> Mapper { get; set; }
+        public string NamespaceUri { get; set; }
+        public Opc.Ua.ITelemetryContext ResolvedTelemetryContext { get; }
+        public string? RootName { get; set; }
+        public Opc.Ua.ITelemetryContext? TelemetryContext { get; set; }
+        public Namotion.Interceptor.OpcUa.OpcUaValueConverter ValueConverter { get; set; }
+        public virtual System.Threading.Tasks.Task<Opc.Ua.Configuration.ApplicationInstance> CreateApplicationInstanceAsync() { }
+        public virtual string[] GetNamespaceUris() { }
+        protected void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, Opc.Ua.NodeStateCollection nodes, Opc.Ua.ISystemContext context) { }
+        public virtual void LoadPredefinedNodes(Opc.Ua.NodeStateCollection collection, Opc.Ua.ISystemContext context) { }
+    }
+    public class OpcUaServerDiagnostics
+    {
+        public int ActiveSessionCount { get; }
+        public int ConsecutiveFailures { get; }
+        public double IncomingChangesPerSecond { get; }
+        public bool IsRunning { get; }
+        public System.Exception? LastError { get; }
+        public double OutgoingChangesPerSecond { get; }
+        public System.DateTimeOffset? StartTime { get; }
+        public System.TimeSpan? Uptime { get; }
+    }
+}

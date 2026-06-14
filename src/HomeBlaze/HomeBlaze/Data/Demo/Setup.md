@@ -14,11 +14,11 @@ The demo simulates a small factory with the following equipment (live data):
 
 | Equipment | Current Speed | Target Speed | Temperature | Status |
 |-----------|---------------|--------------|-------------|--------|
-| **Conveyor Belt** | {{ /Demo/Conveyor/CurrentSpeed }} | {{ /Demo/Conveyor/TargetSpeed }} | {{ /Demo/Conveyor/Temperature }} | {{ /Demo/Conveyor/Status }} |
-| **Exhaust Fan** | {{ /Demo/ExhaustFan/CurrentSpeed }} | {{ /Demo/ExhaustFan/TargetSpeed }} | {{ /Demo/ExhaustFan/Temperature }} | {{ /Demo/ExhaustFan/Status }} |
-| **Cooling Fan** | {{ /Demo/CoolingFan/CurrentSpeed }} | {{ /Demo/CoolingFan/TargetSpeed }} | {{ /Demo/CoolingFan/Temperature }} | {{ /Demo/CoolingFan/Status }} |
-| **Water Pump** | {{ /Demo/WaterPump/CurrentSpeed }} | {{ /Demo/WaterPump/TargetSpeed }} | {{ /Demo/WaterPump/Temperature }} | {{ /Demo/WaterPump/Status }} |
-| **Compressor** | {{ /Demo/Compressor/CurrentSpeed }} | {{ /Demo/Compressor/TargetSpeed }} | {{ /Demo/Compressor/Temperature }} | {{ /Demo/Compressor/Status }} |
+| **Conveyor Belt** | {{ ../Conveyor/CurrentSpeed }} | {{ ../Conveyor/TargetSpeed }} | {{ ../Conveyor/Temperature }} | {{ ../Conveyor/Status }} |
+| **Exhaust Fan** | {{ ../ExhaustFan/CurrentSpeed }} | {{ ../ExhaustFan/TargetSpeed }} | {{ ../ExhaustFan/Temperature }} | {{ ../ExhaustFan/Status }} |
+| **Cooling Fan** | {{ ../CoolingFan/CurrentSpeed }} | {{ ../CoolingFan/TargetSpeed }} | {{ ../CoolingFan/Temperature }} | {{ ../CoolingFan/Status }} |
+| **Water Pump** | {{ ../WaterPump/CurrentSpeed }} | {{ ../WaterPump/TargetSpeed }} | {{ ../WaterPump/Temperature }} | {{ ../WaterPump/Status }} |
+| **Compressor** | {{ ../Compressor/CurrentSpeed }} | {{ ../Compressor/TargetSpeed }} | {{ ../Compressor/Temperature }} | {{ ../Compressor/Status }} |
 
 ## Motor Properties
 
@@ -45,7 +45,7 @@ These properties auto-calculate when dependencies change:
 
 ```
 Data/
-  demo/
+  Demo/
     Conveyor.json         # 600 RPM conveyor
     ExhaustFan.json      # 1500 RPM exhaust system
     CoolingFan.json      # 1800 RPM HVAC system
@@ -134,8 +134,8 @@ To start with a clean slate:
 
 ## Next Steps
 
-- Review [Building Custom Subjects](../docs/BuildingSubjects.md) to create your own subject types
-- Check out [Architecture](../Docs/Architecture.md) to understand the system design
+- Review [Building Custom Subjects](../Docs/development/building-subjects.md) to create your own subject types
+- Check out [Architecture](../Docs/architecture/overview.md) to understand the system design
 - Explore the source code in `HomeBlaze.Samples/Motor.cs`
 
 ---

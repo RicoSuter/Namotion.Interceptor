@@ -13,16 +13,16 @@ public partial class ShellyInput :
 {
     internal int Index { get; }
 
-    [State(IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 100)]
     public partial bool? State { get; internal set; }
 
-    [State]
+    [State(Position = 400)]
     public partial long? CountTotal { get; internal set; }
 
-    [State(Unit = StateUnit.Hertz)]
+    [State(Unit = StateUnit.Hertz, Position = 401)]
     public partial double? CountFrequency { get; internal set; }
 
-    [State]
+    [State(Position = 950)]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [Derived]

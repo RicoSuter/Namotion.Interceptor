@@ -13,12 +13,12 @@ public interface IPowerSensor
     /// <summary>
     /// The current power consumption.
     /// </summary>
-    [State(Unit = StateUnit.Watt)]
+    [State(Unit = StateUnit.Watt, Position = 300)]
     decimal? Power { get; }
 
     /// <summary>
     /// The total energy consumed.
     /// </summary>
-    [State(Unit = StateUnit.WattHour, IsCumulative = true)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 301)]
     decimal? EnergyConsumed { get; }
 }

@@ -11,18 +11,18 @@ namespace HomeBlaze.Abstractions.Devices;
 [Description("Reports hardware identity information.")]
 public interface IDeviceInfo
 {
-    [State]
+    [State(Position = 800)]
     string? Manufacturer { get; }
 
-    [State]
+    [State(Position = 801)]
     string? Model { get; }
 
-    [State]
+    [State(Position = 802)]
     string? ProductCode { get; }
 
-    [State]
+    [State(Position = 803)]
     string? SerialNumber { get; }
 
-    [State]
+    [State(Position = 804)]
     string? HardwareRevision { get; }
 }

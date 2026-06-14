@@ -13,13 +13,13 @@ public interface ISoftwareState
     /// <summary>
     /// The currently running software or firmware version.
     /// </summary>
-    [State]
+    [State(Position = 850)]
     string? SoftwareVersion { get; }
 
     /// <summary>
     /// The available software update version, or null if up to date.
     /// </summary>
-    [State]
+    [State(Position = 851)]
     string? AvailableSoftwareUpdate { get; }
 
     /// <summary>

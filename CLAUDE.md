@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Namotion.Interceptor is a .NET library for creating trackable object models through automatic property interception using C# 13 partial properties and source generation. It enables property change tracking, derived property updates, and object graph management with zero runtime reflection.
 
+## Priorities
+
+When tradeoffs conflict, prefer in this order:
+
+1. **Correctness** — documented semantics, thread-safety (no data races, no torn reads/writes), quiescent consistency (state agrees once writes settle), existing invariants hold.
+2. **Performance** — minimize allocations and CPU time. Both matter; when they trade, allocations usually win (GC pressure compounds across the host).
+3. **Code style / idiom** — non-idiomatic API is fine when 1 or 2 demand it (e.g., `ImmutableArray<T>` in public API instead of `IEnumerable<T>`).
+
 ## Development Commands
 
 ### Build and Test
@@ -114,8 +122,18 @@ Priority 1 is absolute. Priorities 2–4 are trade-offs — discuss to find the 
 ## Coding Style
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
+- **No em dashes** in docs, READMEs, or PR descriptions. Restructure into plain sentences instead.
+
+## Git Rules
+
+- Never include "Claude", "Co-Authored-By", or AI attribution in commit messages, PR descriptions, or GitHub comments.
 
 ## Test Conventions
 
 - **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)
 - **Structure**: Explicit `// Arrange`, `// Act`, `// Assert` comments separating each phase (use `// Act & Assert` for exception tests)
+- **No hardcoded waits**: Use `AsyncTestHelpers.WaitUntilAsync(() => condition)` or event-based synchronization (`ManualResetEventSlim`, `CountdownEvent`) instead of `Task.Delay`/`Thread.Sleep`. Hardcoded delays are either too long (slow CI) or too short (flaky CI).
+
+## Public API Tracking
+
+The public API for some libraries is snapshot-tested via `PublicApiGenerator` + `Verify`. Each one's test project has a `VerifyChecksTests.PublicApi` test that compares the generated API against a checked-in `VerifyChecksTests.PublicApi.verified.txt`. When the API changes intentionally, accept the new snapshot by replacing `.verified.txt` with the test's `.received.txt` output.

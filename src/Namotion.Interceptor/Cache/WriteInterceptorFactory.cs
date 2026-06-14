@@ -9,13 +9,14 @@ internal static class WriteInterceptorFactory<TProperty>
     {
         if (interceptors.Length == 0)
         {
-            return static (ref interception, innerWriteValue) =>
+            return static (ref context, innerWriteValue) =>
             {
-                lock (interception.Property.Subject.SyncRoot)
+                lock (context.Property.Subject.SyncRoot)
                 {
-                    innerWriteValue(interception.Property.Subject, interception.NewValue);
-                    interception.IsWritten = true;
-                    interception.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+                    innerWriteValue(context.Property.Subject, context.NewValue);
+                    context.IsWritten = true;
+                    var raw = context.WriteTimestampRaw;
+                    context.Property.SetWriteTimestamp(raw > 0 ? raw : 0);
                 }
             };
         }
@@ -28,7 +29,8 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
-                    context.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+                    var raw = context.WriteTimestampRaw;
+                    context.Property.SetWriteTimestamp(raw > 0 ? raw : 0);
                 }
                 return context.NewValue;
             }

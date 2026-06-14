@@ -199,6 +199,21 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     /// <summary>
+    /// Copies this change with a different source, without re-boxing the values. A transaction writer
+    /// uses this to mark an accepted change with the source that confirmed it.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public SubjectPropertyChange WithSource(object? source) =>
+        new(Property,
+            source,
+            ChangedTimestamp,
+            ReceivedTimestamp,
+            _oldValueStorage,
+            _newValueStorage,
+            _oldBoxedHolder,
+            _newBoxedHolder);
+
+    /// <summary>
     /// Equality based on PropertyReference only for efficient HashSet/Dictionary usage.
     /// </summary>
     public bool Equals(SubjectPropertyChange other) => Property.Equals(other.Property);

@@ -1,0 +1,14 @@
+{
+  "$type": "HomeBlaze.Plugins.PluginManager",
+  "feeds": [
+    { "name": "local", "url": "Plugins" },
+    { "name": "nuget.org", "url": "https://api.nuget.org/v3/index.json" }
+  ],
+  "hostPackages": [],
+  "hostIdentifier": "HomeBlaze",
+  "cacheDirectory": "PluginsCache",
+  "plugins": [
+    { "packageName": "MyCompany.SamplePlugin1.HomeBlaze", "version": "1.0.0" },
+    { "packageName": "MyCompany.SamplePlugin2.HomeBlaze", "version": "1.0.0" }
+  ]
+}

@@ -227,7 +227,7 @@ public class ConfigurationJsonTypeInfoResolverTests
             .WithFullPropertyTracking()
             .WithRegistry()
             .WithLifecycle()
-            .WithService<ILifecycleHandler>(
+            .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
         var subject = new TestSubject(context)

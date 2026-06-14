@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -104,6 +105,28 @@ public class WriteRetryQueueTests
         // Assert
         Assert.False(result);
         Assert.Equal(3, queue.PendingWriteCount); // Re-queued
+    }
+
+    [Fact]
+    public async Task WhenFlushFailsWithoutEnumeratedFailedChanges_ThenWholeBatchIsRequeued()
+    {
+        // Arrange: the source fails wholesale but does not enumerate the failed changes.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var sourceMock = new Mock<ISubjectSource>();
+
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(
+                    ReadOnlyMemory<SubjectPropertyChange>.Empty, new Exception("Connection failed"))));
+
+        // Act
+        queue.Enqueue(CreateChanges(3));
+        var result = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert
+        Assert.False(result);
+        Assert.Equal(3, queue.PendingWriteCount); // the whole attempted batch is re-queued, not dropped
     }
 
     [Fact]
@@ -215,7 +238,7 @@ public class WriteRetryQueueTests
         var flush1 = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
         var flush2 = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
-        await Task.Delay(100); // Let them start
+        await AsyncTestHelpers.WaitUntilAsync(() => callCount >= 1);
 
         // Assert - only one should be running
         Assert.Equal(1, callCount);

@@ -71,7 +71,7 @@ Also read the corresponding `src/Namotion.Devices.*.HomeBlaze/` UI projects to u
 
 ### Step 4: Read v2 interfaces
 
-Read `src/HomeBlaze/HomeBlaze.Abstractions/` to understand all available v2 interfaces. Map each v1 capability to its v2 equivalent. Identify:
+Read `src/HomeBlaze/HomeBlaze*.Abstractions*/` to understand all available v2 interfaces. Map each v1 capability to its v2 equivalent. Identify:
 - Direct mappings (e.g., v1 `ITemperatureSensor` -> v2 `ITemperatureSensor`)
 - Name changes (e.g., v1 `IPowerConsumptionSensor` -> v2 `IPowerSensor`)
 - Missing v2 interfaces that need to be created
@@ -121,7 +121,7 @@ Examples of generic interfaces that emerged from migrations:
 - `ISoftwareState` (SoftwareVersion, AvailableSoftwareUpdate) -- shared by any device that reports firmware/software versions
 
 **Naming conventions:**
-- Follow existing pattern: `I{Concept}Sensor` for sensor interfaces, `I{Concept}State` for status interfaces
+- Follow existing pattern: `I{Concept}Sensor` for sensors, `I{Concept}Controller` for controllable capabilities, `I{Concept}State` for status interfaces
 - Use `Electrical` prefix for electrical measurements to avoid ambiguity (e.g., `ElectricalCurrent` not `Current`)
 - Keep property names consistent with the interface name
 

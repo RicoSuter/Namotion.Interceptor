@@ -14,6 +14,6 @@ public interface IColorState
     /// <summary>
     /// The current color as a hex string (e.g., "#FF0000" for red).
     /// </summary>
-    [State(Unit = StateUnit.HexColor)]
+    [State(Unit = StateUnit.HexColor, Position = 111)]
     string? Color { get; }
 }

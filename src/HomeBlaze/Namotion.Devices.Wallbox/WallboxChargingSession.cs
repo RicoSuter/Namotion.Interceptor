@@ -7,19 +7,19 @@ namespace Namotion.Devices.Wallbox;
 [InterceptorSubject]
 public partial class WallboxChargingSession : ITitleProvider, IIconProvider
 {
-    [State(Position = 0, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 0)]
     public partial bool IsCharging { get; internal set; }
 
-    [State(Position = 1, Unit = StateUnit.WattHour)]
+    [State(Unit = StateUnit.WattHour, Position = 1)]
     public partial decimal? AddedEnergy { get; internal set; }
 
-    [State(Position = 2, Unit = StateUnit.WattHour)]
+    [State(Unit = StateUnit.WattHour, Position = 2)]
     public partial decimal? AddedGreenEnergy { get; internal set; }
 
-    [State(Position = 3, Unit = StateUnit.WattHour)]
+    [State(Unit = StateUnit.WattHour, Position = 3)]
     public partial decimal? AddedGridEnergy { get; internal set; }
 
-    [State(Position = 4, Unit = StateUnit.Kilometer)]
+    [State(Unit = StateUnit.Kilometer, Position = 4)]
     public partial decimal? AddedRange { get; internal set; }
 
     [State(Position = 5)]
@@ -28,7 +28,7 @@ public partial class WallboxChargingSession : ITitleProvider, IIconProvider
     [State(Position = 6)]
     public partial decimal? SessionCost { get; internal set; }
 
-    [State(Position = 7, Unit = StateUnit.Percent)]
+    [State(Unit = StateUnit.Percent, Position = 7)]
     public partial decimal? ChargeLevel { get; internal set; }
 
     [Derived]

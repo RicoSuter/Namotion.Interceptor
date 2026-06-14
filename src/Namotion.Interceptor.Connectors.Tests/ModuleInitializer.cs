@@ -31,6 +31,14 @@ public static class ModuleInitializer
             var state = _stateByCounter.GetOrCreateValue(counterKey);
 
             var text = builder.ToString();
+
+            // Skip PublicApiGenerator snapshots: their output starts with "[assembly: ...]" and
+            // contains C# type names that can be exactly 22 base62-compatible chars (e.g.
+            // "SourceOwnershipManager", "BackgroundTaskLifetime"), which would otherwise collide
+            // with the random base62 subject-ID pattern and get scrubbed to "SubjectId_N".
+            if (text.Contains("[assembly:"))
+                return;
+
             var replaced = Base62IdPattern.Replace(text, match =>
             {
                 var id = match.Value;

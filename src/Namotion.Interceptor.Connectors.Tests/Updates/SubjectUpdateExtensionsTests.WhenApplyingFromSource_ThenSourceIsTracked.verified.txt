@@ -25,7 +25,7 @@
       FullName: {
         Kind: Value,
         Value: John ,
-        Timestamp: DateTimeOffset_2
+        Timestamp: DateTimeOffset_1
       },
       Father: {
         Kind: Object

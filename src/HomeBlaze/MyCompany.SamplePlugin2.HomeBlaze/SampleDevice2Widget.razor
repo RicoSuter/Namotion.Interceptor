@@ -1,0 +1,34 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SampleDevice2))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.LightMode" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Device?.Name ?? "Sample Device 2")</MudText>
+        </MudStack>
+
+        <MudDivider />
+
+        @if (Device?.IsDark == true)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                Low light level detected
+            </MudAlert>
+        }
+
+        <MudStack Row="true" Spacing="4">
+            <MudStack>
+                <MudText Typo="Typo.caption">Light Level</MudText>
+                <MudText Typo="Typo.h5">@(Device?.LightLevel.ToString("F1") ?? "\u2014") lux</MudText>
+            </MudStack>
+        </MudStack>
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private SampleDevice2? Device => Subject as SampleDevice2;
+}

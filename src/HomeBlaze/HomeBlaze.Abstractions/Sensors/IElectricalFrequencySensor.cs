@@ -13,6 +13,6 @@ public interface IElectricalFrequencySensor
     /// <summary>
     /// The current electrical frequency reading.
     /// </summary>
-    [State(Unit = StateUnit.Hertz)]
+    [State(Unit = StateUnit.Hertz, Position = 322)]
     decimal? ElectricalFrequency { get; }
 }

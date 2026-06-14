@@ -12,9 +12,10 @@ public class PlaywrightFixture : IAsyncLifetime
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private WebTestingHostFactory<App>? _factory;
+    private readonly List<IBrowserContext> _contexts = [];
 
     public IBrowser Browser => _browser ?? throw new InvalidOperationException("Browser not initialized");
-    
+
     public string ServerAddress => _factory?.ServerAddress ?? throw new InvalidOperationException("Server not started");
 
     public async Task InitializeAsync()
@@ -29,17 +30,18 @@ public class PlaywrightFixture : IAsyncLifetime
         _playwright = await Playwright.CreateAsync();
         _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {
-            #if DEBUG
             Headless = true,
-            #else
-            Headless = true,
-            #endif
-            SlowMo = 500 // Slow down actions by 500ms for visibility
         });
     }
 
     public async Task DisposeAsync()
     {
+        foreach (var context in _contexts)
+        {
+            await context.CloseAsync();
+        }
+        _contexts.Clear();
+
         if (_browser != null)
         {
             await _browser.CloseAsync();
@@ -51,10 +53,12 @@ public class PlaywrightFixture : IAsyncLifetime
 
     /// <summary>
     /// Creates a new browser context and page for isolated test execution.
+    /// The context is tracked and disposed when the fixture is torn down.
     /// </summary>
     public async Task<IPage> CreatePageAsync()
     {
         var context = await Browser.NewContextAsync();
+        _contexts.Add(context);
         return await context.NewPageAsync();
     }
 }

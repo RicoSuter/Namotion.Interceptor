@@ -41,7 +41,7 @@ The registry makes it easy to find metadata associated with properties:
 var property = registered.TryGetProperty("Pressure");
 foreach (var attribute in property!.Attributes)
 {
-    Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attribute.Reference.GetValue()}");
+    Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attribute.GetValue()}");
 }
 ```
 
@@ -134,7 +134,7 @@ Use `AddDerivedAttribute` to create computed metadata that updates automatically
 ```csharp
 // Add a derived attribute that computes the maximum based on current value
 pressureProperty.AddDerivedAttribute("DynamicMax", typeof(decimal),
-    getValue: s => ((decimal)pressureProperty.Reference.GetValue()) * 1.5m,
+    getValue: s => ((decimal)pressureProperty.GetValue()!) * 1.5m,
     setValue: null);
 ```
 
@@ -142,7 +142,9 @@ This pattern is useful for creating adaptive metadata that changes based on the 
 
 ## Custom property initializers
 
-Implement `ISubjectPropertyInitializer` in a .NET attribute to automatically add metadata attributes when properties are created:
+Implement `ISubjectPropertyInitializer` to automatically add metadata attributes when properties are attached. There are two ways to register an initializer:
+
+**As an attribute.** When you own the attribute class, implement the interface directly on it:
 
 ```csharp
 public class UnitAttribute : Attribute, ISubjectPropertyInitializer
@@ -157,12 +159,36 @@ public class UnitAttribute : Attribute, ISubjectPropertyInitializer
     }
 }
 
-// Usage - automatically creates a Unit attribute
+// Automatically creates a "Unit" attribute when the property is registered
 [Unit("°C")]
 public partial decimal Temperature { get; set; }
 ```
 
-This pattern allows you to define reusable metadata behaviors that are automatically applied when subjects are registered.
+**As a global initializer.** Register an `ISubjectPropertyInitializer` on the context to run for every property that gets attached. This allows initialization based on any source, e.g. reflection attributes or external configuration.
+
+```csharp
+public class DefaultValueInitializer : ISubjectPropertyInitializer
+{
+    public void InitializeProperty(RegisteredSubjectProperty property)
+    {
+        var attribute = property.ReflectionAttributes
+            .OfType<DefaultValueAttribute>()
+            .FirstOrDefault();
+
+        if (attribute is not null)
+        {
+            property.AddAttribute("DefaultValue", property.Type,
+                _ => attribute.Value, null);
+        }
+    }
+}
+
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking();
+
+context.AddService<ISubjectPropertyInitializer>(new DefaultValueInitializer());
+```
 
 ## Subject IDs
 

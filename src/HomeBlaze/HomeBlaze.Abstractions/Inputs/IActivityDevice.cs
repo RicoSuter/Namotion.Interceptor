@@ -13,13 +13,13 @@ public interface IActivityDevice
     /// <summary>
     /// The currently active activity.
     /// </summary>
-    [State]
+    [State(Position = 160)]
     DeviceActivity? CurrentActivity { get; }
 
     /// <summary>
     /// The available activities on this device.
     /// </summary>
-    [State]
+    [State(Position = 161)]
     DeviceActivity[] Activities { get; }
 
     /// <summary>
