@@ -192,13 +192,3 @@ namespace Namotion.Interceptor.Registry.Paths
         public virtual string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
 }
-namespace Namotion.Interceptor.Registry.Performance
-{
-    public sealed class ObjectPool<T>
-        where T :  class
-    {
-        public ObjectPool(System.Func<T> factory) { }
-        public T Rent() { }
-        public void Return(T item) { }
-    }
-}
