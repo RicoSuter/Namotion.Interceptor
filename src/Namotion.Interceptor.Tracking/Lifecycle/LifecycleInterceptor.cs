@@ -1,12 +1,13 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
-    private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference>> _attachedSubjects = [];
+    private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = [];
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
     [ThreadStatic]
@@ -54,8 +55,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <summary>
     /// Creates a batch scope that defers isLastDetach processing.
     /// Subjects whose last property reference is removed during the scope
-    /// stay in _attachedSubjects with an empty set. On dispose, only
-    /// subjects still with an empty set are detached.
+    /// stay in _attachedSubjects as a present-but-empty entry. On dispose,
+    /// only subjects whose entry is still empty are detached.
     /// PropertyReferenceRemoved/Added always fire immediately.
     /// </summary>
     public IDisposable CreateBatchScope(IInterceptorSubjectContext rootContext)
@@ -78,9 +79,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             {
                 foreach (var (subject, deferredProperty) in s_deferredLastDetaches)
                 {
-                    if (_attachedSubjects.TryGetValue(subject, out var set) && set.Count == 0)
+                    if (_attachedSubjects.TryGetValue(subject, out var set) && set.IsEmpty)
                     {
-                        // Genuinely orphaned — execute full detach.
+                        // Genuinely orphaned, execute full detach.
                         _attachedSubjects.Remove(subject);
 
                         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
@@ -140,7 +141,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                             ReturnList(children);
                         }
                     }
-                    // else: re-attached during batch → skip
+                    // else: re-attached during batch (entry not empty), skip
                 }
 
                 s_deferredLastDetaches.Clear();
@@ -204,7 +205,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AttachToContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, []);
+        var isFirstAttach = _attachedSubjects.TryAdd(subject, default);
         if (!isFirstAttach)
         {
             return;
@@ -235,8 +236,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private void AttachToProperty(IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference property, object? index)
     {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, []);
-        if (!_attachedSubjects[subject].Add(property))
+        ref var set = ref CollectionsMarshal.GetValueRefOrAddDefault(_attachedSubjects, subject, out var existed);
+        var isFirstAttach = !existed;
+        if (!set.Add(property))
         {
             return;
         }
@@ -321,12 +323,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference property, object? index)
     {
-        if (!_attachedSubjects.TryGetValue(subject, out var set) || !set.Remove(property))
+        ref var set = ref CollectionsMarshal.GetValueRefOrNullRef(_attachedSubjects, subject);
+        if (Unsafe.IsNullRef(ref set) || !set.Remove(property))
         {
             return;
         }
 
-        var isLastDetach = set.Count == 0;
+        var isLastDetach = set.IsEmpty;
 
         // Collect children and clean up in a single pass over properties
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
@@ -334,15 +337,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             if (s_batchScopeCount > 0)
             {
-                // Defer the full detach — subject stays in _attachedSubjects with empty set.
-                // PropertyReferenceRemoved still fires below (per-link, always immediate).
-                // ContextDetach deferred until scope dispose.
+                // Defer the full detach. The entry stays in _attachedSubjects as a present-but-empty
+                // PropertyReferenceSet (the ref-mutated struct is already empty), so a re-attach within
+                // the batch is seen as existing (isFirstAttach == false). EndBatchScope runs the real
+                // detach only for entries that are still empty.
                 s_deferredLastDetaches ??= [];
                 s_deferredLastDetaches[subject] = property;
             }
             else
             {
-                // Immediate detach (existing behavior)
+                // Immediate detach (existing behavior). Structurally modifies _attachedSubjects,
+                // so the ref to set must not be used after this point.
                 _attachedSubjects.Remove(subject);
 
                 foreach (var entry in subject.Properties)
@@ -367,6 +372,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
 
         var count = subject.DecrementReferenceCount();
+        var contextDetach = isLastDetach && s_batchScopeCount == 0;
         var change = new SubjectLifecycleChange
         {
             Subject = subject,
@@ -374,10 +380,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Index = index,
             ReferenceCount = count,
             IsPropertyReferenceRemoved = true,
-            IsContextDetach = isLastDetach && s_batchScopeCount == 0
+            IsContextDetach = contextDetach
         };
 
-        if (isLastDetach && s_batchScopeCount == 0)
+        if (contextDetach)
         {
             SubjectDetaching?.Invoke(change);
         }
