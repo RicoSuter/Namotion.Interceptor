@@ -1,4 +1,4 @@
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -171,7 +171,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                         if (property is not null)
                         {
                             registeredSubject.RemoveParent(property, change.Index);
-
+                         
                             property.RemoveChild(new SubjectPropertyChild
                             {
                                 Subject = change.Subject,
@@ -179,7 +179,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                             });
                         }
                     }
-
+                    
                     if (change.IsContextDetach)
                     {
                         // Remove stale parent references from children and clear
@@ -261,7 +261,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
         // holding _knownSubjects would risk deadlock.
         registeredProperty?.RefreshCollectionIndices(value, registry: this);
     }
-
+    
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)
     {
