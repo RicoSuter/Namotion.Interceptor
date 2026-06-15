@@ -1,5 +1,7 @@
 # Deferred Subject Removal
 
+> Note: Superseded by the lifecycle batch scope. The `SuppressRemoval()` API described below no longer exists; the deferred-detach mechanism now lives in `LifecycleInterceptor.CreateBatchScope`. This document is kept as design history.
+
 ## Problem
 
 When a subject moves between structural properties within the same update (e.g., DictA → DictB), the `SubjectUpdateApplier` processes properties sequentially. If the source property (DictA) is processed first, the subject is fully detached — removed from both `_knownSubjects` and `_subjectIdToSubject`, with parent/child cleanup executed. When the target property (DictB) is processed, the subject is re-attached from scratch.

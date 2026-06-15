@@ -191,15 +191,22 @@ When a collection or dictionary property is `null`, it keeps its declared `kind`
 
 An empty (non-null) collection or dictionary uses an empty `items` array (`[]`).
 
-### Attributes
+### Complete-State Collection and Dictionary Updates
+
+Both complete and partial updates use the same complete-state model: the `items` array always carries the full new ordering (collections) or the full set of key entries (dictionaries). There are no per-element insert, remove, move, or reorder operations on the wire, and there is no `index` or `count` field. Ordering for collections is the array order itself; dictionary entries are identified by `id` plus `key`.
+
+A structural change is therefore expressed by sending the new `items` array. Items that already exist on the receiver are referenced by `id` only (collections) or `id` plus `key` (dictionaries); newly introduced items additionally have their properties in the `subjects` dictionary (and are listed in `completeSubjectIds`, unless `completeSubjectIds` is null, which marks all subjects in the update complete).
+
+For example, inserting a new item into `[A, B]` to produce `[A, NewItem, B]` sends the full new ordering:
 
 ```json
 {
   "kind": "Collection",
-  "operations": [
-    { "action": "Insert", "index": 1, "id": "5" }
-  ],
-  "count": 3
+  "items": [
+    { "id": "childAId" },
+    { "id": "newItemId" },
+    { "id": "childBId" }
+  ]
 }
 ```
 
@@ -208,52 +215,14 @@ The new item's data is in the `subjects` dictionary:
 ```json
 {
   "subjects": {
-    "5": {
+    "newItemId": {
       "name": { "kind": "Value", "value": "New Item" }
     }
   }
 }
 ```
 
-### Complete vs Partial Collection Updates
-
-**Partial updates** (incremental changes) have `operations` for structural changes:
-
-```json
-{
-  "kind": "Collection",
-  "operations": [ { "action": "Remove", "index": 1 } ],
-  "items": [ { "index": 0, "id": "2" } ],
-  "count": 2
-}
-```
-
-**Complete updates** (initial sync) have no `operations` - just all items in `items`:
-
-```json
-{
-  "kind": "Collection",
-  "items": [
-    { "index": 0, "id": "1" },
-    { "index": 1, "id": "2" }
-  ],
-  "count": 2
-}
-```
-
-### Applying Collection Updates
-
-When applying sparse property updates from the `items` array, the `index` must be valid according to the declared `count`:
-
-| Condition | Behavior |
-|-----------|----------|
-| `index < count` | Valid - update or create item at that position |
-| `index >= count` | **Error** - throws `InvalidOperationException` |
-| `count` not specified | Index validated against current collection size |
-
-**Important:** The `count` field declares the final expected size of the collection. Any `index` in the `items` array must satisfy `index < count`. An index >= count indicates a malformed update (bug in the sender) and will throw an exception.
-
-For complete updates (no `operations`), items at indices that don't exist locally are created sequentially. For partial updates, indices reference the final position after structural operations have been applied.
+This complete-state model avoids computing diff operations against a previous collection, which can be incorrect when the sender's old value is stale (for example after reconnection or after change-queue deduplication). The receiver reconciles its local collection or dictionary to match the `items` array: items present in `items` are reused (looked up by `id`) or created, and local entries absent from `items` are removed.
 
 ## Circular References
 
@@ -279,21 +248,20 @@ No special `reference` field is needed - the `id` field always points to a subje
 
 ## Null Collections and Dictionaries
 
-When a collection or dictionary property is set to `null`, it is represented as `Kind=Value, Value=null` — the same as any other null property value:
+When a collection or dictionary property is `null`, it keeps its declared `kind` (`Collection` or `Dictionary`) and omits the `items` field. The applier treats a missing `items` as "set the property to null". An empty (non-null) collection or dictionary uses an empty `items` array (`[]`).
 
 ```json
-{
-  "kind": "Value",
-  "value": null
-}
+{ "kind": "Collection" }
 ```
 
-Note: In partial updates, `Kind=Collection/Dictionary` entries with no operations are **path nodes** — they describe the structural parent-to-child reference so the apply side can navigate the tree, not the collection's new state. An empty collection in a complete update is represented with `count: 0` and no items.
+```json
+{ "kind": "Dictionary" }
+```
 
 ## Limitations
 
-- **No "clear collection" operation**: clearing N items emits N individual Remove operations.
-- **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections support structural diffs.
+- **Complete-state collections and dictionaries**: every structural change resends the full `items` array. There are no incremental operations and no separate "clear collection" operation; clearing a collection sends an empty `items` array (`[]`).
+- **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections and dictionaries use the complete-state `items` model.
 - **Conflict resolution** is last-applied-wins by message arrival order with eventual consistency via reconnection.
 - **Dictionary keys** are normalized to strings during transport. Non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`.
 
@@ -401,11 +369,11 @@ Dictionary keys are normalized to strings during transport. Non-string keys (int
 
 ### Deferred removal during structural apply
 
-`SubjectUpdateApplier.ApplyUpdate` wraps all structural processing in `SubjectRegistry.SuppressRemoval()`. This prevents subjects from being temporarily unregistered when they move between structural properties within the same update (e.g., removed from one dictionary, added to another).
+`SubjectUpdateApplier.ApplyUpdate` wraps all structural processing in a lifecycle batch scope (`LifecycleInterceptor.CreateBatchScope(rootContext)`). This prevents subjects from being temporarily detached when they move between structural properties within the same update (for example, removed from one dictionary and added to another).
 
-Without suppression, the sequential processing of properties could fully detach a subject (removing it from `_knownSubjects` and `_subjectIdToSubject`) before re-attaching it to the target property. During this gap, the `ChangeQueueProcessor` filter — which depends on `_knownSubjects` via `TryGetRegisteredProperty()` — could drop value changes for the subject, causing permanent divergence.
+Without the batch scope, the sequential processing of properties could fully detach a subject before re-attaching it to the target property. During that gap the subject leaves the registry (no longer present in `_subjectIdToSubject`), so the `ChangeQueueProcessor` filter, which resolves the registered property via `TryGetRegisteredProperty()`, could drop value changes for the subject and cause permanent divergence.
 
-With suppression, the subject stays visible in both maps throughout the apply window. On scope dispose, only subjects that are genuinely orphaned (removed but never re-attached, verified by checking `RegisteredSubject.Parents.Length == 0`) are cleaned up.
+During a batch scope, a subject's last detach (the removal of its final property reference) is deferred: the subject stays in the lifecycle's `_attachedSubjects` as a present-but-empty entry (and therefore remains visible in the registry and resolvable by ID). A re-attach within the same batch sees the existing entry and keeps the subject attached. When the outermost scope is disposed (`EndBatchScope`), only subjects whose entry is still empty (never re-attached during the batch) get the real detach. Per-link `PropertyReferenceAdded`/`PropertyReferenceRemoved` always fire immediately. The batch state is thread-local, so concurrent threads without a scope are not affected.
 
 ## Implementing a Custom Client
 

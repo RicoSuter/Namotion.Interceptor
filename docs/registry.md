@@ -243,24 +243,9 @@ Subject IDs are automatically managed during the subject lifecycle:
 
 ### Deferred subject removal
 
-When applying updates that move subjects between structural properties, subjects can be temporarily unregistered between detach and re-attach. `SubjectRegistry.SuppressRemoval()` returns an `IDisposable` scope that defers context-detach cleanup:
+When applying updates that move subjects between structural properties, a subject can be temporarily detached between the removal from one property and the re-attach to another. While detached, the subject leaves the registry and becomes unresolvable by ID, which can cause value changes to be dropped mid-apply.
 
-```csharp
-using (registry.SuppressRemoval())
-{
-    // Structural changes here won't remove subjects from the registry.
-    // On dispose, only genuinely orphaned subjects are removed.
-}
-```
-
-During suppression:
-- `PropertyReferenceRemoved/Added` always run immediately (per-link, always correct)
-- Context-detach cleanup is deferred (subjects stay in `_knownSubjects` and `_subjectIdToSubject`)
-- On dispose, subjects with no parents are removed; subjects re-attached by any thread are kept
-
-The suppression counter is thread-local — concurrent threads without a scope are not affected.
-
-See [Deferred Subject Removal design](design/deferred-subject-removal.md) for full rationale and concurrent correctness analysis.
+This atomicity is handled by the lifecycle, not the registry directly. `SubjectUpdateApplier` wraps each apply in a lifecycle batch scope (`LifecycleInterceptor.CreateBatchScope`), which defers a subject's last detach so it stays attached (and registered) throughout the apply window; only subjects that are still orphaned when the scope ends are detached. See the [Subject Updates documentation](connectors-subject-updates.md#deferred-removal-during-structural-apply) for details.
 
 ### Without a registry
 
