@@ -55,7 +55,9 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     /// </summary>
     public long LastReceivedSequence => _sequenceTracker.ExpectedNextSequence - 1;
 
-    private volatile bool _isStarted;
+    // Signaled once StartListeningAsync has established the first connection.
+    // ExecuteAsync awaits this gate instead of polling a flag.
+    private readonly TaskCompletionSource _startedGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
     private int _disposed;
@@ -95,7 +97,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
         await ConnectAsync(cancellationToken).ConfigureAwait(false);
 
-        _isStarted = true;
+        // Release the monitor loop now that the first connection is established.
+        _startedGate.TrySetResult();
 
         return new ConnectionLifetime(async () =>
         {
@@ -592,17 +595,18 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     /// <summary>
     /// Compares the client's SentStructuralState against the actual registry.
     /// Returns true if divergence is detected (CQP dropped a mutation).
-    /// Only runs when the client has been idle (no updates received for HeartbeatInterval).
+    /// Only runs when the client has been idle (no updates received for IdleDivergenceCheckDelay).
     /// </summary>
     private bool HasRegistryDivergence()
     {
         // Only check when client is idle (no updates received recently).
         // The server heartbeat only fires during server idle, so receiving a heartbeat
         // means the server has been quiet. We additionally require the client to be quiet
-        // (no updates received for 5 seconds) to avoid false positives from in-flight updates.
-        const long clientIdleThresholdMs = 5000;
+        // (no updates received for IdleDivergenceCheckDelay) to avoid false positives from
+        // in-flight updates.
+        var idleThresholdMs = _configuration.IdleDivergenceCheckDelay.TotalMilliseconds;
         var timeSinceLastUpdate = Environment.TickCount64 - Volatile.Read(ref _lastUpdateReceivedTicks);
-        if (timeSinceLastUpdate < clientIdleThresholdMs)
+        if (timeSinceLastUpdate < idleThresholdMs)
             return false;
 
         var idRegistry = _subject.Context.TryGetService<ISubjectIdRegistry>();
@@ -646,22 +650,28 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Wait until StartListeningAsync has been called
-        while (!_isStarted && !stoppingToken.IsCancellationRequested)
+        // Cancel receive loop when stopping (store registration for proper disposal).
+        // Registered before the started gate so a stop during startup also cancels cleanly.
+        _stoppingTokenRegistration = stoppingToken.Register(static state =>
         {
-            await Task.Delay(500, stoppingToken).ConfigureAwait(false);
+            var source = (WebSocketSubjectClientSource)state!;
+            try { source._receiveCts?.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }, this);
+
+        // Wait until StartListeningAsync has established the first connection.
+        try
+        {
+            await _startedGate.Task.WaitAsync(stoppingToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // Stopped before listening started.
         }
 
         // Monitor connection and handle reconnection with exponential backoff
         var reconnectDelay = _configuration.ReconnectDelay;
         var maxDelay = _configuration.MaxReconnectDelay;
-
-        // Cancel receive loop when stopping (store registration for proper disposal)
-        _stoppingTokenRegistration = stoppingToken.Register(() =>
-        {
-            try { _receiveCts?.Cancel(); }
-            catch (ObjectDisposedException) { }
-        });
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -733,7 +743,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             }
         }
 
-        // Cancel receive loop on exit
+        // Belt and braces: the stopping-token registration already cancels the receive loop,
+        // but cancel again on exit in case the loop ended via a non-cancellation break.
         if (_receiveCts is not null)
         {
             await _receiveCts.CancelAsync().ConfigureAwait(false);

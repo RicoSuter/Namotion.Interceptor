@@ -78,6 +78,13 @@ public class WebSocketClientConfiguration
     public TimeSpan CircuitBreakerCooldown { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// Minimum time the client must be idle (no updates received) before a heartbeat
+    /// triggers the client-side registry divergence check. Avoids false positives from
+    /// in-flight updates that have not yet been sent to the server. Default is 5 seconds.
+    /// </summary>
+    public TimeSpan IdleDivergenceCheckDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Path provider for property filtering/mapping.
     /// </summary>
     public PathProviderBase? PathProvider { get; set; }
@@ -150,6 +157,11 @@ public class WebSocketClientConfiguration
         if (CircuitBreakerCooldown <= TimeSpan.Zero && CircuitBreakerFailureThreshold > 0)
         {
             throw new ArgumentException($"CircuitBreakerCooldown must be positive when circuit breaker is enabled, got: {CircuitBreakerCooldown}", nameof(CircuitBreakerCooldown));
+        }
+
+        if (IdleDivergenceCheckDelay < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"IdleDivergenceCheckDelay must be non-negative, got: {IdleDivergenceCheckDelay}", nameof(IdleDivergenceCheckDelay));
         }
     }
 }
