@@ -1,16 +1,28 @@
 {
   "profiles": {
-    "opcua": {
+    "opcua-chaos": {
       "commandName": "Project",
-      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua" }
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-chaos" }
     },
-    "mqtt": {
+    "mqtt-chaos": {
       "commandName": "Project",
-      "environmentVariables": { "DOTNET_ENVIRONMENT": "mqtt" }
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "mqtt-chaos" }
     },
-    "websocket": {
+    "websocket-chaos": {
       "commandName": "Project",
-      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket" }
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-chaos" }
+    },
+    "opcua-load": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-load" }
+    },
+    "mqtt-load": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "mqtt-load" }
+    },
+    "websocket-load": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-load" }
     }
   }
 }

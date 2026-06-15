@@ -21,6 +21,11 @@ public partial class TestNode
     [Path("ws", "IntValue")]
     public partial int IntValue { get; set; }
 
+    [Path("opc", "LongValue")]
+    [Path("mqtt", "LongValue")]
+    [Path("ws", "LongValue")]
+    public partial long LongValue { get; set; }
+
     [Path("opc", "ObjectRef")]
     [Path("mqtt", "ObjectRef")]
     [Path("ws", "ObjectRef")]
@@ -41,37 +46,27 @@ public partial class TestNode
         StringValue = string.Empty;
         DecimalValue = 0;
         IntValue = 0;
+        LongValue = 0;
         ObjectRef = null;
         Collection = [];
         Items = new Dictionary<string, TestNode>();
     }
 
     /// <summary>
-    /// Creates a TestNode root pre-populated near MaxTotalNodes (500) with a multi-level
-    /// graph so the test starts in steady-state rather than a growth phase.
-    /// Depth 0 (root): 20 collection + 10 dict = 30 children
-    /// Depth 1: each has 15 collection children (leaves at depth 2)
-    /// Total: 1 + 30 + (30 * 15) = 481 nodes
+    /// Creates a TestNode root with a configurable number of children.
     /// </summary>
-    public static TestNode CreateWithGraph(IInterceptorSubjectContext context)
+    /// <param name="context">Interceptor context for the root node.</param>
+    /// <param name="collectionCount">Number of collection children.</param>
+    /// <param name="dictionaryCount">Number of dictionary entries.</param>
+    public static TestNode CreateWithGraph(IInterceptorSubjectContext context, int collectionCount = 20, int dictionaryCount = 10)
     {
-        TestNode CreateDepth1Node() => new()
+        return new TestNode(context)
         {
-            Collection = Enumerable.Range(0, 15)
+            Collection = Enumerable.Range(0, collectionCount)
                 .Select(_ => new TestNode())
-                .ToArray()
-        };
-
-        var root = new TestNode(context)
-        {
-            Collection = Enumerable.Range(0, 20)
-                .Select(_ => CreateDepth1Node())
                 .ToArray(),
-
-            Items = Enumerable.Range(0, 10)
-                .ToDictionary(i => $"item-{i}", _ => CreateDepth1Node())
+            Items = Enumerable.Range(0, dictionaryCount)
+                .ToDictionary(i => $"item-{i}", _ => new TestNode())
         };
-
-        return root;
     }
 }

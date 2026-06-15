@@ -1,3 +1,5 @@
+using Namotion.Interceptor.ConnectorTester.Connectors;
+
 namespace Namotion.Interceptor.ConnectorTester.Configuration;
 
 public class ConnectorTesterConfiguration
@@ -5,15 +7,32 @@ public class ConnectorTesterConfiguration
     /// <summary>"opcua", "mqtt", or "websocket"</summary>
     public string Connector { get; set; } = "opcua";
 
-    public TimeSpan MutatePhaseDuration { get; set; } = TimeSpan.FromMinutes(1);
-    public TimeSpan ConvergenceTimeout { get; set; } = TimeSpan.FromMinutes(1);
+    /// <summary>Parsed connector kind based on <see cref="Connector"/>.</summary>
+    public ConnectorKind ConnectorKind =>
+        Enum.TryParse<ConnectorKind>(Connector, ignoreCase: true, out var kind)
+            ? kind
+            : throw new InvalidOperationException(
+                $"Unknown ConnectorTester:Connector value '{Connector}'. Expected one of: {string.Join(", ", Enum.GetNames<ConnectorKind>())}.");
+
+    /// <summary>Number of collection children in the test graph.</summary>
+    public int CollectionCount { get; set; } = 20;
+
+    /// <summary>Number of dictionary entries in the test graph.</summary>
+    public int DictionaryCount { get; set; } = 10;
 
     /// <summary>
-    /// When true, snapshot comparison uses subject IDs to match subjects across participants.
-    /// When false, subjects are matched by graph position (path from root) — required for
-    /// connectors like OPC UA and MQTT where each participant creates independent subject IDs.
+    /// Number of batches per second for the value mutation loop.
+    /// 0 = use RandomValueMutationStrategy (single random mutations).
+    /// Greater than 0 = use BatchValueMutationStrategy (parallel batched updates).
+    /// Each batch mutates ceil(ValueMutationRate / NumberOfBatches) nodes.
     /// </summary>
-    public bool CompareBySubjectId { get; set; } = false;
+    public int NumberOfBatches { get; set; } = 0;
+
+    /// <summary>How often performance metrics are logged to console and performance-*.csv.</summary>
+    public TimeSpan MetricsReportingInterval { get; set; } = TimeSpan.FromMinutes(1);
+
+    public TimeSpan MutatePhaseDuration { get; set; } = TimeSpan.FromMinutes(1);
+    public TimeSpan ConvergenceTimeout { get; set; } = TimeSpan.FromMinutes(1);
 
     public ParticipantConfiguration Server { get; set; } = new()
     {

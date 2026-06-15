@@ -1,12 +1,13 @@
 using System.Collections.Concurrent;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 namespace Namotion.Interceptor.ConnectorTester.Logging;
 
 /// <summary>
 /// Logger provider that writes to both console and per-cycle log files.
-/// The verification engine signals cycle boundaries via StartNewCycle/FinishCycle.
+/// The verification engine signals cycle boundaries via StartCycle/FinishCycle.
 /// </summary>
-public sealed class CycleLoggerProvider : ILoggerProvider
+public sealed class CycleLoggerProvider : ILoggerProvider, ICycleRecorder
 {
     private const int MaxPassingLogFiles = 50;
 
@@ -24,7 +25,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
         Directory.CreateDirectory(_logDirectory);
     }
 
-    public void StartNewCycle(int cycleNumber)
+    public void StartCycle(int cycleNumber)
     {
         lock (_fileLock)
         {
@@ -32,9 +33,8 @@ public sealed class CycleLoggerProvider : ILoggerProvider
             _currentWriter?.Dispose();
 
             _currentCycle = cycleNumber;
-            var timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH-mm-ss");
             _currentFilePath = Path.Combine(_logDirectory,
-                $"cycle-{cycleNumber:D3}-pending-{timestamp}.log");
+                $"cycle-{cycleNumber:D4}-pending.log");
 
             _currentWriter = new StreamWriter(_currentFilePath, append: false)
             {
@@ -43,7 +43,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
         }
     }
 
-    public void FinishCycle(int cycleNumber, bool passed)
+    public void FinishCycle(int cycleNumber, CycleResult result)
     {
         lock (_fileLock)
         {
@@ -54,9 +54,8 @@ public sealed class CycleLoggerProvider : ILoggerProvider
             _currentWriter.Dispose();
             _currentWriter = null;
 
-            // Rename file with result
-            var result = passed ? "pass" : "FAIL";
-            var newPath = _currentFilePath.Replace("-pending-", $"-{result}-");
+            var resultSuffix = result == CycleResult.Pass ? "pass" : "FAIL";
+            var newPath = _currentFilePath.Replace("-pending.log", $"-{resultSuffix}.log");
 
             try
             {
@@ -85,10 +84,18 @@ public sealed class CycleLoggerProvider : ILoggerProvider
     }
 
     /// <summary>
-    /// Checks the current cycle log for structural hash mismatch warnings.
-    /// Returns the matching log lines, or empty if none found.
+    /// The connector logs this message (see WebSocketSubjectClientSource) when the server and
+    /// client structural hashes diverge and a reconnection is triggered. Matched as a substring
+    /// so the formatted hash arguments do not affect detection.
     /// </summary>
-    public List<string> GetHashMismatchWarnings()
+    private const string HashMismatchMarker = "Structural hash mismatch";
+
+    /// <summary>
+    /// Scans the current cycle log for structural hash mismatch warnings and returns the matching
+    /// lines, or an empty list if none were recorded. Each line was written to the pending cycle
+    /// file by the connector's warning, so the buffered writer is flushed before reading.
+    /// </summary>
+    public IReadOnlyList<string> GetHashMismatchWarnings()
     {
         lock (_fileLock)
         {
@@ -97,9 +104,21 @@ public sealed class CycleLoggerProvider : ILoggerProvider
             if (_currentFilePath is null || !File.Exists(_currentFilePath))
                 return [];
 
-            return File.ReadAllLines(_currentFilePath)
-                .Where(line => line.Contains("Structural hash mismatch", StringComparison.Ordinal))
-                .ToList();
+            // The cycle's StreamWriter is still open while the cycle runs, so open with
+            // FileShare.ReadWrite to read alongside it. File.ReadAllLines requests an
+            // exclusive-enough handle that collides with the live writer on Windows.
+            var matches = new List<string>();
+            using var stream = new FileStream(
+                _currentFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+
+            while (reader.ReadLine() is { } line)
+            {
+                if (line.Contains(HashMismatchMarker, StringComparison.Ordinal))
+                    matches.Add(line);
+            }
+
+            return matches;
         }
     }
 
@@ -119,7 +138,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
     {
         try
         {
-            var passingLogs = Directory.GetFiles(_logDirectory, "cycle-*-pass-*.log")
+            var passingLogs = Directory.GetFiles(_logDirectory, "cycle-*-pass.log")
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .Skip(MaxPassingLogFiles)
                 .ToList();
@@ -175,11 +194,21 @@ public sealed class CycleLoggerProvider : ILoggerProvider
                 LogLevel.Critical => "CRIT",
                 _ => "INFO"
             };
-            var message = $"[{timestamp}] [{level}] [{_categoryName}] {formatter(state, exception)}";
+            // Participant tagging is baked into _categoryName by TaggingLoggerFactory (one factory
+            // per participant SP), so the suffix is already present here for connector-internal
+            // loggers and absent for main-host loggers (verification engine, etc.).
+            var prefix = $"[{timestamp}] [{level}] [{_categoryName}] ";
+            var message = prefix + formatter(state, exception);
 
             if (exception != null)
             {
-                message += Environment.NewLine + exception;
+                // Prefix every line of the exception text so the cycle log stays line-grep-able.
+                // Without this, exception/stack-trace lines drop the [time] [level] [category]
+                // prefix and slip through grep filters used to triage CI failures.
+                foreach (var line in exception.ToString().Split('\n'))
+                {
+                    message += Environment.NewLine + prefix + line.TrimEnd('\r');
+                }
             }
 
             // Write to cycle log file (console is handled by the default console provider)
