@@ -4,7 +4,6 @@ using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 using Namotion.Interceptor.Connectors;
@@ -23,7 +22,7 @@ namespace Namotion.Interceptor.WebSocket.Client;
 /// <summary>
 /// WebSocket client source that connects to a WebSocket server and synchronizes subjects.
 /// </summary>
-public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSource, IFaultInjectable, IAsyncDisposable
+public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInjectable, IAsyncDisposable
 {
     private const int SendBufferShrinkThreshold = 256 * 1024;
 
@@ -55,26 +54,22 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     /// </summary>
     public long LastReceivedSequence => _sequenceTracker.ExpectedNextSequence - 1;
 
-    // Signaled once StartListeningAsync has established the first connection.
-    // ExecuteAsync awaits this gate instead of polling a flag.
-    private readonly TaskCompletionSource _startedGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
     private int _disposed;
-    private CancellationTokenRegistration _stoppingTokenRegistration;
 
-    public IInterceptorSubject RootSubject => _subject;
-    public int WriteBatchSize => _configuration.WriteBatchSize;
+    /// <inheritdoc />
+    public override IInterceptorSubject RootSubject => _subject;
+
+    /// <inheritdoc />
+    public override int WriteBatchSize => _configuration.WriteBatchSize;
 
     public WebSocketSubjectClientSource(
         IInterceptorSubject subject,
         WebSocketClientConfiguration configuration,
         ILogger<WebSocketSubjectClientSource> logger)
+        : base(ValidateArguments(subject, configuration, logger), logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize)
     {
-        ArgumentNullException.ThrowIfNull(subject);
-        ArgumentNullException.ThrowIfNull(configuration);
-        ArgumentNullException.ThrowIfNull(logger);
-
         _subject = subject;
         _configuration = configuration;
         _logger = logger;
@@ -91,37 +86,57 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         configuration.Validate();
     }
 
-    public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
+    // Validates arguments before the base constructor runs and returns the subject context.
+    // Keeps ArgumentNullException semantics even though the base call dereferences these arguments.
+    private static IInterceptorSubjectContext ValidateArguments(
+        IInterceptorSubject subject,
+        WebSocketClientConfiguration configuration,
+        ILogger<WebSocketSubjectClientSource> logger)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
+        return subject.Context;
+    }
+
+    /// <inheritdoc />
+    protected override async Task<IAsyncDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
         _propertyWriter = propertyWriter;
 
         await ConnectAsync(cancellationToken).ConfigureAwait(false);
 
-        // Release the monitor loop now that the first connection is established.
-        _startedGate.TrySetResult();
+        // The base owns the listen lifetime: it runs the connection monitor loop as a
+        // background task (handling reconnect, backoff, circuit breaker and force-kill restart)
+        // and, on disposal, cancels that loop and closes the active socket.
+        return BackgroundTaskLifetime.Start(
+            cancellationToken,
+            _logger,
+            RunConnectionMonitorAsync,
+            CloseActiveSocketAsync);
+    }
 
-        return new ConnectionLifetime(async () =>
+    private async ValueTask CloseActiveSocketAsync()
+    {
+        // Read the current socket (not a stale captured reference) so that
+        // after reconnection, we close the active connection.
+        var currentSocket = _webSocket;
+        if (currentSocket?.State == WebSocketState.Open)
         {
-            // Read the current socket (not a stale captured reference) so that
-            // after reconnection, we close the active connection.
-            var currentSocket = _webSocket;
-            if (currentSocket?.State == WebSocketState.Open)
+            try
             {
-                try
-                {
-                    using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await currentSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", closeCts.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    currentSocket.Abort();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error while closing WebSocket connection");
-                }
+                using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await currentSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", closeCts.Token).ConfigureAwait(false);
             }
-        });
+            catch (OperationCanceledException)
+            {
+                currentSocket.Abort();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error while closing WebSocket connection");
+            }
+        }
     }
 
     private async Task ConnectAsync(CancellationToken cancellationToken)
@@ -245,13 +260,14 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 _webSocket?.Dispose();
                 _webSocket = null;
 
-                // Signal completion to prevent ExecuteAsync from hanging
+                // Signal completion so the connection monitor loop can trigger reconnect
                 _receiveLoopCompleted.TrySetResult();
             }
         }
     }
 
-    public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         if (_initialState is null)
         {
@@ -336,7 +352,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         }
     }
 
-    public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         _logger.LogDebug("WriteChangesAsync called with {Count} changes", changes.Length);
 
@@ -648,28 +665,22 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         return Task.CompletedTask;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    /// <summary>
+    /// Monitors the active connection and handles reconnection (exponential backoff,
+    /// circuit breaker) and force-kill restart. Runs as a background task owned by the
+    /// listen lifetime that <see cref="StartListeningAsync"/> returns; the base disposes
+    /// that lifetime (cancelling this loop) on host shutdown or before a retry cycle.
+    /// </summary>
+    private async Task RunConnectionMonitorAsync(CancellationToken stoppingToken)
     {
-        // Cancel receive loop when stopping (store registration for proper disposal).
-        // Registered before the started gate so a stop during startup also cancels cleanly.
-        _stoppingTokenRegistration = stoppingToken.Register(static state =>
+        // Cancel the receive loop when the lifetime is cancelled (host stop or base teardown).
+        await using var stoppingTokenRegistration = stoppingToken.Register(static state =>
         {
             var source = (WebSocketSubjectClientSource)state!;
             try { source._receiveCts?.Cancel(); }
             catch (ObjectDisposedException) { }
         }, this);
 
-        // Wait until StartListeningAsync has established the first connection.
-        try
-        {
-            await _startedGate.Task.WaitAsync(stoppingToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return; // Stopped before listening started.
-        }
-
-        // Monitor connection and handle reconnection with exponential backoff
         var reconnectDelay = _configuration.ReconnectDelay;
         var maxDelay = _configuration.MaxReconnectDelay;
 
@@ -739,11 +750,12 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             finally
             {
                 _isForceKill = false;
+                _forceKillCts = null;
                 cts.Dispose();
             }
         }
 
-        // Belt and braces: the stopping-token registration already cancels the receive loop,
+        // The stopping-token registration already cancels the receive loop,
         // but cancel again on exit in case the loop ended via a non-cancellation break.
         if (_receiveCts is not null)
         {
@@ -796,8 +808,9 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
-        // Stop ExecuteAsync first — this cancels the stoppingToken and waits for ExecuteAsync to exit,
-        // ensuring no concurrent access to resources before we dispose them.
+        // Stop the base ExecuteAsync first. This cancels the stoppingToken, which disposes the
+        // listen lifetime (cancelling the connection monitor and closing the socket) and lets the
+        // change queue processor exit, ensuring no concurrent access to resources before disposal.
         try
         {
             using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -807,9 +820,6 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         {
             // Best effort stop
         }
-
-        // Now safe to dispose — ExecuteAsync has exited
-        await _stoppingTokenRegistration.DisposeAsync().ConfigureAwait(false);
 
         // Cancel receive loop and wait for it to finish before disposing resources
         // (same pattern as ConnectCoreAsync)
@@ -853,26 +863,6 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         if (_sendBuffer is { Capacity: > SendBufferShrinkThreshold, WrittenCount: < SendBufferShrinkThreshold / 4 })
         {
             _sendBuffer = new ArrayBufferWriter<byte>(4096);
-        }
-    }
-
-    private sealed class ConnectionLifetime(Func<Task> onDispose) : IDisposable, IAsyncDisposable
-    {
-        private int _disposed;
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-            // Blocking call in sync path for correctness
-            try { onDispose().GetAwaiter().GetResult(); }
-            catch { /* Best effort */ }
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-            try { await onDispose().ConfigureAwait(false); }
-            catch { /* Best effort */ }
         }
     }
 }
