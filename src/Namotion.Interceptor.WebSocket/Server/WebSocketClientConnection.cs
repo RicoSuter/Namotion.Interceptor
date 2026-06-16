@@ -35,9 +35,12 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private int _disposed;
     private int _consecutiveSendFailures;
     private readonly SentStructuralState _sentState = new();
+    private readonly ConnectionSequenceTracker _clientSequence = new();
 
     public string ConnectionId { get; } = Guid.NewGuid().ToString("N")[..8];
-    
+
+    public ConnectionSequenceTracker ClientSequence => _clientSequence;
+
     public bool IsConnected => _webSocket.State == WebSocketState.Open;
 
     public bool HasRepeatedSendFailures => Volatile.Read(ref _consecutiveSendFailures) >= 3;
@@ -209,6 +212,11 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
     }
 
+    public Task SendResyncAsync(string? reason, CancellationToken cancellationToken)
+    {
+        return SendAsync(MessageType.Resync, new ResyncPayload { Reason = reason }, trackFailures: false, cancellationToken);
+    }
+
     public Task SendErrorAsync(ErrorPayload error, CancellationToken cancellationToken)
     {
         return SendAsync(MessageType.Error, error, trackFailures: false, cancellationToken);
@@ -270,7 +278,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
     }
 
-    public async Task<SubjectUpdate?> ReceiveUpdateAsync(CancellationToken cancellationToken)
+    public async Task<UpdatePayload?> ReceiveUpdateAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -299,7 +307,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
             var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(result.MessageBytes.Span);
             if (messageType == MessageType.Update)
             {
-                var update = _serializer.Deserialize<SubjectUpdate>(result.MessageBytes.Span.Slice(payloadStart, payloadLength));
+                var update = _serializer.Deserialize<UpdatePayload>(result.MessageBytes.Span.Slice(payloadStart, payloadLength));
                 _logger.LogDebug("Client {ConnectionId}: Received update with {SubjectCount} subjects",
                     ConnectionId, update.Subjects.Count);
                 return update;

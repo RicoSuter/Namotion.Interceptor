@@ -189,7 +189,7 @@ public sealed class WebSocketSubjectHandler
 
         while (!stoppingToken.IsCancellationRequested && connection.IsConnected)
         {
-            SubjectUpdate? update;
+            UpdatePayload? update;
             try
             {
                 update = await connection.ReceiveUpdateAsync(stoppingToken).ConfigureAwait(false);
@@ -213,6 +213,17 @@ public sealed class WebSocketSubjectHandler
 
             try
             {
+                if (update.Sequence is { } clientSequence)
+                {
+                    if (!connection.ClientSequence.IsClientUpdateValid(clientSequence))
+                    {
+                        _logger.LogWarning(
+                            "Client {ConnectionId}: client-to-server sequence gap (expected {Expected}, received {Received}). Requesting resync.",
+                            connection.ConnectionId, connection.ClientSequence.ExpectedNextSequence, clientSequence);
+                        await connection.SendResyncAsync("sequence-gap", stoppingToken).ConfigureAwait(false);
+                    }
+                }
+
                 var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
                 // Must use lock (not SemaphoreSlim) because SubjectChangeContext uses [ThreadStatic] storage.
                 lock (_applyUpdateLock)

@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
@@ -422,6 +423,54 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
     }
 
+    private SubjectUpdate BuildOwnedStateUpdate()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        var owned = _ownership.Properties;
+        var changes = new List<SubjectPropertyChange>(owned.Count);
+        foreach (var property in owned)
+        {
+            var current = property.Metadata.GetValue?.Invoke(property.Subject);
+            changes.Add(SubjectPropertyChange.Create<object?>(property, this, timestamp, null, current, current));
+        }
+
+        return SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.ToArray(), _processors);
+    }
+
+    private async Task SendOwnedStateResyncAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken cancellationToken)
+    {
+        var update = BuildOwnedStateUpdate();
+
+        // Acquire _connectionLock before sending: WebSocket does not allow concurrent sends,
+        // and WriteChangesAsync also sends under this lock.
+        try
+        {
+            await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        try
+        {
+            var payload = new UpdatePayload
+            {
+                Root = update.Root,
+                Subjects = update.Subjects,
+                Sequence = Interlocked.Increment(ref _clientSendSequence)
+            };
+            _sendBuffer.Clear();
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, payload);
+            await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            try { _connectionLock.Release(); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
         var completionSource = _receiveLoopCompleted; // capture before loop to avoid stale TCS reference
@@ -523,6 +572,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                             case MessageType.Error:
                                 var error = _serializer.Deserialize<ErrorPayload>(payloadBytes);
                                 _logger.LogWarning("Received error from server: {Code} - {Message}", error.Code, error.Message);
+                                break;
+
+                            case MessageType.Resync:
+                                _logger.LogInformation("Server requested resync; resending complete owned state.");
+                                await SendOwnedStateResyncAsync(webSocket!, cancellationToken).ConfigureAwait(false);
                                 break;
                         }
 
