@@ -221,6 +221,9 @@ public sealed class WebSocketSubjectHandler
                             "Client {ConnectionId}: client-to-server sequence gap (expected {Expected}, received {Received}). Requesting resync.",
                             connection.ConnectionId, connection.ClientSequence.ExpectedNextSequence, clientSequence);
                         await connection.SendResyncAsync("sequence-gap", stoppingToken).ConfigureAwait(false);
+                        // Realign so subsequent in-order messages validate; this update is applied below,
+                        // and the resync response supersedes anything that was missed.
+                        connection.ClientSequence.ResyncTo(clientSequence);
                     }
                 }
 

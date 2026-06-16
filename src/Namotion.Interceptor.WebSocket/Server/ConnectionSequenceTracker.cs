@@ -32,6 +32,13 @@ internal sealed class ConnectionSequenceTracker
     }
 
     /// <summary>
+    /// Realigns the expected next sequence after a gap. The server has accepted (applied) the
+    /// out-of-order update at <paramref name="sequence"/>, so the next in-order message is sequence + 1.
+    /// Without this, every message after a gap re-triggers a gap and a resync storm.
+    /// </summary>
+    public void ResyncTo(long sequence) => Volatile.Write(ref _expectedNextSequence, sequence + 1);
+
+    /// <summary>
     /// Idle check: given the client's reported last-sent sequence, returns true when the server has
     /// already received everything the client sent (mirror of the client's heartbeat sequence check).
     /// </summary>

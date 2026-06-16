@@ -430,10 +430,19 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         var changes = new List<SubjectPropertyChange>(owned.Count);
         foreach (var property in owned)
         {
-            var current = property.Metadata.GetValue?.Invoke(property.Subject);
+            var getValue = property.Metadata.GetValue;
+            if (getValue is null)
+            {
+                continue; // no getter (write-only / structural without reader): nothing to snapshot
+            }
+
+            var current = getValue(property.Subject);
             changes.Add(SubjectPropertyChange.Create<object?>(property, this, timestamp, null, current, current));
         }
 
+        // These changes intentionally have old == new. CreatePartialUpdateFromChanges serializes each
+        // change's new value without dropping no-op changes, so the resync carries the full current owned
+        // state. If that factory ever starts dropping no-op changes, the resync would send nothing.
         return SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.ToArray(), _processors);
     }
 

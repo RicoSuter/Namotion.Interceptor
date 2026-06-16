@@ -58,4 +58,20 @@ public class ConnectionSequenceTrackerTests
         // Assert
         Assert.Equal(1, tracker.ExpectedNextSequence);
     }
+
+    [Fact]
+    public void WhenRealignedAfterGap_ThenNextSequenceValidates()
+    {
+        // Arrange
+        var tracker = new ConnectionSequenceTracker();
+        tracker.IsClientUpdateValid(1);                 // expected 2
+        Assert.False(tracker.IsClientUpdateValid(3));   // gap: expected 2, received 3
+
+        // Act
+        tracker.ResyncTo(3);                            // server applied 3; next expected is 4
+
+        // Assert
+        Assert.Equal(4, tracker.ExpectedNextSequence);
+        Assert.True(tracker.IsClientUpdateValid(4));
+    }
 }
