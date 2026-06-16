@@ -282,40 +282,50 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     {
         try
         {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
-            using var result = await WebSocketMessageReader.ReadMessageAsync(_webSocket, _maxMessageSize, linkedCts.Token).ConfigureAwait(false);
-
-            if (result.IsCloseMessage)
+            // Loop so transport-level control messages (client heartbeats) are handled here and do not
+            // surface to the update-processing loop. Returns only state updates, or null on close/error.
+            while (true)
             {
-                _logger.LogInformation("Client {ConnectionId}: Received close message", ConnectionId);
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
+                using var result = await WebSocketMessageReader.ReadMessageAsync(_webSocket, _maxMessageSize, linkedCts.Token).ConfigureAwait(false);
+
+                if (result.IsCloseMessage)
+                {
+                    _logger.LogInformation("Client {ConnectionId}: Received close message", ConnectionId);
+                    return null;
+                }
+
+                if (result.ExceededMaxSize)
+                {
+                    _logger.LogWarning("Client {ConnectionId}: Message exceeds maximum size of {MaxSize} bytes", ConnectionId, _maxMessageSize);
+                    throw new InvalidOperationException($"Message exceeds maximum size of {_maxMessageSize} bytes");
+                }
+
+                if (!result.Success)
+                {
+                    return null;
+                }
+
+                _logger.LogDebug("Client {ConnectionId}: Received {ByteCount} bytes", ConnectionId, result.MessageBytes.Length);
+
+                var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(result.MessageBytes.Span);
+                if (messageType == MessageType.Update)
+                {
+                    var update = _serializer.Deserialize<UpdatePayload>(result.MessageBytes.Span.Slice(payloadStart, payloadLength));
+                    _logger.LogDebug("Client {ConnectionId}: Received update with {SubjectCount} subjects", ConnectionId, update.Subjects.Count);
+                    return update;
+                }
+
+                if (messageType == MessageType.ClientHeartbeat)
+                {
+                    var heartbeat = _serializer.Deserialize<ClientHeartbeatPayload>(result.MessageBytes.Span.Slice(payloadStart, payloadLength));
+                    await HandleClientHeartbeatAsync(heartbeat, cancellationToken).ConfigureAwait(false);
+                    continue; // control message; keep reading for the next state update
+                }
+
+                _logger.LogWarning("Received unexpected message type {MessageType} from client {ConnectionId}", messageType, ConnectionId);
                 return null;
             }
-
-            if (result.ExceededMaxSize)
-            {
-                _logger.LogWarning("Client {ConnectionId}: Message exceeds maximum size of {MaxSize} bytes", ConnectionId, _maxMessageSize);
-                throw new InvalidOperationException($"Message exceeds maximum size of {_maxMessageSize} bytes");
-            }
-
-            if (!result.Success)
-            {
-                return null;
-            }
-
-            _logger.LogDebug("Client {ConnectionId}: Received {ByteCount} bytes", ConnectionId, result.MessageBytes.Length);
-
-            var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(result.MessageBytes.Span);
-            if (messageType == MessageType.Update)
-            {
-                var update = _serializer.Deserialize<UpdatePayload>(result.MessageBytes.Span.Slice(payloadStart, payloadLength));
-                _logger.LogDebug("Client {ConnectionId}: Received update with {SubjectCount} subjects",
-                    ConnectionId, update.Subjects.Count);
-                return update;
-            }
-
-            _logger.LogWarning("Received unexpected message type {MessageType} from client {ConnectionId}",
-                messageType, ConnectionId);
-            return null;
         }
         catch (WebSocketException ex)
         {
@@ -325,6 +335,21 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         catch (OperationCanceledException)
         {
             return null;
+        }
+    }
+
+    private async Task HandleClientHeartbeatAsync(ClientHeartbeatPayload heartbeat, CancellationToken cancellationToken)
+    {
+        // Trailing-idle gap: the client reports its last-sent sequence during idle. If the server has not
+        // received through it, a final client-to-server message was lost with no following update to reveal
+        // the gap. Request a resync and realign so the resync response (sent at LastSentSequence + 1) validates.
+        if (!_clientSequence.HasReceivedThrough(heartbeat.LastSentSequence))
+        {
+            _logger.LogWarning(
+                "Client {ConnectionId}: trailing client-to-server gap (client sent through {Sent}, server received through {Received}). Requesting resync.",
+                ConnectionId, heartbeat.LastSentSequence, _clientSequence.ExpectedNextSequence - 1);
+            await SendResyncAsync("idle-trailing-gap", cancellationToken).ConfigureAwait(false);
+            _clientSequence.ResyncTo(heartbeat.LastSentSequence);
         }
     }
 
