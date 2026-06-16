@@ -34,7 +34,6 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
     private int _disposed;
     private int _consecutiveSendFailures;
-    private readonly SentStructuralState _sentState = new();
     private readonly ConnectionSequenceTracker _clientSequence = new();
 
     public string ConnectionId { get; } = Guid.NewGuid().ToString("N")[..8];
@@ -369,32 +368,6 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
                 catch (ObjectDisposedException) { }
             }
         }
-    }
-
-    /// <summary>
-    /// Initializes this connection's structural state tracking from the Welcome snapshot.
-    /// Must be called under _applyUpdateLock in the handler.
-    /// </summary>
-    public void InitializeSentState(SubjectUpdate welcomeSnapshot)
-    {
-        _sentState.InitializeFromSnapshot(welcomeSnapshot);
-    }
-
-    /// <summary>
-    /// Updates this connection's structural state from a broadcast update.
-    /// Must be called under _applyUpdateLock in the handler.
-    /// </summary>
-    public void UpdateSentState(SubjectUpdate update)
-    {
-        _sentState.UpdateFromBroadcast(update);
-    }
-
-    /// <summary>
-    /// Computes the structural hash for this connection's sent state.
-    /// </summary>
-    public string? ComputeSentStateHash()
-    {
-        return _sentState.ComputeHash();
     }
 
     public async ValueTask DisposeAsync()

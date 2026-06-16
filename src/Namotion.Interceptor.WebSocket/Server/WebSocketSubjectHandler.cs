@@ -143,7 +143,6 @@ public sealed class WebSocketSubjectHandler
             {
                 welcomeSequence = Volatile.Read(ref _sequence);
                 initialState = SubjectUpdate.CreateCompleteUpdate(_subject, _processors);
-                connection.InitializeSentState(initialState);
             }
 
             // Send Welcome (flushes queued updates under _sendLock)
@@ -259,8 +258,8 @@ public sealed class WebSocketSubjectHandler
         var batchSize = _configuration.WriteBatchSize;
         if (batchSize <= 0 || changes.Length <= batchSize)
         {
-            var (update, sequence, hashes) = CreateUpdateWithSequence(changes.Span);
-            await BroadcastUpdateAsync(update, sequence, hashes, cancellationToken).ConfigureAwait(false);
+            var (update, sequence) = CreateUpdateWithSequence(changes.Span);
+            await BroadcastUpdateAsync(update, sequence, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -268,8 +267,8 @@ public sealed class WebSocketSubjectHandler
             {
                 var currentBatchSize = Math.Min(batchSize, changes.Length - i);
                 var batch = changes.Slice(i, currentBatchSize);
-                var (update, sequence, hashes) = CreateUpdateWithSequence(batch.Span);
-                await BroadcastUpdateAsync(update, sequence, hashes, cancellationToken).ConfigureAwait(false);
+                var (update, sequence) = CreateUpdateWithSequence(batch.Span);
+                await BroadcastUpdateAsync(update, sequence, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -284,44 +283,28 @@ public sealed class WebSocketSubjectHandler
     /// already been fully created from their change data, preventing stale change data
     /// from being assigned a post-Welcome sequence number.
     /// </remarks>
-    private (SubjectUpdate Update, long Sequence, Dictionary<string, string?> ConnectionHashes) CreateUpdateWithSequence(ReadOnlySpan<SubjectPropertyChange> changes)
+    private (SubjectUpdate Update, long Sequence) CreateUpdateWithSequence(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         lock (_applyUpdateLock)
         {
             var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes, _processors);
             var sequence = Interlocked.Increment(ref _sequence);
-
-            // Update all connections' sent states and compute hashes under the lock.
-            // Both operations must be inside the lock to avoid racing with
-            // InitializeSentState (which runs under the same lock during Welcome).
-            var connectionHashes = new Dictionary<string, string?>(_connections.Count);
-            foreach (var (connectionId, connection) in _connections)
-            {
-                connection.UpdateSentState(update);
-                connectionHashes[connectionId] = connection.ComputeSentStateHash();
-            }
-
-            return (update, sequence, connectionHashes);
+            return (update, sequence);
         }
     }
 
-    private async Task BroadcastUpdateAsync(SubjectUpdate update, long sequence,
-        Dictionary<string, string?> connectionHashes, CancellationToken cancellationToken)
+    private async Task BroadcastUpdateAsync(SubjectUpdate update, long sequence, CancellationToken cancellationToken)
     {
         Volatile.Write(ref _lastBroadcastTicks, Environment.TickCount64);
         if (_connections.IsEmpty) return;
 
-        // Per-connection hash: each connection has its own SentStructuralState
-        // initialized from its Welcome. Hashes were pre-computed under _applyUpdateLock.
         await BroadcastToAllAsync(connection =>
         {
-            connectionHashes.TryGetValue(connection.ConnectionId, out var hash);
             var updatePayload = new UpdatePayload
             {
                 Root = update.Root,
                 Subjects = update.Subjects,
-                Sequence = sequence,
-                StructuralHash = hash
+                Sequence = sequence
             };
             var serializedMessage = _serializer.SerializeMessage(MessageType.Update, updatePayload);
             return connection.SendUpdateAsync(serializedMessage, sequence, cancellationToken);
@@ -375,29 +358,13 @@ public sealed class WebSocketSubjectHandler
         if (timeSinceLastBroadcast < _configuration.HeartbeatInterval.TotalMilliseconds)
             return;
 
-        // Compute per-connection hashes under _applyUpdateLock to avoid racing
-        // with UpdateSentState in CreateUpdateWithSequence (SentStructuralState
-        // uses non-concurrent dictionaries internally).
-        Dictionary<string, (long Sequence, string? Hash)> connectionHashes;
-        lock (_applyUpdateLock)
-        {
-            var sequence = Volatile.Read(ref _sequence);
-            connectionHashes = new Dictionary<string, (long, string?)>(_connections.Count);
-            foreach (var (connectionId, connection) in _connections)
-            {
-                connectionHashes[connectionId] = (sequence, connection.ComputeSentStateHash());
-            }
-        }
+        var sequence = Volatile.Read(ref _sequence);
 
         await BroadcastToAllAsync(connection =>
         {
-            if (!connectionHashes.TryGetValue(connection.ConnectionId, out var entry))
-                return Task.CompletedTask;
-
             var heartbeat = new HeartbeatPayload
             {
-                Sequence = entry.Sequence,
-                StateHash = entry.Hash
+                Sequence = sequence
             };
             var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
             return connection.SendHeartbeatAsync(serializedMessage, cancellationToken);
