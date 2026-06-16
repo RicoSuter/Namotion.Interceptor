@@ -45,6 +45,9 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private readonly ClientSequenceTracker _sequenceTracker = new();
+    // Monotonic per-connection sequence stamped on each client-to-server update.
+    // Reset on every (re)connect so the server's per-connection tracker stays aligned.
+    private long _clientSendSequence;
     private readonly SentStructuralState _clientState = new();
     private long _lastUpdateReceivedTicks;
 
@@ -241,6 +244,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
             _initialState = welcome.State;
             _sequenceTracker.InitializeFromWelcome(welcome.Sequence);
+            Interlocked.Exchange(ref _clientSendSequence, 0);
             if (welcome.State is not null)
             {
                 _clientState.InitializeFromSnapshot(welcome.State);
@@ -385,10 +389,16 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
 
             var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
+            var payload = new UpdatePayload
+            {
+                Root = update.Root,
+                Subjects = update.Subjects,
+                Sequence = Interlocked.Increment(ref _clientSendSequence)
+            };
             _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, update);
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, payload);
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
-                _sendBuffer.WrittenCount, update.Subjects.Count);
+                _sendBuffer.WrittenCount, payload.Subjects.Count);
             await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
             MaybeShrinkSendBuffer();
             _logger.LogDebug("Sent update successfully");
