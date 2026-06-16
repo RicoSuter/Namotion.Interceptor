@@ -40,16 +40,6 @@ public class ChangeQueueProcessor : IDisposable
 
     private readonly PropertyChangeQueueSubscription _subscription;
 
-    // Tracks when the last flush sent changes (for idle detection)
-    private long _lastFlushWithChangesTicks;
-
-    /// <summary>
-    /// Returns true if no changes have been flushed for at least the specified duration.
-    /// Used by the client to determine when it's safe to compare sent-state against registry.
-    /// </summary>
-    public bool IsIdle(TimeSpan idleDuration)
-        => Environment.TickCount64 - Volatile.Read(ref _lastFlushWithChangesTicks) >= (long)idleDuration.TotalMilliseconds;
-
     // Diagnostic counters (reset per cycle via ResetDiagnostics)
     private long _diagSourceFiltered;
     private long _diagPropertyFiltered;
@@ -293,7 +283,6 @@ public class ChangeQueueProcessor : IDisposable
                 {
                     await _writeHandler(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, _flushDedupedCount), cancellationToken).ConfigureAwait(false);
                     Interlocked.Add(ref _diagFlushed, _flushDedupedCount);
-                    Volatile.Write(ref _lastFlushWithChangesTicks, Environment.TickCount64);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {

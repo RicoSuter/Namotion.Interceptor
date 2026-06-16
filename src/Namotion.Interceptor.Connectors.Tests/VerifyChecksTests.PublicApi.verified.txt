@@ -16,7 +16,6 @@ namespace Namotion.Interceptor.Connectors
         public long DiagPropertyFiltered { get; }
         public long DiagSourceFiltered { get; }
         public void Dispose() { }
-        public bool IsIdle(System.TimeSpan idleDuration) { }
         public System.Threading.Tasks.Task ProcessAsync(System.Threading.CancellationToken cancellationToken) { }
         public void ResetDiagnostics() { }
     }
