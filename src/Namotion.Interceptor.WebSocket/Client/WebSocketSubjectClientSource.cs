@@ -593,6 +593,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     /// </summary>
     private bool HasStructuralHashMismatch(string? serverHash)
     {
+        // Temporarily disabled (PR #197 item-2 simplification): the structural-hash reconnect
+        // trigger is being replaced by symmetric client-to-server sequencing. This method is
+        // removed in Phase D of docs/superpowers/plans/2026-06-16-websocket-connector-simplification.md.
+        return false;
+#pragma warning disable CS0162
         if (serverHash is null)
             return false;
 
@@ -616,6 +621,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     /// </summary>
     private bool HasRegistryDivergence()
     {
+        // Temporarily disabled (PR #197 item-2 simplification): the client-to-server divergence
+        // safety net is being replaced by symmetric sequencing + gap detection. This method is
+        // removed in Phase D of docs/superpowers/plans/2026-06-16-websocket-connector-simplification.md.
+        return false;
+
         // Only check when client is idle (no updates received recently).
         // The server heartbeat only fires during server idle, so receiving a heartbeat
         // means the server has been quiet. We additionally require the client to be quiet
