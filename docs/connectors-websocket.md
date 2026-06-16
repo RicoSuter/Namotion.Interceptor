@@ -7,7 +7,7 @@ The `Namotion.Interceptor.WebSocket` package provides bidirectional WebSocket co
 - Bidirectional synchronization between server and clients
 - JSON serialization (extensible for MessagePack in future)
 - Hello/Welcome handshake with initial state delivery
-- Sequence numbers on server-to-client messages for gap detection
+- Sequence numbers on messages in both directions for gap detection and recovery
 - Periodic heartbeat messages for liveness checking
 - Automatic reconnection with exponential backoff
 - Write retry queue for resilience during disconnection
@@ -212,7 +212,7 @@ All messages use the same structure:
 [MessageType, Payload]
 ```
 
-- `MessageType`: Integer discriminator (0-4)
+- `MessageType`: Integer discriminator (0-6)
 - `Payload`: Type-specific JSON payload
 
 ### Message Types
@@ -224,6 +224,8 @@ All messages use the same structure:
 | Update | 2 | Bidirectional | Property changes |
 | Error | 3 | Bidirectional | Error notification |
 | Heartbeat | 4 | Server -> Client | Periodic liveness check with current sequence |
+| Resync | 5 | Server -> Client | Requests a client to resend its complete owned state after a client-to-server sequence gap |
+| ClientHeartbeat | 6 | Client -> Server | Reports the client's last-sent sequence during idle for trailing-gap detection |
 
 ### Connection Sequence
 
@@ -254,13 +256,15 @@ Client                                 Server
    |<------- Update ----------------------|  (server pushes changes)
    |  [2, {sequence:7, root:..., subjects:...}]
    |                                      |
-   |-------- Update --------------------->|  (client writes changes, no sequence)
-   |  [2, {root:..., subjects:...}]       |
+   |-------- Update --------------------->|  (client writes changes, monotonic per-connection sequence)
+   |  [2, {sequence:1, root:..., subjects:...}]  |
    |                                      |
    |<------- Heartbeat -------------------|  (periodic, every 30s by default)
    |  [4, {sequence: 7}]                  |
    |                                      |
    |  (client checks: 7 < 8 → in sync)   |
+   |-------- ClientHeartbeat ------------>|  (client echoes its last-sent sequence)
+   |  [6, {sequence: 1}]                  |
 ```
 
 #### Register-Before-Welcome Design
@@ -371,17 +375,28 @@ The server maintains a monotonically increasing sequence counter that is increme
 - The Welcome payload includes the current sequence at snapshot time. Clients initialize their expected next sequence to `welcome.sequence + 1`.
 - Heartbeat messages include the current sequence in their payload but do **not** increment it.
 
-**Client behavior:**
+**Client behavior (receiving from server):**
 - On receiving an Update: the client reads the sequence from the `UpdatePayload`. If `sequence != expectedNextSequence`, the client logs a warning and exits the receive loop, triggering reconnection via the existing recovery flow.
 - On receiving a Heartbeat: if `heartbeat.sequence >= expectedNextSequence`, the server has sent updates the client never received. The client exits the receive loop and reconnects.
-- A heartbeat with `sequence < expectedNextSequence` means the client is fully caught up — no action needed.
-- A null or zero sequence is treated as "unassigned" for client-to-server messages which do not carry sequence numbers.
+- A heartbeat with `sequence < expectedNextSequence` means the client is fully caught up. No action needed.
+- On receiving a Resync: the client immediately sends a complete update of all properties it owns (a reverse Welcome), which the server applies authoritatively to recover any lost writes.
 
-**Recovery flow on gap detection:**
-Gap detected -> receive loop exits -> `RunMonitorLoopAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `SubjectPropertyWriter.LoadInitialStateAndResumeAsync` calls the source's `LoadInitialStateAsync` to fetch the apply action, runs it under the buffer lock, and replays buffered updates. No new recovery logic is needed; the existing reconnection flow handles everything.
+**Client behavior (sending to server):**
+- The client stamps a monotonic per-connection `Sequence` on every `Update` it sends, starting at 1 on each (re)connect.
+- After receiving a server Heartbeat, the client replies with a `ClientHeartbeat` carrying its last-sent sequence. If the server has not received through that sequence, it sends a `Resync`.
 
-**Why only server-to-client messages carry sequence numbers:**
-Client-to-server writes are covered by the write retry queue (ring buffer, oldest-dropped-when-full) and flush-before-load on reconnection. The server applies updates synchronously under a lock, so silent drops within the server are impossible.
+**Server behavior (receiving from client):**
+- The server tracks the expected-next client sequence per connection (`ConnectionSequenceTracker`). On an in-stream gap (received sequence higher than expected), the server sends `Resync` to that client and realigns its tracker. The received update is still applied.
+- On receiving a `ClientHeartbeat`: if the client's last-sent sequence exceeds the server's last-received sequence for that connection, a `Resync` is sent to recover the trailing loss.
+
+**Recovery flow on server-to-client gap:**
+Gap detected -> receive loop exits -> `RunMonitorLoopAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `SubjectPropertyWriter.LoadInitialStateAndResumeAsync` loads initial state under the buffer lock and replays buffered updates. The existing reconnection flow handles everything.
+
+**Recovery flow on client-to-server gap:**
+In-stream gap or idle trailing loss detected by server -> server sends `Resync` -> client responds with complete owned-state update -> server applies it authoritatively. No reconnection needed.
+
+**Symmetry:**
+A server-to-client gap is recovered by the client pulling the server's complete state (Welcome on reconnect). A client-to-server gap is recovered by the server pulling the client's complete owned state (Resync). The write retry queue complements this for the disconnect/reconnect case.
 
 ### Heartbeat
 
@@ -395,30 +410,6 @@ configuration.HeartbeatInterval = TimeSpan.Zero;              // Disable heartbe
 - The heartbeat loop runs as a parallel task alongside the change queue processor.
 - If a transient send failure occurs during heartbeat broadcast, the error is logged and the loop continues.
 - Zombie connections (repeated send failures) are cleaned up during heartbeat broadcast, using the same logic as update broadcasts.
-
-### Structural Divergence Detection
-
-Every broadcast update includes a per-connection structural hash (`UpdatePayload.StructuralHash`) computed from the sent-state model — a lightweight dictionary tracking the structural state implied by all updates sent to that specific client. Each `WebSocketClientConnection` on the server maintains its own `SentStructuralState`, initialized from the Welcome it was sent and updated from each broadcast under `_applyUpdateLock`. The client maintains an identical model, updated from received updates.
-
-All `SentStructuralState` access on the server — both update (broadcast path) and hash computation (heartbeat path) — happens under `_applyUpdateLock`. There is no unsynchronized access. The hash is pre-computed under the lock and passed as a per-connection dictionary to the broadcast method, which runs outside the lock. This ensures hash consistency without holding the lock during I/O.
-
-After applying each update, the client compares its hash against the server's. A mismatch indicates structural divergence (dropped update, failed apply, or pipeline bug) and triggers reconnection via the existing recovery flow (Welcome with complete state).
-
-**Why per-connection state:**
-A single global sent state on the server would get re-initialized on each new client Welcome, breaking the hash tracking for other connected clients. Per-connection state ensures each client's hash reflects only the data that client has been sent.
-
-**Per-instance isolation:**
-The CQP filter's PathProvider cache uses a per-instance prefix (`_filterCachePrefix` = GUID) to isolate cache entries between server instances. Multiple `WebSocketSubjectHandler` instances sharing the same subject graph have independent caches, preventing stale cache hits or cross-instance interference.
-
-**Why sent-state hash instead of live graph hash:**
-The live graph contains mutations from the mutation engine that haven't been flushed by the change queue processor yet. Hashing the live graph produces false-positive mismatches during concurrent structural mutations. The sent-state hash only reflects what was actually sent/received, eliminating false positives regardless of mutation rate.
-
-**Idle heartbeat:** When no updates are broadcast for 10 seconds, the server sends a heartbeat carrying the same per-connection sent-state hash. This covers the edge case where the last update is lost and the system goes idle. During active operation, the heartbeat is suppressed — updates already carry the hash.
-
-**What the hash covers:**
-- Subject IDs (sorted lexicographically)
-- Structural property content: collection items (order-preserving), dictionary entries (sorted by key), object references
-- Does NOT hash value properties — structural divergence is the critical detection target. Value divergence self-heals via continued mutations or is fixed as a side effect of structural resync.
 
 ### Echo Behavior
 
@@ -471,8 +462,8 @@ Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches 
 The protocol is designed for future enhancements:
 
 - **MessagePack support**: `format` field in Hello/Welcome enables negotiation for 3-4x smaller payloads
-- **Commands/RPC**: Message types 5-6 reserved for invoking methods on subjects
-- **Subscriptions**: Message types 7-8 reserved for subscribing to specific subjects/properties
+- **Commands/RPC**: Message types 7-8 reserved for invoking methods on subjects
+- **Subscriptions**: Message types 9-10 reserved for subscribing to specific subjects/properties
 - **Message compression**: Per-message or per-frame compression to reduce bandwidth
 - **Authentication/authorization hooks**: Token-based auth during handshake or per-message access control
 - **Diagnostic counters**: Connection metrics, reconnection attempts, message throughput tracking
