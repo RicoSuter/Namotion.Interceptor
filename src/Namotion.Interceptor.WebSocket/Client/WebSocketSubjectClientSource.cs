@@ -443,57 +443,32 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     private async Task SendOwnedStateResyncAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken cancellationToken)
     {
         var update = BuildOwnedStateUpdate();
-
-        // Acquire _connectionLock before sending: WebSocket does not allow concurrent sends,
-        // and WriteChangesAsync also sends under this lock.
-        try
+        var payload = new UpdatePayload
         {
-            await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (ObjectDisposedException)
-        {
-            return;
-        }
-
-        try
-        {
-            var payload = new UpdatePayload
-            {
-                Root = update.Root,
-                Subjects = update.Subjects,
-                Sequence = Interlocked.Increment(ref _clientSendSequence)
-            };
-            _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, payload);
-            await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            try { _connectionLock.Release(); }
-            catch (ObjectDisposedException) { }
-        }
+            Root = update.Root,
+            Subjects = update.Subjects,
+            Sequence = Interlocked.Increment(ref _clientSendSequence)
+        };
+        await SendUnderLockAsync(webSocket, MessageType.Update, payload, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task SendClientHeartbeatAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken cancellationToken)
     {
         var payload = new ClientHeartbeatPayload { LastSentSequence = Interlocked.Read(ref _clientSendSequence) };
+        await SendUnderLockAsync(webSocket, MessageType.ClientHeartbeat, payload, cancellationToken).ConfigureAwait(false);
+    }
 
-        // Acquire _connectionLock before sending: WebSocket does not allow concurrent sends,
-        // and WriteChangesAsync also sends under this lock.
-        try
-        {
-            await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (ObjectDisposedException)
-        {
-            return;
-        }
-
+    // Serializes a message and sends it on the single WebSocket while holding _connectionLock,
+    // so concurrent sends from the write pump and the receive loop never overlap on one socket.
+    private async Task SendUnderLockAsync(System.Net.WebSockets.WebSocket webSocket, MessageType messageType, object payload, CancellationToken cancellationToken)
+    {
+        try { await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false); }
+        catch (ObjectDisposedException) { return; }
         try
         {
             _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.ClientHeartbeat, payload);
-            await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+            _serializer.SerializeMessageTo(_sendBuffer, messageType, payload);
+            await webSocket.SendAsync(_sendBuffer.WrittenMemory, System.Net.WebSockets.WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

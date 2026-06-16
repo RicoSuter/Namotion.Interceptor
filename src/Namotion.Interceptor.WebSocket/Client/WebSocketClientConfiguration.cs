@@ -151,6 +151,5 @@ public class WebSocketClientConfiguration
         {
             throw new ArgumentException($"CircuitBreakerCooldown must be positive when circuit breaker is enabled, got: {CircuitBreakerCooldown}", nameof(CircuitBreakerCooldown));
         }
-
     }
 }

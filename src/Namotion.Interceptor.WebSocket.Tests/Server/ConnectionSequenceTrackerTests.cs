@@ -46,20 +46,6 @@ public class ConnectionSequenceTrackerTests
     }
 
     [Fact]
-    public void WhenResetAfterReconnect_ThenExpectsSequenceOneAgain()
-    {
-        // Arrange
-        var tracker = new ConnectionSequenceTracker();
-        tracker.IsClientUpdateValid(1);
-
-        // Act
-        tracker.Reset();
-
-        // Assert
-        Assert.Equal(1, tracker.ExpectedNextSequence);
-    }
-
-    [Fact]
     public void WhenRealignedAfterGap_ThenNextSequenceValidates()
     {
         // Arrange

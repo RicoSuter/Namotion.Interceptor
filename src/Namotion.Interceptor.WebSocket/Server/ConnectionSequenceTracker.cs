@@ -13,9 +13,6 @@ internal sealed class ConnectionSequenceTracker
 
     public long ExpectedNextSequence => Volatile.Read(ref _expectedNextSequence);
 
-    /// <summary>Resets to expect sequence 1 again (new connection / reconnect).</summary>
-    public void Reset() => Volatile.Write(ref _expectedNextSequence, 1);
-
     /// <summary>
     /// Validates an inbound client update sequence. Returns true and advances when it is the
     /// expected next sequence; false when a gap is detected (server missed earlier messages).
