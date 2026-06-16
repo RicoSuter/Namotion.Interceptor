@@ -480,6 +480,34 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
     }
 
+    private async Task SendClientHeartbeatAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken cancellationToken)
+    {
+        var payload = new ClientHeartbeatPayload { LastSentSequence = Interlocked.Read(ref _clientSendSequence) };
+
+        // Acquire _connectionLock before sending: WebSocket does not allow concurrent sends,
+        // and WriteChangesAsync also sends under this lock.
+        try
+        {
+            await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        try
+        {
+            _sendBuffer.Clear();
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.ClientHeartbeat, payload);
+            await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            try { _connectionLock.Release(); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
         var completionSource = _receiveLoopCompleted; // capture before loop to avoid stale TCS reference
@@ -576,6 +604,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                                 {
                                     return; // Exit receive loop -> triggers reconnection
                                 }
+
+                                await SendClientHeartbeatAsync(webSocket, cancellationToken).ConfigureAwait(false);
                                 break;
 
                             case MessageType.Error:
