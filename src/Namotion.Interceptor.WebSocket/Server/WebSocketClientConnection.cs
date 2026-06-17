@@ -5,6 +5,7 @@ using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;
@@ -21,6 +22,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
     private readonly System.Net.WebSockets.WebSocket _webSocket;
     private readonly ILogger _logger;
+    private readonly IInterceptorSubject _serverRoot;
     private readonly CancellationTokenSource _cts = new();
     private readonly IWebSocketSerializer _serializer = JsonWebSocketSerializer.Instance;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -47,12 +49,14 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     public WebSocketClientConnection(
         System.Net.WebSockets.WebSocket webSocket,
         ILogger logger,
+        IInterceptorSubject serverRoot,
         long maxMessageSize = 10 * 1024 * 1024,
         TimeSpan? helloTimeout = null,
         TimeSpan? sendLockTimeout = null)
     {
         _webSocket = webSocket;
         _logger = logger;
+        _serverRoot = serverRoot;
         _maxMessageSize = maxMessageSize;
         _helloTimeout = helloTimeout ?? TimeSpan.FromSeconds(10);
         _sendLockTimeout = sendLockTimeout ?? TimeSpan.FromSeconds(5);
@@ -349,6 +353,25 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
                 ConnectionId, heartbeat.LastSentSequence, _clientSequence.ExpectedNextSequence - 1);
             await SendResyncAsync("idle-trailing-gap", cancellationToken).ConfigureAwait(false);
             _clientSequence.ResyncTo(heartbeat.LastSentSequence);
+            return;
+        }
+
+        // Content-level divergence backstop: both sides are idle (the client only sends a
+        // ClientHeartbeat in reply to a server heartbeat, which is server-idle-gated). If the
+        // client's value-aware digest differs from the server's, a value diverged with no
+        // message-level sequence gap to reveal it. Request a Resync so the client re-pushes its
+        // owned state, healing the divergence WITHOUT losing the client's writes.
+        // A false-positive mismatch is safe: it only causes one extra resync, never incorrectness.
+        if (heartbeat.Digest is not null)
+        {
+            var serverDigest = StateDigest.Compute(_serverRoot);
+            if (serverDigest.Length != 0 && !string.Equals(serverDigest, heartbeat.Digest, StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Client {ConnectionId}: idle state digest mismatch (server {Server}, client {Client}). Requesting resync.",
+                    ConnectionId, serverDigest, heartbeat.Digest);
+                await SendResyncAsync("digest-mismatch", cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 

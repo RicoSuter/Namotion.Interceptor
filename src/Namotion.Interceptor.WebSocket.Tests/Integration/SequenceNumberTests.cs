@@ -764,6 +764,71 @@ public class SequenceNumberTests
         catch (OperationCanceledException) { }
     }
 
+    [Fact]
+    public async Task WhenClientHeartbeatDigestMismatchesServer_ThenServerRequestsResync()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+
+        // Non-trivial state ensures StateDigest.Compute returns a non-empty string
+        // (an empty registry would cause the digest check to be skipped).
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "x",
+            port: portLease.Port);
+
+        using var ws = new ClientWebSocket();
+        await ws.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
+
+        var sendBuffer = new ArrayBufferWriter<byte>(256);
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
+        await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+
+        var receiveBuffer = new byte[64 * 1024];
+        await ws.ReceiveAsync(receiveBuffer, CancellationToken.None); // Welcome
+
+        // Start collecting messages before sending the ClientHeartbeat so we don't miss the Resync.
+        var receivedMessages = new ConcurrentQueue<ReceivedMessage>();
+        using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var receiveTask = StartReceivingMessagesAsync(ws, receiveBuffer, receivedMessages, receiveCts.Token);
+
+        // Act - Send a ClientHeartbeat with a deliberately wrong digest.
+        // LastSentSequence = 0: HasReceivedThrough(0) returns true (0 < _expectedNextSequence=1),
+        // so the trailing-idle gap branch is NOT taken. The digest branch runs independently.
+        sendBuffer.Clear();
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.ClientHeartbeat, new ClientHeartbeatPayload
+        {
+            LastSentSequence = 0,
+            Digest = "DELIBERATELY-WRONG-DIGEST"
+        });
+        await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+
+        // Assert
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => receivedMessages.ToArray().Any(m => m.Type == MessageType.Resync),
+                timeout: TimeSpan.FromSeconds(5),
+                message: "Server should send Resync after ClientHeartbeat reports a mismatching state digest");
+
+            _output.WriteLine("Resync received as expected after digest mismatch");
+        }
+        finally
+        {
+            receiveCts.Cancel();
+            try { await receiveTask; } catch { }
+        }
+
+        try
+        {
+            using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", closeCts.Token);
+        }
+        catch (WebSocketException) { }
+        catch (OperationCanceledException) { }
+    }
+
     private record ReceivedMessage(MessageType Type, long Sequence);
 
     /// <summary>

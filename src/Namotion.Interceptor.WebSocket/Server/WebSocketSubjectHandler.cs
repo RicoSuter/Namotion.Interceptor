@@ -10,6 +10,7 @@ using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
 
@@ -97,6 +98,7 @@ public sealed class WebSocketSubjectHandler
         var connection = new WebSocketClientConnection(
             webSocket,
             _logger,
+            _subject,
             _configuration.MaxMessageSize,
             _configuration.HelloTimeout,
             _configuration.SendLockTimeout);
@@ -360,15 +362,20 @@ public sealed class WebSocketSubjectHandler
 
         var sequence = Volatile.Read(ref _sequence);
 
-        await BroadcastToAllAsync(connection =>
+        // Compute the value-aware state digest once: the server is idle here (gated above), so the
+        // graph is quiescent. The same serialized heartbeat is reused for every connection.
+        var digest = StateDigest.Compute(_subject);
+
+        var heartbeat = new HeartbeatPayload
         {
-            var heartbeat = new HeartbeatPayload
-            {
-                Sequence = sequence
-            };
-            var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
-            return connection.SendHeartbeatAsync(serializedMessage, cancellationToken);
-        }, cancellationToken).ConfigureAwait(false);
+            Sequence = sequence,
+            Digest = digest
+        };
+        var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
+
+        await BroadcastToAllAsync(connection =>
+            connection.SendHeartbeatAsync(serializedMessage, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task BroadcastToAllAsync(Func<WebSocketClientConnection, Task> sendAsync, CancellationToken cancellationToken)

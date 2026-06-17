@@ -454,7 +454,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
     private async Task SendClientHeartbeatAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken cancellationToken)
     {
-        var payload = new ClientHeartbeatPayload { LastSentSequence = Interlocked.Read(ref _clientSendSequence) };
+        // Carry the client's value-aware state digest so the server can detect a content-level
+        // client-to-server divergence (a value lost with no sequence gap) and request a Resync.
+        var payload = new ClientHeartbeatPayload
+        {
+            LastSentSequence = Interlocked.Read(ref _clientSendSequence),
+            Digest = StateDigest.Compute(_subject)
+        };
         await SendUnderLockAsync(webSocket, MessageType.ClientHeartbeat, payload, cancellationToken).ConfigureAwait(false);
     }
 
@@ -553,6 +559,25 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                                         "Heartbeat sequence gap: server at {ServerSequence}, client expects {Expected}. Triggering reconnection.",
                                         heartbeat.Sequence, _sequenceTracker.ExpectedNextSequence);
                                     return; // Exit receive loop -> triggers reconnection
+                                }
+
+                                // Content-level divergence backstop: the heartbeat is server-idle-gated, so when
+                                // it arrives both sides are quiescent. If the server's value-aware digest differs
+                                // from ours, a value diverged with no sequence gap to reveal it. Trigger the
+                                // existing reconnect recovery (exit the receive loop -> reconnect -> Welcome),
+                                // which heals a server-to-client divergence by re-applying the complete state.
+                                // A false-positive mismatch is safe: it only costs one extra reconnect, never
+                                // incorrectness.
+                                if (heartbeat.Digest is not null)
+                                {
+                                    var clientDigest = StateDigest.Compute(_subject);
+                                    if (clientDigest.Length != 0 && !string.Equals(clientDigest, heartbeat.Digest, StringComparison.Ordinal))
+                                    {
+                                        _logger.LogWarning(
+                                            "Idle state digest mismatch: server {Server}, client {Client}. Triggering reconnection.",
+                                            heartbeat.Digest, clientDigest);
+                                        return; // Exit receive loop -> triggers reconnection -> Welcome
+                                    }
                                 }
 
                                 await SendClientHeartbeatAsync(webSocket, cancellationToken).ConfigureAwait(false);

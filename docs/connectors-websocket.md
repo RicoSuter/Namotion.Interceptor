@@ -8,6 +8,7 @@ The `Namotion.Interceptor.WebSocket` package provides bidirectional WebSocket co
 - JSON serialization (extensible for MessagePack in future)
 - Hello/Welcome handshake with initial state delivery
 - Sequence numbers on messages in both directions for gap detection and recovery
+- State-digest on heartbeats for quiescent-consistency verification
 - Periodic heartbeat messages for liveness checking
 - Automatic reconnection with exponential backoff
 - Write retry queue for resilience during disconnection
@@ -259,12 +260,12 @@ Client                                 Server
    |-------- Update --------------------->|  (client writes changes, monotonic per-connection sequence)
    |  [2, {sequence:1, root:..., subjects:...}]  |
    |                                      |
-   |<------- Heartbeat -------------------|  (periodic, every 30s by default)
-   |  [4, {sequence: 7}]                  |
+   |<------- Heartbeat -------------------|  (periodic, server-idle-gated)
+   |  [4, {sequence: 7, digest: "a3f..."}]|
    |                                      |
-   |  (client checks: 7 < 8 → in sync)   |
-   |-------- ClientHeartbeat ------------>|  (client echoes its last-sent sequence)
-   |  [6, {sequence: 1}]                  |
+   |  (client checks sequence: 7 < 8 → in sync; compares digest)
+   |-------- ClientHeartbeat ------------>|  (client echoes its last-sent sequence + digest)
+   |  [6, {lastSentSequence: 1, digest: "a3f..."}]|
 ```
 
 #### Register-Before-Welcome Design
@@ -303,13 +304,26 @@ The snapshot does not need to be fully up-to-date — it is just a baseline. The
 **HeartbeatPayload**
 ```json
 {
-  "sequence": 42
+  "sequence": 42,
+  "digest": "a3f8c2..."
 }
 ```
 
 - `sequence`: Server's current sequence number (last broadcast batch). Does **not** increment the counter — it reflects the current value.
+- `digest`: On-demand state digest of the server's live graph. Carried only when heartbeats are enabled. See [State-Digest Recovery Net](#state-digest-recovery-net).
 
-Example wire format: `[4, {"sequence": 42}]`
+Example wire format: `[4, {"sequence": 42, "digest": "a3f8c2..."}]`
+
+**ClientHeartbeatPayload**
+```json
+{
+  "lastSentSequence": 3,
+  "digest": "b1d9e7..."
+}
+```
+
+- `lastSentSequence`: Client's last-sent sequence number. The server uses this to detect trailing client-to-server gaps.
+- `digest`: On-demand state digest of the client's live graph. The server compares it against its own digest to detect residual content-level divergence. See [State-Digest Recovery Net](#state-digest-recovery-net).
 
 **ErrorPayload**
 ```json
@@ -397,6 +411,19 @@ In-stream gap or idle trailing loss detected by server -> server sends `Resync` 
 
 **Symmetry:**
 A server-to-client gap is recovered by the client pulling the server's complete state (Welcome on reconnect). A client-to-server gap is recovered by the server pulling the client's complete owned state (Resync). The write retry queue complements this for the disconnect/reconnect case.
+
+### State-Digest Recovery Net
+
+Sequence numbers guarantee message delivery: every sent update reaches its destination or a gap is detected. They do not, however, guarantee that the applied content is identical on both sides once heavy concurrent structural churn or repeated reconnects are factored in. The state-digest net is the quiescent-consistency backstop for that residual content-level divergence. Together the two layers implement the library's "state agrees once writes settle" model.
+
+**How it works:**
+
+- Both the server `Heartbeat` and the client `ClientHeartbeat` carry a `Digest` field. The digest is a deterministic, value-aware hash computed on demand from the live graph (no persistent shadow structure). It is timestamp-insensitive so clock skew does not cause false positives.
+- Heartbeats are server-idle-gated: the server only sends a Heartbeat when no update was broadcast within the last `HeartbeatInterval` (a time-since-last-broadcast cooldown, see `BroadcastHeartbeatAsync`). This means digest comparisons happen during quiescent periods, when the two sides should agree.
+- On receiving a heartbeat, each side compares the peer's digest to its own. A match means the graphs are consistent; no action is taken.
+- A mismatch routes to the existing recovery: a server-to-client mismatch triggers client reconnection (Welcome with full state); a client-to-server mismatch causes the server to send `Resync`, which causes the client to re-push its complete owned state. This preserves client writes rather than discarding them.
+- A false-positive mismatch is safe: it triggers one extra resync cycle, never incorrectness.
+- The net is bounded: O(1) on the wire (a hash), O(N) to compute but only at idle. There is no persistent per-update structure. This is the key contrast with the previously-removed `SentStructuralState` shadow, which was unbounded, leaky, and structural-only. The digest is value-aware and computed on demand.
 
 ### Heartbeat
 
