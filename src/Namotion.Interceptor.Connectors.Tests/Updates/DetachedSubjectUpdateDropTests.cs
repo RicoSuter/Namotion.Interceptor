@@ -118,4 +118,50 @@ public class DetachedSubjectUpdateDropTests
             "CreatePartialUpdateFromChanges. After re-attachment, no new change notifications " +
             "are generated, so the client permanently has stale/default values.");
     }
+
+    [Fact]
+    public void WhenChangeForUnregisteredSubjectWithoutId_ThenIdIsMintedAndChangeSerialized()
+    {
+        // The lazy-mint fallback. A value change for a subject that is BOTH momentarily
+        // unregistered AND has never been assigned a subject ID must still be serialized:
+        // the factory mints a stable ID on demand instead of dropping the change. Dropping it
+        // would cause permanent value loss because re-attachment generates no new change
+        // notification. The two tests above cover the already-has-an-ID case; this covers the
+        // no-ID case, which previously fell through to the DroppedNoId drop.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "Root" };
+        var child = new Person { FirstName = "Child" };
+        root.Mother = child;
+
+        // Precondition: the child has no stable ID yet (it was attached but never serialized,
+        // and registration alone does not assign an ID).
+        Assert.Null(((IInterceptorSubject)child).TryGetSubjectId());
+
+        child.FirstName = "Updated";
+        var changes = new[]
+        {
+            SubjectPropertyChange.Create(
+                new PropertyReference((IInterceptorSubject)child, "FirstName"),
+                null, DateTimeOffset.UtcNow, null, "Child", "Updated"),
+        };
+
+        // Act: detach the child (concurrent structural mutation), then build the partial update
+        // while it is unregistered and still has no ID.
+        root.Mother = null;
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes, []);
+
+        // Assert: an ID was minted for the previously ID-less subject and its change is carried.
+        var childId = ((IInterceptorSubject)child).TryGetSubjectId();
+        Assert.NotNull(childId);
+        Assert.True(
+            update.Subjects.TryGetValue(childId!, out var properties),
+            "The change for an unregistered, ID-less subject must be serialized under a freshly " +
+            "minted ID, not dropped.");
+        Assert.True(properties!.ContainsKey("FirstName"));
+        Assert.Equal("Updated", properties["FirstName"].Value);
+    }
 }

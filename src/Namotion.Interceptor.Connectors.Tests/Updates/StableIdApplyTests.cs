@@ -481,4 +481,78 @@ public class StableIdApplyTests
         Assert.NotNull(dictItem.Child);
         Assert.Equal("NestedChild", dictItem.Child!.Name);
     }
+
+    [Fact]
+    public void ApplyUpdate_WhenValueForUnresolvableSubjectArrives_ThenBufferedAndRecoveredOnceResolvable()
+    {
+        // Exercises the full buffer-then-recover wiring through ApplyUpdate (the unit test
+        // PendingApplyBufferTests covers the buffer class in isolation). A value-only update
+        // arrives for a subject that is not yet in the graph and is not creatable (no structural
+        // parent, not marked complete). It must be buffered, not dropped, and recovered on a later
+        // apply once the subject becomes resolvable.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new CycleTestNode(context) { Name = "Root" };
+        var rootId = root.GetOrAddSubjectId();
+        const string ghostId = "ghost-child-id";
+
+        var recoveredBefore = SubjectUpdateExtensions.DiagRecoveredSubjectUpdateCount;
+
+        // Act 1: value-only update for an unresolvable subject -> buffered (not applied, not dropped).
+        var bufferedUpdate = new SubjectUpdate
+        {
+            Root = null,
+            Subjects = new()
+            {
+                [ghostId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "Buffered" }
+                }
+            }
+        };
+        SubjectUpdateApplier.ApplyUpdate(root, bufferedUpdate, new DefaultSubjectFactory());
+
+        // Assert 1: nothing in the graph carries the buffered value yet.
+        Assert.Null(root.Child);
+
+        // Act 2: a structural update creates the ghost subject as root.Child (now resolvable).
+        // The drain runs at the START of an apply, so this same apply does NOT recover it yet.
+        var createUpdate = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Child"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = ghostId }
+                },
+                [ghostId] = new() // complete but no Name -> Child.Name stays null after creation
+            },
+            CompleteSubjectIds = [ghostId]
+        };
+        SubjectUpdateApplier.ApplyUpdate(root, createUpdate, new DefaultSubjectFactory());
+
+        // Assert 2: the child exists but the buffered value has not been recovered yet
+        // (recovery happens at the start of the NEXT apply, once the subject resolves).
+        Assert.NotNull(root.Child);
+        Assert.Equal(ghostId, root.Child!.TryGetSubjectId());
+        Assert.Null(root.Child.Name);
+
+        // Act 3: any later apply triggers the start-of-apply drain, recovering the buffered value.
+        var tickUpdate = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "tick" }
+                }
+            }
+        };
+        SubjectUpdateApplier.ApplyUpdate(root, tickUpdate, new DefaultSubjectFactory());
+
+        // Assert 3: the buffered value was recovered and applied to the now-resolvable subject.
+        Assert.Equal("Buffered", root.Child!.Name);
+        Assert.True(SubjectUpdateExtensions.DiagRecoveredSubjectUpdateCount >= recoveredBefore + 1);
+    }
 }

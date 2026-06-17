@@ -107,6 +107,8 @@ To create a **complete update**, traverse the entire object graph starting from 
 
 To create a **partial update**, collect the set of property changes since the last update. For each changed property, include its subject (by ID) and the changed property in the `subjects` dictionary. For structural changes (collection/dictionary), include the full `items` array with the new state. Include full properties for any newly created subjects. Set `root` to the root subject's ID if the root has changes, otherwise set it to null.
 
+**Lazy ID minting (outbound churn robustness):** When serializing a change for a subject that does not yet have a stable ID assigned (possible under concurrent structural mutations), the ID is minted at serialization time rather than dropping the change. This ensures that value changes for newly introduced subjects are not lost during rapid structural churn.
+
 ## Property Update Kinds
 
 Each property update has a `kind` that determines how it is serialized and applied.
@@ -294,6 +296,8 @@ If `root` is null, skip this step because the root subject has no changes in thi
 ### Step 2: Remaining Subjects
 
 Process remaining entries in `subjects` (those not already processed as root) by looking up each subject ID in the local ID-to-object map. If a subject ID is found, apply its properties to the local object. If not found, skip it. The subject is likely a newly introduced item (e.g., inserted into a collection) whose local object doesn't exist yet because its parent's structural property hasn't been applied yet. Skipping is safe because the parent's collection/dictionary/object apply step will create the item, register it by ID, and immediately look up its properties from `subjects` at that point.
+
+**Pending-apply buffer (inbound churn robustness):** Under heavy concurrent structural mutations a subject may be momentarily unresolvable by ID at apply time (the subject exists but has not yet been registered). Resolution is attempted twice within a single apply: unresolvable entries from the first pass are deferred and retried after all structural changes in the same update have been processed (the structural apply may itself create and register the subject). Only entries still unresolvable after that second pass are placed into a bounded per-root pending-apply buffer and re-applied once the subject becomes resolvable in a later apply, rather than being dropped. The buffer is drained at the start of each apply, before that update's own values, so a recovered (older) value applies first and a newer value in the current update wins on conflict. This prevents permanent divergence from transient lookup failures during rapid structural churn.
 
 ### Applying Value Properties
 

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -13,7 +14,19 @@ internal static class SubjectUpdateApplier
 {
     private static readonly ObjectPool<SubjectUpdateApplyContext> ContextPool = new(() => new SubjectUpdateApplyContext());
 
-    /// <summary>Diagnostic counter: total subject updates dropped because the subject was not found after deferred retry.</summary>
+    /// <summary>
+    /// Per-root pending-apply buffers. A subject update that is unresolvable after deferred
+    /// retry is buffered here and recovered when the subject becomes resolvable in a later apply,
+    /// instead of being dropped (which caused permanent divergence under concurrent structural churn).
+    /// Keyed by root subject; entries are collected automatically when the root is collected.
+    /// </summary>
+    private static readonly ConditionalWeakTable<IInterceptorSubject, PendingApplyBuffer> PendingBuffers = new();
+
+    /// <summary>
+    /// Diagnostic counter: subject updates genuinely lost. With the pending-apply buffer this means
+    /// only buffer-overflow evictions (the buffer discards the oldest entry), which should be ~0 in
+    /// a healthy run. Unresolvable-but-buffered updates are not counted here (see RecoveredSubjectUpdateCount).
+    /// </summary>
     internal static long DroppedSubjectUpdateCount;
 
     /// <summary>Diagnostic counter: total value properties applied successfully.</summary>
@@ -41,6 +54,15 @@ internal static class SubjectUpdateApplier
             var lifecycle = subject.Context.TryGetLifecycleInterceptor();
             using (lifecycle?.CreateBatchScope(subject.Context))
             {
+                // Recover previously-unresolvable updates BEFORE applying this update's values.
+                // Value apply is last-applied-wins (ApplyPropertyUpdate has no timestamp gating),
+                // so recovered/older values must land first and this update's newer values win on conflict.
+                var buffer = PendingBuffers.GetValue(subject, static _ => new PendingApplyBuffer());
+                if (!buffer.IsEmpty)
+                {
+                    buffer.DrainResolvable(context);
+                }
+
                 if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
                 {
                     // The Root field identifies which subject ID in the update
@@ -96,14 +118,16 @@ internal static class SubjectUpdateApplier
                         }
                         else
                         {
-                            // Subject was not created by structural processing and is not in
-                            // the registry — silently dropped. This can happen when a concurrent
-                            // structural mutation detaches the subject during apply.
-                            Interlocked.Increment(ref DroppedSubjectUpdateCount);
-                            System.Diagnostics.Trace.TraceWarning(
-                                $"SubjectUpdateApplier: Dropped update for subject {subjectId} " +
-                                $"({properties.Count} properties: {string.Join(", ", properties.Keys)}). " +
-                                $"Not found in registry after deferred retry.");
+                            // Subject was not created by structural processing and is not in the
+                            // registry — buffer it instead of dropping. A concurrent structural
+                            // mutation may have momentarily detached it; it is recovered (applied)
+                            // at the start of a later apply once it resolves again. This prevents
+                            // permanent divergence (a server-held value the client never gets).
+                            buffer.Add(subjectId, properties);
+                            System.Diagnostics.Trace.TraceInformation(
+                                $"SubjectUpdateApplier: Buffered update for subject {subjectId} " +
+                                $"({properties.Count} properties: {string.Join(", ", properties.Keys)}) " +
+                                $"for later: not found in registry after deferred retry.");
                         }
                     }
                 }

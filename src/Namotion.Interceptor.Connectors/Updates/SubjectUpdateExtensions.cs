@@ -12,8 +12,11 @@ public static class SubjectUpdateExtensions
     /// <summary>Diagnostic: total value properties applied by the applier.</summary>
     public static long DiagAppliedValueCount => Volatile.Read(ref Internal.SubjectUpdateApplier.AppliedValueCount);
 
-    /// <summary>Diagnostic: total subject updates dropped (subject not found after deferred retry).</summary>
+    /// <summary>Diagnostic: total subject updates genuinely lost (buffer-overflow eviction). Should be ~0 in a healthy run.</summary>
     public static long DiagDroppedSubjectUpdateCount => Volatile.Read(ref Internal.SubjectUpdateApplier.DroppedSubjectUpdateCount);
+
+    /// <summary>Diagnostic: total subject updates recovered from the pending-apply buffer once the subject became resolvable.</summary>
+    public static long DiagRecoveredSubjectUpdateCount => Volatile.Read(ref Internal.PendingApplyBuffer.RecoveredSubjectUpdateCount);
 
     /// <summary>Diagnostic: total properties skipped (property name not found on subject).</summary>
     public static long DiagUnknownPropertyCount => Volatile.Read(ref Internal.SubjectUpdateApplier.UnknownPropertyCount);

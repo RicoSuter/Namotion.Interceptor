@@ -139,9 +139,10 @@ internal static class SubjectUpdateFactory
             // Use the subject's own property metadata to serialize the change. Dropping it would
             // cause permanent value loss because no new change notification is generated when
             // the subject is re-attached.
-            var droppedId = changedSubject.TryGetSubjectId();
-            if (droppedId is not null &&
-                changedSubject.Properties.TryGetValue(change.Property.Name, out var fallbackMetadata))
+            // GetOrCreateId (below) mints a stable ID lazily under the registry lock when the subject
+            // does not have one yet, so a not-yet-serialized subject's change is serialized instead of
+            // dropped. Only a change to a property the subject does not own falls through to the drop.
+            if (changedSubject.Properties.TryGetValue(change.Property.Name, out var fallbackMetadata))
             {
                 Interlocked.Increment(ref FallbackSerializationCount);
                 var fallbackId = builder.GetOrCreateId(changedSubject);
