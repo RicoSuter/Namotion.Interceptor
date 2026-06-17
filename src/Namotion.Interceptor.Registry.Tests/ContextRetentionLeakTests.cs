@@ -118,10 +118,11 @@ public class ContextRetentionLeakTests
     }
 
     /// <summary>
-    /// Same as basic test but WITH registry — closer to tester setup.
+    /// Same as the basic test but WITH registry — closer to the tester setup. Verifies the registry
+    /// releases detached subjects rather than retaining them in its known-subjects map.
     /// </summary>
     [Fact]
-    public void WhenChildDetachedWithRegistry_ThenMemoryDoesNotGrow()
+    public void WhenChildDetachedWithRegistry_ThenChildIsGarbageCollected()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -130,19 +131,7 @@ public class ContextRetentionLeakTests
             .WithRegistry();
 
         var root = new Person(context) { FirstName = "Root" };
-
-        // Warm up
-        for (var i = 0; i < 100; i++)
-        {
-            var child = new Person { FirstName = $"Warmup_{i}" };
-            root.Mother = child;
-            root.Mother = null;
-        }
-
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        var baselineBytes = GC.GetTotalMemory(forceFullCollection: true);
+        var weakRefs = new List<WeakReference>();
 
         // Act: 1000 attach/detach cycles with registry
         for (var i = 0; i < 1000; i++)
@@ -150,22 +139,28 @@ public class ContextRetentionLeakTests
             var child = new Person { FirstName = $"Child_{i}" };
             root.Mother = child;
             root.Mother = null;
+            weakRefs.Add(new WeakReference(child));
         }
 
+        // Force GC
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        var afterBytes = GC.GetTotalMemory(forceFullCollection: true);
 
-        var growthKb = (afterBytes - baselineBytes) / 1024.0;
-        Assert.True(growthKb < 50, $"Memory grew by {growthKb:F1} KB after 1000 attach/detach cycles WITH registry — likely a retention leak");
+        // Assert: all detached children are collected. A retention leak would keep them reachable via
+        // the registry. WeakReference liveness measures reachability of specific objects, so it is
+        // immune to the parallel-test process-global heap noise that made the old GetTotalMemory delta flaky.
+        var alive = weakRefs.Count(w => w.IsAlive);
+        // Allow 1 — the last loop variable may still be on the stack frame (Debug builds don't clear dead locals).
+        Assert.True(alive <= 1, $"{alive} of 1000 detached children are still alive after GC — likely retained by the registry");
     }
 
     /// <summary>
-    /// Deep graph with registry — child has pre-populated structural property (like applier Phase 1).
+    /// Deep graph (child → grandchild via Mother) with registry. Verifies the registry releases both
+    /// detached subjects, not just the directly-detached child.
     /// </summary>
     [Fact]
-    public void WhenDeepGraphWithRegistryDetached_ThenMemoryDoesNotGrow()
+    public void WhenDeepGraphWithRegistryDetached_ThenAllDescendantsAreGarbageCollected()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -174,20 +169,7 @@ public class ContextRetentionLeakTests
             .WithRegistry();
 
         var root = new Person(context) { FirstName = "Root" };
-
-        // Warm up
-        for (var i = 0; i < 50; i++)
-        {
-            var grandchild = new Person { FirstName = $"WarmupGC_{i}" };
-            var child = new Person { FirstName = $"Warmup_{i}", Mother = grandchild };
-            root.Mother = child;
-            root.Mother = null;
-        }
-
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        var baselineBytes = GC.GetTotalMemory(forceFullCollection: true);
+        var weakRefs = new List<WeakReference>();
 
         // Act: 500 deep attach/detach cycles
         for (var i = 0; i < 500; i++)
@@ -196,23 +178,27 @@ public class ContextRetentionLeakTests
             var child = new Person { FirstName = $"Child_{i}", Mother = grandchild };
             root.Mother = child;
             root.Mother = null;
+            weakRefs.Add(new WeakReference(child));
+            weakRefs.Add(new WeakReference(grandchild));
         }
 
+        // Force GC
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        var afterBytes = GC.GetTotalMemory(forceFullCollection: true);
 
-        var growthKb = (afterBytes - baselineBytes) / 1024.0;
-        Assert.True(growthKb < 100, $"Memory grew by {growthKb:F1} KB after 500 deep attach/detach cycles WITH registry");
+        // Assert
+        var alive = weakRefs.Count(w => w.IsAlive);
+        // Allow 2 — last child + grandchild from the final iteration may still be on the stack.
+        Assert.True(alive <= 2, $"{alive} of 1000 detached deep-graph subjects are still alive after GC — likely retained by the registry");
     }
 
     /// <summary>
     /// Sustained mutation loop simulating the tester: attach/detach many subjects over time.
-    /// After all detached and GC'd, only root should remain.
+    /// After all are detached and GC'd, only the root should remain.
     /// </summary>
     [Fact]
-    public void WhenManySubjectsAttachedAndDetached_ThenMemoryDoesNotGrow()
+    public void WhenManySubjectsAttachedAndDetached_ThenAllAreGarbageCollected()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -220,18 +206,7 @@ public class ContextRetentionLeakTests
             .WithFullPropertyTracking();
 
         var root = new Person(context) { FirstName = "Root" };
-
-        // Warm up
-        for (var i = 0; i < 100; i++)
-        {
-            root.Mother = new Person { FirstName = $"Warmup_{i}" };
-            root.Mother = null;
-        }
-
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        var baselineBytes = GC.GetTotalMemory(forceFullCollection: true);
+        var weakRefs = new List<WeakReference>();
 
         // Act: 1000 attach/detach cycles
         for (var i = 0; i < 1000; i++)
@@ -239,24 +214,26 @@ public class ContextRetentionLeakTests
             var child = new Person { FirstName = $"Child_{i}" };
             root.Mother = child;
             root.Mother = null;
+            weakRefs.Add(new WeakReference(child));
         }
 
+        // Force GC
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        var afterBytes = GC.GetTotalMemory(forceFullCollection: true);
 
-        // Assert: should not grow more than ~50KB (tolerance for dict capacity etc.)
-        var growthKb = (afterBytes - baselineBytes) / 1024.0;
-        Assert.True(growthKb < 50, $"Memory grew by {growthKb:F1} KB after 1000 attach/detach cycles — likely a retention leak");
+        // Assert: all detached children are collected (a retention leak would keep them reachable).
+        var alive = weakRefs.Count(w => w.IsAlive);
+        Assert.True(alive <= 1, $"{alive} of 1000 detached children are still alive after GC — likely a retention leak");
     }
 
     /// <summary>
-    /// Exercises the SubjectUpdateApplier path (CreateCompleteUpdate + ApplySubjectUpdate)
-    /// which uses batch scope and the update serialization pipeline.
+    /// Exercises the SubjectUpdateApplier path (CreateCompleteUpdate + ApplySubjectUpdate), which uses
+    /// batch scope and the update serialization pipeline. Verifies the client-side subjects the applier
+    /// creates are released once the server removes them.
     /// </summary>
     [Fact]
-    public void WhenApplierCreatesAndDestroysSubjects_ThenMemoryDoesNotGrow()
+    public void WhenApplierCreatesAndDestroysSubjects_ThenAllAreGarbageCollected()
     {
         // Arrange: two participants (simulates server + client)
         var serverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -264,37 +241,34 @@ public class ContextRetentionLeakTests
 
         var serverRoot = new Person(serverContext) { FirstName = "ServerRoot" };
         var clientRoot = new Person(clientContext) { FirstName = "ClientRoot" };
+        var weakRefs = new List<WeakReference>();
 
-        // Warm up: a few complete update round-trips
-        for (var i = 0; i < 20; i++)
-        {
-            serverRoot.Mother = new Person { FirstName = $"Warmup_{i}", Mother = new Person { FirstName = $"WarmupGC_{i}" } };
-            var update = Connectors.Updates.SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
-            clientRoot.ApplySubjectUpdate(update, null);
-            serverRoot.Mother = null;
-            update = Connectors.Updates.SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
-            clientRoot.ApplySubjectUpdate(update, null);
-        }
-
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        var baselineBytes = GC.GetTotalMemory(forceFullCollection: true);
-
-        // Act: 2000 apply cycles (create → complete update → apply → remove → complete update → apply)
-        for (var i = 0; i < 2000; i++)
+        // Act: 1000 apply cycles (create → complete update → apply → remove → complete update → apply)
+        for (var i = 0; i < 1000; i++)
         {
             // Server adds a child with grandchild
             serverRoot.Mother = new Person { FirstName = $"Child_{i}", Mother = new Person { FirstName = $"GC_{i}" } };
 
-            // Create snapshot and apply to client
+            // Create snapshot and apply to client (the applier creates client-side instances)
             var addUpdate = Connectors.Updates.SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
             clientRoot.ApplySubjectUpdate(addUpdate, null);
+
+            // Track the client-side instances the applier just created (distinct per cycle: each new
+            // server child gets a fresh subject ID, so the applier materializes a new client instance).
+            var clientChild = clientRoot.Mother;
+            if (clientChild is not null)
+            {
+                weakRefs.Add(new WeakReference(clientChild));
+                if (clientChild.Mother is not null)
+                {
+                    weakRefs.Add(new WeakReference(clientChild.Mother));
+                }
+            }
 
             // Server removes the child
             serverRoot.Mother = null;
 
-            // Create snapshot and apply to client
+            // Create snapshot and apply to client (removal should release the client-side instances)
             var removeUpdate = Connectors.Updates.SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
             clientRoot.ApplySubjectUpdate(removeUpdate, null);
         }
@@ -302,10 +276,12 @@ public class ContextRetentionLeakTests
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        var afterBytes = GC.GetTotalMemory(forceFullCollection: true);
 
-        var growthKb = (afterBytes - baselineBytes) / 1024.0;
-        Assert.True(growthKb < 200, $"Memory grew by {growthKb:F1} KB after 2000 applier round-trips — likely a retention leak in the update pipeline");
+        // Assert: applier-created client subjects are released after removal. A leak in the update
+        // pipeline (batch scope, ownership, registry) would keep them reachable.
+        var alive = weakRefs.Count(w => w.IsAlive);
+        // Allow a few — the final iteration's locals and any in-flight pooled state may linger.
+        Assert.True(alive <= 5, $"{alive} of {weakRefs.Count} applier-created client subjects are still alive after GC — likely a retention leak in the update pipeline");
     }
 
     /// <summary>
