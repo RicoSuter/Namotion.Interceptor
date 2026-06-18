@@ -40,32 +40,6 @@ public class ChangeQueueProcessor : IDisposable
 
     private readonly PropertyChangeQueueSubscription _subscription;
 
-    // Diagnostic counters (reset per cycle via ResetDiagnostics)
-    private long _diagSourceFiltered;
-    private long _diagPropertyFiltered;
-    private long _diagFlushed;
-    private long _diagFlushFailed;
-
-    /// <summary>Source-echo filtered change count since last reset.</summary>
-    public long DiagSourceFiltered => Volatile.Read(ref _diagSourceFiltered);
-
-    /// <summary>Property-filter dropped change count since last reset.</summary>
-    public long DiagPropertyFiltered => Volatile.Read(ref _diagPropertyFiltered);
-
-    /// <summary>Successfully flushed change count since last reset.</summary>
-    public long DiagFlushed => Volatile.Read(ref _diagFlushed);
-
-    /// <summary>Changes lost due to flush failure since last reset.</summary>
-    public long DiagFlushFailed => Volatile.Read(ref _diagFlushFailed);
-
-    public void ResetDiagnostics()
-    {
-        Interlocked.Exchange(ref _diagSourceFiltered, 0);
-        Interlocked.Exchange(ref _diagPropertyFiltered, 0);
-        Interlocked.Exchange(ref _diagFlushed, 0);
-        Interlocked.Exchange(ref _diagFlushFailed, 0);
-    }
-
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeQueueProcessor"/> class.
     /// The subscription is created immediately so that changes are captured from this point,
@@ -157,13 +131,11 @@ public class ChangeQueueProcessor : IDisposable
             {
                 if (change.Source == _source)
                 {
-                    Interlocked.Increment(ref _diagSourceFiltered);
                     continue;
                 }
 
                 if (!_propertyFilter(change.Property))
                 {
-                    Interlocked.Increment(ref _diagPropertyFiltered);
                     continue;
                 }
 
@@ -282,7 +254,6 @@ public class ChangeQueueProcessor : IDisposable
                 try
                 {
                     await _writeHandler(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, _flushDedupedCount), cancellationToken).ConfigureAwait(false);
-                    Interlocked.Add(ref _diagFlushed, _flushDedupedCount);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -290,8 +261,7 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    Interlocked.Add(ref _diagFlushFailed, _flushDedupedCount);
-                    _logger.LogError(ex, "CQP flush failed — {Count} changes lost (drained from queue but writeHandler threw).", _flushDedupedCount);
+                    _logger.LogError(ex, "Failed to write changes.");
                 }
             }
         }
