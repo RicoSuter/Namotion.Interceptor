@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Connectors;
@@ -101,6 +102,52 @@ public class SourceOwnershipManager : IDisposable
                 _onReleasing?.Invoke(property);
                 property.RemoveSource(_source);
             }
+        }
+    }
+
+    /// <summary>
+    /// Releases ownership of every owned property whose subject is no longer registered (detached
+    /// from the object graph). This reconciles the owned set after an operation that can claim a
+    /// property whose subject detaches concurrently: a bulk re-claim (see callers) snapshots the
+    /// graph and then claims each property, so a subject detaching between snapshot and claim is
+    /// re-added <em>after</em> its <see cref="LifecycleInterceptor.SubjectDetaching"/> event already
+    /// fired. Without this reconcile that property would never be released, retaining the detached
+    /// subject and its subtree.
+    /// </summary>
+    /// <returns>The number of detached properties released.</returns>
+    public int ReleaseDetachedSubjects()
+    {
+        // Requires a registry to distinguish detached subjects; if the source root itself is not
+        // registered there is no registry (or state is not loaded yet) and nothing to reconcile.
+        if (_source.RootSubject.TryGetRegisteredSubject() is null)
+        {
+            return 0;
+        }
+
+        lock (_lock)
+        {
+            List<PropertyReference>? detached = null;
+            foreach (var property in _properties)
+            {
+                if (property.Subject.TryGetRegisteredSubject() is null)
+                {
+                    (detached ??= []).Add(property);
+                }
+            }
+
+            if (detached is null)
+            {
+                return 0;
+            }
+
+            foreach (var property in detached)
+            {
+                _properties.Remove(property);
+                _onReleasing?.Invoke(property);
+                property.RemoveSource(_source);
+            }
+
+            return detached.Count;
         }
     }
 

@@ -11,13 +11,8 @@ namespace Namotion.Interceptor.Connectors
     public class ChangeQueueProcessor : System.IDisposable
     {
         public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, System.TimeSpan? bufferTime, Microsoft.Extensions.Logging.ILogger logger) { }
-        public long DiagFlushFailed { get; }
-        public long DiagFlushed { get; }
-        public long DiagPropertyFiltered { get; }
-        public long DiagSourceFiltered { get; }
         public void Dispose() { }
         public System.Threading.Tasks.Task ProcessAsync(System.Threading.CancellationToken cancellationToken) { }
-        public void ResetDiagnostics() { }
     }
     public class DefaultSubjectFactory : Namotion.Interceptor.Connectors.ISubjectFactory
     {
@@ -67,6 +62,7 @@ namespace Namotion.Interceptor.Connectors
         public System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.PropertyReference> Properties { get; }
         public bool ClaimSource(Namotion.Interceptor.PropertyReference property) { }
         public void Dispose() { }
+        public int ReleaseDetachedSubjects() { }
         public void ReleaseSource(Namotion.Interceptor.PropertyReference property) { }
     }
     public static class SourcePropertyExtensions

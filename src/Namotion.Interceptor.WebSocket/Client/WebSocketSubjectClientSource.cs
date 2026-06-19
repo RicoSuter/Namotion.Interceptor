@@ -333,6 +333,16 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
 
         _logger.LogInformation("Claimed ownership of {Count} properties for WebSocket sync.", claimedCount);
+
+        // Reconcile: this bulk claim snapshots the graph (GetAllProperties) and then claims each
+        // property, so a subject detaching between the snapshot and its claim is re-added after its
+        // detach event already fired and would never be released. Drop any such orphaned ownership
+        // for now-detached subjects, otherwise they (and their subtrees) leak across reconnects.
+        var releasedDetached = _ownership.ReleaseDetachedSubjects();
+        if (releasedDetached > 0)
+        {
+            _logger.LogDebug("Released {Count} orphaned ownership entries for detached subjects after re-claim.", releasedDetached);
+        }
     }
 
     private void OnSubjectAttached(SubjectLifecycleChange change)
