@@ -20,7 +20,7 @@ public class ContextInheritanceHandler : ILifecycleHandler
             {
                 change.Subject.Context.AddFallbackContext(change.Property.Value.Subject.Context);
             }
-            else if (change is { ReferenceCount: 0, IsPropertyReferenceRemoved: true })
+            else if (change is { IsContextDetach: true, IsPropertyReferenceRemoved: true })
             {
                 change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
             }

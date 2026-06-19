@@ -241,6 +241,12 @@ Subject IDs are automatically managed during the subject lifecycle:
 - **On detach**: The reverse index entry is automatically cleaned up.
 - **Deferred reverse-index registration**: `SetSubjectId` and `GetOrAddSubjectId` only store the ID in the subject's `Data` dictionary until the subject is attached to the graph via the lifecycle. The reverse index (`TryGetSubjectById`) is populated by the lifecycle attach handler, preventing orphaned index entries for subjects that are never attached.
 
+### Deferred subject removal
+
+When applying updates that move subjects between structural properties, a subject can be temporarily detached between the removal from one property and the re-attach to another. While detached, the subject leaves the registry and becomes unresolvable by ID, which can cause value changes to be dropped mid-apply.
+
+This atomicity is handled by the lifecycle, not the registry directly. `SubjectUpdateApplier` wraps each apply in a lifecycle batch scope (`LifecycleInterceptor.CreateBatchScope`), which defers a subject's last detach so it stays attached (and registered) throughout the apply window; only subjects that are still orphaned when the scope ends are detached. See the [Subject Updates documentation](connectors-subject-updates.md#deferred-removal-during-structural-apply) for details.
+
 ### Without a registry
 
 Subject IDs also work without a registry configured — IDs are stored directly in the subject's `Data` dictionary. However, the reverse index lookup (`TryGetSubjectById`) requires a registry.

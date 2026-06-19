@@ -51,18 +51,19 @@ public sealed class CycleStatistics
 
     private void WriteStatistics(int cycleNumber, TimeSpan cycleDuration, TimeSpan convergeDuration, CycleResult result, string? profileName)
     {
-        var totalMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
+        var totalValueMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
+        var totalStructuralMutations = _mutationEngines.Sum(engine => engine.StructuralMutationCount);
         var totalChaos = _chaosEngines.Sum(engine => engine.ChaosEventCount);
 
         _logger.LogInformation("""
             --- Cycle {Cycle} Statistics ---
             Duration: {CycleDuration:F0}s (converged in {ConvergeDuration:F1}s)
             Chaos profile: {Profile}
-            Total mutations: {TotalMutations:N0} | Total chaos events: {TotalChaos}
+            Total mutations: {TotalValueMutations:N0} value + {TotalStructuralMutations:N0} structural | Total chaos events: {TotalChaos}
             Result: {Result}
             """,
             cycleNumber, cycleDuration.TotalSeconds, convergeDuration.TotalSeconds,
-            profileName ?? "(none)", totalMutations, totalChaos, result);
+            profileName ?? "(none)", totalValueMutations, totalStructuralMutations, totalChaos, result);
 
         foreach (var engine in _mutationEngines)
         {

@@ -167,6 +167,26 @@ public class ChangeQueueProcessor : IDisposable
         {
             try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
             await flushTask.ConfigureAwait(false);
+
+            // Final flush: drain any remaining changes that were enqueued after the last
+            // periodic flush but before the dequeue loop exited (e.g., connection error
+            // during chaos). Without this, these changes are permanently lost — the CQP
+            // is about to be disposed and the concurrent queue contents are discarded.
+            // The writeHandler may fail (connection is dead), but
+            // SubjectSourceBackgroundService.WriteChangesAsync routes failures to the
+            // WriteRetryQueue, which is re-applied on the next reconnection.
+            if (!_changes.IsEmpty)
+            {
+                try
+                {
+                    await TryFlushAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Best-effort: if flush fails here, changes go to WriteRetryQueue
+                    // via the writeHandler's error handling, or are lost if even that fails.
+                }
+            }
         }
     }
 

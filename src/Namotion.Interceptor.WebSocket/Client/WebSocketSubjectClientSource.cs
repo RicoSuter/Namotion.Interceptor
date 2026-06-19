@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
@@ -10,7 +11,9 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Resilience;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
@@ -35,14 +38,24 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
     private volatile ClientWebSocket? _webSocket;
     private volatile SubjectPropertyWriter? _propertyWriter;
-    private volatile SubjectUpdate? _initialState;
-    private volatile CancellationTokenSource? _receiveCts;
-    private volatile TaskCompletionSource? _receiveLoopCompleted;
+    private SubjectUpdate? _initialState;
+    private CancellationTokenSource? _receiveCts;
+    private TaskCompletionSource? _receiveLoopCompleted;
     private readonly SourceOwnershipManager _ownership;
     private readonly CircuitBreaker? _circuitBreaker;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private readonly ClientSequenceTracker _sequenceTracker = new();
+    // Monotonic per-connection sequence stamped on each client-to-server update.
+    // Reset on every (re)connect so the server's per-connection tracker stays aligned.
+    private long _clientSendSequence;
+
+    /// <summary>
+    /// Gets the last successfully received sequence number from the server.
+    /// Returns the Welcome sequence if no updates have been received yet, or -1 if not connected.
+    /// </summary>
+    public long LastReceivedSequence => _sequenceTracker.ExpectedNextSequence - 1;
+
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
     private int _disposed;
@@ -57,12 +70,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         IInterceptorSubject subject,
         WebSocketClientConfiguration configuration,
         ILogger<WebSocketSubjectClientSource> logger)
-        : base(
-            (subject ?? throw new ArgumentNullException(nameof(subject))).Context,
-            logger ?? throw new ArgumentNullException(nameof(logger)),
-            (configuration ?? throw new ArgumentNullException(nameof(configuration))).BufferTime,
-            configuration.RetryTime,
-            configuration.WriteRetryQueueSize)
+        : base(ValidateArguments(subject, configuration, logger), logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize)
     {
         _subject = subject;
         _configuration = configuration;
@@ -80,30 +88,40 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         configuration.Validate();
     }
 
+    // Validates arguments before the base constructor runs and returns the subject context.
+    // Keeps ArgumentNullException semantics even though the base call dereferences these arguments.
+    private static IInterceptorSubjectContext ValidateArguments(
+        IInterceptorSubject subject,
+        WebSocketClientConfiguration configuration,
+        ILogger<WebSocketSubjectClientSource> logger)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
+        return subject.Context;
+    }
+
     /// <inheritdoc />
     protected override async Task<IAsyncDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
         _propertyWriter = propertyWriter;
 
-        try
-        {
-            await ConnectAsync(cancellationToken).ConfigureAwait(false);
+        await ConnectAsync(cancellationToken).ConfigureAwait(false);
 
-            return BackgroundTaskLifetime.Start(
-                cancellationToken,
-                _logger,
-                RunMonitorLoopAsync,
-                DisposeWebSocketConnectionAsync);
-        }
-        catch
-        {
-            await StopReceiveLoopAndDisposeSocketAsync().ConfigureAwait(false);
-            throw;
-        }
+        // The base owns the listen lifetime: it runs the connection monitor loop as a
+        // background task (handling reconnect, backoff, circuit breaker and force-kill restart)
+        // and, on disposal, cancels that loop and closes the active socket.
+        return BackgroundTaskLifetime.Start(
+            cancellationToken,
+            _logger,
+            RunConnectionMonitorAsync,
+            CloseActiveSocketAsync);
     }
 
-    private async ValueTask DisposeWebSocketConnectionAsync()
+    private async ValueTask CloseActiveSocketAsync()
     {
+        // Read the current socket (not a stale captured reference) so that
+        // after reconnection, we close the active connection.
         var currentSocket = _webSocket;
         if (currentSocket?.State == WebSocketState.Open)
         {
@@ -120,42 +138,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             {
                 _logger.LogError(ex, "Error while closing WebSocket connection");
             }
-        }
-
-        await StopReceiveLoopAndDisposeSocketAsync().ConfigureAwait(false);
-    }
-
-    private async Task StopReceiveLoopAndDisposeSocketAsync()
-    {
-        var receiveCts = _receiveCts;
-        if (receiveCts is not null)
-        {
-            try { await receiveCts.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-
-            var receiveLoop = _receiveLoopCompleted?.Task;
-            if (receiveLoop is not null && !receiveLoop.IsCompleted)
-            {
-                try
-                {
-                    using var waitCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                    await receiveLoop.WaitAsync(waitCts.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Receive loop did not complete within timeout — proceed with cleanup
-                }
-            }
-
-            try { receiveCts.Dispose(); } catch { /* ignore */ }
-            _receiveCts = null;
-        }
-
-        var webSocket = _webSocket;
-        if (webSocket is not null)
-        {
-            try { webSocket.Abort(); } catch { /* ignore */ }
-            try { webSocket.Dispose(); } catch { /* ignore */ }
-            _webSocket = null;
         }
     }
 
@@ -261,6 +243,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
             _initialState = welcome.State;
             _sequenceTracker.InitializeFromWelcome(welcome.Sequence);
+            Interlocked.Exchange(ref _clientSendSequence, 0);
 
             _logger.LogInformation("Connected to WebSocket server (sequence: {Sequence})", welcome.Sequence);
 
@@ -276,7 +259,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 _webSocket?.Dispose();
                 _webSocket = null;
 
-                // Signal completion to prevent the monitor loop from hanging
+                // Signal completion so the connection monitor loop can trigger reconnect
                 _receiveLoopCompleted.TrySetResult();
             }
         }
@@ -301,6 +284,16 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             // Claim ownership of all properties matching the path provider
             ClaimPropertyOwnership();
 
+            // Auto-claim properties of new subjects when they appear via structural mutations.
+            // This ensures value changes on dynamically added collection/dictionary items
+            // are forwarded to the server.
+            var lifecycle = _subject.Context.TryGetLifecycleInterceptor();
+            if (lifecycle is not null)
+            {
+                lifecycle.SubjectAttached -= OnSubjectAttached;
+                lifecycle.SubjectAttached += OnSubjectAttached;
+            }
+
             _initialState = null;
         });
     }
@@ -316,9 +309,12 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             return;
         }
 
+        // Get all properties (including structural), filtered by PathProvider if configured.
+        // Structural properties (Collection, Dictionary, ObjectRef) must be claimed so that
+        // client-side structural mutations are forwarded to the server.
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(p)))
+            .Where(p => pathProvider is null || pathProvider.IsPropertyIncluded(p))
             .ToList();
 
         var claimedCount = 0;
@@ -337,6 +333,32 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
 
         _logger.LogInformation("Claimed ownership of {Count} properties for WebSocket sync.", claimedCount);
+
+        // Reconcile: this bulk claim snapshots the graph (GetAllProperties) and then claims each
+        // property, so a subject detaching between the snapshot and its claim is re-added after its
+        // detach event already fired and would never be released. Drop any such orphaned ownership
+        // for now-detached subjects, otherwise they (and their subtrees) leak across reconnects.
+        var releasedDetached = _ownership.ReleaseDetachedSubjects();
+        if (releasedDetached > 0)
+        {
+            _logger.LogDebug("Released {Count} orphaned ownership entries for detached subjects after re-claim.", releasedDetached);
+        }
+    }
+
+    private void OnSubjectAttached(SubjectLifecycleChange change)
+    {
+        var pathProvider = _configuration.PathProvider;
+        var registeredSubject = change.Subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+            return;
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (pathProvider is not null && !pathProvider.IsPropertyIncluded(property))
+                continue;
+
+            _ownership.ClaimSource(property.Reference);
+        }
     }
 
     /// <inheritdoc />
@@ -372,10 +394,16 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
 
             var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
+            var payload = new UpdatePayload
+            {
+                Root = update.Root,
+                Subjects = update.Subjects,
+                Sequence = Interlocked.Increment(ref _clientSendSequence)
+            };
             _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, update);
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, payload);
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
-                _sendBuffer.WrittenCount, update.Subjects.Count);
+                _sendBuffer.WrittenCount, payload.Subjects.Count);
             await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
             MaybeShrinkSendBuffer();
             _logger.LogDebug("Sent update successfully");
@@ -396,6 +424,72 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             {
                 // Lock was disposed during operation
             }
+        }
+    }
+
+    private SubjectUpdate BuildOwnedStateUpdate()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        var owned = _ownership.Properties;
+        var changes = new List<SubjectPropertyChange>(owned.Count);
+        foreach (var property in owned)
+        {
+            var getValue = property.Metadata.GetValue;
+            if (getValue is null)
+            {
+                continue; // no getter (write-only / structural without reader): nothing to snapshot
+            }
+
+            var current = getValue(property.Subject);
+            changes.Add(SubjectPropertyChange.Create<object?>(property, this, timestamp, null, current, current));
+        }
+
+        // These changes intentionally have old == new. CreatePartialUpdateFromChanges serializes each
+        // change's new value without dropping no-op changes, so the resync carries the full current owned
+        // state. If that factory ever starts dropping no-op changes, the resync would send nothing.
+        return SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.ToArray(), _processors);
+    }
+
+    private async Task SendOwnedStateResyncAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken cancellationToken)
+    {
+        var update = BuildOwnedStateUpdate();
+        var payload = new UpdatePayload
+        {
+            Root = update.Root,
+            Subjects = update.Subjects,
+            Sequence = Interlocked.Increment(ref _clientSendSequence)
+        };
+        await SendUnderLockAsync(webSocket, MessageType.Update, payload, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SendClientHeartbeatAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken cancellationToken)
+    {
+        // Carry the client's value-aware state digest so the server can detect a content-level
+        // client-to-server divergence (a value lost with no sequence gap) and request a Resync.
+        var payload = new ClientHeartbeatPayload
+        {
+            LastSentSequence = Interlocked.Read(ref _clientSendSequence),
+            Digest = StateDigest.Compute(_subject)
+        };
+        await SendUnderLockAsync(webSocket, MessageType.ClientHeartbeat, payload, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Serializes a message and sends it on the single WebSocket while holding _connectionLock,
+    // so concurrent sends from the write pump and the receive loop never overlap on one socket.
+    private async Task SendUnderLockAsync(System.Net.WebSockets.WebSocket webSocket, MessageType messageType, object payload, CancellationToken cancellationToken)
+    {
+        try { await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false); }
+        catch (ObjectDisposedException) { return; }
+        try
+        {
+            _sendBuffer.Clear();
+            _serializer.SerializeMessageTo(_sendBuffer, messageType, payload);
+            await webSocket.SendAsync(_sendBuffer.WrittenMemory, System.Net.WebSockets.WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            try { _connectionLock.Release(); }
+            catch (ObjectDisposedException) { }
         }
     }
 
@@ -476,11 +570,37 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                                         heartbeat.Sequence, _sequenceTracker.ExpectedNextSequence);
                                     return; // Exit receive loop -> triggers reconnection
                                 }
+
+                                // Content-level divergence backstop: the heartbeat is server-idle-gated, so when
+                                // it arrives both sides are quiescent. If the server's value-aware digest differs
+                                // from ours, a value diverged with no sequence gap to reveal it. Trigger the
+                                // existing reconnect recovery (exit the receive loop -> reconnect -> Welcome),
+                                // which heals a server-to-client divergence by re-applying the complete state.
+                                // A false-positive mismatch is safe: it only costs one extra reconnect, never
+                                // incorrectness.
+                                if (heartbeat.Digest is not null)
+                                {
+                                    var clientDigest = StateDigest.Compute(_subject);
+                                    if (clientDigest.Length != 0 && !string.Equals(clientDigest, heartbeat.Digest, StringComparison.Ordinal))
+                                    {
+                                        _logger.LogWarning(
+                                            "Idle state digest mismatch: server {Server}, client {Client}. Triggering reconnection.",
+                                            heartbeat.Digest, clientDigest);
+                                        return; // Exit receive loop -> triggers reconnection -> Welcome
+                                    }
+                                }
+
+                                await SendClientHeartbeatAsync(webSocket, cancellationToken).ConfigureAwait(false);
                                 break;
 
                             case MessageType.Error:
                                 var error = _serializer.Deserialize<ErrorPayload>(payloadBytes);
                                 _logger.LogWarning("Received error from server: {Code} - {Message}", error.Code, error.Message);
+                                break;
+
+                            case MessageType.Resync:
+                                _logger.LogInformation("Server requested resync; resending complete owned state.");
+                                await SendOwnedStateResyncAsync(webSocket!, cancellationToken).ConfigureAwait(false);
                                 break;
                         }
 
@@ -528,7 +648,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
     }
 
-    private void HandleUpdate(SubjectUpdate update)
+    private void HandleUpdate(UpdatePayload update)
     {
         var propertyWriter = _propertyWriter;
         if (propertyWriter is null) return;
@@ -567,14 +687,21 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     }
 
     /// <summary>
-    /// Monitor connection and handle reconnection with exponential backoff.
-    /// Spawned by <see cref="StartListeningAsync"/> via <see cref="BackgroundTaskLifetime.Start"/>.
-    /// Cancellation of <paramref name="stoppingToken"/> (via lifetime disposal or host shutdown)
-    /// breaks the outer loop.
+    /// Monitors the active connection and handles reconnection (exponential backoff,
+    /// circuit breaker) and force-kill restart. Runs as a background task owned by the
+    /// listen lifetime that <see cref="StartListeningAsync"/> returns; the base disposes
+    /// that lifetime (cancelling this loop) on host shutdown or before a retry cycle.
     /// </summary>
-    private async Task RunMonitorLoopAsync(CancellationToken stoppingToken)
+    private async Task RunConnectionMonitorAsync(CancellationToken stoppingToken)
     {
-        // Monitor connection and handle reconnection with exponential backoff
+        // Cancel the receive loop when the lifetime is cancelled (host stop or base teardown).
+        await using var stoppingTokenRegistration = stoppingToken.Register(static state =>
+        {
+            var source = (WebSocketSubjectClientSource)state!;
+            try { source._receiveCts?.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }, this);
+
         var reconnectDelay = _configuration.ReconnectDelay;
         var maxDelay = _configuration.MaxReconnectDelay;
 
@@ -648,6 +775,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 cts.Dispose();
             }
         }
+
+        // The stopping-token registration already cancels the receive loop,
+        // but cancel again on exit in case the loop ended via a non-cancellation break.
+        if (_receiveCts is not null)
+        {
+            await _receiveCts.CancelAsync().ConfigureAwait(false);
+        }
     }
 
     private async Task<TimeSpan> ReconnectAndResumeAsync(
@@ -695,9 +829,9 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
-        // Stop the base ExecuteAsync first — this cancels the stoppingToken and waits
-        // for the listen lifetime (which owns the monitor task) to be disposed,
-        // ensuring no concurrent access to resources before we dispose them.
+        // Stop the base ExecuteAsync first. This cancels the stoppingToken, which disposes the
+        // listen lifetime (cancelling the connection monitor and closing the socket) and lets the
+        // change queue processor exit, ensuring no concurrent access to resources before disposal.
         try
         {
             using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -708,12 +842,38 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             // Best effort stop
         }
 
-        // Now safe to dispose — ExecuteAsync has exited and the lifetime has been disposed.
-        // Belt-and-braces: cancel and dispose any straggler receive CTS / socket.
-        await StopReceiveLoopAndDisposeSocketAsync().ConfigureAwait(false);
+        // Cancel receive loop and wait for it to finish before disposing resources
+        // (same pattern as ConnectCoreAsync)
+        if (_receiveCts is not null)
+        {
+            await _receiveCts.CancelAsync().ConfigureAwait(false);
+
+            var receiveLoop = _receiveLoopCompleted?.Task;
+            if (receiveLoop is not null && !receiveLoop.IsCompleted)
+            {
+                try
+                {
+                    using var waitCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await receiveLoop.WaitAsync(waitCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Receive loop did not complete within timeout — proceed with disposal
+                }
+            }
+
+            _receiveCts.Dispose();
+        }
+
+        // Unsubscribe from lifecycle events
+        var lifecycle = _subject.Context.TryGetLifecycleInterceptor();
+        if (lifecycle is not null)
+            lifecycle.SubjectAttached -= OnSubjectAttached;
 
         // Clean up resources
         _ownership.Dispose();
+        _webSocket?.Abort();
+        _webSocket?.Dispose();
         _connectionLock.Dispose();
 
         Dispose();
@@ -726,5 +886,4 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _sendBuffer = new ArrayBufferWriter<byte>(4096);
         }
     }
-
 }

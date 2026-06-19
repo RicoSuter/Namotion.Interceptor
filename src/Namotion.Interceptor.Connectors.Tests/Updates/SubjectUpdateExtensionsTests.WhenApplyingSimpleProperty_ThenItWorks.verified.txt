@@ -1,14 +1,7 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      Children: {
-        Kind: Collection,
-        Count: 0
-      },
-      Father: {
-        Kind: Object
-      },
+    SubjectId_1: {
       FirstName: {
         Kind: Value,
         Value: John,
@@ -26,20 +19,26 @@
           }
         }
       },
-      FullName: {
-        Kind: Value,
-        Value: John Doe
-      },
       LastName: {
         Kind: Value,
         Value: Doe,
         Timestamp: DateTimeOffset_2
       },
+      FullName: {
+        Kind: Value,
+        Value: John Doe
+      },
+      Father: {
+        Kind: Object
+      },
       Mother: {
         Kind: Object
       },
+      Children: {
+        Kind: Collection
+      },
       Relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     }
   }

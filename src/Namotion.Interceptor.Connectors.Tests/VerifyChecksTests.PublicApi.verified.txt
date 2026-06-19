@@ -62,6 +62,7 @@ namespace Namotion.Interceptor.Connectors
         public System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.PropertyReference> Properties { get; }
         public bool ClaimSource(Namotion.Interceptor.PropertyReference property) { }
         public void Dispose() { }
+        public int ReleaseDetachedSubjects() { }
         public void ReleaseSource(Namotion.Interceptor.PropertyReference property) { }
     }
     public static class SourcePropertyExtensions
@@ -215,34 +216,13 @@ namespace Namotion.Interceptor.Connectors.Updates
         Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate TransformSubjectPropertyUpdate(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate update);
         Namotion.Interceptor.Connectors.Updates.SubjectUpdate TransformSubjectUpdate(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update);
     }
-    public class SubjectCollectionOperation
-    {
-        public SubjectCollectionOperation() { }
-        [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
-        [System.Text.Json.Serialization.JsonPropertyName("action")]
-        public Namotion.Interceptor.Connectors.Updates.SubjectCollectionOperationType Action { get; init; }
-        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-        [System.Text.Json.Serialization.JsonPropertyName("fromIndex")]
-        public int? FromIndex { get; init; }
-        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-        [System.Text.Json.Serialization.JsonPropertyName("id")]
-        public string? Id { get; init; }
-        [System.Text.Json.Serialization.JsonPropertyName("index")]
-        public required object Index { get; init; }
-    }
-    public enum SubjectCollectionOperationType
-    {
-        Remove = 0,
-        Insert = 1,
-        Move = 2,
-    }
     public readonly struct SubjectPropertyItemUpdate
     {
-        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         [System.Text.Json.Serialization.JsonPropertyName("id")]
-        public string? Id { get; init; }
-        [System.Text.Json.Serialization.JsonPropertyName("index")]
-        public required object Index { get; init; }
+        public required string Id { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("key")]
+        public string? Key { get; init; }
     }
     public class SubjectPropertyUpdate
     {
@@ -250,9 +230,6 @@ namespace Namotion.Interceptor.Connectors.Updates
         [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         [System.Text.Json.Serialization.JsonPropertyName("attributes")]
         public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? Attributes { get; set; }
-        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-        [System.Text.Json.Serialization.JsonPropertyName("count")]
-        public int? Count { get; set; }
         [System.Text.Json.Serialization.JsonExtensionData]
         public System.Collections.Generic.Dictionary<string, object>? ExtensionData { get; set; }
         [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -264,9 +241,6 @@ namespace Namotion.Interceptor.Connectors.Updates
         [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter?))]
         [System.Text.Json.Serialization.JsonPropertyName("kind")]
         public Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdateKind Kind { get; set; }
-        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-        [System.Text.Json.Serialization.JsonPropertyName("operations")]
-        public System.Collections.Generic.List<Namotion.Interceptor.Connectors.Updates.SubjectCollectionOperation>? Operations { get; set; }
         [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         [System.Text.Json.Serialization.JsonPropertyName("timestamp")]
         public System.DateTimeOffset? Timestamp { get; set; }
@@ -285,8 +259,12 @@ namespace Namotion.Interceptor.Connectors.Updates
     public class SubjectUpdate
     {
         public SubjectUpdate() { }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("completeSubjectIds")]
+        public System.Collections.Generic.HashSet<string>? CompleteSubjectIds { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         [System.Text.Json.Serialization.JsonPropertyName("root")]
-        public string Root { get; init; }
+        public string? Root { get; init; }
         [System.Text.Json.Serialization.JsonPropertyName("subjects")]
         public System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>> Subjects { get; init; }
         public static Namotion.Interceptor.Connectors.Updates.SubjectUpdate CreateCompleteUpdate(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.ISubjectUpdateProcessor[] processors) { }
@@ -294,6 +272,13 @@ namespace Namotion.Interceptor.Connectors.Updates
     }
     public static class SubjectUpdateExtensions
     {
-        public static void ApplySubjectUpdate(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory, System.Action<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? transformValueBeforeApply = null) { }
+        public static long DiagAppliedValueCount { get; }
+        public static long DiagDroppedNoIdCount { get; }
+        public static long DiagDroppedSubjectUpdateCount { get; }
+        public static long DiagFallbackSerializationCount { get; }
+        public static long DiagRecoveredSubjectUpdateCount { get; }
+        public static long DiagUnknownPropertyCount { get; }
+        public static void ApplySubjectUpdate(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory, System.Action<Namotion.Interceptor.PropertyReference, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? transformValueBeforeApply = null) { }
+        public static object GetApplyLock(this Namotion.Interceptor.IInterceptorSubject subject) { }
     }
 }

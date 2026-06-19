@@ -26,12 +26,8 @@ Only run integration tests when changing connector implementations (OPC UA, MQTT
 - `dotnet test src/Namotion.Interceptor.OpcUa.Tests`
 - `dotnet test src/HomeBlaze/HomeBlaze.E2E.Tests`
 
-### Running Samples
-- `dotnet run --project src/Namotion.Interceptor.SampleConsole` - Run console sample
-- `dotnet run --project src/Extensions/Namotion.Interceptor.SampleBlazor` - Run Blazor sample
-
 ### Performance Testing
-- `dotnet run --project src/Namotion.Interceptor.Benchmarks -c Release` - Run performance benchmarks
+- `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release` - Run performance benchmarks
 
 ## Architecture
 
@@ -49,14 +45,16 @@ Only run integration tests when changing connector implementations (OPC UA, MQTT
 ### Project Structure
 ```
 src/
-├── Namotion.Interceptor/           # Core library with base interfaces
-├── Namotion.Interceptor.Generator/ # Source generator for [InterceptorSubject]
-├── Namotion.Interceptor.{Feature}/ # Extension libraries (Tracking, Registry, etc.)
-├── Extensions/                     # Integration packages (AspNetCore, Blazor, etc.)
-├── Samples/                        # Example applications
-└── Tests/                          # Unit test projects
-docs/                               # Feature and connector documentation
-├── design/                         # Internal design documents
+├── Namotion.Interceptor/              # Core library with base interfaces
+├── Namotion.Interceptor.Generator/    # Source generator for [InterceptorSubject]
+├── Namotion.Interceptor.{Feature}/    # Extension libraries (Tracking, Registry, Connectors, etc.)
+├── Namotion.Interceptor.{Feature}.Tests/  # Tests colocated per feature
+├── Namotion.Interceptor.{Protocol}/   # Integration packages (AspNetCore, Blazor, OpcUa, Mqtt, WebSocket, GraphQL)
+├── Namotion.Interceptor.Benchmark/    # BenchmarkDotNet performance tests
+├── Namotion.Interceptor.Sample*/      # Example applications
+└── HomeBlaze/                         # Full application built on the library
+docs/                                  # Feature and connector documentation (read before changing a feature)
+├── design/                            # Internal design documents
 ```
 
 ## Language Requirements
@@ -93,7 +91,7 @@ The library uses a fluent configuration API:
 
 - **Global Settings**: `Directory.Build.props` with nullable enabled, warnings as errors
 - **Target Frameworks**: .NET Standard 2.0 (core), .NET 9.0 (extensions)
-- **Package Version**: 0.0.2 (early development)
+- **Maturity**: Early development — smaller breaking changes are acceptable
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
 
 ## Key Dependencies
@@ -112,12 +110,14 @@ The library has specialized support for:
 - **GraphQL**: Real-time subscription support
 - **Blazor**: UI data binding components
 
-## Performance Considerations
+## Design Priorities
 
-- All interception logic generated at compile-time (no runtime reflection)
-- Dedicated benchmarking with BenchmarkDotNet
-- Recent performance optimizations focused on allocation reduction
-- Observable streams for efficient change propagation
+1. **Correctness** (non-negotiable) — Thread-safe, no race conditions, guaranteed correct under concurrent reads and writes. Never trade correctness for anything else.
+2. **Performance** — Minimize allocations and maximize throughput. Any code path that runs during normal operation is a potential hot path — only error recovery, contention fallbacks, and rare race-resolution paths can assume cold execution. Less readable patterns (generics to avoid boxing, `Span<T>` in APIs, object pooling, etc.) are acceptable when justified by benchmarks.
+3. **API usability** — Easy to use correctly. Performance-oriented API shapes are fine when they serve priority 2.
+4. **Code simplicity** — Readable, low-abstraction code where priorities 1–3 allow.
+
+Priority 1 is absolute. Priorities 2–4 are trade-offs — discuss to find the right balance per case.
 
 ## Coding Style
 

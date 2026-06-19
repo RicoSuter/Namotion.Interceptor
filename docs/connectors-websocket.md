@@ -7,7 +7,8 @@ The `Namotion.Interceptor.WebSocket` package provides bidirectional WebSocket co
 - Bidirectional synchronization between server and clients
 - JSON serialization (extensible for MessagePack in future)
 - Hello/Welcome handshake with initial state delivery
-- Sequence numbers on server-to-client messages for gap detection
+- Sequence numbers on messages in both directions for gap detection and recovery
+- State-digest on heartbeats for quiescent-consistency verification
 - Periodic heartbeat messages for liveness checking
 - Automatic reconnection with exponential backoff
 - Write retry queue for resilience during disconnection
@@ -212,7 +213,7 @@ All messages use the same structure:
 [MessageType, Payload]
 ```
 
-- `MessageType`: Integer discriminator (0-4)
+- `MessageType`: Integer discriminator (0-6)
 - `Payload`: Type-specific JSON payload
 
 ### Message Types
@@ -224,6 +225,8 @@ All messages use the same structure:
 | Update | 2 | Bidirectional | Property changes |
 | Error | 3 | Bidirectional | Error notification |
 | Heartbeat | 4 | Server -> Client | Periodic liveness check with current sequence |
+| Resync | 5 | Server -> Client | Requests a client to resend its complete owned state after a client-to-server sequence gap |
+| ClientHeartbeat | 6 | Client -> Server | Reports the client's last-sent sequence during idle for trailing-gap detection |
 
 ### Connection Sequence
 
@@ -254,13 +257,15 @@ Client                                 Server
    |<------- Update ----------------------|  (server pushes changes)
    |  [2, {sequence:7, root:..., subjects:...}]
    |                                      |
-   |-------- Update --------------------->|  (client writes changes, no sequence)
-   |  [2, {root:..., subjects:...}]       |
+   |-------- Update --------------------->|  (client writes changes, monotonic per-connection sequence)
+   |  [2, {sequence:1, root:..., subjects:...}]  |
    |                                      |
-   |<------- Heartbeat -------------------|  (periodic, every 30s by default)
-   |  [4, {sequence: 7}]                  |
+   |<------- Heartbeat -------------------|  (periodic, server-idle-gated)
+   |  [4, {sequence: 7, digest: "a3f..."}]|
    |                                      |
-   |  (client checks: 7 < 8 → in sync)   |
+   |  (client checks sequence: 7 < 8 → in sync; compares digest)
+   |-------- ClientHeartbeat ------------>|  (client echoes its last-sent sequence + digest)
+   |  [6, {lastSentSequence: 1, digest: "a3f..."}]|
 ```
 
 #### Register-Before-Welcome Design
@@ -299,13 +304,26 @@ The snapshot does not need to be fully up-to-date — it is just a baseline. The
 **HeartbeatPayload**
 ```json
 {
-  "sequence": 42
+  "sequence": 42,
+  "digest": "a3f8c2..."
 }
 ```
 
 - `sequence`: Server's current sequence number (last broadcast batch). Does **not** increment the counter — it reflects the current value.
+- `digest`: On-demand state digest of the server's live graph. Carried only when heartbeats are enabled. See [State-Digest Recovery Net](#state-digest-recovery-net).
 
-Example wire format: `[4, {"sequence": 42}]`
+Example wire format: `[4, {"sequence": 42, "digest": "a3f8c2..."}]`
+
+**ClientHeartbeatPayload**
+```json
+{
+  "lastSentSequence": 3,
+  "digest": "b1d9e7..."
+}
+```
+
+- `lastSentSequence`: Client's last-sent sequence number. The server uses this to detect trailing client-to-server gaps.
+- `digest`: On-demand state digest of the client's live graph. The server compares it against its own digest to detect residual content-level divergence. See [State-Digest Recovery Net](#state-digest-recovery-net).
 
 **ErrorPayload**
 ```json
@@ -371,17 +389,41 @@ The server maintains a monotonically increasing sequence counter that is increme
 - The Welcome payload includes the current sequence at snapshot time. Clients initialize their expected next sequence to `welcome.sequence + 1`.
 - Heartbeat messages include the current sequence in their payload but do **not** increment it.
 
-**Client behavior:**
+**Client behavior (receiving from server):**
 - On receiving an Update: the client reads the sequence from the `UpdatePayload`. If `sequence != expectedNextSequence`, the client logs a warning and exits the receive loop, triggering reconnection via the existing recovery flow.
 - On receiving a Heartbeat: if `heartbeat.sequence >= expectedNextSequence`, the server has sent updates the client never received. The client exits the receive loop and reconnects.
-- A heartbeat with `sequence < expectedNextSequence` means the client is fully caught up — no action needed.
-- A null or zero sequence is treated as "unassigned" for client-to-server messages which do not carry sequence numbers.
+- A heartbeat with `sequence < expectedNextSequence` means the client is fully caught up. No action needed.
+- On receiving a Resync: the client immediately sends a complete update of all properties it owns (a reverse Welcome), which the server applies authoritatively to recover any lost writes.
 
-**Recovery flow on gap detection:**
-Gap detected -> receive loop exits -> `RunMonitorLoopAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `SubjectPropertyWriter.LoadInitialStateAndResumeAsync` calls the source's `LoadInitialStateAsync` to fetch the apply action, runs it under the buffer lock, and replays buffered updates. No new recovery logic is needed; the existing reconnection flow handles everything.
+**Client behavior (sending to server):**
+- The client stamps a monotonic per-connection `Sequence` on every `Update` it sends, starting at 1 on each (re)connect.
+- After receiving a server Heartbeat, the client replies with a `ClientHeartbeat` carrying its last-sent sequence. If the server has not received through that sequence, it sends a `Resync`.
 
-**Why only server-to-client messages carry sequence numbers:**
-Client-to-server writes are covered by the write retry queue (ring buffer, oldest-dropped-when-full) and flush-before-load on reconnection. The server applies updates synchronously under a lock, so silent drops within the server are impossible.
+**Server behavior (receiving from client):**
+- The server tracks the expected-next client sequence per connection (`ConnectionSequenceTracker`). On an in-stream gap (received sequence higher than expected), the server sends `Resync` to that client and realigns its tracker. The received update is still applied.
+- On receiving a `ClientHeartbeat`: if the client's last-sent sequence exceeds the server's last-received sequence for that connection, a `Resync` is sent to recover the trailing loss.
+
+**Recovery flow on server-to-client gap:**
+Gap detected -> receive loop exits -> `RunMonitorLoopAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `SubjectPropertyWriter.LoadInitialStateAndResumeAsync` loads initial state under the buffer lock and replays buffered updates. The existing reconnection flow handles everything.
+
+**Recovery flow on client-to-server gap:**
+In-stream gap or idle trailing loss detected by server -> server sends `Resync` -> client responds with complete owned-state update -> server applies it authoritatively. No reconnection needed.
+
+**Symmetry:**
+A server-to-client gap is recovered by the client pulling the server's complete state (Welcome on reconnect). A client-to-server gap is recovered by the server pulling the client's complete owned state (Resync). The write retry queue complements this for the disconnect/reconnect case.
+
+### State-Digest Recovery Net
+
+Sequence numbers guarantee message delivery: every sent update reaches its destination or a gap is detected. They do not, however, guarantee that the applied content is identical on both sides once heavy concurrent structural churn or repeated reconnects are factored in. The state-digest net is the quiescent-consistency backstop for that residual content-level divergence. Together the two layers implement the library's "state agrees once writes settle" model.
+
+**How it works:**
+
+- Both the server `Heartbeat` and the client `ClientHeartbeat` carry a `Digest` field. The digest is a deterministic, value-aware hash computed on demand from the live graph (no persistent shadow structure). It is timestamp-insensitive so clock skew does not cause false positives.
+- Heartbeats are server-idle-gated: the server only sends a Heartbeat when no update was broadcast within the last `HeartbeatInterval` (a time-since-last-broadcast cooldown, see `BroadcastHeartbeatAsync`). This means digest comparisons happen during quiescent periods, when the two sides should agree.
+- On receiving a heartbeat, each side compares the peer's digest to its own. A match means the graphs are consistent; no action is taken.
+- A mismatch routes to the existing recovery: a server-to-client mismatch triggers client reconnection (Welcome with full state); a client-to-server mismatch causes the server to send `Resync`, which causes the client to re-push its complete owned state. This preserves client writes rather than discarding them.
+- A false-positive mismatch is safe: it triggers one extra resync cycle, never incorrectness.
+- The net is bounded: O(1) on the wire (a hash), O(N) to compute but only at idle. There is no persistent per-update structure. This is the key contrast with the previously-removed `SentStructuralState` shadow, which was unbounded, leaky, and structural-only. The digest is value-aware and computed on demand.
 
 ### Heartbeat
 
@@ -440,13 +482,15 @@ Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches 
 
 - **Broadcast timeout**: A slow client can delay broadcast completion for other clients. Broadcasts have a 10-second timeout to mitigate this — sends that haven't completed continue in the background, and zombie detection cleans up persistently slow connections. However, very slow clients may still cause temporary backpressure before being removed. This should be revisited if it becomes a bottleneck in high-throughput scenarios.
 
+- **No server acknowledgment for client writes**: When a client sends an update to the server, `WriteChangesAsync` returns success as soon as the WebSocket send completes — it does not wait for the server to acknowledge or apply the change. This means transactions committed over WebSocket confirm only that the message was sent, not that the server accepted it. This differs from OPC UA and MQTT sources, where the external system provides real write confirmation. If the server fails to apply the update (e.g., validation error, concurrent conflict), the client is not notified. See [#231](https://github.com/RicoSuter/Namotion.Interceptor/issues/231) for planned server-ack support.
+
 ## Future Extensibility
 
 The protocol is designed for future enhancements:
 
 - **MessagePack support**: `format` field in Hello/Welcome enables negotiation for 3-4x smaller payloads
-- **Commands/RPC**: Message types 5-6 reserved for invoking methods on subjects
-- **Subscriptions**: Message types 7-8 reserved for subscribing to specific subjects/properties
+- **Commands/RPC**: Message types 7-8 reserved for invoking methods on subjects
+- **Subscriptions**: Message types 9-10 reserved for subscribing to specific subjects/properties
 - **Message compression**: Per-message or per-frame compression to reduce bandwidth
 - **Authentication/authorization hooks**: Token-based auth during handshake or per-message access control
 - **Diagnostic counters**: Connection metrics, reconnection attempts, message throughput tracking

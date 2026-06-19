@@ -83,6 +83,45 @@ public sealed class CycleLoggerProvider : ILoggerProvider, ICycleRecorder
         }
     }
 
+    /// <summary>
+    /// The connector logs this message (see WebSocketSubjectClientSource) when the server and
+    /// client structural hashes diverge and a reconnection is triggered. Matched as a substring
+    /// so the formatted hash arguments do not affect detection.
+    /// </summary>
+    private const string HashMismatchMarker = "Structural hash mismatch";
+
+    /// <summary>
+    /// Scans the current cycle log for structural hash mismatch warnings and returns the matching
+    /// lines, or an empty list if none were recorded. Each line was written to the pending cycle
+    /// file by the connector's warning, so the buffered writer is flushed before reading.
+    /// </summary>
+    public IReadOnlyList<string> GetHashMismatchWarnings()
+    {
+        lock (_fileLock)
+        {
+            _currentWriter?.Flush();
+
+            if (_currentFilePath is null || !File.Exists(_currentFilePath))
+                return [];
+
+            // The cycle's StreamWriter is still open while the cycle runs, so open with
+            // FileShare.ReadWrite to read alongside it. File.ReadAllLines requests an
+            // exclusive-enough handle that collides with the live writer on Windows.
+            var matches = new List<string>();
+            using var stream = new FileStream(
+                _currentFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+
+            while (reader.ReadLine() is { } line)
+            {
+                if (line.Contains(HashMismatchMarker, StringComparison.Ordinal))
+                    matches.Add(line);
+            }
+
+            return matches;
+        }
+    }
+
     internal void WriteToFile(string message)
     {
         lock (_fileLock)

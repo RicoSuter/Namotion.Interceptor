@@ -23,6 +23,13 @@ public sealed class JsonWebSocketSerializer : IWebSocketSerializer
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
+    /// <summary>
+    /// The JSON options used to serialize protocol payloads. Exposed internally so the state digest
+    /// can serialize property values with the exact same options the protocol uses on the wire,
+    /// keeping the digest consistent across participants.
+    /// </summary>
+    internal static JsonSerializerOptions SerializerOptions => Options;
+
     public WebSocketFormat Format => WebSocketFormat.Json;
 
     public byte[] Serialize<T>(T value)

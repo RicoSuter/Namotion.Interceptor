@@ -1,10 +1,12 @@
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
+using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
@@ -610,6 +612,221 @@ public class SequenceNumberTests
             message: "Client should resync after server restart");
 
         _output.WriteLine("Client successfully resynced after server restart");
+    }
+
+    [Fact]
+    public async Task WhenClientHeartbeatReportsUnreceivedSequence_ThenServerRequestsResync()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            port: portLease.Port);
+
+        using var ws = new ClientWebSocket();
+        await ws.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
+
+        var sendBuffer = new ArrayBufferWriter<byte>(256);
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
+        await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+
+        var receiveBuffer = new byte[64 * 1024];
+        await ws.ReceiveAsync(receiveBuffer, CancellationToken.None); // Welcome
+
+        // Start collecting messages before sending the ClientHeartbeat so we don't miss the Resync.
+        var receivedMessages = new ConcurrentQueue<ReceivedMessage>();
+        using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var receiveTask = StartReceivingMessagesAsync(ws, receiveBuffer, receivedMessages, receiveCts.Token);
+
+        // Act - Send a ClientHeartbeat claiming sequence 5 was sent.
+        // The server has received zero updates from this connection (expected next = 1),
+        // so HasReceivedThrough(5) is false -> server sends Resync.
+        sendBuffer.Clear();
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.ClientHeartbeat, new ClientHeartbeatPayload { LastSentSequence = 5 });
+        await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+
+        // Assert
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => receivedMessages.ToArray().Any(m => m.Type == MessageType.Resync),
+                timeout: TimeSpan.FromSeconds(5),
+                message: "Server should send Resync after ClientHeartbeat reports an unreceived sequence");
+
+            _output.WriteLine("Resync received as expected after trailing-idle gap");
+        }
+        finally
+        {
+            receiveCts.Cancel();
+            try { await receiveTask; } catch { }
+        }
+
+        try
+        {
+            using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", closeCts.Token);
+        }
+        catch (WebSocketException) { }
+        catch (OperationCanceledException) { }
+    }
+
+    [Fact]
+    public async Task WhenClientToServerUpdateSequenceHasGap_ThenServerRequestsResync()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
+
+        using var ws = new ClientWebSocket();
+        await ws.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
+
+        var sendBuffer = new ArrayBufferWriter<byte>(256);
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
+        await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+
+        var receiveBuffer = new byte[64 * 1024];
+        var welcomeResult = await ws.ReceiveAsync(receiveBuffer, CancellationToken.None);
+        var welcomeBytes = new ReadOnlySpan<byte>(receiveBuffer, 0, welcomeResult.Count);
+        var (welcomeMessageType, welcomePayloadStart, welcomePayloadLength) = _serializer.DeserializeMessageEnvelope(welcomeBytes);
+        Assert.Equal(MessageType.Welcome, welcomeMessageType);
+        var welcome = _serializer.Deserialize<WelcomePayload>(
+            new ReadOnlySpan<byte>(receiveBuffer, welcomePayloadStart, welcomePayloadLength));
+
+        // The root subject ID is available from the Welcome snapshot.
+        var rootId = welcome.State!.Root!;
+
+        // Start collecting messages before sending updates so we don't miss the Resync.
+        var receivedMessages = new ConcurrentQueue<ReceivedMessage>();
+        using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var receiveTask = StartReceivingMessagesAsync(ws, receiveBuffer, receivedMessages, receiveCts.Token);
+
+        // Act - Send sequence 1 (expected: accepted, server advances to expect 2).
+        sendBuffer.Clear();
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Update, new UpdatePayload
+        {
+            Root = rootId,
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                [rootId] = new Dictionary<string, SubjectPropertyUpdate>
+                {
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "ClientUpdate1" }
+                }
+            },
+            Sequence = 1
+        });
+        await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+
+        // Send sequence 3 (skipping 2 -> gap: server expects 2, receives 3 -> sends Resync).
+        sendBuffer.Clear();
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Update, new UpdatePayload
+        {
+            Root = rootId,
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                [rootId] = new Dictionary<string, SubjectPropertyUpdate>
+                {
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "ClientUpdate3" }
+                }
+            },
+            Sequence = 3
+        });
+        await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+
+        // Assert
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => receivedMessages.ToArray().Any(m => m.Type == MessageType.Resync),
+                timeout: TimeSpan.FromSeconds(5),
+                message: "Server should send Resync after detecting a gap in client-to-server update sequence");
+
+            _output.WriteLine("Resync received as expected after in-stream sequence gap");
+        }
+        finally
+        {
+            receiveCts.Cancel();
+            try { await receiveTask; } catch { }
+        }
+
+        try
+        {
+            using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", closeCts.Token);
+        }
+        catch (WebSocketException) { }
+        catch (OperationCanceledException) { }
+    }
+
+    [Fact]
+    public async Task WhenClientHeartbeatDigestMismatchesServer_ThenServerRequestsResync()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+
+        // Non-trivial state ensures StateDigest.Compute returns a non-empty string
+        // (an empty registry would cause the digest check to be skipped).
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "x",
+            port: portLease.Port);
+
+        using var ws = new ClientWebSocket();
+        await ws.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
+
+        var sendBuffer = new ArrayBufferWriter<byte>(256);
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
+        await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+
+        var receiveBuffer = new byte[64 * 1024];
+        await ws.ReceiveAsync(receiveBuffer, CancellationToken.None); // Welcome
+
+        // Start collecting messages before sending the ClientHeartbeat so we don't miss the Resync.
+        var receivedMessages = new ConcurrentQueue<ReceivedMessage>();
+        using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var receiveTask = StartReceivingMessagesAsync(ws, receiveBuffer, receivedMessages, receiveCts.Token);
+
+        // Act - Send a ClientHeartbeat with a deliberately wrong digest.
+        // LastSentSequence = 0: HasReceivedThrough(0) returns true (0 < _expectedNextSequence=1),
+        // so the trailing-idle gap branch is NOT taken. The digest branch runs independently.
+        sendBuffer.Clear();
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.ClientHeartbeat, new ClientHeartbeatPayload
+        {
+            LastSentSequence = 0,
+            Digest = "DELIBERATELY-WRONG-DIGEST"
+        });
+        await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+
+        // Assert
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => receivedMessages.ToArray().Any(m => m.Type == MessageType.Resync),
+                timeout: TimeSpan.FromSeconds(5),
+                message: "Server should send Resync after ClientHeartbeat reports a mismatching state digest");
+
+            _output.WriteLine("Resync received as expected after digest mismatch");
+        }
+        finally
+        {
+            receiveCts.Cancel();
+            try { await receiveTask; } catch { }
+        }
+
+        try
+        {
+            using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", closeCts.Token);
+        }
+        catch (WebSocketException) { }
+        catch (OperationCanceledException) { }
     }
 
     private record ReceivedMessage(MessageType Type, long Sequence);

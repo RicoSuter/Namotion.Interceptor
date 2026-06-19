@@ -1,4 +1,8 @@
+using System.Linq;
 using Moq;
+using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -212,6 +216,73 @@ public class SourceOwnershipManagerTests
         // Assert
         Assert.True(result);
         Assert.Contains(property, manager2.Properties);
+    }
+
+    /// <summary>
+    /// Regression for the long-run heap leak: a bulk re-claim (the WebSocket client's
+    /// ClaimPropertyOwnership on every reconnect) snapshots the graph and then claims each property,
+    /// so a subject detaching between snapshot and claim is re-added AFTER its SubjectDetaching event
+    /// already fired and would never be released. ReleaseDetachedSubjects must shed such orphaned
+    /// ownership (subject no longer registered) while keeping ownership of still-live subjects.
+    /// </summary>
+    [Fact]
+    public void ReleaseDetachedSubjects_ReleasesOnlyOrphanedDetachedSubjects()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new CycleTestNode(context) { Name = "Root" };
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(source => source.RootSubject).Returns(root);
+        using var manager = new SourceOwnershipManager(sourceMock.Object);
+
+        // Claim a live property (the root's own) — must be retained.
+        var liveProperty = new PropertyReference(root, nameof(CycleTestNode.Name));
+        Assert.True(manager.ClaimSource(liveProperty));
+
+        // Build the orphan exactly like the race: attach a child (registers it), detach it
+        // (unregisters it), then claim its property AFTER detach.
+        var child = new CycleTestNode { Name = "Child" };
+        root.Child = child;
+        root.Child = null;
+        Assert.Null(((IInterceptorSubject)child).TryGetRegisteredSubject());
+
+        Assert.True(manager.ClaimSource(new PropertyReference(child, nameof(CycleTestNode.Name))));
+        Assert.Equal(2, manager.Properties.Count);
+
+        // Act
+        var released = manager.ReleaseDetachedSubjects();
+
+        // Assert: only the detached orphan was released; the live root property is retained.
+        Assert.Equal(1, released);
+        Assert.Single(manager.Properties);
+        Assert.Same(root, manager.Properties.First().Subject);
+    }
+
+    /// <summary>
+    /// ReleaseDetachedSubjects must not touch ownership when every owned subject is still registered.
+    /// </summary>
+    [Fact]
+    public void ReleaseDetachedSubjects_WhenAllOwnedSubjectsRegistered_ReleasesNothing()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new CycleTestNode(context) { Name = "Root", Child = new CycleTestNode { Name = "Child" } };
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(source => source.RootSubject).Returns(root);
+        using var manager = new SourceOwnershipManager(sourceMock.Object);
+
+        Assert.True(manager.ClaimSource(new PropertyReference(root, nameof(CycleTestNode.Name))));
+        Assert.True(manager.ClaimSource(new PropertyReference(root.Child!, nameof(CycleTestNode.Name))));
+        var before = manager.Properties.Count;
+
+        // Act
+        var released = manager.ReleaseDetachedSubjects();
+
+        // Assert
+        Assert.Equal(0, released);
+        Assert.Equal(before, manager.Properties.Count);
     }
 
     private static (LifecycleInterceptor Lifecycle, SourceOwnershipManager Manager) CreateSourceWithManager(

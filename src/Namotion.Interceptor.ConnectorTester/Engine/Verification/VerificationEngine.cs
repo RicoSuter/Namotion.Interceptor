@@ -138,6 +138,31 @@ public class VerificationEngine : BackgroundService
 
             if (outcome.Converged)
             {
+                // A converged cycle can still hide a structural-sync bug: the connector detects a
+                // server/client hash divergence and auto-heals it with a full reconnect/resync, so
+                // the final state agrees even though a mutation was lost mid-stream. Treat any such
+                // warning during this cycle as a failure so the bug is investigated, not masked.
+                var hashMismatches = _cycleRecorder?.GetHashMismatchWarnings() ?? [];
+                if (hashMismatches.Count > 0)
+                {
+                    _logger.LogError(
+                        "=== Cycle {Cycle}: FAIL (converged but {Count} structural hash mismatch(es) detected; pipeline bug auto-healed via reconnection) ===",
+                        _cycleNumber, hashMismatches.Count);
+                    foreach (var mismatch in hashMismatches)
+                    {
+                        _logger.LogError("  {Mismatch}", mismatch);
+                    }
+
+                    await _failureDiagnostics.RunAsync(_cycleNumber, outcome.Snapshots, stoppingToken);
+
+                    _cycleStatistics.RecordFail(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
+                    _cycleRecorder?.FinishCycle(_cycleNumber, CycleResult.Fail);
+
+                    _failed = true;
+                    _applicationLifetime.StopApplication();
+                    return;
+                }
+
                 _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed);
                 _cycleStatistics.RecordPass(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
                 var (subjects, properties) = SnapshotComparer.CountSubjectsAndProperties(outcome.Snapshots[0].Snapshot);
