@@ -3,7 +3,7 @@ using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking.Transactions;
 
-namespace Namotion.Interceptor.ConnectorTester.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 
 /// <summary>
 /// Value mutation strategy: cycles through all nodes in parallel batches.
@@ -15,30 +15,42 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 /// When UseTransactions is enabled, each batch is wrapped in a transaction
 /// (sequential, since transactions are not thread-safe with Parallel.For).
 /// </summary>
-public class BatchMutationEngine : MutationEngine
+public sealed class BatchValueMutationStrategy : IValueMutationStrategy
 {
+    private readonly KnownNodeGraph _graph;
+    private readonly TestCycleCoordinator _coordinator;
+    private readonly IInterceptorSubjectContext _context;
+    private readonly MutationCounters _counters;
+    private readonly bool _useTransactions;
+    private readonly int _valueMutationRate;
     private readonly int _numberOfBatches;
     private readonly int _participantIndex;
 
-    public BatchMutationEngine(
-        TestNode root,
-        ParticipantConfiguration configuration,
+    public BatchValueMutationStrategy(
+        KnownNodeGraph graph,
         TestCycleCoordinator coordinator,
-        ILogger logger,
+        IInterceptorSubjectContext context,
+        MutationCounters counters,
+        ParticipantConfiguration participantConfiguration,
         int numberOfBatches,
         int participantIndex)
-        : base(root, configuration, coordinator, logger)
     {
+        _graph = graph;
+        _coordinator = coordinator;
+        _context = context;
+        _counters = counters;
+        _useTransactions = participantConfiguration.UseTransactions;
+        _valueMutationRate = participantConfiguration.ValueMutationRate;
         _numberOfBatches = numberOfBatches;
         _participantIndex = participantIndex;
     }
 
-    protected override async Task RunValueMutationsAsync(CancellationToken stoppingToken)
+    public async Task RunAsync(CancellationToken cancellationToken)
     {
         int nodeCount;
-        lock (NodeLock)
+        lock (_graph.NodeLock)
         {
-            nodeCount = KnownNodes.Count;
+            nodeCount = _graph.KnownNodes.Count;
         }
 
         if (nodeCount == 0)
@@ -46,7 +58,7 @@ public class BatchMutationEngine : MutationEngine
             return;
         }
 
-        var nodesPerBatch = (int)Math.Ceiling((double)ValueMutationRate / _numberOfBatches);
+        var nodesPerBatch = (int)Math.Ceiling((double)_valueMutationRate / _numberOfBatches);
         var timerIntervalMs = 1000.0 / (_numberOfBatches * 1.1);
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(timerIntervalMs));
 
@@ -55,11 +67,21 @@ public class BatchMutationEngine : MutationEngine
         var cycleStart = Stopwatch.GetTimestamp();
         var property = _participantIndex % 4;
 
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        while (await timer.WaitForNextTickAsync(cancellationToken))
         {
-            Coordinator.WaitIfPaused(stoppingToken);
+            if (_coordinator.WaitIfPaused(cancellationToken))
+            {
+                // Convergence pause leaves cycleStart frozen while wall-clock advances.
+                // Without resync, the rate limit's idle branch (elapsed < 1s) never fires
+                // for the first ~3 minutes of the next mutate phase: the loop bursts at the
+                // timer's max throughput (~22k/sec at NumberOfBatches=50, timer*1.1) until
+                // cycleStart slowly catches wall (gaining ~0.06s per 0.94s window). Resync
+                // here so every cycle starts at exactly the configured ValueMutationRate.
+                cycleStart = Stopwatch.GetTimestamp();
+                mutationsThisSecond = 0;
+            }
 
-            if (mutationsThisSecond >= ValueMutationRate)
+            if (mutationsThisSecond >= _valueMutationRate)
             {
                 var elapsed = Stopwatch.GetElapsedTime(cycleStart);
                 if (elapsed < TimeSpan.FromSeconds(1))
@@ -72,9 +94,9 @@ public class BatchMutationEngine : MutationEngine
             }
 
             List<TestNode> nodes;
-            lock (NodeLock)
+            lock (_graph.NodeLock)
             {
-                nodes = KnownNodes;
+                nodes = _graph.KnownNodes;
                 nodeCount = nodes.Count;
                 if (nodeCount == 0)
                 {
@@ -82,11 +104,11 @@ public class BatchMutationEngine : MutationEngine
                 }
             }
 
-            var count = Math.Min(Math.Min(nodesPerBatch, ValueMutationRate - mutationsThisSecond), nodeCount);
+            var count = Math.Min(Math.Min(nodesPerBatch, _valueMutationRate - mutationsThisSecond), nodeCount);
 
-            if (UseTransactions)
+            if (_useTransactions)
             {
-                await MutateBatchWithTransactionAsync(nodes, nodeCount, nodeIndex, count, property, stoppingToken);
+                await MutateBatchWithTransactionAsync(nodes, nodeCount, nodeIndex, count, property, cancellationToken);
             }
             else
             {
@@ -100,9 +122,9 @@ public class BatchMutationEngine : MutationEngine
 
     private async Task MutateBatchWithTransactionAsync(
         List<TestNode> nodes, int nodeCount, int nodeIndex, int count, int property,
-        CancellationToken stoppingToken)
+        CancellationToken cancellationToken)
     {
-        using var transaction = await Context.BeginTransactionAsync(
+        using var transaction = await _context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort);
 
         using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
@@ -113,24 +135,28 @@ public class BatchMutationEngine : MutationEngine
             }
         }
 
-        await transaction.CommitAsync(stoppingToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private void MutateBatchParallel(
         List<TestNode> nodes, int nodeCount, int nodeIndex, int count, int property)
     {
-        using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
+        // Bug fix #1: SubjectChangeContext._current is [ThreadStatic], so the scope opened on the
+        // orchestrator thread is invisible to Parallel.For workers. Capture the batch timestamp here
+        // and re-enter the scope inside each worker action so every mutation observes the same value.
+        var batchTimestamp = DateTimeOffset.UtcNow;
+        Parallel.For(0, count, j =>
         {
-            Parallel.For(0, count, j =>
+            using (SubjectChangeContext.WithChangedTimestamp(batchTimestamp))
             {
                 MutateNode(nodes[(nodeIndex + j) % nodeCount], property);
-            });
-        }
+            }
+        });
     }
 
     private void MutateNode(TestNode node, int property)
     {
-        var counter = NextGlobalCounter();
+        var counter = GlobalMutationCounter.Next();
 
         switch (property)
         {
@@ -148,6 +174,6 @@ public class BatchMutationEngine : MutationEngine
                 break;
         }
 
-        IncrementValueMutationCount();
+        _counters.IncrementValue();
     }
 }

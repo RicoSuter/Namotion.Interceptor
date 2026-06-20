@@ -575,4 +575,104 @@ public class SubjectTransactionTests
         // Assert
         Assert.Same(transaction2, SubjectTransaction.Current);
     }
+
+    /// <summary>
+    /// Writes nothing to any source but marks each accepted snapshot slot with a fixed source in place,
+    /// emulating a custom writer fulfilling the in-place marking contract.
+    /// </summary>
+    private sealed class MarkingTransactionWriter(object source) : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+        {
+            var span = changes.Span;
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = span[i].WithSource(source);
+            }
+            return new ValueTask<SourceWriteResult>(new SourceWriteResult([], [], [], RevertState: null));
+        }
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
+    }
+
+    [Fact]
+    public async Task WhenCustomWriterMarksSnapshotInPlace_ThenApplyNotificationsCarryThatSource()
+    {
+        // Arrange
+        var source = new object();
+        var changes = new List<SubjectPropertyChange>();
+        var context = CreateTransactionContext();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        context.AddService<ITransactionWriter>(new MarkingTransactionWriter(source));
+
+        var person = new Person(context);
+        changes.Clear();
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert: the local apply published the FirstName change carrying the writer's source.
+        var firstNameChange = Assert.Single(changes, c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Same(source, firstNameChange.Source);
+        Assert.Equal("John", firstNameChange.GetNewValue<string?>());
+    }
+
+    /// <summary>
+    /// Fulfills the writer contract but never marks any snapshot slot, like a custom writer
+    /// predating the in-place marking contract.
+    /// </summary>
+    private sealed class NonMarkingTransactionWriter : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+            => new(new SourceWriteResult([], [], [], RevertState: null));
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
+    }
+
+    [Fact]
+    public async Task WhenCustomWriterDoesNotMarkSnapshot_ThenApplyNotificationsCarryNoSource()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = CreateTransactionContext();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        context.AddService<ITransactionWriter>(new NonMarkingTransactionWriter());
+
+        var person = new Person(context);
+        changes.Clear();
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert: the commit succeeds, but unmarked slots publish with no source, so an outbound
+        // connector queue would not recognize the notification as an echo and would push the value
+        // to the source a second time (the documented graceful degradation for non-marking writers).
+        var firstNameChange = Assert.Single(changes, c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Null(firstNameChange.Source);
+        Assert.Equal("John", firstNameChange.GetNewValue<string?>());
+        Assert.Equal("John", person.FirstName);
+    }
+
 }

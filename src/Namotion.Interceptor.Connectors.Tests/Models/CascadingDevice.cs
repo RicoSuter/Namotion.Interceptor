@@ -2,6 +2,11 @@ using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Connectors.Tests.Models;
 
+/// <summary>
+/// Test model whose OnPrimaryChanged hook cascades into another property, used to pin the source
+/// semantics of consequence writes: after #345 the cascade publishes as local origin (Source = null)
+/// and flows to bound sources.
+/// </summary>
 [InterceptorSubject]
 public partial class CascadingDevice
 {
@@ -9,8 +14,6 @@ public partial class CascadingDevice
 
     public partial int Secondary { get; set; }
 
-    // Cascade: writing Primary computes Secondary locally. Secondary is the local model's own
-    // computation, so its change must publish as local origin (Source = null).
     partial void OnPrimaryChanged(int newValue)
     {
         Secondary = newValue * 2;

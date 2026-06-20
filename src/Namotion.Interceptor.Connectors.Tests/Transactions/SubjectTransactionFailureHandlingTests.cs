@@ -15,7 +15,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     private sealed class ThrowingTransactionWriter : ITransactionWriter
     {
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            ReadOnlyMemory<SubjectPropertyChange> changes,
+            Memory<SubjectPropertyChange> changes,
             TransactionRequirement requirement,
             CancellationToken cancellationToken)
             => throw new InvalidOperationException("Writer boom");
@@ -65,7 +65,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     private sealed class ThrowingRevertTransactionWriter : ITransactionWriter
     {
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            ReadOnlyMemory<SubjectPropertyChange> changes,
+            Memory<SubjectPropertyChange> changes,
             TransactionRequirement requirement,
             CancellationToken cancellationToken)
         {
@@ -180,13 +180,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
         var person = new Person(context);
 
         var writeCallCount = 0;
-        var successSource = new Mock<ISubjectSource>();
-        successSource.Setup(s => s.WriteBatchSize).Returns(0);
-        successSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback(() => writeCallCount++)
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
-                new ValueTask<WriteResult>(WriteResult.Success));
-
+        var successSource = CreateSucceedingSource(() => writeCallCount++);
         var failSource = CreateFailingSource();
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(successSource.Object);
@@ -413,6 +407,208 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
         person.LastName = "Doe";
         await nextTransaction.CommitAsync(CancellationToken.None);
         Assert.Equal("Doe", person.LastName);
+    }
+
+    private sealed class UnattributedErrorTransactionWriter : ITransactionWriter
+    {
+        public IReadOnlyList<SubjectPropertyChange>? RevertedChanges { get; private set; }
+
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+        {
+            // Contract-violating custom writer: reports the first change as written and an error
+            // that is not attributed to any failed change.
+            var span = changes.Span;
+            return new(new SourceWriteResult(
+                Written: [span[0]],
+                Failed: [],
+                Errors: [new InvalidOperationException("Unattributed boom")],
+                RevertState: this));
+        }
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+        {
+            RevertedChanges = written;
+            return new(new SourceRevertResult([], []));
+        }
+    }
+
+    [Fact]
+    public async Task WhenWriterReportsErrorWithoutFailedChangesInRollbackMode_ThenCommitFailsAndWrittenChangesAreReverted()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithTransactions()
+            .WithFullPropertyTracking();
+        var writer = new UnattributedErrorTransactionWriter();
+        context.AddService<ITransactionWriter>(writer);
+
+        var person = new Person(context);
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Contains(exception.Errors, error => error.Message == "Unattributed boom");
+
+        // The written change was reverted at the writer; written-and-reverted changes are not
+        // reported as failed, so only the never-applied second change is.
+        Assert.NotNull(writer.RevertedChanges);
+        var reverted = Assert.Single(writer.RevertedChanges);
+        Assert.Equal(nameof(Person.FirstName), reverted.Property.Name);
+        var failed = Assert.Single(exception.FailedChanges);
+        Assert.Equal(nameof(Person.LastName), failed.Property.Name);
+
+        Assert.Null(person.FirstName); // local model untouched (Rollback applies nothing on writer error)
+        Assert.Null(person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenWriterReportsErrorWithoutFailedChangesInBestEffortMode_ThenChangesApplyAndErrorSurfaces()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithTransactions()
+            .WithFullPropertyTracking();
+        var writer = new UnattributedErrorTransactionWriter();
+        context.AddService<ITransactionWriter>(writer);
+
+        var person = new Person(context);
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert: best effort applies the changes but still surfaces the unattributed error.
+        Assert.Equal(2, exception.AppliedChanges.Count);
+        Assert.Empty(exception.FailedChanges);
+        Assert.Contains(exception.Errors, error => error.Message == "Unattributed boom");
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenSourceReportsErrorWithoutFailedChanges_ThenWholeBatchIsReportedFailed()
+    {
+        // Arrange: the source fails wholesale but does not enumerate the failed changes.
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source = CreateWholesaleFailingSource("Wholesale boom");
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(2, exception.FailedChanges.Count);
+        Assert.Contains(exception.FailedChanges, change => change.Property.Name == nameof(Person.FirstName));
+        Assert.Contains(exception.FailedChanges, change => change.Property.Name == nameof(Person.LastName));
+        Assert.Contains(exception.Errors, error => ErrorMentions(error, "Wholesale boom"));
+        Assert.Null(person.FirstName); // local model untouched (Rollback applies nothing on source failure)
+        Assert.Null(person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenOneSourceReportsErrorWithoutFailedChangesInRollbackMode_ThenOtherSourceWriteIsReverted()
+    {
+        // Arrange: two sources; one succeeds, the other fails wholesale without enumerating
+        // the failed changes.
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var writeCallCount = 0;
+        var successSource = CreateSucceedingSource(() => writeCallCount++);
+        var failSource = CreateWholesaleFailingSource("Wholesale boom");
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(successSource.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert: only the wholesale-failed change is reported; FirstName was written and
+        // successfully reverted, so it is not reported as failed.
+        Assert.Empty(exception.AppliedChanges);
+        var failed = Assert.Single(exception.FailedChanges);
+        Assert.Equal(nameof(Person.LastName), failed.Property.Name);
+        Assert.Contains(exception.Errors, error => ErrorMentions(error, "Wholesale boom"));
+        Assert.Equal(2, writeCallCount); // initial write + revert of the successful source
+        Assert.Null(person.FirstName);   // local model untouched (Rollback applies nothing on source failure)
+        Assert.Null(person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenSourceReportsFailedChangeForUnknownProperty_ThenSourceErrorIsStillReported()
+    {
+        // Arrange: a contract-violating source reports the real change plus a change for a
+        // property that was never part of the batch.
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source = new Mock<ISubjectSource>();
+        source.Setup(s => s.WriteBatchSize).Returns(0);
+        source.Setup(s => s.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var foreignChange = SubjectPropertyChange.Create<string?>(
+                    new PropertyReference(person, nameof(Person.LastName)),
+                    source: null,
+                    changedTimestamp: DateTimeOffset.UtcNow,
+                    receivedTimestamp: null,
+                    oldValue: null,
+                    newValue: "x");
+                var failed = new[] { changes.Span[0], foreignChange };
+                return new ValueTask<WriteResult>(WriteResult.Failure(
+                    failed, new InvalidOperationException("Foreign boom")));
+            });
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "John";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert: the source's own error is surfaced, not an internal bookkeeping failure.
+        Assert.Contains(exception.Errors, error => ErrorMentions(error, "Foreign boom"));
+        Assert.Contains(exception.FailedChanges, change => change.Property.Name == nameof(Person.FirstName));
+        Assert.Null(person.FirstName);
     }
 
     [Fact]

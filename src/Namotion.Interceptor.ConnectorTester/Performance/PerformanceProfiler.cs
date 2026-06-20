@@ -1,22 +1,24 @@
 using System.Diagnostics;
-using System.Globalization;
+using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor.ConnectorTester.Engine;
+using Namotion.Interceptor.ConnectorTester.Reporting;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.ConnectorTester.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Performance;
 
-public class PerformanceProfiler : IDisposable
+public class PerformanceProfiler : IHostedService, IDisposable
 {
     private const int MaxLatencySamples = 10_000;
-    private static readonly Lock ConsoleLock = new();
 
     private readonly PropertyChangeQueueSubscription _subscription;
     private readonly Thread _consumerThread;
     private readonly Timer _timer;
     private readonly string _participantName;
-    private readonly string _logFilePath;
+    private readonly CsvFile<PerformanceCsvRow> _csv;
     private readonly CancellationTokenSource _cts = new();
-    private readonly Random _samplingRandom = new();
+    private readonly ReservoirSampler _sampler = new(MaxLatencySamples);
+    private readonly PerformanceConsoleReporter _consoleReporter;
 
     private readonly Lock _syncLock = new();
     private readonly List<double> _changedLatencies = [];
@@ -33,18 +35,20 @@ public class PerformanceProfiler : IDisposable
     private DateTimeOffset _lastThroughputTime;
     private long _windowStartTotalAllocatedBytes;
     private TimeSpan _windowStartCpuTime;
+    private bool _disposed;
 
-    private readonly TestCycleCoordinator? _coordinator;
+    private readonly TestCycleCoordinator _coordinator;
 
     public PerformanceProfiler(
         IInterceptorSubjectContext context,
         string participantName,
         TimeSpan reportingInterval,
         string logDirectory,
-        TestCycleCoordinator? coordinator = null)
+        TestCycleCoordinator coordinator)
     {
         _coordinator = coordinator;
         _participantName = participantName;
+        _consoleReporter = new PerformanceConsoleReporter(participantName);
         _windowStartTime = DateTimeOffset.UtcNow;
         _lastThroughputTime = _windowStartTime;
         _windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true);
@@ -53,12 +57,8 @@ public class PerformanceProfiler : IDisposable
             _windowStartCpuTime = process.TotalProcessorTime;
         }
 
-        _logFilePath = Path.Combine(logDirectory, $"performance-{participantName}.csv");
-
-        var header = string.Format(
-            "{0,24}, {1,12}, {2,6}, {3,12}, {4,16}, {5,14}, {6,14}, {7,14}, {8,14}, {9,15}, {10,14}, {11,20}, {12,12}, {13,12}, {14,12}, {15,12}, {16,12}, {17,14}",
-            "Timestamp", "Participant", "Cycle", "Received/s", "Received-Average", "Received-P50", "Received-P90", "Received-P95", "Received-P99", "Received-P999", "Received-Max", "Received-Processing", "Published", "Received", "CPU%", "ProcessMB", "HeapMB", "AllocationMB/s");
-        File.WriteAllText(_logFilePath, header + Environment.NewLine);
+        _csv = PerformanceCsv.Create(Path.Combine(logDirectory, $"performance-{participantName}.csv"));
+        _csv.WriteHeader();
 
         _subscription = context.CreatePropertyChangeQueueSubscription();
 
@@ -94,14 +94,14 @@ public class PerformanceProfiler : IDisposable
                 var changedLatencyMs = (now - change.ChangedTimestamp).TotalMilliseconds;
                 _changedLatencySum += changedLatencyMs;
                 if (changedLatencyMs > _changedLatencyMax) _changedLatencyMax = changedLatencyMs;
-                ReservoirAdd(_changedLatencies, changedLatencyMs, _totalReceivedChanges);
+                _sampler.Add(_changedLatencies, changedLatencyMs, _totalReceivedChanges);
 
                 if (change.ReceivedTimestamp is not null)
                 {
                     var receivedLatencyMs = (now - change.ReceivedTimestamp.Value).TotalMilliseconds;
                     _receivedLatencySum += receivedLatencyMs;
                     if (receivedLatencyMs > _receivedLatencyMax) _receivedLatencyMax = receivedLatencyMs;
-                    ReservoirAdd(_receivedLatencies, receivedLatencyMs, _totalReceivedChanges);
+                    _sampler.Add(_receivedLatencies, receivedLatencyMs, _totalReceivedChanges);
                 }
 
                 var timeSinceLastSample = (now - _lastThroughputTime).TotalSeconds;
@@ -111,22 +111,6 @@ public class PerformanceProfiler : IDisposable
                     _updatesSinceLastSample = 0;
                     _lastThroughputTime = now;
                 }
-            }
-        }
-    }
-
-    private void ReservoirAdd(List<double> reservoir, double value, int totalSeen)
-    {
-        if (reservoir.Count < MaxLatencySamples)
-        {
-            reservoir.Add(value);
-        }
-        else
-        {
-            var index = _samplingRandom.Next(totalSeen);
-            if (index < MaxLatencySamples)
-            {
-                reservoir[index] = value;
             }
         }
     }
@@ -208,63 +192,45 @@ public class PerformanceProfiler : IDisposable
         var avgChangedLatency = receivedCount > 0 ? changedLatencySum / receivedCount : 0;
         var avgReceivedLatency = receivedCount > 0 ? receivedLatencySum / receivedCount : 0;
 
-        lock (ConsoleLock)
-        {
-            Console.WriteLine();
-            Console.WriteLine(new string('=', 129));
-            Console.WriteLine($"[{_participantName}] Performance Report - [{now:yyyy-MM-dd HH:mm:ss.fff}]");
-            Console.WriteLine();
-            Console.WriteLine($"Total received changes:          {receivedCount}");
-            Console.WriteLine($"Total published changes:         {publishedCount}");
-            var cpuCores = cpuPercent / 100.0 * Environment.ProcessorCount;
-            Console.WriteLine($"Process CPU:                     {Math.Round(cpuPercent, 1)}% ({Math.Round(cpuCores, 1)} cores)");
-            Console.WriteLine($"Process memory:                  {Math.Round(workingSetMb, 2)} MB ({Math.Round(heapMb, 2)} MB in .NET heap)");
-            Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
-            Console.WriteLine();
+        throughputSamples.Sort();
+        receivedLatencies.Sort();
+        changedLatencies.Sort();
 
-            Console.WriteLine($"{"Metric",-29} {"Avg",10} {"P50",10} {"P90",10} {"P95",10} {"P99",10} {"P99.9",10} {"Max",10} {"StdDev",10} {"Count",10}");
-            Console.WriteLine(new string('-', 129));
-
-            if (throughputSamples.Count > 0)
-            {
-                throughputSamples.Sort();
-                PrintPercentileLine("Received changes/s", throughputSamples);
-            }
-
-            if (receivedLatencies.Count > 0)
-            {
-                receivedLatencies.Sort();
-                PrintPercentileLine("Received processing (ms)", receivedLatencies, avgReceivedLatency, receivedCount, receivedLatencyMax);
-            }
-
-            if (changedLatencies.Count > 0)
-            {
-                changedLatencies.Sort();
-                PrintPercentileLine("Received E2E latency (ms)", changedLatencies, avgChangedLatency, receivedCount, changedLatencyMax);
-            }
-        }
+        _consoleReporter.Report(
+            now, elapsedSec, receivedCount, publishedCount,
+            cpuPercent, workingSetMb, heapMb, allocRateMbPerSec,
+            throughputSamples,
+            receivedLatencies, avgReceivedLatency, receivedLatencyMax,
+            changedLatencies, avgChangedLatency, changedLatencyMax);
 
         var avgThroughput = throughputSamples.Count > 0 ? throughputSamples.Average() : 0;
-        var p50ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.50) : 0;
-        var p90ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.90) : 0;
-        var p95ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.95) : 0;
-        var p99ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.99) : 0;
-        var p999ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.999) : 0;
-
-        var cycle = _coordinator?.CurrentCycle ?? 0;
-        var logLine = string.Format(
-            CultureInfo.InvariantCulture,
-            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,12}, {2,6}, {3,12:F0}, {4,16:F1}, {5,14:F1}, {6,14:F1}, {7,14:F1}, {8,14:F1}, {9,15:F1}, {10,14:F1}, {11,20:F1}, {12,12}, {13,12}, {14,12:F1}, {15,12:F1}, {16,12:F1}, {17,14:F2}",
-            now, _participantName, cycle, avgThroughput,
-            avgChangedLatency, p50ChangedLatency, p90ChangedLatency, p95ChangedLatency,
-            p99ChangedLatency, p999ChangedLatency, changedLatencyMax,
-            avgReceivedLatency, publishedCount, receivedCount,
-            cpuPercent,
-            workingSetMb, heapMb, allocRateMbPerSec);
+        var p50ChangedLatency = changedLatencies.Count > 0 ? PerformanceWindow.Percentile(changedLatencies, 0.50) : 0;
+        var p90ChangedLatency = changedLatencies.Count > 0 ? PerformanceWindow.Percentile(changedLatencies, 0.90) : 0;
+        var p95ChangedLatency = changedLatencies.Count > 0 ? PerformanceWindow.Percentile(changedLatencies, 0.95) : 0;
+        var p99ChangedLatency = changedLatencies.Count > 0 ? PerformanceWindow.Percentile(changedLatencies, 0.99) : 0;
+        var p999ChangedLatency = changedLatencies.Count > 0 ? PerformanceWindow.Percentile(changedLatencies, 0.999) : 0;
 
         try
         {
-            File.AppendAllText(_logFilePath, logLine + Environment.NewLine);
+            _csv.AppendRow(new PerformanceCsvRow(
+                Timestamp: now,
+                Participant: _participantName,
+                Cycle: _coordinator.CurrentCycle,
+                ReceivedPerSecond: avgThroughput,
+                ReceivedAverage: avgChangedLatency,
+                ReceivedP50: p50ChangedLatency,
+                ReceivedP90: p90ChangedLatency,
+                ReceivedP95: p95ChangedLatency,
+                ReceivedP99: p99ChangedLatency,
+                ReceivedP999: p999ChangedLatency,
+                ReceivedMax: changedLatencyMax,
+                ReceivedProcessing: avgReceivedLatency,
+                Published: publishedCount,
+                Received: receivedCount,
+                CpuPercent: cpuPercent,
+                ProcessMb: workingSetMb,
+                HeapMb: heapMb,
+                AllocationMbPerSec: allocRateMbPerSec));
         }
         catch
         {
@@ -272,39 +238,32 @@ public class PerformanceProfiler : IDisposable
         }
     }
 
-    private static void PrintPercentileLine(string label, List<double> sortedValues, double? exactAvg = null, int? exactCount = null, double? exactMax = null)
-    {
-        var avg = exactAvg ?? sortedValues.Average();
-        var count = exactCount ?? sortedValues.Count;
-        var max = exactMax ?? sortedValues[^1];
-        Console.WriteLine($"{label,-29} {avg,10:F2} {Percentile(sortedValues, 0.50),10:F2} {Percentile(sortedValues, 0.90),10:F2} {Percentile(sortedValues, 0.95),10:F2} {Percentile(sortedValues, 0.99),10:F2} {Percentile(sortedValues, 0.999),10:F2} {max,10:F2} {StdDev(sortedValues, avg),10:F2} {count,10}");
-    }
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    private static double Percentile(IReadOnlyList<double> sortedAsc, double p)
+    public Task StopAsync(CancellationToken cancellationToken)
     {
-        if (sortedAsc.Count == 0) return double.NaN;
-        var index = (int)Math.Ceiling(sortedAsc.Count * p) - 1;
-        return sortedAsc[Math.Clamp(index, 0, sortedAsc.Count - 1)];
-    }
-
-    private static double StdDev(IReadOnlyList<double> values, double mean)
-    {
-        if (values.Count == 0) return double.NaN;
-        double sumSq = 0;
-        for (var i = 0; i < values.Count; i++)
-        {
-            var d = values[i] - mean;
-            sumSq += d * d;
-        }
-        return Math.Sqrt(sumSq / values.Count);
+        // Stops the consumer thread, timer, and subscription. Runs before the participant SP
+        // is disposed (which would invalidate the subscription's backing context), so the
+        // teardown sees a healthy context.
+        Dispose();
+        return Task.CompletedTask;
     }
 
     public void Dispose()
     {
+        // Idempotent: registered as a singleton in the participant SP, so DI will also
+        // call Dispose on SP teardown after StopAsync has already run.
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
+
         _cts.Cancel();
         _timer.Dispose();
         _consumerThread.Join(TimeSpan.FromSeconds(2));
         _subscription.Dispose();
+        _csv.Dispose();
         _cts.Dispose();
     }
 }
