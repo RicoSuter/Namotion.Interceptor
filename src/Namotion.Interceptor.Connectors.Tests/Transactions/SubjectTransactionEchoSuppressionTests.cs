@@ -301,7 +301,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 
         // Assert 1: the FullName recalculation notification carries a null source even though the
         // triggering apply ran under the confirming source scope. DerivedPropertyChangeHandler
-        // publishes recalculations under an explicit WithSource(null) scope: a derived value is
+        // publishes recalculations under an explicit WithLocalOrigin() scope: a derived value is
         // computed locally and no source confirmed it. Consequence: derived recalculations are
         // never echo-suppressed, so a source-bound derived property still gets pushed.
         var fullNameChanges = changes.Where(c => c.Property.Name == nameof(Person.FullName)).ToList();
