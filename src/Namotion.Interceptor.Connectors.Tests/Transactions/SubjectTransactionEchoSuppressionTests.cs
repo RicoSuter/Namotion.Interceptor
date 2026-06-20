@@ -161,7 +161,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WhenCommitAppliedChangeTriggersCascade_ThenCascadeInheritsSourceScope()
+    public async Task WhenCommitAppliedChangeTriggersCascade_ThenCascadePublishesLocalOrigin()
     {
         // Arrange
         var context = CreateContext();
@@ -208,10 +208,11 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         Assert.Equal(5, primaryChanges[0].GetNewValue<int>());
         Assert.Same(sourceMock.Object, primaryChanges[0].Source);
 
-        // Secondary change (the cascade) also carries the source, inheriting the scope.
+        // Secondary change (the cascade) publishes local origin (Source = null) after #345,
+        // instead of inheriting the confirming source scope.
         Assert.Single(secondaryChanges);
         Assert.Equal(10, secondaryChanges[0].GetNewValue<int>());
-        Assert.Same(sourceMock.Object, secondaryChanges[0].Source);
+        Assert.Null(secondaryChanges[0].Source);
 
         // Only Primary was submitted to the source; the cascade was not in the pending set.
         // writtenBatches is populated: the synchronous mock completed inside CommitAsync.
@@ -221,7 +222,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WhenInboundSourceValueTriggersCascade_ThenCascadeInheritsSourceScope()
+    public async Task WhenInboundSourceValueTriggersCascade_ThenCascadePublishesLocalOrigin()
     {
         // Arrange
         var context = CreateContext();
@@ -254,10 +255,11 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         Assert.Equal(7, primaryChanges[0].GetNewValue<int>());
         Assert.Same(sourceMock.Object, primaryChanges[0].Source);
 
-        // Secondary change (the cascade) also carries the inbound source, inheriting the scope.
+        // Secondary change (the cascade) publishes local origin (Source = null) after #345,
+        // instead of inheriting the inbound source scope.
         Assert.Single(secondaryChanges);
         Assert.Equal(14, secondaryChanges[0].GetNewValue<int>());
-        Assert.Same(sourceMock.Object, secondaryChanges[0].Source);
+        Assert.Null(secondaryChanges[0].Source);
     }
 
     [Fact]

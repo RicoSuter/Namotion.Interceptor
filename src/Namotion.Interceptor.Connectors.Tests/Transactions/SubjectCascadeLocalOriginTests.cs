@@ -1,21 +1,18 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
-using Namotion.Interceptor.Connectors.Transactions;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Transactions;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 
 /// <summary>
-/// Pins that framework-invoked consequence writes publish as local origin (Source = null) and flow
-/// to bound sources: hook cascades from OnXChanged, and derived recalculations. Replaces the cascade
-/// pins removed with SubjectTransactionEchoSuppressionTests by the #341 cleanup, flipped from the old
-/// inherited-source behavior to the new local-origin behavior.
+/// Pins the local-origin delivery behavior that complements the flipped cascade pins in
+/// <see cref="SubjectTransactionEchoSuppressionTests"/>: a hook cascade triggered by an inbound
+/// source value is actually delivered to its bound source by the outbound change queue (not just
+/// marked Source = null), and an INotifyPropertyChanged handler that writes back during a
+/// source-scoped apply publishes its write-back as local origin.
 /// </summary>
 public class SubjectCascadeLocalOriginTests : TransactionTestBase
 {
@@ -34,68 +31,6 @@ public class SubjectCascadeLocalOriginTests : TransactionTestBase
             changes.Add(change);
         }
         throw new TimeoutException("Sentinel notification was not received within 10 seconds.");
-    }
-
-    [Fact]
-    public async Task WhenCommitAppliedChangeTriggersCascade_ThenCascadePublishesLocalOrigin()
-    {
-        // Arrange
-        var context = CreateContext();
-        var device = new CascadingDevice(context);
-
-        var writtenBatches = new List<SubjectPropertyChange[]>();
-        var sourceMock = CreateSucceedingSource();
-        sourceMock
-            .Setup(s => s.WriteChangesAsync(
-                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
-                It.IsAny<CancellationToken>()))
-            .Callback((ReadOnlyMemory<SubjectPropertyChange> batch, CancellationToken _) =>
-                writtenBatches.Add(batch.ToArray()))
-            .Returns(new ValueTask<WriteResult>(WriteResult.Success));
-
-        new PropertyReference(device, nameof(CascadingDevice.Primary)).SetSource(sourceMock.Object);
-        new PropertyReference(device, nameof(CascadingDevice.Secondary)).SetSource(sourceMock.Object);
-
-        using var subscription = context.CreatePropertyChangeQueueSubscription();
-
-        // Act
-        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-        {
-            device.Primary = 5;
-            await transaction.CommitAsync(CancellationToken.None);
-        }
-
-        var secondaryAfterCommit = device.Secondary;
-
-        var sentinel = new Person(context);
-        sentinel.LastName = "Sentinel";
-        var changes = DrainUntil(subscription, c =>
-            ReferenceEquals(c.Property.Subject, sentinel) && c.Property.Name == nameof(Person.LastName));
-
-        // Assert: the cascade produced Secondary = 10.
-        Assert.Equal(10, secondaryAfterCommit);
-
-        var primaryChanges = changes.Where(c => c.Property.Name == nameof(CascadingDevice.Primary)).ToList();
-        var secondaryChanges = changes.Where(c => c.Property.Name == nameof(CascadingDevice.Secondary)).ToList();
-
-        // Primary: the snapshot marking was removed in #345, so the transactional apply uses the
-        // change's captured source (null, since there was no ambient source when device.Primary = 5
-        // was written inside the transaction). Source = null for both Primary and Secondary.
-        Assert.Single(primaryChanges);
-        Assert.Equal(5, primaryChanges[0].GetNewValue<int>());
-        Assert.Null(primaryChanges[0].Source);
-
-        // Secondary (the cascade) publishes local origin (null) via the WithLocalOrigin() scope
-        // that the generator wraps around OnPrimaryChanged on this branch.
-        Assert.Single(secondaryChanges);
-        Assert.Equal(10, secondaryChanges[0].GetNewValue<int>());
-        Assert.Null(secondaryChanges[0].Source);
-
-        // Stage 1 (the transactional source write) still contained only Primary; the cascade reaches
-        // the source through the background queue, not the transaction.
-        Assert.Single(writtenBatches);
-        Assert.Single(writtenBatches[0]);
-        Assert.Equal(nameof(CascadingDevice.Primary), writtenBatches[0][0].Property.Name);
     }
 
     [Fact]
@@ -168,31 +103,30 @@ public class SubjectCascadeLocalOriginTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WhenCommitAppliedChangeTriggersDerivedRecalculation_ThenDerivedNotificationStaysLocalOrigin()
+    public void WhenInpcHandlerWritesBackDuringSourceScopedApply_ThenWriteBackPublishesLocalOrigin()
     {
         // Arrange
         var context = CreateContext();
         var person = new Person(context);
-
-        var writtenBatches = new List<SubjectPropertyChange[]>();
         var sourceMock = CreateSucceedingSource();
-        sourceMock
-            .Setup(s => s.WriteChangesAsync(
-                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
-                It.IsAny<CancellationToken>()))
-            .Callback((ReadOnlyMemory<SubjectPropertyChange> batch, CancellationToken _) =>
-                writtenBatches.Add(batch.ToArray()))
-            .Returns(new ValueTask<WriteResult>(WriteResult.Success));
 
-        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
+        // An INPC handler that reacts to FirstName by writing LastName (a model write-back).
+        person.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(Person.FirstName))
+            {
+                person.LastName = "Derived";
+            }
+        };
 
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
-        // Act
-        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        // Act: apply FirstName under a source scope, like an inbound/commit apply. The generated
+        // RaisePropertyChanged enters a local-origin scope before invoking subscribers, so the
+        // handler's LastName write-back is local origin.
+        using (SubjectChangeContext.WithSource(sourceMock.Object))
         {
             person.FirstName = "John";
-            await transaction.CommitAsync(CancellationToken.None);
         }
 
         var sentinel = new Person(context);
@@ -200,17 +134,16 @@ public class SubjectCascadeLocalOriginTests : TransactionTestBase
         var changes = DrainUntil(subscription, c =>
             ReferenceEquals(c.Property.Subject, sentinel) && c.Property.Name == nameof(Person.LastName));
 
-        // Assert: FullName recalculation stays local origin (unchanged behavior, re-pinned).
-        var fullNameChanges = changes.Where(c =>
-            ReferenceEquals(c.Property.Subject, person) && c.Property.Name == nameof(Person.FullName)).ToList();
-        Assert.Single(fullNameChanges);
-        Assert.Null(fullNameChanges[0].Source);
+        var personChanges = changes.Where(c => ReferenceEquals(c.Property.Subject, person)).ToList();
+        var firstNameChanges = personChanges.Where(c => c.Property.Name == nameof(Person.FirstName)).ToList();
+        var lastNameChanges = personChanges.Where(c => c.Property.Name == nameof(Person.LastName)).ToList();
 
-        // FirstName: snapshot marking was removed in #345, so the transactional apply uses the
-        // captured source (null, no ambient source when person.FirstName = "John" was written).
-        var firstNameChanges = changes.Where(c =>
-            ReferenceEquals(c.Property.Subject, person) && c.Property.Name == nameof(Person.FirstName)).ToList();
+        // Assert: the triggering FirstName write keeps the ambient source.
         Assert.Single(firstNameChanges);
-        Assert.Null(firstNameChanges[0].Source);
+        Assert.Same(sourceMock.Object, firstNameChanges[0].Source);
+
+        // The INPC handler's LastName write-back publishes local origin.
+        Assert.Single(lastNameChanges);
+        Assert.Null(lastNameChanges[0].Source);
     }
 }
