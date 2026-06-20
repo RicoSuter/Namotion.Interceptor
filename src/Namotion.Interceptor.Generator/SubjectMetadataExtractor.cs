@@ -111,6 +111,28 @@ internal static class SubjectMetadataExtractor
     {
         var properties = new List<PropertyMetadata>();
 
+        // First pass: collect names of On{X}Changing/On{X}Changed partial method bodies that are
+        // actually implemented (have a block or expression body), across all partial declarations.
+        // Name-only matching is deliberately over-approximate: a false positive costs one redundant
+        // scope around a compiler-erased call; a false negative would silently restore source
+        // inheritance for that hook.
+        var implementedHookMethods = new HashSet<string>();
+        foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
+        {
+            if (syntaxReference.GetSyntax(cancellationToken) is not ClassDeclarationSyntax hookClassDecl)
+            {
+                continue;
+            }
+
+            foreach (var method in hookClassDecl.Members.OfType<MethodDeclarationSyntax>())
+            {
+                if (method.Body is not null || method.ExpressionBody is not null)
+                {
+                    implementedHookMethods.Add(method.Identifier.ValueText);
+                }
+            }
+        }
+
         foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
         {
             var declaration = syntaxReference.GetSyntax(cancellationToken);
@@ -143,6 +165,9 @@ internal static class SubjectMetadataExtractor
                 var setterAccessModifier = GetAccessorModifier(property.AccessorList, SyntaxKind.SetAccessorDeclaration) ??
                                            GetAccessorModifier(property.AccessorList, SyntaxKind.InitAccessorDeclaration);
 
+                var hasChangingHook = implementedHookMethods.Contains($"On{propertyName}Changing");
+                var hasChangedHook = implementedHookMethods.Contains($"On{propertyName}Changed");
+
                 properties.Add(new PropertyMetadata(
                     propertyName,
                     fullyQualifiedName,
@@ -157,7 +182,9 @@ internal static class SubjectMetadataExtractor
                     hasInit,
                     IsFromInterface: false,
                     getterAccessModifier,
-                    setterAccessModifier));
+                    setterAccessModifier,
+                    HasChangingHook: hasChangingHook,
+                    HasChangedHook: hasChangedHook));
             }
         }
 

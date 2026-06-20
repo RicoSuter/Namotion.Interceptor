@@ -124,7 +124,19 @@ internal static class SubjectCodeGenerator
                     public event PropertyChangedEventHandler? PropertyChanged;
 
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+                    protected void RaisePropertyChanged(string propertyName)
+                    {
+                        var handler = PropertyChanged;
+                        if (handler is null)
+                        {
+                            return;
+                        }
+
+                        using (SubjectChangeContext.WithLocalOrigin())
+                        {
+                            handler.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+                        }
+                    }
 
                     void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
 
@@ -309,11 +321,53 @@ internal static class SubjectCodeGenerator
             builder.AppendLine("            {");
             builder.AppendLine("                var newValue = value;");
             builder.AppendLine("                var cancel = false;");
-            builder.AppendLine($"                On{property.Name}Changing(ref newValue, ref cancel);");
+
+            // OnXChanging: wrap in a local-origin scope only when the hook is actually implemented,
+            // so unimplemented hooks keep the bare (compiler-erased) call and pay nothing.
+            if (property.HasChangingHook)
+            {
+                builder.AppendLine("                using (SubjectChangeContext.WithLocalOrigin())");
+                builder.AppendLine("                {");
+                builder.AppendLine($"                    On{property.Name}Changing(ref newValue, ref cancel);");
+                builder.AppendLine("                }");
+            }
+            else
+            {
+                builder.AppendLine($"                On{property.Name}Changing(ref newValue, ref cancel);");
+            }
+
             builder.AppendLine($"                if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
             builder.AppendLine("                {");
-            builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
-            builder.AppendLine($"                    {raisePropertyChangedCall};");
+
+            // OnXChanged: same conditional wrapping.
+            if (property.HasChangedHook)
+            {
+                builder.AppendLine("                    using (SubjectChangeContext.WithLocalOrigin())");
+                builder.AppendLine("                    {");
+                builder.AppendLine($"                        On{property.Name}Changed(_{property.Name});");
+                builder.AppendLine("                    }");
+            }
+            else
+            {
+                builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
+            }
+
+            // INPC raise. The own and base-generated cases are wrapped inside RaisePropertyChanged
+            // itself, so the call site stays bare. Only the manual-IRaisePropertyChanged-base case
+            // (the user's method cannot be modified) is wrapped here at the interface-cast call site.
+            var raisePropertyChangedIsManualBase = !metadata.BaseClassHasInterceptorSubject && metadata.BaseClassHasInpc;
+            if (raisePropertyChangedIsManualBase)
+            {
+                builder.AppendLine("                    using (SubjectChangeContext.WithLocalOrigin())");
+                builder.AppendLine("                    {");
+                builder.AppendLine($"                        {raisePropertyChangedCall};");
+                builder.AppendLine("                    }");
+            }
+            else
+            {
+                builder.AppendLine($"                    {raisePropertyChangedCall};");
+            }
+
             builder.AppendLine("                }");
             builder.AppendLine("            }");
         }

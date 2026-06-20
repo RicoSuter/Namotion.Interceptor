@@ -30,7 +30,19 @@ namespace TestNamespace
         public event PropertyChangedEventHandler? PropertyChanged;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+        protected void RaisePropertyChanged(string propertyName)
+        {
+            var handler = PropertyChanged;
+            if (handler is null)
+            {
+                return;
+            }
+
+            using (SubjectChangeContext.WithLocalOrigin())
+            {
+                handler.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+            }
+        }
 
         void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
 
