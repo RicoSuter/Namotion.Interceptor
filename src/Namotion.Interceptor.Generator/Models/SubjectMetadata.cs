@@ -12,5 +12,6 @@ internal sealed record SubjectMetadata(
     string? BaseClassTypeName,
     bool BaseClassHasInterceptorSubject,
     bool BaseClassHasInpc,
+    bool RaiseResolvesToManualBase,
     IReadOnlyList<PropertyMetadata> Properties,
     IReadOnlyList<MethodMetadata> Methods);

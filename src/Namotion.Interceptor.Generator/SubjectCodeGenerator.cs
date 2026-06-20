@@ -352,10 +352,12 @@ internal static class SubjectCodeGenerator
                 builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
             }
 
-            // INPC raise. The own and base-generated cases are wrapped inside RaisePropertyChanged
-            // itself, so the call site stays bare. Only the manual-IRaisePropertyChanged-base case
-            // (the user's method cannot be modified) is wrapped here at the interface-cast call site.
-            var raisePropertyChangedIsManualBase = !metadata.BaseClassHasInterceptorSubject && metadata.BaseClassHasInpc;
+            // INPC raise. When a generated subject in the chain owns a wrapped RaisePropertyChanged,
+            // the call site stays bare (the inherited method already enters the scope). Only when the
+            // effective raise resolves to a hand-written IRaisePropertyChanged base (which we cannot
+            // modify) do we wrap here at the call site. This must consider the whole inheritance chain,
+            // not just the immediate base, so multi-level chains rooted at a manual base are covered.
+            var raisePropertyChangedIsManualBase = metadata.RaiseResolvesToManualBase;
             if (raisePropertyChangedIsManualBase)
             {
                 builder.AppendLine("                    using (SubjectChangeContext.WithLocalOrigin())");

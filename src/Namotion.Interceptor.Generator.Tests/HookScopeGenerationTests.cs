@@ -55,4 +55,26 @@ public class HookScopeGenerationTests
         // Assert: the INPC subscriber, invoked by the manual base's raise, saw a null source.
         Assert.Null(sourceSeenDuringRaise);
     }
+
+    [Fact]
+    public void WhenMultiLevelChainRootedAtManualBase_ThenRaiseRunsUnderLocalOriginScope()
+    {
+        // Arrange: ManualInpcGrandchild : ManualInpcSubject : ManualInpcBase. No generated subject
+        // in the chain owns a wrapped RaisePropertyChanged, so the grandchild setter must wrap the
+        // inherited (manual, unwrapped) raise at its own call site.
+        var subject = new ManualInpcGrandchild();
+        var source = new object();
+        object? sourceSeenDuringRaise = "sentinel";
+        subject.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
+
+        // Act
+        using (SubjectChangeContext.WithSource(source))
+        {
+            subject.GrandchildName = "value";
+        }
+
+        // Assert: a regression that only inspected the immediate base would leave this raise
+        // unwrapped and the subscriber would observe the source instead of null.
+        Assert.Null(sourceSeenDuringRaise);
+    }
 }

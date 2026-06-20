@@ -42,6 +42,10 @@ internal static class SubjectMetadataExtractor
                 .Select(t => semanticModel.GetTypeInfo(t.Type, cancellationToken).Type as INamedTypeSymbol)
                 .Any(t => t != null && ImplementsInterface(t, KnownTypes.IRaisePropertyChanged)) ?? false);
 
+        // Whether the RaisePropertyChanged this type calls resolves to a hand-written (unwrapped)
+        // base method rather than a generated, local-origin-wrapped one. See RaiseResolvesToManualBase.
+        var raiseResolvesToManualBase = RaiseResolvesToManualBase(typeSymbol, baseClassHasInpc);
+
         // Collect all partial class declarations
         var allClassDeclarations = typeSymbol.DeclaringSyntaxReferences
             .Select(r => r.GetSyntax(cancellationToken))
@@ -74,8 +78,54 @@ internal static class SubjectMetadataExtractor
             baseClassTypeName,
             baseClassHasInterceptorSubject,
             baseClassHasInpc,
+            raiseResolvesToManualBase,
             properties,
             methods);
+    }
+
+    /// <summary>
+    /// Determines whether the RaisePropertyChanged a generated subject will call resolves to a
+    /// hand-written (unwrapped) base method rather than a generated, local-origin-wrapped one.
+    /// True means the setter must wrap the raise call site in WithLocalOrigin itself, because no
+    /// generated subject in the inheritance chain owns a wrapped RaisePropertyChanged. This covers
+    /// multi-level chains rooted at a manual IRaisePropertyChanged base (the immediate base alone
+    /// is not enough to decide).
+    /// </summary>
+    private static bool RaiseResolvesToManualBase(INamedTypeSymbol typeSymbol, bool baseClassHasInpc)
+    {
+        // The type emits its own wrapped RaisePropertyChanged when it does not inherit INPC.
+        if (!baseClassHasInpc)
+        {
+            return false;
+        }
+
+        for (var current = typeSymbol.BaseType;
+             current is not null && current.SpecialType != SpecialType.System_Object;
+             current = current.BaseType)
+        {
+            if (IsGeneratedSubject(current))
+            {
+                // A generated subject emits its own wrapped raise only when its own base lacks INPC.
+                var baseOfCurrent = current.BaseType;
+                var currentInheritsInpc = baseOfCurrent is not null &&
+                    (IsGeneratedSubject(baseOfCurrent) || ImplementsInterface(baseOfCurrent, KnownTypes.IRaisePropertyChanged));
+                if (!currentInheritsInpc)
+                {
+                    return false; // generated owner found: descendants inherit a wrapped raise
+                }
+            }
+            else if (ImplementsInterface(current, KnownTypes.IRaisePropertyChanged))
+            {
+                return true; // a hand-written IRaisePropertyChanged base provides the unwrapped raise
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsGeneratedSubject(INamedTypeSymbol type)
+    {
+        return HasInterceptorSubjectAttribute(type) || ImplementsInterface(type, KnownTypes.IInterceptorSubject);
     }
 
     private static string GetNamespace(ClassDeclarationSyntax classDeclaration)
