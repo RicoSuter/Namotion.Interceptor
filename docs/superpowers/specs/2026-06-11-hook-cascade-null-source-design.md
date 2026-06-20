@@ -109,13 +109,13 @@ The existing inconsistency that `DerivedPropertyChangeHandler.NotifyDerivedPrope
 
 ## Tests
 
-The cascade source-scope behavior this design changes is currently unpinned: `SubjectTransactionEchoSuppressionTests` (which held `WhenCommitAppliedChangeTriggersCascade_ThenCascadeInheritsSourceScope`, `WhenInboundSourceValueTriggersCascade_ThenCascadeInheritsSourceScope`, and the derived-stays-local test) was removed by the transaction test-suite cleanup (#341, commit `2511e6c8`) after this spec's first draft. There is nothing to flip; the tests below are written from scratch.
+`SubjectTransactionEchoSuppressionTests` (added by #344) pins the cascade source-scope behavior this design changes. This branch was created from `2511e6c8`, before #344, so master must be merged in for that file to be present. Then:
 
-- Commit-cascade delivery: a hook cascade triggered during a transaction commit apply publishes local origin (`Source = null`) and is delivered to its bound source by the background queue.
-- Inbound-cascade delivery (pump level): a value arrives from the source and the hook cascade write to another source-bound property is pushed back out by the change queue.
-- Derived-stays-local: a derived recalculation triggered by a commit apply still publishes local origin (re-pin, since the cleanup removed the original).
-- INPC write-back: an INPC handler that writes back during a source-scoped apply publishes local origin (`Source = null`).
-- Generator tests: extend `PropertyHooksTests`, refresh affected snapshots, and pin that a property without implemented hooks generates no scope (the pay-nothing guarantee).
+- Flip the two cascade tests `WhenCommitAppliedChangeTriggersCascade_*` and `WhenInboundSourceValueTriggersCascade_*` to expect `Source = null` (local origin) instead of inheriting the source. The derived recalculation test in the same file stays unchanged (it already expects `Source = null`). The source-marking tests (the triggering property still carries the confirming source) also stay unchanged.
+- Add, in a focused `SubjectCascadeLocalOriginTests`: a pump-level inbound-cascade delivery test (a value arrives from the source; the cascade write to another source-bound property is delivered to the bound source by a `ChangeQueueProcessor` while the inbound value itself is echo-dropped), and an INPC write-back test (an INPC handler that writes back during a source-scoped apply publishes `Source = null`).
+- Generator tests: a behavioral pin that an implemented hook runs under a local-origin scope, that a property without implemented hooks pays nothing, and that the manual-`IRaisePropertyChanged`-base raise is wrapped; refresh the standalone-subject snapshots affected by the `RaisePropertyChanged` shape change.
+
+(Note: an earlier draft claimed the test file had been "removed by #341." That was a misdiagnosis caused by the stale branch base; the file is added by #344 and is present once master is merged.)
 
 ## Documentation
 

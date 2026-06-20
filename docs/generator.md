@@ -114,6 +114,8 @@ public partial class Person
 }
 ```
 
+Implemented hook bodies run inside a local-origin scope (`SubjectChangeContext.WithLocalOrigin()`): any property write a hook makes (a cascade) publishes with `Source = null`, so it flows to bound sources like any local write. The scope is emitted only for hooks that are actually implemented, so properties without hook bodies pay nothing.
+
 ### Derived Properties
 
 Properties marked with `[Derived]` are included in the metadata as calculated properties (can be read-only or writable):
