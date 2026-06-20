@@ -138,6 +138,7 @@ namespace Namotion.Interceptor
         public static Namotion.Interceptor.SubjectChangeContext Current { get; }
         public static System.Func<System.DateTimeOffset> GetTimestampFunction { get; set; }
         public static Namotion.Interceptor.SubjectChangeContext.SubjectChangeContextScope WithChangedTimestamp(System.DateTimeOffset? changed) { }
+        public static Namotion.Interceptor.SubjectChangeContext.SubjectChangeContextScope WithLocalOrigin() { }
         public static Namotion.Interceptor.SubjectChangeContext.SubjectChangeContextScope WithSource(object? source) { }
         public static Namotion.Interceptor.SubjectChangeContext.SubjectChangeContextScope WithState(object? source, System.DateTimeOffset? changed, System.DateTimeOffset? received) { }
         public readonly ref struct SubjectChangeContextScope

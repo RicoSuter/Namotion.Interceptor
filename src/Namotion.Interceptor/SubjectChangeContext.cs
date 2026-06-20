@@ -137,6 +137,26 @@ public readonly struct SubjectChangeContext
         return new SubjectChangeContextScope(previousState);
     }
 
+    /// <summary>
+    /// Enters a scope that marks writes inside it as local origin: resets the source to null while
+    /// preserving the ambient changed and received timestamps. Used around framework-invoked
+    /// consequence callbacks (generated property hooks, INotifyPropertyChanged raises, derived
+    /// recalculations) so their writes flow to bound sources like any local write.
+    /// Forward-compatibility seam for the typed ChangeOrigin discriminator (#342): encodes local
+    /// origin as Source = null today; a future version sets Kind = Local without changing this
+    /// signature or any call site.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static SubjectChangeContextScope WithLocalOrigin()
+    {
+        var previousState = _current;
+        _current = new SubjectChangeContext(
+            previousState._changedTimestamp,
+            previousState._receivedTimestamp,
+            null);
+        return new SubjectChangeContextScope(previousState);
+    }
+
     /// <summary>Enters a scope that sets source, changed and received timestamps.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static SubjectChangeContextScope WithState(object? source, DateTimeOffset? changed, DateTimeOffset? received)
