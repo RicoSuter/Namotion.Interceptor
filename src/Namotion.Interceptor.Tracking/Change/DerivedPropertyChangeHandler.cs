@@ -354,7 +354,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        using (SubjectChangeContext.WithSource(null))
+        using (SubjectChangeContext.WithLocalOrigin())
         {
             // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
             // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
