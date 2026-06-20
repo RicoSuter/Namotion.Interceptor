@@ -11,7 +11,8 @@ public partial class PersonWithSelectiveHooks
     // NotHooked: no hook bodies implemented, so its setter keeps the bare (erased) calls.
     public partial string? NotHooked { get; set; }
 
-    public object? HookedSourceInsideChanged { get; private set; }
+    // Seeded non-null so a test can distinguish "hook ran and saw a null source" from "hook never ran".
+    public object? HookedSourceInsideChanged { get; private set; } = new object();
 
     partial void OnHookedChanged(string? newValue)
     {
