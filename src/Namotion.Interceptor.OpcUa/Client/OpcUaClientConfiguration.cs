@@ -106,12 +106,6 @@ public class OpcUaClientConfiguration
     public TimeSpan? BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
-    /// Gets or sets the maximum buffered change-queue depth before the oldest unprocessed change is
-    /// dropped, or null for unbounded (default).
-    /// </summary>
-    public int? MaxQueueDepth { get; set; }
-
-    /// <summary>
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
     public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(1);

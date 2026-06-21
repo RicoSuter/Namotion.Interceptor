@@ -43,12 +43,6 @@ public class WebSocketClientConfiguration
     public TimeSpan BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
-    /// Maximum buffered change-queue depth before the oldest unprocessed change is dropped,
-    /// or null for unbounded (default).
-    /// </summary>
-    public int? MaxQueueDepth { get; set; }
-
-    /// <summary>
     /// Retry time for failed writes. Default: 10 seconds
     /// </summary>
     public TimeSpan RetryTime { get; set; } = TimeSpan.FromSeconds(10);

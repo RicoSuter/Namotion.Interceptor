@@ -85,7 +85,7 @@ namespace Namotion.Interceptor.Connectors
     }
     public abstract class SubjectSourceBase : Microsoft.Extensions.Hosting.BackgroundService, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
     {
-        protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000, int? maxQueueDepth = default) { }
+        protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000) { }
         public int PendingWriteCount { get; }
         public abstract Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
         public virtual int WriteBatchSize { get; }

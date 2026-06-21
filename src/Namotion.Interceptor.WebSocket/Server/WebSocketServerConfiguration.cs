@@ -31,12 +31,6 @@ public class WebSocketServerConfiguration
     public TimeSpan BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
-    /// Maximum buffered change-queue depth before the oldest unprocessed change is dropped,
-    /// or null for unbounded (default).
-    /// </summary>
-    public int? MaxQueueDepth { get; set; }
-
-    /// <summary>
     /// Maximum number of property changes per WebSocket message. Default: 1000.
     /// Smaller batches reduce latency, larger batches reduce per-message overhead.
     /// Set to 0 for unlimited (not recommended for large object graphs).

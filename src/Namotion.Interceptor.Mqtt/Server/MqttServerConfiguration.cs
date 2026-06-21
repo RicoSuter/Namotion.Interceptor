@@ -69,12 +69,6 @@ public class MqttServerConfiguration
     public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
-    /// Gets or sets the maximum buffered change-queue depth before the oldest unprocessed change is
-    /// dropped, or null for unbounded (default).
-    /// </summary>
-    public int? MaxQueueDepth { get; init; }
-
-    /// <summary>
     /// Gets or sets the delay before publishing the initial state to a newly connected client.
     /// This allows time for the client to complete its subscription setup.
     /// Set to zero to disable initial state publishing (relies on retained messages only).

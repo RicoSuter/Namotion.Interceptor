@@ -17,7 +17,6 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
-    private readonly int? _maxQueueDepth;
     private readonly TimeSpan _retryTime;
     private readonly SubjectPropertyWriter _propertyWriter;
 
@@ -33,13 +32,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         ILogger logger,
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null,
-        int writeRetryQueueSize = 1000,
-        int? maxQueueDepth = null)
+        int writeRetryQueueSize = 1000)
     {
         _context = context;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
-        _maxQueueDepth = maxQueueDepth;
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
 
         if (writeRetryQueueSize > 0)
@@ -93,7 +90,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     propertyReference => propertyReference.TryGetSource(out var source) && source == this,
                     WriteChangesViaRetryQueueAsync,
                     _bufferTime,
-                    maxQueueDepth: _maxQueueDepth,
+                    maxQueueDepth: null,
                     logger: _logger);
 
                 // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,

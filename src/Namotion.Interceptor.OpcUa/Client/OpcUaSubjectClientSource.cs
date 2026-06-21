@@ -61,7 +61,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     public event EventHandler<OpcUaCurrentSessionChangedEventArgs>? CurrentSessionChanged;
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
-        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize, configuration.MaxQueueDepth)
+        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);
