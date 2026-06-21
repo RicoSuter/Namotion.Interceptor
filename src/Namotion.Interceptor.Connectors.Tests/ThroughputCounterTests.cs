@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.OpcUa.Tests.Client;
+namespace Namotion.Interceptor.Connectors.Tests;
 
 public class ThroughputCounterTests
 {

@@ -99,6 +99,12 @@ namespace Namotion.Interceptor.Connectors
         [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<!0>))]
         public static System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesInBatchesAsync(this Namotion.Interceptor.Connectors.ISubjectSource source, System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken) { }
     }
+    public sealed class ThroughputCounter
+    {
+        public ThroughputCounter() { }
+        public double CurrentRate { get; }
+        public void Add(int count) { }
+    }
     public readonly struct WriteResult
     {
         public System.Exception? Error { get; }
