@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Connectors
     }
     public class ChangeQueueProcessor : System.IDisposable
     {
-        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, System.TimeSpan? bufferTime, Microsoft.Extensions.Logging.ILogger logger, int? maxQueueDepth = default) { }
+        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, System.TimeSpan? bufferTime, int? maxQueueDepth, Microsoft.Extensions.Logging.ILogger logger) { }
         public long DropCount { get; }
         public void Dispose() { }
         public System.Threading.Tasks.Task ProcessAsync(System.Threading.CancellationToken cancellationToken) { }
@@ -85,7 +85,7 @@ namespace Namotion.Interceptor.Connectors
     }
     public abstract class SubjectSourceBase : Microsoft.Extensions.Hosting.BackgroundService, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
     {
-        protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000) { }
+        protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000, int? maxQueueDepth = default) { }
         public int PendingWriteCount { get; }
         public abstract Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
         public virtual int WriteBatchSize { get; }

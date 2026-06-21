@@ -370,7 +370,7 @@ public sealed class WebSocketSubjectHandler
             propertyFilter: propertyReference =>
                 propertyReference.TryGetRegisteredProperty() is { } property &&
                 (_configuration.PathProvider?.IsPropertyIncluded(property) ?? true),
-            writeHandler: BroadcastChangesAsync, BufferTime, logger);
+            writeHandler: BroadcastChangesAsync, BufferTime, _configuration.MaxQueueDepth, logger);
 
     public async ValueTask CloseAllConnectionsAsync()
     {

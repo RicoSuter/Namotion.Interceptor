@@ -131,6 +131,12 @@ public class MqttClientConfiguration
     public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
+    /// Gets or sets the maximum buffered change-queue depth before the oldest unprocessed change is
+    /// dropped, or null for unbounded (default).
+    /// </summary>
+    public int? MaxQueueDepth { get; init; }
+
+    /// <summary>
     /// Gets or sets the time between retry attempts for failed writes. Default is 10 seconds.
     /// </summary>
     public TimeSpan RetryTime { get; init; } = TimeSpan.FromSeconds(10);

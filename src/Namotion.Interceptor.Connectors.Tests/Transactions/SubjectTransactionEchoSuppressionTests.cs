@@ -346,6 +346,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
                 return ValueTask.CompletedTask;
             },
             bufferTime: TimeSpan.FromMilliseconds(8),
+            maxQueueDepth: null,
             logger: NullLogger.Instance);
 
         using var processorCts = new CancellationTokenSource();

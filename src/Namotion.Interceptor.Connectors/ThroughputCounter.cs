@@ -2,7 +2,6 @@ namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Lock-free 60-second sliding-window rate counter (changes per second).
-/// Shared by OPC UA connectors and the history stores for incoming/recorded rate metrics.
 /// </summary>
 public sealed class ThroughputCounter
 {

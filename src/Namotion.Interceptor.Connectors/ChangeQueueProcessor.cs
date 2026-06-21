@@ -31,7 +31,7 @@ public class ChangeQueueProcessor : IDisposable
 
     /// <summary>
     /// Number of buffered changes dropped due to bounded-queue overflow.
-    /// Always zero when <c>maxQueueDepth</c> is null (the default, unbounded).
+    /// Always zero when <c>maxQueueDepth</c> is null (unbounded).
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
 
@@ -63,18 +63,18 @@ public class ChangeQueueProcessor : IDisposable
     /// returning <c>false</c> when null.</param>
     /// <param name="writeHandler">Handler to write batched changes.</param>
     /// <param name="bufferTime">Time to buffer changes before flushing.</param>
+    /// <param name="maxQueueDepth">Bound on the buffered change queue, or null for unbounded (existing
+    /// connector behavior). When set, enqueuing past the bound drops the oldest unprocessed change and
+    /// increments <see cref="DropCount"/>, so the newest change is retained.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="maxQueueDepth">Optional bound on the buffered change queue. When null (default) the
-    /// queue is unbounded, preserving existing connector behavior. When set, enqueuing past the bound drops
-    /// the oldest unprocessed change and increments <see cref="DropCount"/>, so the newest change is retained.</param>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
         Func<PropertyReference, bool> propertyFilter,
         Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
         TimeSpan? bufferTime,
-        ILogger logger,
-        int? maxQueueDepth = null)
+        int? maxQueueDepth,
+        ILogger logger)
     {
         _source = source;
         _propertyFilter = propertyFilter;

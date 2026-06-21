@@ -56,6 +56,12 @@ public class OpcUaServerConfiguration
     public TimeSpan? BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
+    /// Gets or sets the maximum buffered change-queue depth before the oldest unprocessed change is
+    /// dropped, or null for unbounded (default).
+    /// </summary>
+    public int? MaxQueueDepth { get; set; }
+
+    /// <summary>
     /// Gets or sets the base address for the OPC UA server.
     /// Default is "opc.tcp://localhost:4840/".
     /// </summary>

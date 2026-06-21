@@ -97,6 +97,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public bool EnableReadAfterWrite { get; set; }
         public System.TimeSpan KeepAliveInterval { get; set; }
         public Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey> Mapper { get; set; }
+        public int? MaxQueueDepth { get; set; }
         public System.TimeSpan MaxReconnectDuration { get; set; }
         public int MaximumItemsPerSubscription { get; set; }
         public uint MaximumReferencesPerNode { get; set; }
@@ -364,6 +365,7 @@ namespace Namotion.Interceptor.OpcUa.Server
         public string CertificateStoreBasePath { get; set; }
         public bool CleanCertificateStore { get; set; }
         public Namotion.Interceptor.Connectors.Mapping.IPropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping> Mapper { get; set; }
+        public int? MaxQueueDepth { get; set; }
         public string NamespaceUri { get; set; }
         public Opc.Ua.ITelemetryContext ResolvedTelemetryContext { get; }
         public string? RootName { get; set; }

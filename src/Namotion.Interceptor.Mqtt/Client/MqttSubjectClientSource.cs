@@ -49,7 +49,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         IInterceptorSubject subject,
         MqttClientConfiguration configuration,
         ILogger<MqttSubjectClientSource> logger)
-        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize)
+        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize, configuration.MaxQueueDepth)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);

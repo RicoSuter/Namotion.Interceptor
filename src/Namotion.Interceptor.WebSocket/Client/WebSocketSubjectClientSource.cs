@@ -62,7 +62,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             logger ?? throw new ArgumentNullException(nameof(logger)),
             (configuration ?? throw new ArgumentNullException(nameof(configuration))).BufferTime,
             configuration.RetryTime,
-            configuration.WriteRetryQueueSize)
+            configuration.WriteRetryQueueSize,
+            configuration.MaxQueueDepth)
     {
         _subject = subject;
         _configuration = configuration;
