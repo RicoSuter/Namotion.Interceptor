@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Model;
 
-namespace Namotion.Interceptor.ConnectorTester.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Snapshot;
 
 /// <summary>
 /// Captures and compares participant snapshots for the ConnectorTester convergence check.
@@ -38,7 +38,7 @@ public static class SnapshotComparer
     public static string Capture(TestNode root)
     {
         var update = SubjectUpdate.CreateCompleteUpdate(root, []);
-        var idMap = BuildStableIdMap(update);
+        var idMap = SnapshotIdMap.Build(update);
 
         // Verification-tooling invariant: every subject must be reachable from the root
         // via Object/Collection/Dictionary edges. Unreachable orphans would keep their
@@ -131,59 +131,26 @@ public static class SnapshotComparer
         return JsonNode.Parse(snapshot)?[SubjectsKey]?.AsObject();
     }
 
-    private static Dictionary<string, string> BuildStableIdMap(SubjectUpdate update)
+    /// <summary>
+    /// Returns (subjects, properties) totals for the snapshot, used on PASS to log a summary
+    /// of what was actually compared. A non-zero, expected count confirms the comparer ran
+    /// over real data; the absence of a diff alone could otherwise hide a regression that
+    /// skipped properties.
+    /// </summary>
+    public static (int Subjects, int Properties) CountSubjectsAndProperties(string snapshot)
     {
-        var idMap = new Dictionary<string, string>(StringComparer.Ordinal)
+        var subjects = ParseSubjects(snapshot);
+        if (subjects is null) return (0, 0);
+
+        var properties = 0;
+        foreach (var (_, subjectNode) in subjects)
         {
-            [update.Root] = "ROOT"
-        };
-        var queue = new Queue<string>();
-        queue.Enqueue(update.Root);
-
-        var counter = 1;
-
-        while (queue.Count > 0)
-        {
-            var currentRawId = queue.Dequeue();
-
-            if (!update.Subjects.TryGetValue(currentRawId, out var properties))
+            if (subjectNode is JsonObject subjectObject)
             {
-                continue;
-            }
-
-            foreach (var propertyName in properties.Keys.OrderBy(name => name, StringComparer.Ordinal))
-            {
-                var property = properties[propertyName];
-
-                if (property.Kind == SubjectPropertyUpdateKind.Object)
-                {
-                    if (property.Id is not null && !idMap.ContainsKey(property.Id))
-                    {
-                        idMap[property.Id] = $"SUBJ_{counter++}";
-                        queue.Enqueue(property.Id);
-                    }
-                }
-                else if (property.Kind is SubjectPropertyUpdateKind.Collection or SubjectPropertyUpdateKind.Dictionary
-                    && property.Items is { } items)
-                {
-                    IEnumerable<SubjectPropertyItemUpdate> orderedItems =
-                        property.Kind == SubjectPropertyUpdateKind.Dictionary
-                            ? items.OrderBy(item => item.Index?.ToString(), StringComparer.Ordinal)
-                            : items;
-
-                    foreach (var item in orderedItems)
-                    {
-                        if (item.Id is not null && !idMap.ContainsKey(item.Id))
-                        {
-                            idMap[item.Id] = $"SUBJ_{counter++}";
-                            queue.Enqueue(item.Id);
-                        }
-                    }
-                }
+                properties += subjectObject.Count;
             }
         }
-
-        return idMap;
+        return (subjects.Count, properties);
     }
 
     private static SubjectUpdate NormalizeUpdate(SubjectUpdate update, Dictionary<string, string> idMap)
@@ -242,77 +209,6 @@ public static class SnapshotComparer
             Root = "ROOT",
             Subjects = normalizedSubjects,
         };
-    }
-
-    /// <summary>
-    /// Compares two snapshots and returns a list of properties where the null-timestamp
-    /// rule forgave a mismatch (one side had a timestamp, the other did not).
-    /// Returns an empty list when the snapshots are string-equal or when there are no
-    /// forgiven mismatches. Returns null when the snapshots do not match at all.
-    /// </summary>
-    public static List<string>? CollectFindings(
-        string nameA, string snapshotA,
-        string nameB, string snapshotB)
-    {
-        if (snapshotA == snapshotB)
-        {
-            return [];
-        }
-
-        var subjectsA = ParseSubjects(snapshotA);
-        var subjectsB = ParseSubjects(snapshotB);
-
-        if (subjectsA is null || subjectsB is null)
-        {
-            return (subjectsA is null && subjectsB is null) ? [] : null;
-        }
-
-        if (subjectsA.Count != subjectsB.Count)
-        {
-            return null;
-        }
-
-        var findings = new List<string>();
-
-        foreach (var (subjectId, subjectNodeA) in subjectsA)
-        {
-            if (subjectsB[subjectId] is not JsonObject propertiesB)
-            {
-                return null;
-            }
-
-            var propertiesA = subjectNodeA!.AsObject();
-            if (propertiesA.Count != propertiesB.Count)
-            {
-                return null;
-            }
-
-            foreach (var (propertyName, propertyNodeA) in propertiesA)
-            {
-                if (propertiesB[propertyName] is not JsonObject propertyB)
-                {
-                    return null;
-                }
-
-                var propertyA = propertyNodeA!.AsObject();
-                if (!PropertiesMatch(propertyA, propertyB))
-                {
-                    return null;
-                }
-
-                var tsA = propertyA[TimestampKey];
-                var tsB = propertyB[TimestampKey];
-                if ((tsA is null) != (tsB is null))
-                {
-                    var hasTimestamp = tsA is not null ? nameA : nameB;
-                    var missingTimestamp = tsA is null ? nameA : nameB;
-                    var timestampValue = (tsA ?? tsB)!.ToJsonString();
-                    findings.Add($"{subjectId}.{propertyName}: {hasTimestamp} has timestamp {timestampValue}, {missingTimestamp} has none");
-                }
-            }
-        }
-
-        return findings;
     }
 
     internal static bool PropertiesMatch(JsonObject propertyA, JsonObject propertyB)
