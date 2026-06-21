@@ -171,8 +171,14 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 else
                 {
-                    // Buffered path: enqueue lock-free with optional bounded backpressure
-                    EnqueueBuffered(change);
+                    // Buffered path: enqueue lock-free; periodic timer handles flushing
+                    _changes.Enqueue(change);
+
+                    // Optional bounded-queue backpressure: drop oldest changes on overflow
+                    if (_maxQueueDepth is int maxQueueDepth && _changes.Count > maxQueueDepth)
+                    {
+                        DropOverflow(maxQueueDepth);
+                    }
                 }
             }
         }
@@ -184,21 +190,15 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     /// <summary>
-    /// Enqueues a change into the buffered queue, applying optional bounded-queue backpressure.
-    /// When a bound is configured and exceeded, the oldest unprocessed changes are dropped (and
-    /// <see cref="DropCount"/> incremented) so the newest change is retained. Best-effort: a
-    /// concurrent flush may drain the queue below the bound, in which case fewer drops occur.
+    /// Drops the oldest buffered changes until the queue is back within <paramref name="maxQueueDepth"/>,
+    /// incrementing <see cref="DropCount"/> for each. Best-effort: a concurrent flush may drain the queue
+    /// below the bound first, in which case fewer drops occur.
     /// </summary>
-    private void EnqueueBuffered(SubjectPropertyChange change)
+    private void DropOverflow(int maxQueueDepth)
     {
-        _changes.Enqueue(change);
-
-        if (_maxQueueDepth is int maxQueueDepth)
+        while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
         {
-            while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
-            {
-                Interlocked.Increment(ref _dropCount);
-            }
+            Interlocked.Increment(ref _dropCount);
         }
     }
 
