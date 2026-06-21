@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
