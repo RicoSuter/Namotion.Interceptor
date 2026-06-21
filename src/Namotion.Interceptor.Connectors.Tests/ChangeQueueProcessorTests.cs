@@ -231,6 +231,74 @@ public class ChangeQueueProcessorTests
         Assert.Equal(1, flushCount);
     }
 
+    [Fact]
+    public void WhenBoundedQueueOverflows_ThenOldestDroppedAndDropCountIncrements()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeQueue();
+
+        var subject = new Person(context);
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+
+        var processor = new ChangeQueueProcessor(
+            source: null,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMilliseconds(50),
+            logger: NullLogger.Instance,
+            maxQueueDepth: 2);
+
+        // Act - enqueue five changes into a buffer bounded to two
+        EnqueueBuffered(processor, property, null, "v1");
+        EnqueueBuffered(processor, property, "v1", "v2");
+        EnqueueBuffered(processor, property, "v2", "v3");
+        EnqueueBuffered(processor, property, "v3", "v4");
+        EnqueueBuffered(processor, property, "v4", "v5");
+
+        processor.Dispose();
+
+        // Assert - three oldest dropped, the two newest (v4, v5) retained in order
+        Assert.Equal(3, processor.DropCount);
+        Assert.Equal(new[] { "v4", "v5" }, RemainingNewValues(processor));
+    }
+
+    [Fact]
+    public void WhenUnbounded_ThenNothingIsDroppedAndDefaultPathIsUnchanged()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeQueue();
+
+        var subject = new Person(context);
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+
+        // No maxQueueDepth argument: default null == unbounded (existing connector behavior)
+        var processor = new ChangeQueueProcessor(
+            source: null,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMilliseconds(50),
+            logger: NullLogger.Instance);
+
+        // Act
+        EnqueueBuffered(processor, property, null, "v1");
+        EnqueueBuffered(processor, property, "v1", "v2");
+        EnqueueBuffered(processor, property, "v2", "v3");
+        EnqueueBuffered(processor, property, "v3", "v4");
+        EnqueueBuffered(processor, property, "v4", "v5");
+
+        processor.Dispose();
+
+        // Assert - nothing dropped, all five retained
+        Assert.Equal(0, processor.DropCount);
+        Assert.Equal(new[] { "v1", "v2", "v3", "v4", "v5" }, RemainingNewValues(processor));
+    }
+
     private static void EnqueueChange(
         ChangeQueueProcessor processor,
         PropertyReference property,
@@ -263,5 +331,29 @@ public class ChangeQueueProcessorTests
 
         var task = (ValueTask)tryFlushMethod!.Invoke(processor, [CancellationToken.None])!;
         await task;
+    }
+
+    private static void EnqueueBuffered(
+        ChangeQueueProcessor processor,
+        PropertyReference property,
+        string? oldValue,
+        string? newValue)
+    {
+        var method = typeof(ChangeQueueProcessor)
+            .GetMethod("EnqueueBuffered", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        var change = SubjectPropertyChange.Create(
+            property, null, DateTimeOffset.UtcNow, null, oldValue, newValue);
+
+        method!.Invoke(processor, [change]);
+    }
+
+    private static string?[] RemainingNewValues(ChangeQueueProcessor processor)
+    {
+        var changesField = typeof(ChangeQueueProcessor)
+            .GetField("_changes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        var queue = (System.Collections.Concurrent.ConcurrentQueue<SubjectPropertyChange>)changesField!.GetValue(processor)!;
+        return queue.Select(change => change.GetNewValue<string>()).ToArray();
     }
 }

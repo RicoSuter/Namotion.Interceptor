@@ -24,8 +24,16 @@ public class ChangeQueueProcessor : IDisposable
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
+    private readonly int? _maxQueueDepth;
+    private long _dropCount;
     private int _flushGate; // 0 = free, 1 = flushing
     private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
+
+    /// <summary>
+    /// Number of buffered changes dropped due to bounded-queue overflow.
+    /// Always zero when <c>maxQueueDepth</c> is null (the default, unbounded).
+    /// </summary>
+    public long DropCount => Interlocked.Read(ref _dropCount);
 
     // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
@@ -56,19 +64,24 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="writeHandler">Handler to write batched changes.</param>
     /// <param name="bufferTime">Time to buffer changes before flushing.</param>
     /// <param name="logger">The logger.</param>
+    /// <param name="maxQueueDepth">Optional bound on the buffered change queue. When null (default) the
+    /// queue is unbounded, preserving existing connector behavior. When set, enqueuing past the bound drops
+    /// the oldest unprocessed change and increments <see cref="DropCount"/>, so the newest change is retained.</param>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
         Func<PropertyReference, bool> propertyFilter,
         Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
         TimeSpan? bufferTime,
-        ILogger logger)
+        ILogger logger,
+        int? maxQueueDepth = null)
     {
         _source = source;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+        _maxQueueDepth = maxQueueDepth;
 
         try
         {
@@ -158,8 +171,8 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 else
                 {
-                    // Buffered path: enqueue lock-free; periodic timer handles flushing
-                    _changes.Enqueue(change);
+                    // Buffered path: enqueue lock-free with optional bounded backpressure
+                    EnqueueBuffered(change);
                 }
             }
         }
@@ -167,6 +180,25 @@ public class ChangeQueueProcessor : IDisposable
         {
             try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
             await flushTask.ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues a change into the buffered queue, applying optional bounded-queue backpressure.
+    /// When a bound is configured and exceeded, the oldest unprocessed changes are dropped (and
+    /// <see cref="DropCount"/> incremented) so the newest change is retained. Best-effort: a
+    /// concurrent flush may drain the queue below the bound, in which case fewer drops occur.
+    /// </summary>
+    private void EnqueueBuffered(SubjectPropertyChange change)
+    {
+        _changes.Enqueue(change);
+
+        if (_maxQueueDepth is int maxQueueDepth)
+        {
+            while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
+            {
+                Interlocked.Increment(ref _dropCount);
+            }
         }
     }
 
