@@ -98,6 +98,7 @@ internal static class BucketAssembler
         var carriedNumber = IsCarryDependent(aggregation) ? carrySeedNumber : null;
         var carriedJson = IsCarryDependent(aggregation) ? carrySeedJson : null;
 
+        var bucketTicks = bucket.Ticks;
         var allPoints = new List<HistoryPoint>();
         var bucketStartTimestamp = BucketAlignment.BucketStart(query.From, bucket);
         while (bucketStartTimestamp < query.To)
@@ -107,7 +108,8 @@ internal static class BucketAssembler
             var hasPartial = partials.ContainsKey(bucketStartTicks);
 
             var point = AggregateBucket(
-                aggregation, bucketStartTimestamp, hasPartial ? partial : null, ref carriedNumber, ref carriedJson);
+                aggregation, bucketStartTimestamp, bucketStartTicks, bucketTicks,
+                hasPartial ? partial : null, ref carriedNumber, ref carriedJson);
             allPoints.Add(point);
 
             bucketStartTimestamp += bucket;
@@ -125,8 +127,8 @@ internal static class BucketAssembler
         aggregation is HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
 
     private static HistoryPoint AggregateBucket(
-        string aggregation, DateTimeOffset bucketStart, BucketPartial? partial,
-        ref double? carriedNumber, ref JsonElement? carriedJson)
+        string aggregation, DateTimeOffset bucketStart, long bucketStartTicks, long bucketTicks,
+        BucketPartial? partial, ref double? carriedNumber, ref JsonElement? carriedJson)
     {
         switch (aggregation)
         {
@@ -151,11 +153,53 @@ internal static class BucketAssembler
                 return new HistoryPoint(bucketStart, null, null);
 
             case HistoryAggregations.TimeWeightedAverage:
-                throw new NotImplementedException("Task 5.4");
+                return TimeWeightedAverage(bucketStart, bucketStartTicks, bucketTicks, partial, ref carriedNumber);
 
             default:
                 return AggregateNumeric(aggregation, bucketStart, partial);
         }
+    }
+
+    // Time-weighted average for one bucket. The SQL partial covers only the IN-BUCKET integral
+    // [firstNumericTs, bucketEnd); the value held entering the bucket (carry / look-back / seed) is integrated
+    // over the leading interval [bucketStart, firstNumericTs) here, and over the WHOLE bucket when it is empty.
+    // The carry then advances to the bucket's last numeric sample. Mirrors InMemory.TimeWeightedAverageBucket;
+    // ticks vs seconds does not matter because the ratio weightedSum/totalDuration is unit-free.
+    private static HistoryPoint TimeWeightedAverage(
+        DateTimeOffset bucketStart, long bucketStartTicks, long bucketTicks,
+        BucketPartial? partial, ref double? carriedNumber)
+    {
+        if (partial is { FirstTicks: { } firstTicks } combined)
+        {
+            // Leading interval [bucketStart, firstNumericTs): the held value (if any) over that gap.
+            var weightedSum = combined.WeightedSum;
+            var totalDuration = combined.TotalDuration;
+            if (carriedNumber is { } held)
+            {
+                var leadingDuration = (double)(firstTicks - bucketStartTicks);
+                if (leadingDuration > 0)
+                {
+                    weightedSum += held * leadingDuration;
+                    totalDuration += leadingDuration;
+                }
+            }
+
+            // Advance the carried value to the bucket's last numeric sample for the next bucket.
+            if (combined.LastNumber is { } lastNumber)
+            {
+                carriedNumber = lastNumber;
+            }
+
+            return new HistoryPoint(bucketStart, totalDuration > 0 ? weightedSum / totalDuration : null, null);
+        }
+
+        // Empty bucket (no numeric samples): the held value, if any, covers the whole bucket -> that value.
+        if (carriedNumber is { } heldWhole && bucketTicks > 0)
+        {
+            return new HistoryPoint(bucketStart, heldWhole, null);
+        }
+
+        return new HistoryPoint(bucketStart, null, null);
     }
 
     private static HistoryPoint AggregateNumeric(string aggregation, DateTimeOffset bucketStart, BucketPartial? partial)

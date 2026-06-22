@@ -163,20 +163,27 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
                 list.Add(sample);
             }
 
-            var maxTicks = _lastCommittedTicks;
-            foreach (var (key, samples) in byPartition)
+            // _pendingLock is already released here. Take the re-entrant _connectionLock for all
+            // connection use (see Query). Lock ordering is always _pendingLock-then-_connectionLock
+            // and never the reverse, so no cycle is possible. The body is synchronous, so nothing is
+            // awaited while the lock is held.
+            lock (_connectionLock)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var partitionMax = WritePartition(key, samples);
-                if (maxTicks is null || partitionMax > maxTicks.Value)
+                var maxTicks = _lastCommittedTicks;
+                foreach (var (key, samples) in byPartition)
                 {
-                    maxTicks = partitionMax;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var partitionMax = WritePartition(key, samples);
+                    if (maxTicks is null || partitionMax > maxTicks.Value)
+                    {
+                        maxTicks = partitionMax;
+                    }
                 }
-            }
 
-            _lastCommittedTicks = maxTicks;
-            RefreshOldestCommitted();
-            _lastFlushUtc = _getUtcNow();
+                _lastCommittedTicks = maxTicks;
+                RefreshOldestCommitted();
+                _lastFlushUtc = _getUtcNow();
+            }
         }
         catch (Exception exception)
         {
@@ -258,7 +265,14 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
 
     public HistorySeries Query(HistoryQuery query)
     {
-        return query.Bucket is null ? QueryRaw(query) : QueryBucketed(query);
+        // A single SqliteConnection/SqliteCommand is not thread-safe, and the TWA path mutates
+        // connection-global state via ATTACH/DETACH. Serialize all connection use under the
+        // re-entrant _connectionLock so concurrent queries and the flush loop cannot collide on a
+        // shared cached connection. OpenPartition re-enters this lock, which is safe.
+        lock (_connectionLock)
+        {
+            return query.Bucket is null ? QueryRaw(query) : QueryBucketed(query);
+        }
     }
 
     private HistorySeries QueryRaw(HistoryQuery query)
@@ -333,27 +347,48 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
         var fromTicks = EpochTicks.ToEpochTicks(alignedFrom);
         var toTicks = EpochTicks.ToEpochTicks(query.To);
 
-        var partials = new Dictionary<long, BucketPartial>();
-        foreach (var key in PartitionKeysOverlapping(alignedFrom, query.To))
-        {
-            if (!PartitionFileExists(key))
-            {
-                continue;
-            }
+        var existingKeys = PartitionKeysOverlapping(alignedFrom, query.To)
+            .Where(PartitionFileExists)
+            .ToList();
 
-            var connection = OpenPartition(key);
-            foreach (var partial in ReadPartials(connection, query.PropertyPath, aggregation, isUlong,
-                         bucketTicks, fromTicks, toTicks))
+        Dictionary<long, BucketPartial> partials;
+        if (aggregation == HistoryAggregations.TimeWeightedAverage)
+        {
+            // TWA needs LEAD to see across partition files: a sample in one file is held until the NEXT
+            // sample, which may live in a later file. Per-partition summing would clip every file's last
+            // sample to the bucket end and double-count the overlap. So read the numeric samples over the
+            // UNION ALL of all overlapping partitions in one ordered query (others ATTACHed).
+            partials = ReadTimeWeightedAveragePartials(
+                existingKeys, query.PropertyPath, isUlong, bucketTicks, fromTicks, toTicks);
+        }
+        else
+        {
+            partials = new Dictionary<long, BucketPartial>();
+            foreach (var key in existingKeys)
             {
-                partials[partial.BucketStartTicks] = partials.TryGetValue(partial.BucketStartTicks, out var existing)
-                    ? BucketPartial.Combine(existing, partial)
-                    : partial;
+                var connection = OpenPartition(key);
+                foreach (var partial in ReadPartials(connection, query.PropertyPath, aggregation, isUlong,
+                             bucketTicks, fromTicks, toTicks))
+                {
+                    partials[partial.BucketStartTicks] = partials.TryGetValue(partial.BucketStartTicks, out var existing)
+                        ? BucketPartial.Combine(existing, partial)
+                        : partial;
+                }
             }
         }
 
-        // Seed the carry for Last from the merger-supplied CarrySeed (TWA seeding is Task 5.4).
+        // Seed the carry for Last from the merger-supplied CarrySeed.
         var carrySeedNumber = aggregation == HistoryAggregations.Last ? query.CarrySeed?.Number : null;
         var carrySeedJson = aggregation == HistoryAggregations.Last ? query.CarrySeed?.Json : null;
+
+        // For TWA, seed the held value entering the range from the merger-supplied CarrySeed, else this
+        // store's own at-or-before look-back at BucketStart(From), so an empty leading bucket is not a gap.
+        // Mirrors InMemoryHistoryStoreCore.QueryBucketed.
+        if (aggregation == HistoryAggregations.TimeWeightedAverage)
+        {
+            carrySeedNumber = query.CarrySeed?.Number
+                ?? GetSampleAtOrBefore(query.PropertyPath, alignedFrom)?.Number;
+        }
 
         return BucketAssembler.Assemble(query, partials, carrySeedNumber, carrySeedJson);
     }
@@ -381,6 +416,108 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
         }
 
         return ReadNumericPartials(connection, propertyPath, isUlong, bucketTicks, fromTicks, toTicks);
+    }
+
+    // Time-weighted average: per bucket, the IN-BUCKET integral only. Each numeric sample's value is held
+    // over [ts, min(nextNumericTs, bucketEnd)); LEAD bridges across non-numeric/null rows because those are
+    // filtered out of the ordered set (mirroring InMemory, where a null sample leaves the held value unchanged).
+    // The leading interval [bucketStart, firstNumericTs) and empty-bucket carry are supplied by BucketAssembler,
+    // which also needs FirstTicks (the leading-interval boundary) and LastNumber (the carry-advance value).
+    //
+    // Unlike the other aggregations, TWA cannot be computed per partition then summed: a sample in one file is
+    // held until the NEXT sample, which may live in a LATER file, so LEAD must see the union of all overlapping
+    // partitions in one ordered scan. The first partition is opened as the main connection; the rest are
+    // ATTACHed and folded in with UNION ALL.
+    //
+    // v is cast to REAL so v * duration is floating point: tick products are huge (value ~tens times ~10^8
+    // ticks per 10s) and an integer SUM could overflow; the weighted_sum/total_duration RATIO is unit-free.
+    private Dictionary<long, BucketPartial> ReadTimeWeightedAveragePartials(
+        IReadOnlyList<string> partitionKeys, string propertyPath, bool isUlong,
+        long bucketTicks, long fromTicks, long toTicks)
+    {
+        var result = new Dictionary<long, BucketPartial>();
+        if (partitionKeys.Count == 0)
+        {
+            return result;
+        }
+
+        var numeric = isUlong
+            ? "CAST(COALESCE(value_double, value_long, CAST(value_json AS REAL)) AS REAL)"
+            : "CAST(COALESCE(value_double, value_long) AS REAL)";
+
+        var connection = OpenPartition(partitionKeys[0]);
+
+        // Build the ordered numeric-sample set across every overlapping partition. The first is "main";
+        // each further partition is attached under a stable alias and unioned in.
+        var aliases = new List<string>();
+        var orderedTerms = new List<string>
+        {
+            "SELECT ts, " + numeric + " AS v FROM main.history " +
+            "WHERE path = @path AND ts >= @from AND ts < @to AND " + numeric + " IS NOT NULL"
+        };
+
+        for (var index = 1; index < partitionKeys.Count; index++)
+        {
+            var alias = "p" + index.ToString(CultureInfo.InvariantCulture);
+            aliases.Add(alias);
+            using var attach = connection.CreateCommand();
+            attach.CommandText = "ATTACH DATABASE @file AS " + alias + ";";
+            attach.Parameters.AddWithValue("@file", PartitionFilePath(partitionKeys[index]));
+            attach.ExecuteNonQuery();
+
+            orderedTerms.Add(
+                "SELECT ts, " + numeric + " AS v FROM " + alias + ".history " +
+                "WHERE path = @path AND ts >= @from AND ts < @to AND " + numeric + " IS NOT NULL");
+        }
+
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText =
+                "WITH ordered AS (" + string.Join(" UNION ALL ", orderedTerms) + "), " +
+                "edged AS (" +
+                "  SELECT ts, v, (ts/@b)*@b AS bucket_start, ((ts/@b)*@b) + @b AS bucket_end, " +
+                "         COALESCE(LEAD(ts) OVER (ORDER BY ts), ((ts/@b)*@b) + @b) AS next_ts, " +
+                "         LAST_VALUE(v) OVER (PARTITION BY (ts/@b)*@b ORDER BY ts " +
+                "             ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_v " +
+                "  FROM ordered" +
+                ") " +
+                "SELECT bucket_start, " +
+                "       MIN(ts) AS first_ts, " +
+                "       SUM(v * (CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts)) AS weighted_sum, " +
+                "       SUM(CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts) AS total_duration, " +
+                "       MAX(last_v) AS last_number " + // last_v is constant within a bucket, so MAX returns it
+                "FROM edged GROUP BY bucket_start ORDER BY bucket_start;";
+            command.Parameters.AddWithValue("@path", propertyPath);
+            command.Parameters.AddWithValue("@b", bucketTicks);
+            command.Parameters.AddWithValue("@from", fromTicks);
+            command.Parameters.AddWithValue("@to", toTicks);
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var bucketStart = reader.GetInt64(0);
+                long? firstTicks = reader.IsDBNull(1) ? null : reader.GetInt64(1);
+                var weightedSum = reader.IsDBNull(2) ? 0d : reader.GetDouble(2);
+                var totalDuration = reader.IsDBNull(3) ? 0d : reader.GetDouble(3);
+                double? lastNumber = reader.IsDBNull(4) ? null : reader.GetDouble(4);
+
+                result[bucketStart] = new BucketPartial(
+                    bucketStart, 0, null, null, null, null,
+                    firstTicks, null, null, null, lastNumber, null, weightedSum, totalDuration);
+            }
+        }
+        finally
+        {
+            foreach (var alias in aliases)
+            {
+                using var detach = connection.CreateCommand();
+                detach.CommandText = "DETACH DATABASE " + alias + ";";
+                detach.ExecuteNonQuery();
+            }
+        }
+
+        return result;
     }
 
     // First/Last: the earliest (MIN ts) or latest (MAX ts) row per bucket, with its raw value columns.
@@ -517,32 +654,37 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
     {
         var asOfTicks = EpochTicks.ToEpochTicks(asOf);
-        var isUlong = ResolveIsUlong(propertyPath);
 
-        // Search the partition holding asOf, then earlier partitions, newest match wins.
-        foreach (var key in PartitionKeysAtOrBefore(asOf))
+        // Serialize connection use under the re-entrant _connectionLock (see Query for the rationale).
+        lock (_connectionLock)
         {
-            if (!PartitionFileExists(key))
+            var isUlong = ResolveIsUlong(propertyPath);
+
+            // Search the partition holding asOf, then earlier partitions, newest match wins.
+            foreach (var key in PartitionKeysAtOrBefore(asOf))
             {
-                continue;
+                if (!PartitionFileExists(key))
+                {
+                    continue;
+                }
+
+                var connection = OpenPartition(key);
+                using var command = connection.CreateCommand();
+                command.CommandText =
+                    "SELECT ts, value_long, value_double, value_json FROM history " +
+                    "WHERE path = @path AND ts <= @asOf ORDER BY ts DESC LIMIT 1;";
+                command.Parameters.AddWithValue("@path", propertyPath);
+                command.Parameters.AddWithValue("@asOf", asOfTicks);
+
+                using var reader = command.ExecuteReader();
+                if (reader.Read())
+                {
+                    return ToPoint(ReadRawRow(reader), isUlong);
+                }
             }
 
-            var connection = OpenPartition(key);
-            using var command = connection.CreateCommand();
-            command.CommandText =
-                "SELECT ts, value_long, value_double, value_json FROM history " +
-                "WHERE path = @path AND ts <= @asOf ORDER BY ts DESC LIMIT 1;";
-            command.Parameters.AddWithValue("@path", propertyPath);
-            command.Parameters.AddWithValue("@asOf", asOfTicks);
-
-            using var reader = command.ExecuteReader();
-            if (reader.Read())
-            {
-                return ToPoint(ReadRawRow(reader), isUlong);
-            }
+            return null;
         }
-
-        return null;
     }
 
     public void Sweep()
@@ -566,9 +708,10 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
             {
                 Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
             }
-        }
 
-        RefreshOldestCommitted();
+            // RefreshOldestCommitted also touches connections, so keep it inside the lock.
+            RefreshOldestCommitted();
+        }
     }
 
     // Closes and removes the cached connection (Windows holds WAL/SHM locks), then deletes the
