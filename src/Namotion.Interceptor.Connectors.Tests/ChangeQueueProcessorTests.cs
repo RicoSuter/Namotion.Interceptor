@@ -29,8 +29,7 @@ public class ChangeQueueProcessorTests
                 writtenChanges.AddRange(changes.ToArray());
                 return ValueTask.CompletedTask;
             },
-            bufferTime: TimeSpan.FromMilliseconds(50),
-            maxQueueDepth: null,
+            configuration: new ChangeQueueProcessorConfiguration { BufferTime = TimeSpan.FromMilliseconds(50) },
             logger: NullLogger.Instance);
 
         // Act - enqueue multiple changes to the same property and trigger flush
@@ -70,8 +69,7 @@ public class ChangeQueueProcessorTests
                 writtenChanges.AddRange(changes.ToArray());
                 return ValueTask.CompletedTask;
             },
-            bufferTime: TimeSpan.FromMilliseconds(50),
-            maxQueueDepth: null,
+            configuration: new ChangeQueueProcessorConfiguration { BufferTime = TimeSpan.FromMilliseconds(50) },
             logger: NullLogger.Instance);
 
         // Act - enqueue changes to different properties
@@ -109,8 +107,7 @@ public class ChangeQueueProcessorTests
                 writtenChanges.AddRange(changes.ToArray());
                 return ValueTask.CompletedTask;
             },
-            bufferTime: TimeSpan.FromMilliseconds(50),
-            maxQueueDepth: null,
+            configuration: new ChangeQueueProcessorConfiguration { BufferTime = TimeSpan.FromMilliseconds(50) },
             logger: NullLogger.Instance);
 
         // Act - enqueue in order: A, B, A (last occurrence of A is after B)
@@ -153,8 +150,7 @@ public class ChangeQueueProcessorTests
                 writeHandlerCalled = true;
                 return ValueTask.CompletedTask;
             },
-            bufferTime: TimeSpan.FromMilliseconds(50),
-            maxQueueDepth: null,
+            configuration: new ChangeQueueProcessorConfiguration { BufferTime = TimeSpan.FromMilliseconds(50) },
             logger: NullLogger.Instance);
 
         // Act - trigger flush without enqueuing anything
@@ -179,8 +175,7 @@ public class ChangeQueueProcessorTests
             context: context,
             propertyFilter: _ => true,
             writeHandler: (_, _) => ValueTask.CompletedTask,
-            bufferTime: TimeSpan.FromMilliseconds(50),
-            maxQueueDepth: null,
+            configuration: new ChangeQueueProcessorConfiguration { BufferTime = TimeSpan.FromMilliseconds(50) },
             logger: NullLogger.Instance);
 
         // Act & Assert - should not throw
@@ -211,8 +206,7 @@ public class ChangeQueueProcessorTests
                 flushStarted.TrySetResult();
                 await allowFlush.Task;
             },
-            bufferTime: TimeSpan.FromMilliseconds(50),
-            maxQueueDepth: null,
+            configuration: new ChangeQueueProcessorConfiguration { BufferTime = TimeSpan.FromMilliseconds(50) },
             logger: NullLogger.Instance);
 
         // Act - enqueue and start first flush
@@ -256,8 +250,12 @@ public class ChangeQueueProcessorTests
             context: context,
             propertyFilter: _ => true,
             writeHandler: (_, _) => ValueTask.CompletedTask,
-            bufferTime: TimeSpan.FromMinutes(10),
-            maxQueueDepth: 2,
+            configuration: new ChangeQueueProcessorConfiguration
+            {
+                BufferTime = TimeSpan.FromMinutes(10),
+                OverflowBehavior = OverflowBehavior.DropOldest,
+                MaxQueueSize = 2,
+            },
             logger: NullLogger.Instance);
 
         using var cancellation = new CancellationTokenSource();
@@ -270,11 +268,11 @@ public class ChangeQueueProcessorTests
         }
 
         await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.DropCount >= 3,
+            () => processor.DroppedChangeCount >= 3,
             message: "Three of the five changes should be dropped");
 
         // Assert
-        Assert.Equal(3, processor.DropCount);
+        Assert.Equal(3, processor.DroppedChangeCount);
 
         // Cleanup
         await cancellation.CancelAsync();
@@ -304,8 +302,7 @@ public class ChangeQueueProcessorTests
                 }
                 return ValueTask.CompletedTask;
             },
-            bufferTime: TimeSpan.FromMilliseconds(20),
-            maxQueueDepth: null,
+            configuration: new ChangeQueueProcessorConfiguration { BufferTime = TimeSpan.FromMilliseconds(20) },
             logger: NullLogger.Instance);
 
         using var cancellation = new CancellationTokenSource();
@@ -322,7 +319,51 @@ public class ChangeQueueProcessorTests
             message: "The newest change should be flushed");
 
         // Assert
-        Assert.Equal(0, processor.DropCount);
+        Assert.Equal(0, processor.DroppedChangeCount);
+
+        // Cleanup
+        await cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Fact]
+    public async Task WhenDropNewestQueueOverflows_ThenIncomingChangesAreDropped()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeQueue();
+
+        var subject = new Person(context);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            configuration: new ChangeQueueProcessorConfiguration
+            {
+                BufferTime = TimeSpan.FromMinutes(10),
+                OverflowBehavior = OverflowBehavior.DropNewest,
+                MaxQueueSize = 2,
+            },
+            logger: NullLogger.Instance);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act - five changes into a queue bounded to two; the three newest must be dropped
+        for (var i = 1; i <= 5; i++)
+        {
+            subject.FirstName = $"v{i}";
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.DroppedChangeCount >= 3,
+            message: "Three of the five changes should be dropped");
+
+        // Assert
+        Assert.Equal(3, processor.DroppedChangeCount);
 
         // Cleanup
         await cancellation.CancelAsync();

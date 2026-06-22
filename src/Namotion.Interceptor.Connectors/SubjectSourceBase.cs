@@ -89,8 +89,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     _context,
                     propertyReference => propertyReference.TryGetSource(out var source) && source == this,
                     WriteChangesViaRetryQueueAsync,
-                    _bufferTime,
-                    maxQueueDepth: null,
+                    new ChangeQueueProcessorConfiguration { BufferTime = _bufferTime },
                     logger: _logger);
 
                 // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
