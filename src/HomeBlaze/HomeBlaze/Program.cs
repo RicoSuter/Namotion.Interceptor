@@ -1,6 +1,7 @@
 using HomeBlaze.AI;
 using HomeBlaze.Components;
 using HomeBlaze.History.InMemory.Blazor;
+using HomeBlaze.History.Sqlite.Blazor;
 using HomeBlaze.Host;
 using HomeBlaze.Samples;
 using HomeBlaze.OpcUa;
@@ -80,7 +81,8 @@ typeProvider
     .AddAssembly(typeof(EcowittGatewayWidget).Assembly)
     .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStore).Assembly) // HomeBlaze.History.InMemory
     .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly)               // HomeBlaze.History.InMemory.Blazor
-    .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStore).Assembly);    // HomeBlaze.History.Sqlite
+    .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStore).Assembly)     // HomeBlaze.History.Sqlite
+    .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly);               // HomeBlaze.History.Sqlite.Blazor
 // .Blazor edit component assembly (HomeBlaze.History.Sqlite.Blazor) added in 5.8.
 
 // Register HomeBlaze.Plugins subject types
