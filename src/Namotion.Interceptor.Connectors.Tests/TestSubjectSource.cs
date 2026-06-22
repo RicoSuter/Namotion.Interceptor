@@ -46,4 +46,11 @@ public sealed class TestSubjectSource : SubjectSourceBase
 
     public override ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         => WriteChangesOverride?.Invoke(changes, cancellationToken) ?? ValueTask.FromResult(WriteResult.Success);
+
+    public Func<ChangeQueueProcessorConfiguration>? CreateChangeQueueConfigurationOverride { get; init; }
+
+    protected override ChangeQueueProcessorConfiguration CreateChangeQueueConfiguration()
+        => CreateChangeQueueConfigurationOverride is not null
+            ? CreateChangeQueueConfigurationOverride()
+            : base.CreateChangeQueueConfiguration();
 }

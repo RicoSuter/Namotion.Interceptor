@@ -72,6 +72,18 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     public abstract ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Creates the configuration for this source's <see cref="ChangeQueueProcessor"/>. Override to opt
+    /// into a bounded queue and react to overflow (for example, to request a resync). The default is
+    /// unbounded with the source's configured buffer time. The base wraps the returned
+    /// <see cref="ChangeQueueProcessorConfiguration.OverflowHandler"/> so overflow is also logged,
+    /// so implementations must return a fresh instance on each call (the base mutates the returned
+    /// handler, and a cached instance would accumulate wrappers across reconnects).
+    /// </summary>
+    /// <returns>The processor configuration.</returns>
+    protected virtual ChangeQueueProcessorConfiguration CreateChangeQueueConfiguration()
+        => new() { BufferTime = _bufferTime };
+
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -84,12 +96,22 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
                 await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
 
+                var changeQueueConfiguration = CreateChangeQueueConfiguration();
+                var sourceOverflowHandler = changeQueueConfiguration.OverflowHandler;
+                changeQueueConfiguration.OverflowHandler = overflow =>
+                {
+                    _logger.LogWarning(
+                        "Change queue overflow in source: dropped {Count} change(s) ({Behavior}).",
+                        overflow.DroppedChangeCount, overflow.OverflowBehavior);
+                    sourceOverflowHandler?.Invoke(overflow);
+                };
+
                 using var processor = new ChangeQueueProcessor(
                     this,
                     _context,
                     propertyReference => propertyReference.TryGetSource(out var source) && source == this,
                     WriteChangesViaRetryQueueAsync,
-                    new ChangeQueueProcessorConfiguration { BufferTime = _bufferTime },
+                    changeQueueConfiguration,
                     logger: _logger);
 
                 // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,

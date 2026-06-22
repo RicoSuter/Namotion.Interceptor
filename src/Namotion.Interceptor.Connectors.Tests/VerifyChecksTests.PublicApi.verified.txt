@@ -111,6 +111,7 @@ namespace Namotion.Interceptor.Connectors
         public int PendingWriteCount { get; }
         public abstract Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
         public virtual int WriteBatchSize { get; }
+        protected virtual Namotion.Interceptor.Connectors.ChangeQueueProcessorConfiguration CreateChangeQueueConfiguration() { }
         public override void Dispose() { }
         protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
