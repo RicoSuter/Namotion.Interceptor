@@ -205,9 +205,21 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
         catch (Exception exception)
         {
             _lastError = exception.Message;
+
+            // The write failed, so the batch was not persisted: put it back at the FRONT of the pending
+            // lists (preserving order ahead of anything queued since) so the next flush retries it instead
+            // of silently dropping data. _connectionLock has already been released here, so taking
+            // _pendingLock now keeps the _pendingLock-then-_connectionLock ordering intact (never the reverse).
+            lock (_pendingLock)
+            {
+                _pending.InsertRange(0, batch);
+                _pendingMoves.InsertRange(0, moveBatch);
+            }
+
             throw;
         }
 
+        _lastError = null;
         return Task.CompletedTask;
     }
 
