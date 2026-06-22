@@ -308,7 +308,210 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
 
     private HistorySeries QueryBucketed(HistoryQuery query)
     {
-        throw new NotImplementedException("Task 5.3");
+        var bucket = query.Bucket!.Value;
+        var aggregation = query.Aggregation;
+        var bucketTicks = bucket.Ticks;
+
+        // Resolve the stored column kind and ulong flag from path_meta (the SQLite equivalent of the
+        // InMemory buffer's Column/IsUlong). A numeric aggregation on a json-stored, non-ulong property
+        // (decimal/string/enum) is not supported, mirroring InMemoryHistoryStoreCore.QueryBucketed.
+        var meta = ResolveColumnMeta(query.PropertyPath);
+        var isUlong = meta?.IsUlong ?? false;
+
+        if (meta is { Column: ValueColumn.Json } && !isUlong && IsNumericAggregation(aggregation))
+        {
+            throw new HistoryAggregationNotSupportedException(
+                aggregation,
+                new HashSet<string>(StringComparer.Ordinal)
+                {
+                    HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count
+                });
+        }
+
+        // Build per-partition partials over the aligned bucket range, merging into one map keyed by bucket.
+        var alignedFrom = BucketAlignment.BucketStart(query.From, bucket);
+        var fromTicks = EpochTicks.ToEpochTicks(alignedFrom);
+        var toTicks = EpochTicks.ToEpochTicks(query.To);
+
+        var partials = new Dictionary<long, BucketPartial>();
+        foreach (var key in PartitionKeysOverlapping(alignedFrom, query.To))
+        {
+            if (!PartitionFileExists(key))
+            {
+                continue;
+            }
+
+            var connection = OpenPartition(key);
+            foreach (var partial in ReadPartials(connection, query.PropertyPath, aggregation, isUlong,
+                         bucketTicks, fromTicks, toTicks))
+            {
+                partials[partial.BucketStartTicks] = partials.TryGetValue(partial.BucketStartTicks, out var existing)
+                    ? BucketPartial.Combine(existing, partial)
+                    : partial;
+            }
+        }
+
+        // Seed the carry for Last from the merger-supplied CarrySeed (TWA seeding is Task 5.4).
+        var carrySeedNumber = aggregation == HistoryAggregations.Last ? query.CarrySeed?.Number : null;
+        var carrySeedJson = aggregation == HistoryAggregations.Last ? query.CarrySeed?.Json : null;
+
+        return BucketAssembler.Assemble(query, partials, carrySeedNumber, carrySeedJson);
+    }
+
+    private static bool IsNumericAggregation(string aggregation) =>
+        aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
+            or HistoryAggregations.Minimum or HistoryAggregations.Maximum
+            or HistoryAggregations.Sum or HistoryAggregations.StdDev;
+
+    // One grouped query per partition producing the partials for the requested aggregation. Only the
+    // columns the aggregation needs are fetched. The bucket key is (ts/@b)*@b on epoch ticks, which equals
+    // BucketAlignment.BucketStart for the same bucket size.
+    private IEnumerable<BucketPartial> ReadPartials(
+        SqliteConnection connection, string propertyPath, string aggregation, bool isUlong,
+        long bucketTicks, long fromTicks, long toTicks)
+    {
+        if (aggregation is HistoryAggregations.First or HistoryAggregations.Last)
+        {
+            return ReadEdgePartials(connection, propertyPath, aggregation, isUlong, bucketTicks, fromTicks, toTicks);
+        }
+
+        if (aggregation == HistoryAggregations.Count)
+        {
+            return ReadCountPartials(connection, propertyPath, bucketTicks, fromTicks, toTicks);
+        }
+
+        return ReadNumericPartials(connection, propertyPath, isUlong, bucketTicks, fromTicks, toTicks);
+    }
+
+    // First/Last: the earliest (MIN ts) or latest (MAX ts) row per bucket, with its raw value columns.
+    private List<BucketPartial> ReadEdgePartials(
+        SqliteConnection connection, string propertyPath, string aggregation, bool isUlong,
+        long bucketTicks, long fromTicks, long toTicks)
+    {
+        var isFirst = aggregation == HistoryAggregations.First;
+        var edge = isFirst ? "MIN(ts)" : "MAX(ts)";
+
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT (h.ts/@b)*@b AS bucket, h.ts, h.value_long, h.value_double, h.value_json FROM history h " +
+            "WHERE h.path = @path AND h.ts >= @from AND h.ts < @to " +
+            "AND h.ts = (SELECT " + edge + " FROM history WHERE path = @path AND (ts/@b)*@b = (h.ts/@b)*@b " +
+            "AND ts >= @from AND ts < @to) " +
+            "GROUP BY bucket;";
+        command.Parameters.AddWithValue("@path", propertyPath);
+        command.Parameters.AddWithValue("@b", bucketTicks);
+        command.Parameters.AddWithValue("@from", fromTicks);
+        command.Parameters.AddWithValue("@to", toTicks);
+
+        var result = new List<BucketPartial>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var bucketStart = reader.GetInt64(0);
+            var ts = reader.GetInt64(1);
+            long? longValue = reader.IsDBNull(2) ? null : reader.GetInt64(2);
+            double? doubleValue = reader.IsDBNull(3) ? null : reader.GetDouble(3);
+            string? jsonValue = reader.IsDBNull(4) ? null : reader.GetString(4);
+
+            // The numeric projection for an edge sample mirrors ToPoint: double/long, plus a ulong-overflow
+            // JSON number folded in via path_meta.is_ulong (the rare case where a ulong exceeds long.MaxValue).
+            double? number = doubleValue ?? (double?)longValue;
+            if (number is null && isUlong && jsonValue is not null)
+            {
+                using var document = JsonDocument.Parse(jsonValue);
+                if (document.RootElement.ValueKind == JsonValueKind.Number)
+                {
+                    number = document.RootElement.GetDouble();
+                }
+            }
+
+            if (isFirst)
+            {
+                result.Add(new BucketPartial(
+                    bucketStart, 0, null, null, null, null,
+                    ts, number, jsonValue, null, null, null, 0, 0));
+            }
+            else
+            {
+                result.Add(new BucketPartial(
+                    bucketStart, 0, null, null, null, null,
+                    null, null, null, ts, number, jsonValue, 0, 0));
+            }
+        }
+
+        return result;
+    }
+
+    // Count: total number of samples per bucket (COUNT(*)), matching InMemory's samples.Count, which
+    // includes non-numeric and explicit-null samples (Count is allowed on any column type).
+    private List<BucketPartial> ReadCountPartials(
+        SqliteConnection connection, string propertyPath, long bucketTicks, long fromTicks, long toTicks)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT (ts/@b)*@b AS bucket, COUNT(*) AS cnt FROM history " +
+            "WHERE path = @path AND ts >= @from AND ts < @to GROUP BY bucket ORDER BY bucket;";
+        command.Parameters.AddWithValue("@path", propertyPath);
+        command.Parameters.AddWithValue("@b", bucketTicks);
+        command.Parameters.AddWithValue("@from", fromTicks);
+        command.Parameters.AddWithValue("@to", toTicks);
+
+        var result = new List<BucketPartial>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            result.Add(new BucketPartial(
+                reader.GetInt64(0), reader.GetInt64(1), null, null, null, null,
+                null, null, null, null, null, null, 0, 0));
+        }
+
+        return result;
+    }
+
+    // Sum/Min/Max/SampleAverage/StdDev: grouped numeric reductions over COALESCE(value_double, value_long).
+    // When the property is ulong, value_json numbers (ulong overflow) also count as numeric values; SQLite's
+    // COALESCE includes value_json (numeric text parses to a number) so the reductions fold it in too.
+    private List<BucketPartial> ReadNumericPartials(
+        SqliteConnection connection, string propertyPath, bool isUlong,
+        long bucketTicks, long fromTicks, long toTicks)
+    {
+        // The numeric expression: for ulong properties also fold value_json (a JSON number stored as text).
+        var numeric = isUlong
+            ? "COALESCE(value_double, value_long, CAST(value_json AS REAL))"
+            : "COALESCE(value_double, value_long)";
+
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT (ts/@b)*@b AS bucket, " +
+            "COUNT(" + numeric + ") AS cnt, " +
+            "SUM(" + numeric + ") AS sum_num, " +
+            "MIN(" + numeric + ") AS min_num, " +
+            "MAX(" + numeric + ") AS max_num, " +
+            "SUM(" + numeric + " * " + numeric + ") AS sumsq_num " +
+            "FROM history WHERE path = @path AND ts >= @from AND ts < @to " +
+            "GROUP BY bucket ORDER BY bucket;";
+        command.Parameters.AddWithValue("@path", propertyPath);
+        command.Parameters.AddWithValue("@b", bucketTicks);
+        command.Parameters.AddWithValue("@from", fromTicks);
+        command.Parameters.AddWithValue("@to", toTicks);
+
+        var result = new List<BucketPartial>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var bucketStart = reader.GetInt64(0);
+            var count = reader.GetInt64(1); // COUNT(numeric) = number of non-null numeric values
+            double? sum = reader.IsDBNull(2) ? null : reader.GetDouble(2);
+            double? min = reader.IsDBNull(3) ? null : reader.GetDouble(3);
+            double? max = reader.IsDBNull(4) ? null : reader.GetDouble(4);
+            double? sumSquares = reader.IsDBNull(5) ? null : reader.GetDouble(5);
+
+            result.Add(new BucketPartial(
+                bucketStart, count, sum, min, max, sumSquares,
+                null, null, null, null, null, null, 0, 0));
+        }
+
+        return result;
     }
 
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
@@ -394,6 +597,27 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
         {
             File.Delete(path);
         }
+    }
+
+    // The stored column kind and ulong flag for a path, read from path_meta (written at flush time).
+    // Returns null when the path has never been written. The SQLite equivalent of the InMemory buffer's
+    // Column/IsUlong, used for the numeric-on-json-non-ulong guard and ulong-overflow numeric folding.
+    private ColumnMeta? ResolveColumnMeta(string propertyPath)
+    {
+        foreach (var key in EnumeratePartitionFileKeys())
+        {
+            var connection = OpenPartition(key);
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT column, is_ulong FROM path_meta WHERE path = @path;";
+            command.Parameters.AddWithValue("@path", propertyPath);
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                return new ColumnMeta((ValueColumn)reader.GetInt64(0), reader.GetInt64(1) != 0);
+            }
+        }
+
+        return null;
     }
 
     private bool ResolveIsUlong(string propertyPath)
@@ -580,6 +804,8 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
         // Release the native connection pool so the test fixture can delete the WAL/SHM files.
         SqliteConnection.ClearAllPools();
     }
+
+    private readonly record struct ColumnMeta(ValueColumn Column, bool IsUlong);
 
     private readonly record struct Row(long? Long, double? Double, string? Json);
 
