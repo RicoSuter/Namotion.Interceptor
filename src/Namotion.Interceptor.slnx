@@ -78,6 +78,9 @@
     <Project Path="HomeBlaze/HomeBlaze.History.InMemory/HomeBlaze.History.InMemory.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.History.InMemory.Blazor/HomeBlaze.History.InMemory.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.History.InMemory.Tests/HomeBlaze.History.InMemory.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.History.Sqlite/HomeBlaze.History.Sqlite.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.History.Sqlite.Blazor/HomeBlaze.History.Sqlite.Blazor.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.History.Sqlite.Tests/HomeBlaze.History.Sqlite.Tests.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/NuGet/">
     <Project Path="HomeBlaze/Namotion.NuGet.Plugins.Tests/Namotion.NuGet.Plugins.Tests.csproj" />
