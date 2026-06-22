@@ -12,6 +12,8 @@
 
     <ItemGroup>
         <PackageReference Include="Microsoft.Data.Sqlite" Version="10.*" />
+        <!-- Override the transitive SQLitePCLRaw native bundle to clear NU1903 (GHSA-2m69-gcr7-jv3q) in 2.1.11. -->
+        <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     </ItemGroup>
 
     <ItemGroup>

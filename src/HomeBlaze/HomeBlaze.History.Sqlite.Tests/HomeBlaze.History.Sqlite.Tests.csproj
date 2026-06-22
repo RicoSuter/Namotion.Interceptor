@@ -10,6 +10,8 @@
 
     <ItemGroup>
         <PackageReference Include="Microsoft.Data.Sqlite" Version="10.*" />
+        <!-- Override the transitive SQLitePCLRaw native bundle to clear NU1903 (GHSA-2m69-gcr7-jv3q) in 2.1.11. -->
+        <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.*" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
         <PackageReference Include="PublicApiGenerator" Version="11.5.4" />
