@@ -1,0 +1,64 @@
+﻿[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.History.Sqlite.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.History.Sqlite
+{
+    public enum PartitionInterval
+    {
+        Daily = 0,
+        Weekly = 1,
+        Monthly = 2,
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("History")]
+    [System.ComponentModel.Description("Persists [State] history to partitioned SQLite files (priority 50).")]
+    public class SqliteHistoryStore : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
+    {
+        public SqliteHistoryStore(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.Sqlite.SqliteHistoryStore> logger) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int BufferTimeMilliseconds { get; set; }
+        public HomeBlaze.History.Abstractions.HistoryCoverage Coverage { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string DatabasePath { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public long DropCount { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public long EstimatedStorageBytes { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int FlushIntervalSeconds { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public double IncomingChangesPerSecond { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool IsEnabled { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? LastError { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastFlushUtc { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int MaxAgeDays { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int MaxJsonSize { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public long OversizeCount { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.History.Sqlite.PartitionInterval PartitionInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int Priority { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public int QueueDepth { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public double RecordedChangesPerSecond { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public long RecordedCount { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string Status { get; set; }
+        public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }
+        public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
+        public System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryAsync(HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+    }
+}

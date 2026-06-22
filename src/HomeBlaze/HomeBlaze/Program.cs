@@ -79,7 +79,9 @@ typeProvider
     .AddAssembly(typeof(EcowittGateway).Assembly)
     .AddAssembly(typeof(EcowittGatewayWidget).Assembly)
     .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStore).Assembly) // HomeBlaze.History.InMemory
-    .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly);              // HomeBlaze.History.InMemory.Blazor
+    .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly)               // HomeBlaze.History.InMemory.Blazor
+    .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStore).Assembly);    // HomeBlaze.History.Sqlite
+// .Blazor edit component assembly (HomeBlaze.History.Sqlite.Blazor) added in 5.8.
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);

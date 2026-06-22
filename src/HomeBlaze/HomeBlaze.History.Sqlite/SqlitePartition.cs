@@ -3,9 +3,10 @@ using System.Globalization;
 namespace HomeBlaze.History.Sqlite;
 
 /// <summary>
-/// The time span a single partition file covers.
+/// The time span a single partition file covers. Public because it is the type of the
+/// <see cref="SqliteHistoryStore.PartitionInterval"/> configuration property.
 /// </summary>
-internal enum PartitionInterval
+public enum PartitionInterval
 {
     Daily,
     Weekly,
