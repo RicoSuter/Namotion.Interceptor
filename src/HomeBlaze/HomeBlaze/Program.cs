@@ -1,5 +1,6 @@
 using HomeBlaze.AI;
 using HomeBlaze.Components;
+using HomeBlaze.History.InMemory.Blazor;
 using HomeBlaze.Host;
 using HomeBlaze.Samples;
 using HomeBlaze.OpcUa;
@@ -77,7 +78,8 @@ typeProvider
     .AddAssembly(typeof(WallboxChargerWidget).Assembly)
     .AddAssembly(typeof(EcowittGateway).Assembly)
     .AddAssembly(typeof(EcowittGatewayWidget).Assembly)
-    .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStore).Assembly); // HomeBlaze.History.InMemory
+    .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStore).Assembly) // HomeBlaze.History.InMemory
+    .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly);              // HomeBlaze.History.InMemory.Blazor
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);
