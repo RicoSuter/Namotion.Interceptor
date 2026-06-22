@@ -53,6 +53,33 @@ internal static class SqlitePartition
         }
     }
 
+    // All partition keys whose ranges overlap [from, to), in ascending order.
+    public static IEnumerable<string> EnumeratePartitionKeys(DateTimeOffset from, DateTimeOffset to, PartitionInterval interval)
+    {
+        var cursorKey = PartitionKey(from, interval);
+        var guard = 0;
+        while (true)
+        {
+            yield return cursorKey;
+            var (_, end) = PartitionRange(cursorKey, interval);
+            if (end >= to || ++guard > 100_000)
+            {
+                yield break;
+            }
+
+            cursorKey = PartitionKey(end, interval); // next partition starts at this end
+        }
+    }
+
+    // Returns true when the key is a valid partition key for the interval. Used to filter out
+    // non-partition database files in the same directory (for example the moves database).
+    public static bool IsPartitionKey(string key, PartitionInterval interval)
+    {
+        var candidate = interval == PartitionInterval.Monthly ? key + "-01" : key;
+        return DateTimeOffset.TryParseExact(candidate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out _);
+    }
+
     private static string WeeklyKey(DateTimeOffset utc)
     {
         var date = utc.Date;

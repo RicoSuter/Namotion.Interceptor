@@ -344,7 +344,56 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
 
     public void Sweep()
     {
-        // Retention file sweep arrives in Task 5.2.
+        var cutoff = _getUtcNow() - _maxAge;
+
+        lock (_connectionLock)
+        {
+            foreach (var key in EnumeratePartitionFileKeys().ToArray())
+            {
+                var (_, end) = SqlitePartition.PartitionRange(key, _partitionInterval);
+                if (end < cutoff)
+                {
+                    DeletePartition(key);
+                }
+            }
+
+            // Persist the WAL contents back into the surviving main database files so their on-disk
+            // size reflects the data after the sweep.
+            foreach (var connection in _connections.Values)
+            {
+                Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
+            }
+        }
+
+        RefreshOldestCommitted();
+    }
+
+    // Closes and removes the cached connection (Windows holds WAL/SHM locks), then deletes the
+    // partition's main file and its -wal/-shm siblings if present.
+    private void DeletePartition(string key)
+    {
+        if (_connections.TryGetValue(key, out var connection))
+        {
+            connection.Close();
+            connection.Dispose();
+            _connections.Remove(key);
+        }
+
+        // The native pool can keep a file handle open even after Close/Dispose on Windows.
+        SqliteConnection.ClearAllPools();
+
+        var path = PartitionFilePath(key);
+        DeleteFileIfExists(path);
+        DeleteFileIfExists(path + "-wal");
+        DeleteFileIfExists(path + "-shm");
+    }
+
+    private static void DeleteFileIfExists(string path)
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
     }
 
     private bool ResolveIsUlong(string propertyPath)
@@ -492,27 +541,27 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
 
         foreach (var file in Directory.EnumerateFiles(_databaseDirectory, "*.db"))
         {
-            yield return Path.GetFileNameWithoutExtension(file);
+            var key = Path.GetFileNameWithoutExtension(file);
+            if (SqlitePartition.IsPartitionKey(key, _partitionInterval))
+            {
+                yield return key; // skip non-partition files such as the moves database
+            }
         }
     }
 
-    // Single-partition coverage for Task 5.1: the partitions overlapping a query range.
-    // Task 5.2 replaces this with SqlitePartition.EnumeratePartitionKeys spanning all keys in [from, to).
+    // Every partition key whose range overlaps [from, to), in ascending time order.
     private IEnumerable<string> PartitionKeysOverlapping(DateTimeOffset from, DateTimeOffset to)
     {
-        var keys = new HashSet<string>(StringComparer.Ordinal)
-        {
-            SqlitePartition.PartitionKey(from, _partitionInterval),
-            SqlitePartition.PartitionKey(to, _partitionInterval)
-        };
-        return keys;
+        return SqlitePartition.EnumeratePartitionKeys(from, to, _partitionInterval);
     }
 
+    // Existing partition files at or before asOf, newest first (look-back across files stops at the first hit).
     private IEnumerable<string> PartitionKeysAtOrBefore(DateTimeOffset asOf)
     {
-        // The partition holding asOf is enough for the single-partition raw path; earlier partitions
-        // are added in Task 5.2 (look-back across files).
-        yield return SqlitePartition.PartitionKey(asOf, _partitionInterval);
+        var asOfKey = SqlitePartition.PartitionKey(asOf, _partitionInterval);
+        return EnumeratePartitionFileKeys()
+            .Where(key => string.CompareOrdinal(key, asOfKey) <= 0)
+            .OrderByDescending(key => key, StringComparer.Ordinal);
     }
 
     public void Dispose()
