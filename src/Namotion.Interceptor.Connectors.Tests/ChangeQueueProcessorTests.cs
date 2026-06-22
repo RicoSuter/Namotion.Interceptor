@@ -370,6 +370,110 @@ public class ChangeQueueProcessorTests
         await processing;
     }
 
+    [Fact]
+    public async Task WhenDropOldestOverflows_ThenOverflowHandlerFiresWithDroppedCount()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeQueue();
+
+        var subject = new Person(context);
+        var overflows = new System.Collections.Concurrent.ConcurrentQueue<ChangeQueueOverflow>();
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            configuration: new ChangeQueueProcessorConfiguration
+            {
+                BufferTime = TimeSpan.FromMinutes(10),
+                OverflowBehavior = OverflowBehavior.DropOldest,
+                MaxQueueSize = 2,
+                OverflowHandler = overflow => overflows.Enqueue(overflow),
+            },
+            logger: NullLogger.Instance);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act - five changes into a queue bounded to two; three single-drop events expected
+        for (var i = 1; i <= 5; i++)
+        {
+            subject.FirstName = $"v{i}";
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => overflows.Count >= 3,
+            message: "Three overflow events should be reported");
+
+        // Assert - each event reports one drop, with the configured behavior and bound
+        Assert.Equal(3, overflows.Count);
+        Assert.All(overflows, overflow =>
+        {
+            Assert.Equal(1, overflow.DroppedChangeCount);
+            Assert.Equal(OverflowBehavior.DropOldest, overflow.OverflowBehavior);
+            Assert.Equal(2, overflow.MaxQueueSize);
+        });
+
+        // Cleanup
+        await cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Fact]
+    public async Task WhenUnboundedOverflows_ThenOverflowHandlerNeverFires()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeQueue();
+
+        var subject = new Person(context);
+        var handlerFired = false;
+
+        var lastWritten = "";
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    lastWritten = change.GetNewValue<string>() ?? lastWritten;
+                }
+                return ValueTask.CompletedTask;
+            },
+            configuration: new ChangeQueueProcessorConfiguration
+            {
+                BufferTime = TimeSpan.FromMilliseconds(20),
+                OverflowHandler = _ => handlerFired = true,
+            },
+            logger: NullLogger.Instance);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act
+        for (var i = 1; i <= 5; i++)
+        {
+            subject.FirstName = $"v{i}";
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => lastWritten == "v5",
+            message: "The newest change should be flushed");
+
+        // Assert
+        Assert.False(handlerFired);
+
+        // Cleanup
+        await cancellation.CancelAsync();
+        await processing;
+    }
+
     private static void EnqueueChange(
         ChangeQueueProcessor processor,
         PropertyReference property,

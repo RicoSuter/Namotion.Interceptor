@@ -222,12 +222,14 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     /// <summary>
-    /// Records an overflow event: adds to <see cref="DroppedChangeCount"/>. The overflow handler
-    /// is invoked here in a later change (Task 3); for now only the counter is updated.
+    /// Records an overflow event: adds to <see cref="DroppedChangeCount"/> and invokes the overflow
+    /// handler once for the event. The handler runs synchronously on the producer thread and must be
+    /// non-blocking.
     /// </summary>
     private void RecordOverflow(int droppedCount)
     {
         Interlocked.Add(ref _droppedChangeCount, droppedCount);
+        _overflowHandler?.Invoke(new ChangeQueueOverflow(droppedCount, _overflowBehavior, _maxQueueSize!.Value));
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
