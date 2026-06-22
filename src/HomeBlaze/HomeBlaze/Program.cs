@@ -76,7 +76,8 @@ typeProvider
     .AddAssembly(typeof(WallboxCharger).Assembly)
     .AddAssembly(typeof(WallboxChargerWidget).Assembly)
     .AddAssembly(typeof(EcowittGateway).Assembly)
-    .AddAssembly(typeof(EcowittGatewayWidget).Assembly);
+    .AddAssembly(typeof(EcowittGatewayWidget).Assembly)
+    .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStore).Assembly); // HomeBlaze.History.InMemory
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);

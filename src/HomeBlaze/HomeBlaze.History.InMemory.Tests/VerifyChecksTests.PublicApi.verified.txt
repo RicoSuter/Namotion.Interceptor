@@ -1,0 +1,52 @@
+﻿[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.History.InMemory.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.History.InMemory
+{
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("History")]
+    [System.ComponentModel.Description("Records recent [State] history in memory (priority 100).")]
+    public class InMemoryHistoryStore : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
+    {
+        public InMemoryHistoryStore(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.InMemory.InMemoryHistoryStore> logger) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int BufferTimeMilliseconds { get; set; }
+        public HomeBlaze.History.Abstractions.HistoryCoverage Coverage { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public long EstimatedMemoryBytes { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public long EvictedCount { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public double IncomingChangesPerSecond { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool IsEnabled { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int MaxAgeSeconds { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int MaxJsonSize { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int MaxPointsPerProperty { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public long OversizeCount { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int Priority { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public double RecordedChangesPerSecond { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public long RecordedCount { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string Status { get; set; }
+        public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public long TotalSampleCount { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public int TrackedPropertyCount { get; set; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }
+        public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
+        public System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryAsync(HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+    }
+}

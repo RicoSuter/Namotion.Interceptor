@@ -25,6 +25,7 @@
         <ProjectReference Include="..\HomeBlaze.Samples\HomeBlaze.Samples.csproj" />
         <ProjectReference Include="..\HomeBlaze.OpcUa\HomeBlaze.OpcUa.csproj" />
         <ProjectReference Include="..\HomeBlaze.OpcUa.Blazor\HomeBlaze.OpcUa.Blazor.csproj" />
+        <ProjectReference Include="..\HomeBlaze.History.InMemory\HomeBlaze.History.InMemory.csproj" />
         <ProjectReference Include="..\HomeBlaze.Plugins\HomeBlaze.Plugins.csproj" />
         <ProjectReference Include="..\MyCompany.SamplePlugin1.HomeBlaze\MyCompany.SamplePlugin1.HomeBlaze.csproj">
             <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
