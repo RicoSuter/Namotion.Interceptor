@@ -20,6 +20,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private readonly TimeSpan _retryTime;
     private readonly SubjectPropertyWriter _propertyWriter;
 
+    // Overflow on a bounded queue can fire once per dropped change at the inbound rate. Logging every
+    // event would flood the log and stall the producer thread the handler runs on, so the base
+    // aggregates the dropped count and logs at most once per this interval (matching WriteRetryQueue).
+    private const long OverflowLogThrottleMilliseconds = 5000;
+
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
     /// <summary>
@@ -75,14 +80,41 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <summary>
     /// Creates the configuration for this source's <see cref="ChangeQueueProcessor"/>. Override to opt
     /// into a bounded queue and react to overflow (for example, to request a resync). The default is
-    /// unbounded with the source's configured buffer time. The base wraps the returned
-    /// <see cref="ChangeQueueProcessorConfiguration.OverflowHandler"/> so overflow is also logged,
-    /// so implementations must return a fresh instance on each call (the base mutates the returned
-    /// handler, and a cached instance would accumulate wrappers across reconnects).
+    /// unbounded with the source's configured buffer time. The base derives a processor-owned copy and
+    /// adds throttled overflow logging, so the instance returned here is never mutated and may be cached.
     /// </summary>
     /// <returns>The processor configuration.</returns>
     protected virtual ChangeQueueProcessorConfiguration CreateChangeQueueConfiguration()
         => new() { BufferTime = _bufferTime };
+
+    /// <summary>
+    /// Wraps the source-provided overflow handler with throttled warning logging. The wrapper runs
+    /// synchronously on the processor's single producer thread, so its throttle state needs no
+    /// synchronization; it always forwards to the source handler so the resync signal is never lost.
+    /// </summary>
+    private Action<ChangeQueueOverflow> CreateLoggingOverflowHandler(Action<ChangeQueueOverflow>? sourceOverflowHandler)
+    {
+        var droppedSinceLastLog = 0L;
+        // Start one interval in the past so the first overflow logs immediately.
+        var lastLogTimestamp = Environment.TickCount64 - OverflowLogThrottleMilliseconds;
+
+        return overflow =>
+        {
+            droppedSinceLastLog += overflow.DroppedChangeCount;
+
+            var now = Environment.TickCount64;
+            if (now - lastLogTimestamp >= OverflowLogThrottleMilliseconds)
+            {
+                _logger.LogWarning(
+                    "Change queue overflow in source: {Count} change(s) dropped ({Behavior}) since the last report.",
+                    droppedSinceLastLog, overflow.OverflowBehavior);
+                droppedSinceLastLog = 0;
+                lastLogTimestamp = now;
+            }
+
+            sourceOverflowHandler?.Invoke(overflow);
+        };
+    }
 
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -96,15 +128,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
                 await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
 
-                var changeQueueConfiguration = CreateChangeQueueConfiguration();
-                var sourceOverflowHandler = changeQueueConfiguration.OverflowHandler;
-                changeQueueConfiguration.OverflowHandler = overflow =>
-                {
-                    _logger.LogWarning(
-                        "Change queue overflow in source: dropped {Count} change(s) ({Behavior}).",
-                        overflow.DroppedChangeCount, overflow.OverflowBehavior);
-                    sourceOverflowHandler?.Invoke(overflow);
-                };
+                // Derive a processor-owned copy so the instance from CreateChangeQueueConfiguration is
+                // never mutated and may be safely cached by overrides across reconnects.
+                var changeQueueConfiguration = CreateChangeQueueConfiguration().Clone();
+                changeQueueConfiguration.OverflowHandler =
+                    CreateLoggingOverflowHandler(changeQueueConfiguration.OverflowHandler);
 
                 using var processor = new ChangeQueueProcessor(
                     this,

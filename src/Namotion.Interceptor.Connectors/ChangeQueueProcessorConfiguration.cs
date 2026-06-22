@@ -43,4 +43,16 @@ public sealed class ChangeQueueProcessorConfiguration
                 nameof(MaxQueueSize));
         }
     }
+
+    /// <summary>
+    /// Creates a shallow copy. The base source derives a processor-owned configuration from the
+    /// instance returned by an override, so that override's instance is never mutated and may be cached.
+    /// </summary>
+    internal ChangeQueueProcessorConfiguration Clone() => new()
+    {
+        BufferTime = BufferTime,
+        OverflowBehavior = OverflowBehavior,
+        MaxQueueSize = MaxQueueSize,
+        OverflowHandler = OverflowHandler,
+    };
 }
