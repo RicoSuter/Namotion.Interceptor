@@ -22,8 +22,13 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
     private readonly Func<DateTimeOffset> _getUtcNow;
     private readonly DateTimeOffset _startTime;
 
+    // Fixed connection key for the moves database. It is never a valid partition key
+    // (SqlitePartition.IsPartitionKey("moves", ...) is false), so partition enumeration and Sweep skip it.
+    private const string MovesKey = "moves";
+
     private readonly object _pendingLock = new();
     private readonly List<PendingSample> _pending = new();
+    private readonly List<MoveRecord> _pendingMoves = new();
 
     private readonly object _connectionLock = new();
     private readonly Dictionary<string, SqliteConnection> _connections = new(StringComparer.Ordinal);
@@ -130,22 +135,28 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
 
     public void RecordMove(DateTimeOffset timestamp, string fromPath, string toPath)
     {
-        // Move-chain recording and resolution arrives in Task 5.5; the signature is here so the surface compiles.
-        throw new NotImplementedException("Task 5.5");
+        // Queue the move like a pending sample; FlushAsync persists it into moves.db.
+        lock (_pendingLock)
+        {
+            _pendingMoves.Add(new MoveRecord(timestamp, fromPath, toPath));
+        }
     }
 
     public Task FlushAsync(CancellationToken cancellationToken)
     {
         PendingSample[] batch;
+        MoveRecord[] moveBatch;
         lock (_pendingLock)
         {
-            if (_pending.Count == 0)
+            if (_pending.Count == 0 && _pendingMoves.Count == 0)
             {
                 return Task.CompletedTask;
             }
 
             batch = _pending.ToArray();
             _pending.Clear();
+            moveBatch = _pendingMoves.ToArray();
+            _pendingMoves.Clear();
         }
 
         try
@@ -178,6 +189,12 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
                     {
                         maxTicks = partitionMax;
                     }
+                }
+
+                if (moveBatch.Length > 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    WriteMoves(moveBatch);
                 }
 
                 _lastCommittedTicks = maxTicks;
@@ -245,6 +262,124 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
         return maxTicks;
     }
 
+    // Persists queued moves into moves.db (caller already holds _connectionLock).
+    private void WriteMoves(IReadOnlyList<MoveRecord> moves)
+    {
+        var connection = OpenMoves();
+
+        using var transaction = connection.BeginTransaction();
+        using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = "INSERT INTO moves (ts, from_path, to_path) VALUES (@ts, @from, @to);";
+        var tsParameter = insert.Parameters.Add("@ts", SqliteType.Integer);
+        var fromParameter = insert.Parameters.Add("@from", SqliteType.Text);
+        var toParameter = insert.Parameters.Add("@to", SqliteType.Text);
+
+        foreach (var move in moves)
+        {
+            tsParameter.Value = EpochTicks.ToEpochTicks(move.Timestamp);
+            fromParameter.Value = move.FromPath;
+            toParameter.Value = move.ToPath;
+            insert.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    // Builds the path chain for a queried (current) path by walking moves backward; returns legs each
+    // scoped to [ValidFrom, ValidTo). With no moves a single unbounded leg [MinValue, MaxValue), so the
+    // query path is unchanged. Identical algorithm to InMemoryHistoryStoreCore.ResolveChain, but the move
+    // set is read from moves.db. Caller already holds _connectionLock.
+    private List<ChainLeg> ResolveChain(string currentPath)
+    {
+        var snapshot = ReadMoves();
+
+        var legs = new List<ChainLeg>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var path = currentPath;
+        var validTo = DateTimeOffset.MaxValue;
+
+        while (visited.Add(path))
+        {
+            // Latest move INTO this path before validTo gives the time the subject arrived here.
+            MoveRecord? arrival = null;
+            foreach (var move in snapshot)
+            {
+                if (StringComparer.Ordinal.Equals(move.ToPath, path) && move.Timestamp <= validTo &&
+                    (arrival is null || move.Timestamp > arrival.Value.Timestamp))
+                {
+                    arrival = move;
+                }
+            }
+
+            var validFrom = arrival?.Timestamp ?? DateTimeOffset.MinValue;
+            legs.Add(new ChainLeg(path, validFrom, validTo));
+
+            if (arrival is null)
+            {
+                break; // reached the original path
+            }
+
+            path = arrival.Value.FromPath;
+            validTo = arrival.Value.Timestamp;
+        }
+
+        return legs;
+    }
+
+    // Expands a chain into concrete (path, partitionKey, tickWindow) segments over EXISTING partition files.
+    // For each leg, the query window [from, to) is intersected with the leg's [ValidFrom, ValidTo); the
+    // intersection is split across the partition files it overlaps. With no moves this is the single-path,
+    // multi-partition segment set used before move routing.
+    private List<ChainSegment> BuildChainSegments(List<ChainLeg> chain, DateTimeOffset from, DateTimeOffset to)
+    {
+        var segments = new List<ChainSegment>();
+        foreach (var leg in chain)
+        {
+            var legFrom = from > leg.ValidFrom ? from : leg.ValidFrom;
+            var legTo = to < leg.ValidTo ? to : leg.ValidTo;
+            if (legFrom >= legTo)
+            {
+                continue;
+            }
+
+            var fromTicks = EpochTicks.ToEpochTicks(legFrom);
+            var toTicks = EpochTicks.ToEpochTicks(legTo);
+            foreach (var key in PartitionKeysOverlapping(legFrom, legTo))
+            {
+                if (PartitionFileExists(key))
+                {
+                    segments.Add(new ChainSegment(leg.Path, key, fromTicks, toTicks));
+                }
+            }
+        }
+
+        return segments;
+    }
+
+    // Reads every move from moves.db into memory (the move set is small). Empty when moves.db has no
+    // rows or does not exist yet. Caller already holds _connectionLock.
+    private List<MoveRecord> ReadMoves()
+    {
+        var result = new List<MoveRecord>();
+        if (!File.Exists(PartitionFilePath(MovesKey)))
+        {
+            return result; // no moves recorded yet -> single unbounded leg in ResolveChain
+        }
+
+        var connection = OpenMoves();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT ts, from_path, to_path FROM moves;";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            result.Add(new MoveRecord(
+                EpochTicks.FromEpochTicks(reader.GetInt64(0)), reader.GetString(1), reader.GetString(2)));
+        }
+
+        return result;
+    }
+
     private void RefreshOldestCommitted()
     {
         long? oldest = null;
@@ -277,46 +412,57 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
 
     private HistorySeries QueryRaw(HistoryQuery query)
     {
-        var fromTicks = EpochTicks.ToEpochTicks(query.From);
-        var toTicks = EpochTicks.ToEpochTicks(query.To);
         var limit = query.MaxPoints + 1; // +1 overflow probe to detect truncation
 
-        // Single-partition read for now (multi-partition union arrives in Task 5.2). Read the
-        // partition holding From and any later partitions that exist within [from, to).
-        var rows = new List<RawRow>();
-        foreach (var key in PartitionKeysOverlapping(query.From, query.To))
+        // Route through the move chain: for each leg, read its own path over the intersection of the
+        // query range with the leg's [ValidFrom, ValidTo), then merge. With no moves this is a single
+        // unbounded leg, identical to the pre-move single-path read.
+        var rows = new List<(RawRow Row, bool IsUlong)>();
+        foreach (var leg in ResolveChain(query.PropertyPath))
         {
-            if (!PartitionFileExists(key))
+            var legFrom = query.From > leg.ValidFrom ? query.From : leg.ValidFrom;
+            var legTo = query.To < leg.ValidTo ? query.To : leg.ValidTo;
+            if (legFrom >= legTo)
             {
                 continue;
             }
 
-            var connection = OpenPartition(key);
-            using var command = connection.CreateCommand();
-            command.CommandText =
-                "SELECT ts, value_long, value_double, value_json FROM history " +
-                "WHERE path = @path AND ts >= @from AND ts < @to ORDER BY ts DESC LIMIT @limit;";
-            command.Parameters.AddWithValue("@path", query.PropertyPath);
-            command.Parameters.AddWithValue("@from", fromTicks);
-            command.Parameters.AddWithValue("@to", toTicks);
-            command.Parameters.AddWithValue("@limit", limit);
+            var fromTicks = EpochTicks.ToEpochTicks(legFrom);
+            var toTicks = EpochTicks.ToEpochTicks(legTo);
+            var isUlong = ResolveIsUlong(leg.Path);
 
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+            foreach (var key in PartitionKeysOverlapping(legFrom, legTo))
             {
-                rows.Add(ReadRawRow(reader));
+                if (!PartitionFileExists(key))
+                {
+                    continue;
+                }
+
+                var connection = OpenPartition(key);
+                using var command = connection.CreateCommand();
+                command.CommandText =
+                    "SELECT ts, value_long, value_double, value_json FROM history " +
+                    "WHERE path = @path AND ts >= @from AND ts < @to ORDER BY ts DESC LIMIT @limit;";
+                command.Parameters.AddWithValue("@path", leg.Path);
+                command.Parameters.AddWithValue("@from", fromTicks);
+                command.Parameters.AddWithValue("@to", toTicks);
+                command.Parameters.AddWithValue("@limit", limit);
+
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    rows.Add((ReadRawRow(reader), isUlong));
+                }
             }
         }
 
-        var isUlong = ResolveIsUlong(query.PropertyPath);
-
         // Order descending across the union, take newest (MaxPoints + 1), detect truncation, return ascending.
-        rows.Sort((left, right) => right.Ticks.CompareTo(left.Ticks));
+        rows.Sort((left, right) => right.Row.Ticks.CompareTo(left.Row.Ticks));
         var truncated = rows.Count > query.MaxPoints;
         var kept = truncated ? rows.GetRange(0, query.MaxPoints) : rows;
-        kept.Sort((left, right) => left.Ticks.CompareTo(right.Ticks));
+        kept.Sort((left, right) => left.Row.Ticks.CompareTo(right.Row.Ticks));
 
-        var points = kept.Select(row => ToPoint(row, isUlong)).ToImmutableArray();
+        var points = kept.Select(entry => ToPoint(entry.Row, entry.IsUlong)).ToImmutableArray();
         return new HistorySeries(query.PropertyPath, points, truncated);
     }
 
@@ -326,10 +472,15 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
         var aggregation = query.Aggregation;
         var bucketTicks = bucket.Ticks;
 
-        // Resolve the stored column kind and ulong flag from path_meta (the SQLite equivalent of the
-        // InMemory buffer's Column/IsUlong). A numeric aggregation on a json-stored, non-ulong property
-        // (decimal/string/enum) is not supported, mirroring InMemoryHistoryStoreCore.QueryBucketed.
-        var meta = ResolveColumnMeta(query.PropertyPath);
+        // Resolve the move chain once: each leg owns its [ValidFrom, ValidTo) slice of time and stores its
+        // samples under its own path. With no moves this is a single unbounded leg under query.PropertyPath.
+        var chain = ResolveChain(query.PropertyPath);
+
+        // Resolve the stored column kind and ulong flag from path_meta along the chain (the SQLite
+        // equivalent of the InMemory buffer's Column/IsUlong, which uses the first buffer in the chain).
+        // A numeric aggregation on a json-stored, non-ulong property (decimal/string/enum) is not
+        // supported, mirroring InMemoryHistoryStoreCore.QueryBucketed.
+        var meta = ResolveColumnMeta(chain);
         var isUlong = meta?.IsUlong ?? false;
 
         if (meta is { Column: ValueColumn.Json } && !isUlong && IsNumericAggregation(aggregation))
@@ -342,33 +493,30 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
                 });
         }
 
-        // Build per-partition partials over the aligned bucket range, merging into one map keyed by bucket.
+        // The aligned bucket range, intersected per leg below. A bucket straddling a move boundary draws its
+        // samples from whichever leg owns each instant, exactly like InMemory's RangeAcrossChain.
         var alignedFrom = BucketAlignment.BucketStart(query.From, bucket);
-        var fromTicks = EpochTicks.ToEpochTicks(alignedFrom);
-        var toTicks = EpochTicks.ToEpochTicks(query.To);
 
-        var existingKeys = PartitionKeysOverlapping(alignedFrom, query.To)
-            .Where(PartitionFileExists)
-            .ToList();
+        // Expand the chain into concrete (path, tickWindow) segments over existing partition files.
+        var segments = BuildChainSegments(chain, alignedFrom, query.To);
 
         Dictionary<long, BucketPartial> partials;
         if (aggregation == HistoryAggregations.TimeWeightedAverage)
         {
-            // TWA needs LEAD to see across partition files: a sample in one file is held until the NEXT
-            // sample, which may live in a later file. Per-partition summing would clip every file's last
-            // sample to the bucket end and double-count the overlap. So read the numeric samples over the
-            // UNION ALL of all overlapping partitions in one ordered query (others ATTACHed).
-            partials = ReadTimeWeightedAveragePartials(
-                existingKeys, query.PropertyPath, isUlong, bucketTicks, fromTicks, toTicks);
+            // TWA needs LEAD to see across partition files AND across legs: a sample is held until the NEXT
+            // sample, which may live in a later partition file or a later leg's path. So read the numeric
+            // samples over the UNION ALL of all segments in one ordered query (others ATTACHed), mirroring
+            // InMemory which merges every leg's samples into one ascending list before integrating.
+            partials = ReadTimeWeightedAveragePartials(segments, isUlong, bucketTicks);
         }
         else
         {
             partials = new Dictionary<long, BucketPartial>();
-            foreach (var key in existingKeys)
+            foreach (var segment in segments)
             {
-                var connection = OpenPartition(key);
-                foreach (var partial in ReadPartials(connection, query.PropertyPath, aggregation, isUlong,
-                             bucketTicks, fromTicks, toTicks))
+                var connection = OpenPartition(segment.PartitionKey);
+                foreach (var partial in ReadPartials(connection, segment.Path, aggregation, isUlong,
+                             bucketTicks, segment.FromTicks, segment.ToTicks))
                 {
                     partials[partial.BucketStartTicks] = partials.TryGetValue(partial.BucketStartTicks, out var existing)
                         ? BucketPartial.Combine(existing, partial)
@@ -424,19 +572,19 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
     // The leading interval [bucketStart, firstNumericTs) and empty-bucket carry are supplied by BucketAssembler,
     // which also needs FirstTicks (the leading-interval boundary) and LastNumber (the carry-advance value).
     //
-    // Unlike the other aggregations, TWA cannot be computed per partition then summed: a sample in one file is
-    // held until the NEXT sample, which may live in a LATER file, so LEAD must see the union of all overlapping
-    // partitions in one ordered scan. The first partition is opened as the main connection; the rest are
-    // ATTACHed and folded in with UNION ALL.
+    // Unlike the other aggregations, TWA cannot be computed per segment then summed: a sample is held until the
+    // NEXT sample, which may live in a LATER partition file OR a LATER move-chain leg's path, so LEAD must see
+    // the union of all segments in one ordered scan (mirroring InMemory, which merges every leg's samples into
+    // one ascending list before integrating). Each distinct partition file is ATTACHed once; one UNION term per
+    // segment selects that segment's path over its tick window from the file's alias.
     //
     // v is cast to REAL so v * duration is floating point: tick products are huge (value ~tens times ~10^8
     // ticks per 10s) and an integer SUM could overflow; the weighted_sum/total_duration RATIO is unit-free.
     private Dictionary<long, BucketPartial> ReadTimeWeightedAveragePartials(
-        IReadOnlyList<string> partitionKeys, string propertyPath, bool isUlong,
-        long bucketTicks, long fromTicks, long toTicks)
+        IReadOnlyList<ChainSegment> segments, bool isUlong, long bucketTicks)
     {
         var result = new Dictionary<long, BucketPartial>();
-        if (partitionKeys.Count == 0)
+        if (segments.Count == 0)
         {
             return result;
         }
@@ -445,75 +593,83 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
             ? "CAST(COALESCE(value_double, value_long, CAST(value_json AS REAL)) AS REAL)"
             : "CAST(COALESCE(value_double, value_long) AS REAL)";
 
-        var connection = OpenPartition(partitionKeys[0]);
-
-        // Build the ordered numeric-sample set across every overlapping partition. The first is "main";
-        // each further partition is attached under a stable alias and unioned in.
+        // Open one connection on the first segment's file as "main"; ATTACH every other distinct file once
+        // under a stable alias so each segment can reference its file by alias.
+        var connection = OpenPartition(segments[0].PartitionKey);
+        var aliasByKey = new Dictionary<string, string>(StringComparer.Ordinal) { [segments[0].PartitionKey] = "main" };
         var aliases = new List<string>();
-        var orderedTerms = new List<string>
-        {
-            "SELECT ts, " + numeric + " AS v FROM main.history " +
-            "WHERE path = @path AND ts >= @from AND ts < @to AND " + numeric + " IS NOT NULL"
-        };
 
-        for (var index = 1; index < partitionKeys.Count; index++)
+        var orderedTerms = new List<string>();
+        using (var command = connection.CreateCommand())
         {
-            var alias = "p" + index.ToString(CultureInfo.InvariantCulture);
-            aliases.Add(alias);
-            using var attach = connection.CreateCommand();
-            attach.CommandText = "ATTACH DATABASE @file AS " + alias + ";";
-            attach.Parameters.AddWithValue("@file", PartitionFilePath(partitionKeys[index]));
-            attach.ExecuteNonQuery();
-
-            orderedTerms.Add(
-                "SELECT ts, " + numeric + " AS v FROM " + alias + ".history " +
-                "WHERE path = @path AND ts >= @from AND ts < @to AND " + numeric + " IS NOT NULL");
-        }
-
-        try
-        {
-            using var command = connection.CreateCommand();
-            command.CommandText =
-                "WITH ordered AS (" + string.Join(" UNION ALL ", orderedTerms) + "), " +
-                "edged AS (" +
-                "  SELECT ts, v, (ts/@b)*@b AS bucket_start, ((ts/@b)*@b) + @b AS bucket_end, " +
-                "         COALESCE(LEAD(ts) OVER (ORDER BY ts), ((ts/@b)*@b) + @b) AS next_ts, " +
-                "         LAST_VALUE(v) OVER (PARTITION BY (ts/@b)*@b ORDER BY ts " +
-                "             ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_v " +
-                "  FROM ordered" +
-                ") " +
-                "SELECT bucket_start, " +
-                "       MIN(ts) AS first_ts, " +
-                "       SUM(v * (CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts)) AS weighted_sum, " +
-                "       SUM(CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts) AS total_duration, " +
-                "       MAX(last_v) AS last_number " + // last_v is constant within a bucket, so MAX returns it
-                "FROM edged GROUP BY bucket_start ORDER BY bucket_start;";
-            command.Parameters.AddWithValue("@path", propertyPath);
             command.Parameters.AddWithValue("@b", bucketTicks);
-            command.Parameters.AddWithValue("@from", fromTicks);
-            command.Parameters.AddWithValue("@to", toTicks);
-
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+            for (var index = 0; index < segments.Count; index++)
             {
-                var bucketStart = reader.GetInt64(0);
-                long? firstTicks = reader.IsDBNull(1) ? null : reader.GetInt64(1);
-                var weightedSum = reader.IsDBNull(2) ? 0d : reader.GetDouble(2);
-                var totalDuration = reader.IsDBNull(3) ? 0d : reader.GetDouble(3);
-                double? lastNumber = reader.IsDBNull(4) ? null : reader.GetDouble(4);
+                var segment = segments[index];
+                if (!aliasByKey.TryGetValue(segment.PartitionKey, out var alias))
+                {
+                    alias = "p" + aliases.Count.ToString(CultureInfo.InvariantCulture);
+                    aliases.Add(alias);
+                    aliasByKey[segment.PartitionKey] = alias;
 
-                result[bucketStart] = new BucketPartial(
-                    bucketStart, 0, null, null, null, null,
-                    firstTicks, null, null, null, lastNumber, null, weightedSum, totalDuration);
+                    using var attach = connection.CreateCommand();
+                    attach.CommandText = "ATTACH DATABASE @file AS " + alias + ";";
+                    attach.Parameters.AddWithValue("@file", PartitionFilePath(segment.PartitionKey));
+                    attach.ExecuteNonQuery();
+                }
+
+                var pathParameter = "@path" + index.ToString(CultureInfo.InvariantCulture);
+                var fromParameter = "@from" + index.ToString(CultureInfo.InvariantCulture);
+                var toParameter = "@to" + index.ToString(CultureInfo.InvariantCulture);
+                orderedTerms.Add(
+                    "SELECT ts, " + numeric + " AS v FROM " + alias + ".history " +
+                    "WHERE path = " + pathParameter + " AND ts >= " + fromParameter + " AND ts < " + toParameter +
+                    " AND " + numeric + " IS NOT NULL");
+                command.Parameters.AddWithValue(pathParameter, segment.Path);
+                command.Parameters.AddWithValue(fromParameter, segment.FromTicks);
+                command.Parameters.AddWithValue(toParameter, segment.ToTicks);
             }
-        }
-        finally
-        {
-            foreach (var alias in aliases)
+
+            try
             {
-                using var detach = connection.CreateCommand();
-                detach.CommandText = "DETACH DATABASE " + alias + ";";
-                detach.ExecuteNonQuery();
+                command.CommandText =
+                    "WITH ordered AS (" + string.Join(" UNION ALL ", orderedTerms) + "), " +
+                    "edged AS (" +
+                    "  SELECT ts, v, (ts/@b)*@b AS bucket_start, ((ts/@b)*@b) + @b AS bucket_end, " +
+                    "         COALESCE(LEAD(ts) OVER (ORDER BY ts), ((ts/@b)*@b) + @b) AS next_ts, " +
+                    "         LAST_VALUE(v) OVER (PARTITION BY (ts/@b)*@b ORDER BY ts " +
+                    "             ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_v " +
+                    "  FROM ordered" +
+                    ") " +
+                    "SELECT bucket_start, " +
+                    "       MIN(ts) AS first_ts, " +
+                    "       SUM(v * (CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts)) AS weighted_sum, " +
+                    "       SUM(CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts) AS total_duration, " +
+                    "       MAX(last_v) AS last_number " + // last_v is constant within a bucket, so MAX returns it
+                    "FROM edged GROUP BY bucket_start ORDER BY bucket_start;";
+
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    var bucketStart = reader.GetInt64(0);
+                    long? firstTicks = reader.IsDBNull(1) ? null : reader.GetInt64(1);
+                    var weightedSum = reader.IsDBNull(2) ? 0d : reader.GetDouble(2);
+                    var totalDuration = reader.IsDBNull(3) ? 0d : reader.GetDouble(3);
+                    double? lastNumber = reader.IsDBNull(4) ? null : reader.GetDouble(4);
+
+                    result[bucketStart] = new BucketPartial(
+                        bucketStart, 0, null, null, null, null,
+                        firstTicks, null, null, null, lastNumber, null, weightedSum, totalDuration);
+                }
+            }
+            finally
+            {
+                foreach (var alias in aliases)
+                {
+                    using var detach = connection.CreateCommand();
+                    detach.CommandText = "DETACH DATABASE " + alias + ";";
+                    detach.ExecuteNonQuery();
+                }
             }
         }
 
@@ -653,38 +809,60 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
 
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
     {
-        var asOfTicks = EpochTicks.ToEpochTicks(asOf);
-
         // Serialize connection use under the re-entrant _connectionLock (see Query for the rationale).
         lock (_connectionLock)
         {
-            var isUlong = ResolveIsUlong(propertyPath);
-
-            // Search the partition holding asOf, then earlier partitions, newest match wins.
-            foreach (var key in PartitionKeysAtOrBefore(asOf))
+            // Route through the move chain: walk legs from newest to oldest and return the first held value.
+            // Only legs whose validity starts at or before asOf can hold the value; the older leg of a move is
+            // capped at ValidTo - 1 tick (its half-open ceiling), mirroring InMemoryHistoryStoreCore.
+            foreach (var leg in ResolveChain(propertyPath))
             {
-                if (!PartitionFileExists(key))
+                if (leg.ValidFrom > asOf)
                 {
                     continue;
                 }
 
-                var connection = OpenPartition(key);
-                using var command = connection.CreateCommand();
-                command.CommandText =
-                    "SELECT ts, value_long, value_double, value_json FROM history " +
-                    "WHERE path = @path AND ts <= @asOf ORDER BY ts DESC LIMIT 1;";
-                command.Parameters.AddWithValue("@path", propertyPath);
-                command.Parameters.AddWithValue("@asOf", asOfTicks);
-
-                using var reader = command.ExecuteReader();
-                if (reader.Read())
+                var ceiling = asOf < leg.ValidTo ? asOf : leg.ValidTo - new TimeSpan(1);
+                var found = GetLegSampleAtOrBefore(leg.Path, ceiling);
+                if (found is { } row && EpochTicks.FromEpochTicks(row.Ticks) >= leg.ValidFrom)
                 {
-                    return ToPoint(ReadRawRow(reader), isUlong);
+                    return ToPoint(row, ResolveIsUlong(leg.Path));
                 }
             }
 
             return null;
         }
+    }
+
+    // Newest row at or before asOf for a single path across its partitions. Caller already holds _connectionLock.
+    private RawRow? GetLegSampleAtOrBefore(string path, DateTimeOffset asOf)
+    {
+        var asOfTicks = EpochTicks.ToEpochTicks(asOf);
+
+        // Search the partition holding asOf, then earlier partitions, newest match wins.
+        foreach (var key in PartitionKeysAtOrBefore(asOf))
+        {
+            if (!PartitionFileExists(key))
+            {
+                continue;
+            }
+
+            var connection = OpenPartition(key);
+            using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT ts, value_long, value_double, value_json FROM history " +
+                "WHERE path = @path AND ts <= @asOf ORDER BY ts DESC LIMIT 1;";
+            command.Parameters.AddWithValue("@path", path);
+            command.Parameters.AddWithValue("@asOf", asOfTicks);
+
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                return ReadRawRow(reader);
+            }
+        }
+
+        return null;
     }
 
     public void Sweep()
@@ -742,10 +920,25 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
         }
     }
 
-    // The stored column kind and ulong flag for a path, read from path_meta (written at flush time).
-    // Returns null when the path has never been written. The SQLite equivalent of the InMemory buffer's
-    // Column/IsUlong, used for the numeric-on-json-non-ulong guard and ulong-overflow numeric folding.
-    private ColumnMeta? ResolveColumnMeta(string propertyPath)
+    // The stored column kind and ulong flag for a (possibly moved) property: the first path along its chain
+    // that has path_meta. The SQLite equivalent of InMemoryHistoryStoreCore.ResolveBuffer (which returns the
+    // first buffer in the chain), used for the numeric-on-json-non-ulong guard and ulong-overflow folding.
+    private ColumnMeta? ResolveColumnMeta(List<ChainLeg> chain)
+    {
+        foreach (var leg in chain)
+        {
+            if (ResolveColumnMetaForPath(leg.Path) is { } meta)
+            {
+                return meta;
+            }
+        }
+
+        return null;
+    }
+
+    // The stored column kind and ulong flag for a single path, read from path_meta (written at flush time).
+    // Returns null when the path has never been written.
+    private ColumnMeta? ResolveColumnMetaForPath(string propertyPath)
     {
         foreach (var key in EnumeratePartitionFileKeys())
         {
@@ -887,6 +1080,28 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
         }
     }
 
+    // Opens (and caches) the moves database under the fixed MovesKey, creating the moves table on first
+    // open. Reuses the partition connection cache so Dispose closes it too; MovesKey is filtered out of
+    // partition enumeration by SqlitePartition.IsPartitionKey, so Sweep never touches it.
+    private SqliteConnection OpenMoves()
+    {
+        lock (_connectionLock)
+        {
+            if (_connections.TryGetValue(MovesKey, out var existing))
+            {
+                return existing;
+            }
+
+            var connection = new SqliteConnection($"Data Source={PartitionFilePath(MovesKey)}");
+            connection.Open();
+            Execute(connection, "PRAGMA journal_mode=WAL;");
+            Execute(connection,
+                "CREATE TABLE IF NOT EXISTS moves (ts INTEGER NOT NULL, from_path TEXT NOT NULL, to_path TEXT NOT NULL);");
+            _connections[MovesKey] = connection;
+            return connection;
+        }
+    }
+
     private static void Execute(SqliteConnection connection, string sql)
     {
         using var command = connection.CreateCommand();
@@ -949,6 +1164,14 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
     }
 
     private readonly record struct ColumnMeta(ValueColumn Column, bool IsUlong);
+
+    private readonly record struct MoveRecord(DateTimeOffset Timestamp, string FromPath, string ToPath);
+
+    private readonly record struct ChainLeg(string Path, DateTimeOffset ValidFrom, DateTimeOffset ValidTo);
+
+    // One leg's slice over a single existing partition file: the leg's path, the partition key, and the
+    // intersection of the query window with the leg's validity, expressed in epoch ticks.
+    private readonly record struct ChainSegment(string Path, string PartitionKey, long FromTicks, long ToTicks);
 
     private readonly record struct Row(long? Long, double? Double, string? Json);
 
