@@ -10,7 +10,7 @@ namespace HomeBlaze.History.InMemory
         public InMemoryHistoryStore(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.InMemory.InMemoryHistoryStore> logger) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int BufferTimeMilliseconds { get; set; }
-        public HomeBlaze.History.Abstractions.HistoryCoverage Coverage { get; }
+        public HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public long EstimatedMemoryBytes { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]

@@ -152,7 +152,7 @@ public class InMemoryHistoryStoreCoreRawTests
         core.Record("/a/Value", Base.AddSeconds(70), 1d, typeof(double));
 
         // Act
-        var coverage = core.Coverage;
+        var coverage = core.CurrentCoverage;
 
         // Assert - From = max(startTime, now-60s); startTime == now here (set in ctor), so From == now-?
         Assert.Equal(now, coverage.To);

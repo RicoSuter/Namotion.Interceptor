@@ -124,7 +124,7 @@ public sealed class SqliteHistoryStoreCoreRawTests : IDisposable
 
         // Assert
         Assert.Equal(0, core.QueueDepth);
-        Assert.Equal(Base.AddSeconds(90), core.Coverage.To);
+        Assert.Equal(Base.AddSeconds(90), core.CurrentCoverage.To);
         Assert.True(core.LastFlushUtc is not null);
     }
 }

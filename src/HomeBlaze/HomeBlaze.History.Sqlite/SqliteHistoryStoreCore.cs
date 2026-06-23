@@ -77,7 +77,7 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
 
     public string? LastError => _lastError;
 
-    public HistoryCoverage Coverage
+    public HistoryCoverage CurrentCoverage
     {
         get
         {
@@ -121,7 +121,7 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
 
     public void Record(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
     {
-        var column = HistoryColumns.ValueColumnFor(propertyType);
+        var column = HistoryColumns.GetValueColumnFor(propertyType);
         var isUlong = HistoryColumns.IsUlongProperty(propertyType);
         var row = CreateRow(value, column, isUlong);
 
@@ -556,7 +556,7 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
     private static bool IsNumericAggregation(string aggregation) =>
         aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
             or HistoryAggregations.Minimum or HistoryAggregations.Maximum
-            or HistoryAggregations.Sum or HistoryAggregations.StdDev;
+            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation;
 
     // One grouped query per partition producing the partials for the requested aggregation. Only the
     // columns the aggregation needs are fetched. The bucket key is (ts/@b)*@b on epoch ticks, which equals
@@ -773,7 +773,7 @@ internal sealed class SqliteHistoryStoreCore : IDisposable
         return result;
     }
 
-    // Sum/Min/Max/SampleAverage/StdDev: grouped numeric reductions over COALESCE(value_double, value_long).
+    // Sum/Min/Max/SampleAverage/StandardDeviation: grouped numeric reductions over COALESCE(value_double, value_long).
     // When the property is ulong, value_json numbers (ulong overflow) also count as numeric values; SQLite's
     // COALESCE includes value_json (numeric text parses to a number) so the reductions fold it in too.
     private List<BucketPartial> ReadNumericPartials(

@@ -24,7 +24,7 @@ public static class HistoryColumns
     /// <summary>
     /// Returns the column a value of <paramref name="propertyType"/> is stored in.
     /// </summary>
-    public static ValueColumn ValueColumnFor(Type propertyType)
+    public static ValueColumn GetValueColumnFor(Type propertyType)
     {
         var t = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
         if (t == typeof(double) || t == typeof(float)) return ValueColumn.Double;

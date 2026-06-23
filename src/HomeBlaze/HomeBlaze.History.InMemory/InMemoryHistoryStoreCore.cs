@@ -41,7 +41,7 @@ internal sealed class InMemoryHistoryStoreCore
     // Rough estimate: 4 references/values per Sample (~40 bytes) plus dictionary/key overhead.
     public long EstimatedMemoryBytes => TotalSampleCount * 40 + _buffers.Count * 64;
 
-    public HistoryCoverage Coverage
+    public HistoryCoverage CurrentCoverage
     {
         get
         {
@@ -53,7 +53,7 @@ internal sealed class InMemoryHistoryStoreCore
 
     public void Record(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
     {
-        var column = HistoryColumns.ValueColumnFor(propertyType);
+        var column = HistoryColumns.GetValueColumnFor(propertyType);
         var isUlong = HistoryColumns.IsUlongProperty(propertyType);
         var buffer = _buffers.GetOrAdd(propertyPath, _ => new PropertyBuffer(_maxPointsPerProperty, column, isUlong));
 
@@ -321,7 +321,7 @@ internal sealed class InMemoryHistoryStoreCore
     private static bool IsNumericAggregation(string aggregation) =>
         aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
             or HistoryAggregations.Minimum or HistoryAggregations.Maximum
-            or HistoryAggregations.Sum or HistoryAggregations.StdDev;
+            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation;
 
     private HistoryPoint AggregateBucket(
         string aggregation, DateTimeOffset bucketStart, DateTimeOffset bucketEnd, List<Sample> samples, bool isUlong,
@@ -424,7 +424,7 @@ internal sealed class InMemoryHistoryStoreCore
             HistoryAggregations.Minimum => values.Min(),
             HistoryAggregations.Maximum => values.Max(),
             HistoryAggregations.Sum => values.Sum(),
-            HistoryAggregations.StdDev => SampleStandardDeviation(values),
+            HistoryAggregations.StandardDeviation => SampleStandardDeviation(values),
             _ => throw new HistoryAggregationNotSupportedException(
                 aggregation,
                 new HashSet<string>(StringComparer.Ordinal)

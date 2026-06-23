@@ -35,7 +35,7 @@ public partial class SqliteHistoryStore : BackgroundService, IConfigurable, IHis
         HistoryAggregations.Maximum,
         HistoryAggregations.Sum,
         HistoryAggregations.Count,
-        HistoryAggregations.StdDev
+        HistoryAggregations.StandardDeviation
     };
 
     private readonly ILogger<SqliteHistoryStore> _logger;
@@ -182,8 +182,8 @@ public partial class SqliteHistoryStore : BackgroundService, IConfigurable, IHis
     // IHistoryStore
 
     /// <inheritdoc />
-    public HistoryCoverage Coverage =>
-        _core?.Coverage ?? new HistoryCoverage(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+    public HistoryCoverage CurrentCoverage =>
+        _core?.CurrentCoverage ?? new HistoryCoverage(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
     /// <inheritdoc />
     public IReadOnlySet<string> SupportedAggregations => AllAggregations;

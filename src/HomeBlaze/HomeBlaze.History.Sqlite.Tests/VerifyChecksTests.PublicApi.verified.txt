@@ -16,7 +16,7 @@ namespace HomeBlaze.History.Sqlite
         public SqliteHistoryStore(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.Sqlite.SqliteHistoryStore> logger) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int BufferTimeMilliseconds { get; set; }
-        public HomeBlaze.History.Abstractions.HistoryCoverage Coverage { get; }
+        public HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string DatabasePath { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]

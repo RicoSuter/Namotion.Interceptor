@@ -15,7 +15,7 @@ public sealed class FakeHistoryStore : IHistoryStore
 
     public int Priority { get; set; }
 
-    public HistoryCoverage Coverage { get; set; }
+    public HistoryCoverage CurrentCoverage { get; set; }
 
     public IReadOnlySet<string> SupportedAggregations { get; set; } =
         new HashSet<string>(StringComparer.Ordinal)
@@ -28,7 +28,7 @@ public sealed class FakeHistoryStore : IHistoryStore
             HistoryAggregations.Maximum,
             HistoryAggregations.Sum,
             HistoryAggregations.Count,
-            HistoryAggregations.StdDev
+            HistoryAggregations.StandardDeviation
         };
 
     /// <summary>Records the queries this store received, for routing assertions.</summary>

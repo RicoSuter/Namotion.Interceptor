@@ -35,7 +35,7 @@ public partial class InMemoryHistoryStore : BackgroundService, IConfigurable, IH
         HistoryAggregations.Maximum,
         HistoryAggregations.Sum,
         HistoryAggregations.Count,
-        HistoryAggregations.StdDev
+        HistoryAggregations.StandardDeviation
     };
 
     private readonly ILogger<InMemoryHistoryStore> _logger;
@@ -162,8 +162,8 @@ public partial class InMemoryHistoryStore : BackgroundService, IConfigurable, IH
     // IHistoryStore
 
     /// <inheritdoc />
-    public HistoryCoverage Coverage =>
-        _core?.Coverage ?? new HistoryCoverage(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+    public HistoryCoverage CurrentCoverage =>
+        _core?.CurrentCoverage ?? new HistoryCoverage(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
     /// <inheritdoc />
     public IReadOnlySet<string> SupportedAggregations => AllAggregations;

@@ -18,7 +18,7 @@ public class HistoryColumnsTests
     public void WhenTypeIsFloatingPoint_ThenColumnIsDouble(Type type)
     {
         // Arrange & Act
-        var column = HistoryColumns.ValueColumnFor(type);
+        var column = HistoryColumns.GetValueColumnFor(type);
 
         // Assert
         Assert.Equal(ValueColumn.Double, column);
@@ -41,7 +41,7 @@ public class HistoryColumnsTests
     public void WhenTypeIsIntegerOrBool_ThenColumnIsLong(Type type)
     {
         // Arrange & Act
-        var column = HistoryColumns.ValueColumnFor(type);
+        var column = HistoryColumns.GetValueColumnFor(type);
 
         // Assert
         Assert.Equal(ValueColumn.Long, column);
@@ -56,7 +56,7 @@ public class HistoryColumnsTests
     public void WhenTypeIsDecimalStringOrEnum_ThenColumnIsJson(Type type)
     {
         // Arrange & Act
-        var column = HistoryColumns.ValueColumnFor(type);
+        var column = HistoryColumns.GetValueColumnFor(type);
 
         // Assert
         Assert.Equal(ValueColumn.Json, column);

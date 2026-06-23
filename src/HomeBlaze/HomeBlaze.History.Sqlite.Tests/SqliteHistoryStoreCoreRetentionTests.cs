@@ -49,8 +49,8 @@ public sealed class SqliteHistoryStoreCoreRetentionTests : IDisposable
         core.Sweep();
         var series = core.Query(new HistoryQuery("/a/V", Base.AddDays(-1), now));
 
-        // Assert - old partition file gone; only the recent sample remains; Coverage.From advanced past the old week
+        // Assert - old partition file gone; only the recent sample remains; CurrentCoverage.From advanced past the old week
         Assert.Equal(new double?[] { 2 }, series.Points.Select(p => p.Number).ToArray());
-        Assert.True(core.Coverage.From >= Base.AddDays(18).AddDays(-7)); // within the retained partition's week
+        Assert.True(core.CurrentCoverage.From >= Base.AddDays(18).AddDays(-7)); // within the retained partition's week
     }
 }

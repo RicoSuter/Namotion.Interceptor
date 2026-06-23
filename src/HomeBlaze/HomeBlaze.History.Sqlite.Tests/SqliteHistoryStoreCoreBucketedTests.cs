@@ -130,7 +130,7 @@ public sealed class SqliteHistoryStoreCoreBucketedTests : IDisposable
             (1, 2), (2, 4), (3, 4), (4, 4), (5, 5), (6, 5), (7, 7), (8, 9), (12, 100));
 
         // Act
-        var series = core.Query(BucketedQuery(HistoryAggregations.StdDev, 0, 20));
+        var series = core.Query(BucketedQuery(HistoryAggregations.StandardDeviation, 0, 20));
 
         // Assert
         Assert.NotNull(series.Points[0].Number);

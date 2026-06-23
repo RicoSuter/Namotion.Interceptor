@@ -32,12 +32,12 @@ public static class HistoryAggregations
     public const string Count = "Count";
 
     /// <summary>Sample standard deviation.</summary>
-    public const string StdDev = "StdDev";
+    public const string StandardDeviation = "StandardDeviation";
 
     /// <summary>
     /// Aggregations every store supports regardless of column type. The global eligibility
     /// check skips these (see the cross-store merger).
     /// </summary>
-    public static readonly IReadOnlySet<string> Universal =
+    public static readonly IReadOnlySet<string> AlwaysAvailable =
         new HashSet<string>(StringComparer.Ordinal) { Last, Count };
 }

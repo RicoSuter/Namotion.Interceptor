@@ -20,7 +20,7 @@ public static class HistoryStoreMerger
         this IEnumerable<IHistoryStore> stores, HistoryQuery query, CancellationToken cancellationToken)
     {
         var ordered = stores.OrderByDescending(store => store.Priority).ToArray();
-        CheckEligibility(ordered, query);
+        EnsureEligibility(ordered, query);
         var plan = query.Bucket is null
             ? PlanRawDispatch(ordered, query)
             : PlanBucketedDispatch(ordered, query);
@@ -79,7 +79,7 @@ public static class HistoryStoreMerger
 
     /// <summary>
     /// Verifies every part of the queried range is servable by some store supporting the requested
-    /// aggregation. Universal aggregations (<see cref="HistoryAggregations.Universal"/>) skip the check.
+    /// aggregation. Always-available aggregations (<see cref="HistoryAggregations.AlwaysAvailable"/>) skip the check.
     ///
     /// For bucketed queries the check runs against the bucket-aligned span the planner actually
     /// enumerates (from the start of the bucket containing <c>From</c> through the end of the bucket
@@ -90,9 +90,9 @@ public static class HistoryStoreMerger
     /// throws iff some bucket the planner would enumerate has no supporting store that fully contains
     /// it (otherwise that bucket would be a silent gap the eligibility check had promised away).
     /// </summary>
-    internal static void CheckEligibility(IReadOnlyList<IHistoryStore> ordered, HistoryQuery query)
+    internal static void EnsureEligibility(IReadOnlyList<IHistoryStore> ordered, HistoryQuery query)
     {
-        if (HistoryAggregations.Universal.Contains(query.Aggregation))
+        if (HistoryAggregations.AlwaysAvailable.Contains(query.Aggregation))
         {
             return;
         }
@@ -113,7 +113,7 @@ public static class HistoryStoreMerger
                 continue;
             }
 
-            uncovered = SubtractCoverage(uncovered, store.Coverage);
+            uncovered = SubtractCoverage(uncovered, store.CurrentCoverage);
             if (uncovered.Count == 0)
             {
                 break;
@@ -130,7 +130,7 @@ public static class HistoryStoreMerger
         var available = new HashSet<string>(StringComparer.Ordinal);
         foreach (var store in ordered)
         {
-            if (store.Coverage.Overlaps(range))
+            if (store.CurrentCoverage.Overlaps(range))
             {
                 available.UnionWith(store.SupportedAggregations);
             }
@@ -160,11 +160,11 @@ public static class HistoryStoreMerger
             var remaining = new List<HistoryCoverage>();
             foreach (var piece in unclaimed)
             {
-                var overlap = Intersect(piece, store.Coverage);
+                var overlap = Intersect(piece, store.CurrentCoverage);
                 if (overlap is { } claimed)
                 {
                     segments.Add(new PlannedSegment(store, claimed.From, claimed.To, bucketCount: 0));
-                    remaining.AddRange(SubtractCoverage(new List<HistoryCoverage> { piece }, store.Coverage));
+                    remaining.AddRange(SubtractCoverage(new List<HistoryCoverage> { piece }, store.CurrentCoverage));
                 }
                 else
                 {
@@ -191,7 +191,7 @@ public static class HistoryStoreMerger
     {
         var bucket = query.Bucket!.Value;
         var segments = new List<PlannedSegment>();
-        var isUniversal = HistoryAggregations.Universal.Contains(query.Aggregation);
+        var isAlwaysAvailable = HistoryAggregations.AlwaysAvailable.Contains(query.Aggregation);
 
         IHistoryStore? currentOwner = null;
         DateTimeOffset segmentStart = default;
@@ -208,8 +208,8 @@ public static class HistoryStoreMerger
             IHistoryStore? owner = null;
             foreach (var store in ordered)
             {
-                if ((isUniversal || store.SupportedAggregations.Contains(query.Aggregation)) &&
-                    store.Coverage.Contains(bucketRange))
+                if ((isAlwaysAvailable || store.SupportedAggregations.Contains(query.Aggregation)) &&
+                    store.CurrentCoverage.Contains(bucketRange))
                 {
                     owner = store;
                     break;

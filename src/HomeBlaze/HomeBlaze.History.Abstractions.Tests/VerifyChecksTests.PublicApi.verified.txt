@@ -19,15 +19,15 @@ namespace HomeBlaze.History.Abstractions
         public const string Maximum = "Maximum";
         public const string Minimum = "Minimum";
         public const string SampleAverage = "SampleAverage";
-        public const string StdDev = "StdDev";
+        public const string StandardDeviation = "StandardDeviation";
         public const string Sum = "Sum";
         public const string TimeWeightedAverage = "TimeWeightedAverage";
-        public static readonly System.Collections.Generic.IReadOnlySet<string> Universal;
+        public static readonly System.Collections.Generic.IReadOnlySet<string> AlwaysAvailable;
     }
     public static class HistoryColumns
     {
+        public static HomeBlaze.History.Abstractions.ValueColumn GetValueColumnFor(System.Type propertyType) { }
         public static bool IsUlongProperty(System.Type propertyType) { }
-        public static HomeBlaze.History.Abstractions.ValueColumn ValueColumnFor(System.Type propertyType) { }
     }
     public readonly struct HistoryCoverage : System.IEquatable<HomeBlaze.History.Abstractions.HistoryCoverage>
     {
@@ -76,7 +76,7 @@ namespace HomeBlaze.History.Abstractions
     }
     public interface IHistoryStore
     {
-        HomeBlaze.History.Abstractions.HistoryCoverage Coverage { get; }
+        HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }
         int Priority { get; }
         System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
         System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken);

@@ -18,9 +18,10 @@ public interface IHistoryStore
     int Priority { get; }
 
     /// <summary>
-    /// Gets the time window this store can answer queries for.
+    /// Gets the time window this store can answer queries for. This is a per-read snapshot
+    /// that can change between reads as the store records or evicts data.
     /// </summary>
-    HistoryCoverage Coverage { get; }
+    HistoryCoverage CurrentCoverage { get; }
 
     /// <summary>
     /// Gets the aggregation identifiers (see <see cref="HistoryAggregations"/>) this store supports.

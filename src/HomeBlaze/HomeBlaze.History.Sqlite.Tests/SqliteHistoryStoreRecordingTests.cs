@@ -249,7 +249,7 @@ public class SqliteHistoryStoreRecordingTests
             // Assert
             Assert.NotEmpty(series.Points);
             Assert.Equal(50, store.Priority);
-            Assert.True(store.Coverage.To >= DateTimeOffset.UtcNow.AddMinutes(-1));
+            Assert.True(store.CurrentCoverage.To >= DateTimeOffset.UtcNow.AddMinutes(-1));
         }
         finally
         {

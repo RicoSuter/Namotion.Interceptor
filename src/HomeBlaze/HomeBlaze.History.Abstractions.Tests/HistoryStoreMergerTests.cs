@@ -21,12 +21,12 @@ public class HistoryStoreMergerTests
         var older = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(0), At(30))
+            CurrentCoverage = new HistoryCoverage(At(0), At(30))
         }.AddSample(At(10), 1).AddSample(At(20), 2);
         var newer = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(30), At(60))
+            CurrentCoverage = new HistoryCoverage(At(30), At(60))
         }.AddSample(At(40), 3).AddSample(At(50), 4);
         var query = new HistoryQuery("temp", At(0), At(60), Aggregation: HistoryAggregations.Last);
 
@@ -51,12 +51,12 @@ public class HistoryStoreMergerTests
         var persistent = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(0), At(60))
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
         }.AddSample(At(10), 1).AddSample(At(50), 99);
         var live = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(40), At(60))
+            CurrentCoverage = new HistoryCoverage(At(40), At(60))
         }.AddSample(At(50), 5);
         var query = new HistoryQuery("temp", At(0), At(60), Aggregation: HistoryAggregations.Last);
 
@@ -81,7 +81,7 @@ public class HistoryStoreMergerTests
         var store = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(60)),
+            CurrentCoverage = new HistoryCoverage(At(0), At(60)),
             ThrowOnQuery = true
         };
         var query = new HistoryQuery("temp", At(0), At(60), Aggregation: HistoryAggregations.Last);
@@ -113,7 +113,7 @@ public class HistoryStoreMergerTests
         var store = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(30))
+            CurrentCoverage = new HistoryCoverage(At(0), At(30))
         }.AddSample(At(10), 1);
         var query = new HistoryQuery("temp", At(0), At(60), Aggregation: HistoryAggregations.Last);
 
@@ -135,12 +135,12 @@ public class HistoryStoreMergerTests
         var persistent = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(0), At(40))
+            CurrentCoverage = new HistoryCoverage(At(0), At(40))
         }.AddSample(At(5), 1).AddSample(At(25), 2);
         var live = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(40), At(60))
+            CurrentCoverage = new HistoryCoverage(At(40), At(60))
         }.AddSample(At(45), 3).AddSample(At(55), 4);
         var query = new HistoryQuery("temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.SampleAverage);
 
@@ -164,7 +164,7 @@ public class HistoryStoreMergerTests
         var store = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(60))
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
         }.AddSample(At(5), 1);
         var query = new HistoryQuery("temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.SampleAverage);
 
@@ -184,7 +184,7 @@ public class HistoryStoreMergerTests
         var store = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(30))
+            CurrentCoverage = new HistoryCoverage(At(0), At(30))
         }.AddSample(At(5), 1).AddSample(At(22), 2);
         var query = new HistoryQuery("temp", At(0), At(25), TimeSpan.FromMinutes(10), HistoryAggregations.SampleAverage);
 
@@ -204,7 +204,7 @@ public class HistoryStoreMergerTests
         var store = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(60)),
+            CurrentCoverage = new HistoryCoverage(At(0), At(60)),
             SupportedAggregations = Only(HistoryAggregations.Last)
         };
         var query = new HistoryQuery("temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Minimum);
@@ -222,13 +222,13 @@ public class HistoryStoreMergerTests
         var minStore = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(30)),
+            CurrentCoverage = new HistoryCoverage(At(0), At(30)),
             SupportedAggregations = Only(HistoryAggregations.Minimum)
         }.AddSample(At(5), 1);
         var lastStore = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(30), At(60)),
+            CurrentCoverage = new HistoryCoverage(At(30), At(60)),
             SupportedAggregations = Only(HistoryAggregations.Last)
         }.AddSample(At(45), 2);
         var query = new HistoryQuery("temp", At(0), At(30), TimeSpan.FromMinutes(10), HistoryAggregations.Minimum);
@@ -250,12 +250,12 @@ public class HistoryStoreMergerTests
         var older = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(0), At(30))
+            CurrentCoverage = new HistoryCoverage(At(0), At(30))
         }.AddSample(At(10), 1).AddSample(At(20), 2);
         var newer = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(30), At(60))
+            CurrentCoverage = new HistoryCoverage(At(30), At(60))
         }.AddSample(At(40), 3).AddSample(At(50), 4);
         var query = new HistoryQuery("temp", At(0), At(60), Aggregation: HistoryAggregations.Last, MaxPoints: 2);
 
@@ -275,7 +275,7 @@ public class HistoryStoreMergerTests
         var store = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(60))
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
         }.AddSample(At(10), 1).AddSample(At(20), 2).AddSample(At(30), 3);
         var query = new HistoryQuery("temp", At(0), At(60), Aggregation: HistoryAggregations.Last, MaxPoints: 2);
 
@@ -298,12 +298,12 @@ public class HistoryStoreMergerTests
         var persistent = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(0), At(60))
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
         }.AddSample(At(30), 99);
         var live = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(20), At(60))
+            CurrentCoverage = new HistoryCoverage(At(20), At(60))
         }.AddSample(At(30), 7);
         var query = new HistoryQuery("temp", At(0), At(60), Aggregation: HistoryAggregations.Last);
 
@@ -326,12 +326,12 @@ public class HistoryStoreMergerTests
         var older = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(0), At(30))
+            CurrentCoverage = new HistoryCoverage(At(0), At(30))
         }.AddSample(At(25), 2).AddSample(At(5), 1);
         var newer = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(30), At(60))
+            CurrentCoverage = new HistoryCoverage(At(30), At(60))
         }.AddSample(At(55), 4).AddSample(At(35), 3);
         var query = new HistoryQuery("temp", At(0), At(60), Aggregation: HistoryAggregations.Last);
 
@@ -353,12 +353,12 @@ public class HistoryStoreMergerTests
         var persistent = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(0), At(40))
+            CurrentCoverage = new HistoryCoverage(At(0), At(40))
         }.AddSample(At(5), 42);
         var live = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(40), At(60))
+            CurrentCoverage = new HistoryCoverage(At(40), At(60))
         };
         var query = new HistoryQuery("temp", At(40), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Last);
 
@@ -380,12 +380,12 @@ public class HistoryStoreMergerTests
         var lowPriority = new FakeHistoryStore
         {
             Priority = 10,
-            Coverage = new HistoryCoverage(At(0), At(60))
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
         }.AddSample(At(5), 1);
         var highPriority = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(40), At(60))
+            CurrentCoverage = new HistoryCoverage(At(40), At(60))
         }.AddSample(At(10), 9);
         var query = new HistoryQuery("temp", At(40), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Last);
 
@@ -403,12 +403,12 @@ public class HistoryStoreMergerTests
         var persistent = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(0), At(40))
+            CurrentCoverage = new HistoryCoverage(At(0), At(40))
         }.AddSample(At(35), 17);
         var live = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(40), At(60))
+            CurrentCoverage = new HistoryCoverage(At(40), At(60))
         };
         var query = new HistoryQuery("temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Last);
 
@@ -431,7 +431,7 @@ public class HistoryStoreMergerTests
         var store = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(60))
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
         }.AddSample(At(35), 5);
         var query = new HistoryQuery("temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Last);
 
@@ -455,12 +455,12 @@ public class HistoryStoreMergerTests
         var persistent = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(0), At(40))
+            CurrentCoverage = new HistoryCoverage(At(0), At(40))
         }.AddJsonSample(At(5), held);
         var live = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(40), At(60))
+            CurrentCoverage = new HistoryCoverage(At(40), At(60))
         };
         var query = new HistoryQuery("temp", At(40), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Last);
 
@@ -487,13 +487,13 @@ public class HistoryStoreMergerTests
         var minStore = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(30)),
+            CurrentCoverage = new HistoryCoverage(At(0), At(30)),
             SupportedAggregations = Only(HistoryAggregations.Minimum, HistoryAggregations.Maximum)
         };
         var lastStore = new FakeHistoryStore
         {
             Priority = 50,
-            Coverage = new HistoryCoverage(At(30), At(60)),
+            CurrentCoverage = new HistoryCoverage(At(30), At(60)),
             SupportedAggregations = Only(HistoryAggregations.SampleAverage)
         };
         var query = new HistoryQuery("temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Minimum);
@@ -534,7 +534,7 @@ public class HistoryStoreMergerTests
         var store = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(5), At(25)),
+            CurrentCoverage = new HistoryCoverage(At(5), At(25)),
             SupportedAggregations = Only(HistoryAggregations.Minimum)
         }.AddSample(At(10), 1);
         var query = new HistoryQuery("temp", At(5), At(25), TimeSpan.FromMinutes(10), HistoryAggregations.Minimum);
@@ -553,7 +553,7 @@ public class HistoryStoreMergerTests
         var store = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(60)),
+            CurrentCoverage = new HistoryCoverage(At(0), At(60)),
             SupportedAggregations = Only()
         }.AddSample(At(10), 1);
         var query = new HistoryQuery("temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Count);
@@ -575,7 +575,7 @@ public class HistoryStoreMergerTests
         var store = new FakeHistoryStore
         {
             Priority = 100,
-            Coverage = new HistoryCoverage(At(0), At(60))
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
         }.AddSample(At(10), 1);
         var paths = new[] { "temperature", "humidity", "pressure" };
 

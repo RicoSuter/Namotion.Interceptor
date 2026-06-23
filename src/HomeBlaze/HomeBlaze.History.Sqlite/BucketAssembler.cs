@@ -9,7 +9,7 @@ namespace HomeBlaze.History.Sqlite;
 /// (already merged across partitions) and emits one <see cref="HistoryPoint"/> per aligned bucket in
 /// <c>[BucketStart(from) .. &lt; to)</c>, applying the SAME empty-bucket and carry rules as
 /// <c>InMemoryHistoryStoreCore.AggregateBucket</c>/<c>AggregateNumeric</c>. Numeric partials combine across
-/// partitions (Count sum, Sum sum, Min/Max min/max, SampleAverage=Sum/Count, StdDev from Count+Sum+SumOfSquares);
+/// partitions (Count sum, Sum sum, Min/Max min/max, SampleAverage=Sum/Count, StandardDeviation from Count+Sum+SumOfSquares);
 /// First picks the smallest <c>FirstTicks</c>, Last the largest <c>LastTicks</c>; TWA sums weighted_sum and
 /// total_duration (Task 5.4 owns the TWA value math).
 /// </summary>
@@ -216,7 +216,7 @@ internal static class BucketAssembler
             HistoryAggregations.Minimum => combined.Min,
             HistoryAggregations.Maximum => combined.Max,
             HistoryAggregations.Sum => combined.Sum,
-            HistoryAggregations.StdDev => SampleStandardDeviation(combined),
+            HistoryAggregations.StandardDeviation => SampleStandardDeviation(combined),
             _ => throw new HistoryAggregationNotSupportedException(
                 aggregation,
                 new HashSet<string>(StringComparer.Ordinal)
