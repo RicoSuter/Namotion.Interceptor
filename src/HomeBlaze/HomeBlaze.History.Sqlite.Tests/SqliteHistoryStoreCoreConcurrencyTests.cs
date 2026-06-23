@@ -20,8 +20,8 @@ public sealed class SqliteHistoryStoreCoreConcurrencyTests : IDisposable
 
     // now sits just after the recorded data and maxAge is long, so the concurrent Sweep keeps both
     // partition files (cutoff = now - maxAge falls long before either partition's range).
-    private SqliteHistoryStoreCore NewCore() =>
-        new(_directory, PartitionInterval.Weekly, TimeSpan.FromDays(3650), maxJsonSize: 8192,
+    private SqliteHistoryStore NewCore() =>
+        new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly, TimeSpan.FromDays(3650), maxJsonSize: 8192,
             getUtcNow: () => Base.AddDays(14));
 
     public void Dispose()

@@ -8,7 +8,7 @@ namespace HomeBlaze.History.Sqlite;
 /// One per bucketed query. Fed a map of <c>bucketStartTicks -&gt; combined <see cref="BucketPartial"/></c>
 /// (already merged across partitions) and emits one <see cref="HistoryPoint"/> per aligned bucket in
 /// <c>[BucketStart(from) .. &lt; to)</c>, applying the SAME empty-bucket and carry rules as
-/// <c>InMemoryHistoryStoreCore.AggregateBucket</c>/<c>AggregateNumeric</c>. Numeric partials combine across
+/// <c>InMemoryHistoryStore.AggregateBucket</c>/<c>AggregateNumeric</c>. Numeric partials combine across
 /// partitions (Count sum, Sum sum, Min/Max min/max, SampleAverage=Sum/Count, StandardDeviation from Count+Sum+SumOfSquares);
 /// First picks the smallest <c>FirstTicks</c>, Last the largest <c>LastTicks</c>; TWA sums weighted_sum and
 /// total_duration (Task 5.4 owns the TWA value math).

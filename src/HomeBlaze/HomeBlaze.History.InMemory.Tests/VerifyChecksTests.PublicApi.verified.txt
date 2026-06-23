@@ -2,12 +2,33 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace HomeBlaze.History.InMemory
 {
+    public sealed class InMemoryHistoryStore : HomeBlaze.History.Abstractions.IHistoryStore
+    {
+        public static readonly System.Collections.Generic.IReadOnlySet<string> AllAggregations;
+        public InMemoryHistoryStore(int priority, int maxPointsPerProperty, System.TimeSpan maxAge, int maxJsonSize, System.Func<System.DateTimeOffset> getUtcNow) { }
+        public HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }
+        public long EstimatedMemoryBytes { get; }
+        public long EvictedCount { get; }
+        public long OversizeCount { get; }
+        public int Priority { get; }
+        public long RecordedCount { get; }
+        public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
+        public long TotalSampleCount { get; }
+        public int TrackedPropertyCount { get; }
+        public HomeBlaze.History.Abstractions.HistoryPoint? GetSampleAtOrBefore(string propertyPath, System.DateTimeOffset asOf) { }
+        public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }
+        public HomeBlaze.History.Abstractions.HistorySeries Query(HomeBlaze.History.Abstractions.HistoryQuery query) { }
+        public System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryAsync(HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken) { }
+        public void Record(string propertyPath, System.DateTimeOffset timestamp, object? value, System.Type propertyType) { }
+        public void RecordMove(System.DateTimeOffset timestamp, string fromPath, string toPath) { }
+        public void Sweep() { }
+    }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("History")]
     [System.ComponentModel.Description("Records recent [State] history in memory (priority 100).")]
-    public class InMemoryHistoryStore : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
+    public class InMemoryHistoryStoreSubject : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
     {
-        public InMemoryHistoryStore(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.InMemory.InMemoryHistoryStore> logger) { }
+        public InMemoryHistoryStoreSubject(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.InMemory.InMemoryHistoryStoreSubject> logger) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int BufferTimeMilliseconds { get; set; }
         public HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }

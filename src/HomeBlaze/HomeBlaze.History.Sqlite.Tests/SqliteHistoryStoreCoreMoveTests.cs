@@ -10,8 +10,8 @@ public sealed class SqliteHistoryStoreCoreMoveTests : IDisposable
     private readonly string _directory =
         Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-move-" + Guid.NewGuid().ToString("N"));
 
-    private SqliteHistoryStoreCore NewCore() =>
-        new(_directory, PartitionInterval.Weekly, TimeSpan.FromHours(1), maxJsonSize: 8192,
+    private SqliteHistoryStore NewCore() =>
+        new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly, TimeSpan.FromHours(1), maxJsonSize: 8192,
             () => Base.AddHours(1));
 
     public void Dispose()

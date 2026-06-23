@@ -8,8 +8,8 @@ public class InMemoryHistoryStoreCoreRawTests
 {
     private static readonly DateTimeOffset Base = new(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
 
-    private static InMemoryHistoryStoreCore NewCore(DateTimeOffset now, int maxPoints = 1000, int maxAgeSeconds = 60) =>
-        new(maxPointsPerProperty: maxPoints, maxAge: TimeSpan.FromSeconds(maxAgeSeconds),
+    private static InMemoryHistoryStore NewCore(DateTimeOffset now, int maxPoints = 1000, int maxAgeSeconds = 60) =>
+        new(priority: 100, maxPointsPerProperty: maxPoints, maxAge: TimeSpan.FromSeconds(maxAgeSeconds),
             maxJsonSize: 8192, getUtcNow: () => now);
 
     [Fact]

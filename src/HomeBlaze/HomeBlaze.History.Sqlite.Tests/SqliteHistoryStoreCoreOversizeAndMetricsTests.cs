@@ -11,8 +11,8 @@ public sealed class SqliteHistoryStoreCoreOversizeAndMetricsTests : IDisposable
     private readonly string _directory =
         Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
 
-    private SqliteHistoryStoreCore NewCore(int maxJsonSize = 8192) =>
-        new(_directory, PartitionInterval.Weekly, TimeSpan.FromDays(365), maxJsonSize, () => Base.AddHours(1));
+    private SqliteHistoryStore NewCore(int maxJsonSize = 8192) =>
+        new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly, TimeSpan.FromDays(365), maxJsonSize, () => Base.AddHours(1));
 
     public void Dispose()
     {

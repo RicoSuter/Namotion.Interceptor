@@ -12,8 +12,8 @@ public sealed class SqliteHistoryStoreCoreTimeWeightedAverageTests : IDisposable
         Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
 
     // A far-future now and a long maxAge so nothing is swept while the cases run.
-    private SqliteHistoryStoreCore NewCore() =>
-        new(_directory, PartitionInterval.Weekly, TimeSpan.FromDays(365), maxJsonSize: 8192,
+    private SqliteHistoryStore NewCore() =>
+        new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly, TimeSpan.FromDays(365), maxJsonSize: 8192,
             getUtcNow: () => Base.AddHours(1));
 
     private static HistoryQuery Twa(int fromSecond, int toSecond, HistoryPoint? carrySeed = null) =>

@@ -13,11 +13,11 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace HomeBlaze.History.Sqlite.Tests;
 
 /// <summary>
-/// Drives <see cref="SqliteHistoryStore"/> against a real graph wired with the real
+/// Drives <see cref="SqliteHistoryStoreSubject"/> against a real graph wired with the real
 /// <see cref="SubjectPathResolver"/>, mutates [State] properties, and asserts that changes are
 /// recorded under their canonical property paths and persisted to the SQLite partition files.
 /// Because the store flushes on an interval, the harness forces a flush through the internal
-/// <see cref="SqliteHistoryStore.FlushNowAsync"/> test hook before each query, so the wait is
+/// <see cref="SqliteHistoryStoreSubject.FlushNowAsync"/> test hook before each query, so the wait is
 /// deterministic rather than timing-dependent.
 /// </summary>
 public class SqliteHistoryStoreRecordingTests
@@ -56,11 +56,11 @@ public class SqliteHistoryStoreRecordingTests
         return (context, root, rootManager);
     }
 
-    private static (SqliteHistoryStore Store, string DatabasePath) CreateStore(IInterceptorSubjectContext sharedContext)
+    private static (SqliteHistoryStoreSubject Store, string DatabasePath) CreateStore(IInterceptorSubjectContext sharedContext)
     {
         var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
 
-        var store = new SqliteHistoryStore(NullLogger<SqliteHistoryStore>.Instance)
+        var store = new SqliteHistoryStoreSubject(NullLogger<SqliteHistoryStoreSubject>.Instance)
         {
             DatabasePath = databasePath,
             // A short buffer time keeps the change-queue batch small so the warm-up loop converges quickly.
@@ -84,7 +84,7 @@ public class SqliteHistoryStoreRecordingTests
     /// queued samples become queryable immediately instead of waiting for the interval flush.
     /// </summary>
     private static async Task<HistorySeries> RecordAndWaitForValueAsync(
-        SqliteHistoryStore store, string propertyPath, Action<double> mutate, double targetValue)
+        SqliteHistoryStoreSubject store, string propertyPath, Action<double> mutate, double targetValue)
     {
         var warmupValue = -1000.0;
         await AsyncTestHelpers.WaitUntilAsync(
@@ -111,7 +111,7 @@ public class SqliteHistoryStoreRecordingTests
         return QuerySeries(store, propertyPath);
     }
 
-    private static HistorySeries QuerySeries(SqliteHistoryStore store, string propertyPath) =>
+    private static HistorySeries QuerySeries(SqliteHistoryStoreSubject store, string propertyPath) =>
         store.QueryAsync(
             new HistoryQuery(propertyPath, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1)),
             CancellationToken.None).GetAwaiter().GetResult();

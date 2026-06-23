@@ -1,31 +1,23 @@
-using System.ComponentModel;
-using HomeBlaze.Abstractions;
-using HomeBlaze.Abstractions.Attributes;
+using System.Collections.Concurrent;
+using System.Collections.Immutable;
+using System.Globalization;
+using System.Text.Json;
 using HomeBlaze.History.Abstractions;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Namotion.Interceptor;
-using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.History.InMemory;
 
 /// <summary>
-/// Priority-100 in-memory history store. A <see cref="BackgroundService"/> [InterceptorSubject]
-/// that records recordable [State] scalar property changes into per-path ring buffers and answers
-/// raw and bucketed history queries through <see cref="IHistoryStore"/>. Storage concerns are delegated
-/// to the graph-free <see cref="InMemoryHistoryStoreCore"/>; this subject owns the change-queue glue,
-/// path resolution and move detection.
+/// The graph-free in-memory history engine. Operates only on canonical path strings and typed values:
+/// per-path ring buffers, raw and bucketed queries, look-back, coverage, and metrics. It implements
+/// <see cref="IHistoryStore"/> directly so a future generic host can drive it without graph coupling;
+/// the <see cref="InMemoryHistoryStoreSubject"/> [InterceptorSubject] adapter delegates to it.
 /// </summary>
-[Category("History")]
-[Description("Records recent [State] history in memory (priority 100).")]
-[InterceptorSubject]
-public partial class InMemoryHistoryStore : BackgroundService, IConfigurable, IHistoryStore, ILifecycleHandler
+public sealed class InMemoryHistoryStore : IHistoryStore
 {
-    private static readonly IReadOnlySet<string> AllAggregations = new HashSet<string>(StringComparer.Ordinal)
+    /// <summary>
+    /// The aggregations every in-memory store path supports (the full set, independent of column type).
+    /// </summary>
+    public static readonly IReadOnlySet<string> AllAggregations = new HashSet<string>(StringComparer.Ordinal)
     {
         HistoryAggregations.Last,
         HistoryAggregations.First,
@@ -38,324 +30,497 @@ public partial class InMemoryHistoryStore : BackgroundService, IConfigurable, IH
         HistoryAggregations.StandardDeviation
     };
 
-    private readonly ILogger<InMemoryHistoryStore> _logger;
+    private readonly int _priority;
+    private readonly int _maxPointsPerProperty;
+    private readonly TimeSpan _maxAge;
+    private readonly int _maxJsonSize;
+    private readonly Func<DateTimeOffset> _getUtcNow;
+    private readonly DateTimeOffset _startTime;
 
-    private readonly ThroughputCounter _incomingThroughput = new();
-    private readonly ThroughputCounter _recordedThroughput = new();
+    private readonly ConcurrentDictionary<string, PropertyBuffer> _buffers = new(StringComparer.Ordinal);
 
-    // Last canonical subject path seen per subject, used for move detection. The resolver's own
-    // cache is cleared on every structural change, so GetPath() is always current; comparing the
-    // returned path to the stored one detects a move without depending on lifecycle event delivery.
-    private readonly Dictionary<IInterceptorSubject, string> _lastSubjectPath = new();
-    private readonly object _pathCacheLock = new();
+    private readonly List<MoveRecord> _moves = new();
+    private readonly object _movesLock = new();
 
-    private InMemoryHistoryStoreCore? _core;
+    private long _recordedCount;
+    private long _oversizeCount;
 
-    public InMemoryHistoryStore(ILogger<InMemoryHistoryStore> logger)
+    public InMemoryHistoryStore(
+        int priority, int maxPointsPerProperty, TimeSpan maxAge, int maxJsonSize, Func<DateTimeOffset> getUtcNow)
     {
-        _logger = logger;
-
-        Priority = 100;
-        MaxAgeSeconds = 60;
-        MaxPointsPerProperty = 1000;
-        BufferTimeMilliseconds = 250;
-        MaxJsonSize = 8192;
-        IsEnabled = true;
-
-        Status = "Stopped";
+        _priority = priority;
+        _maxPointsPerProperty = maxPointsPerProperty;
+        _maxAge = maxAge;
+        _maxJsonSize = maxJsonSize;
+        _getUtcNow = getUtcNow;
+        _startTime = getUtcNow();
     }
 
-    // Configuration properties (persisted to JSON)
+    public int Priority => _priority;
 
-    /// <summary>
-    /// Store priority. Higher values are preferred for overlapping ranges (in-memory is the highest tier).
-    /// </summary>
-    [Configuration]
-    public partial int Priority { get; set; }
-
-    /// <summary>
-    /// Retention window in seconds. Samples older than this are evicted on sweep.
-    /// </summary>
-    [Configuration]
-    public partial int MaxAgeSeconds { get; set; }
-
-    /// <summary>
-    /// Maximum samples retained per property path (ring-buffer capacity).
-    /// </summary>
-    [Configuration]
-    public partial int MaxPointsPerProperty { get; set; }
-
-    /// <summary>
-    /// Change-queue buffer time in milliseconds before a batch is flushed to the recorder.
-    /// </summary>
-    [Configuration]
-    public partial int BufferTimeMilliseconds { get; set; }
-
-    /// <summary>
-    /// Maximum JSON value size in characters; larger string values are recorded as an oversize placeholder.
-    /// </summary>
-    [Configuration]
-    public partial int MaxJsonSize { get; set; }
-
-    /// <summary>
-    /// Whether the store is enabled and should auto-start on application startup.
-    /// </summary>
-    [Configuration]
-    public partial bool IsEnabled { get; set; }
-
-    // State properties (runtime only)
-
-    /// <summary>
-    /// Current store status.
-    /// </summary>
-    [State]
-    public partial string Status { get; set; }
-
-    /// <summary>
-    /// Total number of samples recorded since start.
-    /// </summary>
-    [State]
-    public partial long RecordedCount { get; set; }
-
-    /// <summary>
-    /// Number of oversize string values replaced with a placeholder.
-    /// </summary>
-    [State]
-    public partial long OversizeCount { get; set; }
-
-    /// <summary>
-    /// Cumulative number of samples evicted by age or capacity.
-    /// </summary>
-    [State]
-    public partial long EvictedCount { get; set; }
-
-    /// <summary>
-    /// Number of distinct property paths currently tracked.
-    /// </summary>
-    [State]
-    public partial int TrackedPropertyCount { get; set; }
-
-    /// <summary>
-    /// Total number of samples currently retained across all property paths.
-    /// </summary>
-    [State]
-    public partial long TotalSampleCount { get; set; }
-
-    /// <summary>
-    /// Rough estimate of memory used by the retained samples in bytes.
-    /// </summary>
-    [State]
-    public partial long EstimatedMemoryBytes { get; set; }
-
-    /// <summary>
-    /// Average incoming changes per second (eligible [State] changes observed).
-    /// </summary>
-    [State]
-    public partial double IncomingChangesPerSecond { get; set; }
-
-    /// <summary>
-    /// Average recorded changes per second (samples written to the core).
-    /// </summary>
-    [State]
-    public partial double RecordedChangesPerSecond { get; set; }
-
-    // IHistoryStore
-
-    /// <inheritdoc />
-    public HistoryCoverage CurrentCoverage =>
-        _core?.CurrentCoverage ?? new HistoryCoverage(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
-
-    /// <inheritdoc />
     public IReadOnlySet<string> SupportedAggregations => AllAggregations;
 
-    /// <inheritdoc />
-    public Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken)
+    public long RecordedCount => Interlocked.Read(ref _recordedCount);
+    public long OversizeCount => Interlocked.Read(ref _oversizeCount);
+    public long EvictedCount => _buffers.Values.Sum(buffer => buffer.EvictedCount);
+    public int TrackedPropertyCount => _buffers.Count;
+    public long TotalSampleCount => _buffers.Values.Sum(buffer => (long)buffer.Count);
+
+    // Rough estimate: 4 references/values per Sample (~40 bytes) plus dictionary/key overhead.
+    public long EstimatedMemoryBytes => TotalSampleCount * 40 + _buffers.Count * 64;
+
+    public HistoryCoverage CurrentCoverage
     {
-        if (_core is null)
+        get
         {
-            return Task.FromResult(
-                new HistorySeries(query.PropertyPath, System.Collections.Immutable.ImmutableArray<HistoryPoint>.Empty, false));
-        }
-
-        return Task.FromResult(_core.Query(query));
-    }
-
-    /// <inheritdoc />
-    public ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
-        string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
-    {
-        return new ValueTask<HistoryPoint?>(_core?.GetSampleAtOrBefore(propertyPath, asOf));
-    }
-
-    // BackgroundService
-
-    /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        if (!IsEnabled)
-        {
-            Status = "Disabled";
-            return;
-        }
-
-        var context = ((IInterceptorSubject)this).Context;
-
-        var resolver = context.TryGetService<ISubjectPathResolver>();
-        if (resolver is null)
-        {
-            Status = "Error";
-            _logger.LogError("No ISubjectPathResolver is registered in the context; cannot record history.");
-            return;
-        }
-
-        var core = new InMemoryHistoryStoreCore(
-            maxPointsPerProperty: MaxPointsPerProperty,
-            maxAge: TimeSpan.FromSeconds(MaxAgeSeconds),
-            maxJsonSize: MaxJsonSize,
-            getUtcNow: () => DateTimeOffset.UtcNow);
-        _core = core;
-
-        // Drop detached subjects from the move-detection cache (memory hygiene).
-        context.AddService(this);
-
-        // Construct the processor first so its change-queue subscription is live before the first await
-        // (BackgroundService.StartAsync returns at that point); this minimizes the startup gap during
-        // which changes would otherwise go unobserved. InMemory is a direct recorder, so the buffered
-        // queue is never stuck and needs no bound (maxQueueDepth: null).
-        using var processor = new ChangeQueueProcessor(
-            this,
-            context,
-            propertyReference => propertyReference.TryGetRegisteredProperty() is { } registered && registered.HasHistory(),
-            (changes, _) => RecordBatch(core, resolver, changes),
-            TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
-            maxQueueDepth: null,
-            logger: _logger);
-
-        Status = "Running";
-
-        var sweepTask = RunSweepLoopAsync(core, stoppingToken);
-        try
-        {
-            await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-        }
-        finally
-        {
-            await sweepTask.ConfigureAwait(false);
-            Status = "Stopped";
+            var now = _getUtcNow();
+            var from = _startTime > now - _maxAge ? _startTime : now - _maxAge;
+            return new HistoryCoverage(from, now);
         }
     }
 
-    private ValueTask RecordBatch(
-        InMemoryHistoryStoreCore core, ISubjectPathResolver resolver, ReadOnlyMemory<SubjectPropertyChange> changes)
+    public void Record(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
     {
-        var span = changes.Span;
-        for (var index = 0; index < span.Length; index++)
+        var column = HistoryColumns.GetValueColumnFor(propertyType);
+        var isUlong = HistoryColumns.IsUlongProperty(propertyType);
+        var buffer = _buffers.GetOrAdd(propertyPath, _ => new PropertyBuffer(_maxPointsPerProperty, column, isUlong));
+
+        buffer.Append(CreateSample(timestamp, value, column, isUlong));
+        Interlocked.Increment(ref _recordedCount);
+    }
+
+    private Sample CreateSample(DateTimeOffset timestamp, object? value, ValueColumn column, bool isUlong)
+    {
+        if (value is null)
         {
-            var change = span[index];
+            return new Sample(timestamp, null, null, null);
+        }
 
-            var registered = change.Property.TryGetRegisteredProperty();
-            if (registered is null || !registered.HasHistory())
-            {
-                continue;
-            }
+        switch (column)
+        {
+            case ValueColumn.Double:
+                return new Sample(timestamp, null, Convert.ToDouble(value, CultureInfo.InvariantCulture), null);
 
-            _incomingThroughput.Add(1);
-
-            var subject = change.Property.Subject;
-            var subjectPath = resolver.GetPath(subject, PathStyle.Canonical);
-            if (subjectPath is null)
-            {
-                // Subject is no longer reachable (detached between change and flush); skip.
-                continue;
-            }
-
-            var propertyName = change.Property.Name;
-            var fullPath = JoinPath(subjectPath, propertyName);
-
-            lock (_pathCacheLock)
-            {
-                if (_lastSubjectPath.TryGetValue(subject, out var previousSubjectPath) &&
-                    !string.Equals(previousSubjectPath, subjectPath, StringComparison.Ordinal))
+            case ValueColumn.Long:
+                if (isUlong && value is ulong unsigned && unsigned > long.MaxValue)
                 {
-                    core.RecordMove(
-                        change.ChangedTimestamp,
-                        JoinPath(previousSubjectPath, propertyName),
-                        fullPath);
+                    return new Sample(timestamp, null, null, JsonSerializer.SerializeToElement(unsigned));
                 }
 
-                _lastSubjectPath[subject] = subjectPath;
-            }
+                return new Sample(timestamp, Convert.ToInt64(value, CultureInfo.InvariantCulture), null, null);
 
-            core.Record(fullPath, change.ChangedTimestamp, change.GetNewValue<object>(), registered.Type);
-            _recordedThroughput.Add(1);
+            case ValueColumn.Json:
+            default:
+                return new Sample(timestamp, null, null, SerializeJson(value));
         }
-
-        return ValueTask.CompletedTask;
     }
 
-    private async Task RunSweepLoopAsync(InMemoryHistoryStoreCore core, CancellationToken stoppingToken)
+    private JsonElement SerializeJson(object value)
     {
-        try
+        // enum -> name; decimal/string -> native JSON; oversize string -> placeholder.
+        JsonElement element = value is Enum
+            ? JsonSerializer.SerializeToElement(value.ToString())
+            : JsonSerializer.SerializeToElement(value);
+
+        if (element.ValueKind == JsonValueKind.String)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            var size = element.GetRawText().Length; // UTF-16 length is a safe upper-bound proxy for the cap
+            if (size > _maxJsonSize)
             {
-                core.Sweep();
-                RefreshMetrics(core);
-
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+                Interlocked.Increment(ref _oversizeCount);
+                return JsonSerializer.SerializeToElement(new OversizePlaceholder(true, size));
             }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+
+        return element;
+    }
+
+    private readonly record struct OversizePlaceholder(
+        [property: System.Text.Json.Serialization.JsonPropertyName("$oversize")] bool Oversize,
+        [property: System.Text.Json.Serialization.JsonPropertyName("size")] int Size);
+
+    private readonly record struct MoveRecord(DateTimeOffset Timestamp, string FromPath, string ToPath);
+
+    public void RecordMove(DateTimeOffset timestamp, string fromPath, string toPath)
+    {
+        lock (_movesLock)
         {
-        }
-        finally
-        {
-            RefreshMetrics(core);
+            _moves.Add(new MoveRecord(timestamp, fromPath, toPath));
         }
     }
 
-    private void RefreshMetrics(InMemoryHistoryStoreCore core)
+    private readonly record struct ChainLeg(string Path, DateTimeOffset ValidFrom, DateTimeOffset ValidTo);
+
+    // Builds the path chain for a queried (current) path by walking moves backwards; returns legs each
+    // scoped to [ValidFrom, ValidTo). With no moves, a single unbounded leg [MinValue, MaxValue).
+    private List<ChainLeg> ResolveChain(string currentPath)
     {
-        RecordedCount = core.RecordedCount;
-        OversizeCount = core.OversizeCount;
-        EvictedCount = core.EvictedCount;
-        TrackedPropertyCount = core.TrackedPropertyCount;
-        TotalSampleCount = core.TotalSampleCount;
-        EstimatedMemoryBytes = core.EstimatedMemoryBytes;
-        IncomingChangesPerSecond = _incomingThroughput.CurrentRate;
-        RecordedChangesPerSecond = _recordedThroughput.CurrentRate;
-    }
-
-    // Joins a canonical subject path with a property name. The root subject path is "/", so a root
-    // property is "/Temperature" (not "//Temperature"); a child at "/Child" yields "/Child/Pressure".
-    private static string JoinPath(string subjectPath, string propertyName) =>
-        subjectPath == "/" ? "/" + propertyName : subjectPath + "/" + propertyName;
-
-    // ILifecycleHandler
-
-    /// <inheritdoc />
-    public void HandleLifecycleChange(SubjectLifecycleChange change)
-    {
-        if (change.IsContextDetach)
+        MoveRecord[] snapshot;
+        lock (_movesLock)
         {
-            lock (_pathCacheLock)
+            snapshot = _moves.ToArray();
+        }
+
+        var legs = new List<ChainLeg>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var path = currentPath;
+        var validTo = DateTimeOffset.MaxValue;
+
+        while (visited.Add(path))
+        {
+            // Latest move INTO this path before validTo gives the time the subject arrived here.
+            MoveRecord? arrival = null;
+            foreach (var move in snapshot)
             {
-                _lastSubjectPath.Remove(change.Subject);
+                if (StringComparer.Ordinal.Equals(move.ToPath, path) && move.Timestamp <= validTo &&
+                    (arrival is null || move.Timestamp > arrival.Value.Timestamp))
+                {
+                    arrival = move;
+                }
             }
+
+            var validFrom = arrival?.Timestamp ?? DateTimeOffset.MinValue;
+            legs.Add(new ChainLeg(path, validFrom, validTo));
+
+            if (arrival is null)
+            {
+                break; // reached the original path
+            }
+
+            path = arrival.Value.FromPath;
+            validTo = arrival.Value.Timestamp;
+        }
+
+        return legs;
+    }
+
+    // Column/IsUlong for a (possibly moved) property: the first buffer found along its chain.
+    private PropertyBuffer? ResolveBuffer(string propertyPath)
+    {
+        foreach (var leg in ResolveChain(propertyPath))
+        {
+            if (_buffers.TryGetValue(leg.Path, out var buffer))
+            {
+                return buffer;
+            }
+        }
+
+        return null;
+    }
+
+    private List<Sample> RangeAcrossChain(List<ChainLeg> chain, DateTimeOffset from, DateTimeOffset to)
+    {
+        var result = new List<Sample>();
+        foreach (var leg in chain)
+        {
+            if (!_buffers.TryGetValue(leg.Path, out var buffer))
+            {
+                continue;
+            }
+
+            var legFrom = from > leg.ValidFrom ? from : leg.ValidFrom;
+            var legTo = to < leg.ValidTo ? to : leg.ValidTo;
+            if (legFrom < legTo)
+            {
+                result.AddRange(buffer.Range(legFrom, legTo));
+            }
+        }
+
+        result.Sort((left, right) => left.Timestamp.CompareTo(right.Timestamp));
+        return result;
+    }
+
+    public Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken)
+        => Task.FromResult(Query(query));
+
+    public ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
+        string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
+        => new(GetSampleAtOrBefore(propertyPath, asOf));
+
+    public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
+    {
+        foreach (var leg in ResolveChain(propertyPath))
+        {
+            // Only legs whose validity starts at or before asOf can hold the value.
+            if (leg.ValidFrom > asOf)
+            {
+                continue;
+            }
+
+            if (_buffers.TryGetValue(leg.Path, out var buffer))
+            {
+                var ceiling = asOf < leg.ValidTo ? asOf : leg.ValidTo - new TimeSpan(1);
+                var sample = buffer.AtOrBefore(ceiling);
+                if (sample is { } found && found.Timestamp >= leg.ValidFrom)
+                {
+                    return ToPoint(found, buffer.IsUlong);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public HistorySeries Query(HistoryQuery query)
+    {
+        return query.Bucket is null ? QueryRaw(query) : QueryBucketed(query);
+    }
+
+    private HistorySeries QueryRaw(HistoryQuery query)
+    {
+        var samples = new List<(Sample Sample, bool IsUlong)>();
+        foreach (var leg in ResolveChain(query.PropertyPath))
+        {
+            if (!_buffers.TryGetValue(leg.Path, out var buffer))
+            {
+                continue;
+            }
+
+            var from = query.From > leg.ValidFrom ? query.From : leg.ValidFrom;
+            var to = query.To < leg.ValidTo ? query.To : leg.ValidTo;
+            if (from >= to)
+            {
+                continue;
+            }
+
+            foreach (var sample in buffer.Range(from, to))
+            {
+                samples.Add((sample, buffer.IsUlong));
+            }
+        }
+
+        samples.Sort((left, right) => left.Sample.Timestamp.CompareTo(right.Sample.Timestamp));
+
+        var truncated = samples.Count > query.MaxPoints;
+        var kept = truncated ? samples.Skip(samples.Count - query.MaxPoints) : samples; // newest-N
+        var points = kept.Select(entry => ToPoint(entry.Sample, entry.IsUlong)).ToImmutableArray();
+        return new HistorySeries(query.PropertyPath, points, truncated);
+    }
+
+    private HistorySeries QueryBucketed(HistoryQuery query)
+    {
+        var bucket = query.Bucket!.Value;
+        var aggregation = query.Aggregation;
+
+        var chain = ResolveChain(query.PropertyPath);
+        var buffer = ResolveBuffer(query.PropertyPath);
+        var isUlong = buffer?.IsUlong ?? false;
+
+        if (buffer is not null && buffer.Column == ValueColumn.Json && !isUlong && IsNumericAggregation(aggregation))
+        {
+            throw new HistoryAggregationNotSupportedException(
+                aggregation,
+                new HashSet<string>(StringComparer.Ordinal)
+                {
+                    HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count
+                });
+        }
+
+        // Build all buckets first (deterministic count), then apply the newest-N budget.
+        var carriedNumber = IsCarryDependent(aggregation) ? query.CarrySeed?.Number : null;
+        var carriedJson = IsCarryDependent(aggregation) ? query.CarrySeed?.Json : null;
+
+        // For TWA, when the merger supplied no CarrySeed, fall back to this store's own held value
+        // entering the range (the sample at-or-before From), so an empty leading bucket is not a gap.
+        // The chain-aware GetSampleAtOrBefore follows moves, so this seeds both single-path and moved-path TWA.
+        if (aggregation == HistoryAggregations.TimeWeightedAverage && carriedNumber is null)
+        {
+            var prior = GetSampleAtOrBefore(query.PropertyPath, BucketAlignment.BucketStart(query.From, bucket));
+            carriedNumber = prior?.Number;
+        }
+
+        var allPoints = new List<HistoryPoint>();
+        var bucketStart = BucketAlignment.BucketStart(query.From, bucket);
+        while (bucketStart < query.To)
+        {
+            var bucketEnd = bucketStart + bucket;
+            var samples = RangeAcrossChain(chain, bucketStart, bucketEnd);
+
+            var point = AggregateBucket(aggregation, bucketStart, bucketEnd, samples, isUlong, ref carriedNumber, ref carriedJson);
+            allPoints.Add(point);
+
+            bucketStart = bucketEnd;
+        }
+
+        var truncated = allPoints.Count > query.MaxPoints;
+        var kept = truncated
+            ? allPoints.Skip(allPoints.Count - query.MaxPoints).ToImmutableArray()
+            : allPoints.ToImmutableArray();
+
+        return new HistorySeries(query.PropertyPath, kept, truncated);
+    }
+
+    private static bool IsCarryDependent(string aggregation) =>
+        aggregation is HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
+
+    private static bool IsNumericAggregation(string aggregation) =>
+        aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
+            or HistoryAggregations.Minimum or HistoryAggregations.Maximum
+            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation;
+
+    private HistoryPoint AggregateBucket(
+        string aggregation, DateTimeOffset bucketStart, DateTimeOffset bucketEnd, List<Sample> samples, bool isUlong,
+        ref double? carriedNumber, ref JsonElement? carriedJson)
+    {
+        switch (aggregation)
+        {
+            case HistoryAggregations.Count:
+                return new HistoryPoint(bucketStart, samples.Count, null);
+
+            case HistoryAggregations.Last:
+                if (samples.Count > 0)
+                {
+                    var lastPoint = ToPoint(samples[^1], isUlong);
+                    carriedNumber = lastPoint.Number;
+                    carriedJson = lastPoint.Json;
+                }
+
+                return new HistoryPoint(bucketStart, carriedNumber, carriedJson);
+
+            case HistoryAggregations.First:
+                return samples.Count > 0
+                    ? ToPoint(samples[0], isUlong) with { Timestamp = bucketStart }
+                    : new HistoryPoint(bucketStart, null, null);
+
+            case HistoryAggregations.TimeWeightedAverage:
+                return TimeWeightedAverageBucket(bucketStart, bucketEnd, samples, isUlong, ref carriedNumber);
+
+            default:
+                return AggregateNumeric(aggregation, bucketStart, samples, isUlong);
         }
     }
 
-    // IConfigurable
-
-    /// <inheritdoc />
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+    private HistoryPoint TimeWeightedAverageBucket(
+        DateTimeOffset bucketStart, DateTimeOffset bucketEnd, List<Sample> samples, bool isUlong,
+        ref double? carriedNumber)
     {
-        // Size knobs (MaxPointsPerProperty, MaxAgeSeconds, MaxJsonSize) and BufferTime are read once when
-        // the core and change-queue processor are built in ExecuteAsync. Like OpcUaServer, configuration
-        // changes take effect on the next start; the host restarts the background service to apply them.
-        return Task.CompletedTask;
+        double weightedSum = 0;
+        double totalDuration = 0;
+
+        var previousTimestamp = bucketStart;
+        var previousValue = carriedNumber; // value held entering the bucket (carry / look-back / seed)
+
+        foreach (var sample in samples)
+        {
+            var duration = (sample.Timestamp - previousTimestamp).TotalSeconds;
+            if (previousValue is { } held && duration > 0)
+            {
+                weightedSum += held * duration;
+                totalDuration += duration;
+            }
+
+            var numeric = Numeric(sample, isUlong);
+            if (numeric is not null)
+            {
+                previousValue = numeric;
+            }
+
+            previousTimestamp = sample.Timestamp;
+        }
+
+        // Close the final interval to the bucket end.
+        var tailDuration = (bucketEnd - previousTimestamp).TotalSeconds;
+        if (previousValue is { } tailHeld && tailDuration > 0)
+        {
+            weightedSum += tailHeld * tailDuration;
+            totalDuration += tailDuration;
+        }
+
+        // Advance the carried value to the bucket's last numeric sample (so the next bucket continues it).
+        if (samples.Count > 0)
+        {
+            var lastNumeric = Numeric(samples[^1], isUlong);
+            if (lastNumeric is not null)
+            {
+                carriedNumber = lastNumeric;
+            }
+        }
+
+        return new HistoryPoint(bucketStart, totalDuration > 0 ? weightedSum / totalDuration : null, null);
+    }
+
+    private HistoryPoint AggregateNumeric(
+        string aggregation, DateTimeOffset bucketStart, List<Sample> samples, bool isUlong)
+    {
+        var values = samples
+            .Select(sample => Numeric(sample, isUlong))
+            .Where(number => number.HasValue)
+            .Select(number => number!.Value)
+            .ToList();
+
+        if (values.Count == 0)
+        {
+            return new HistoryPoint(bucketStart, null, null);
+        }
+
+        double? result = aggregation switch
+        {
+            HistoryAggregations.SampleAverage => values.Average(),
+            HistoryAggregations.Minimum => values.Min(),
+            HistoryAggregations.Maximum => values.Max(),
+            HistoryAggregations.Sum => values.Sum(),
+            HistoryAggregations.StandardDeviation => SampleStandardDeviation(values),
+            _ => throw new HistoryAggregationNotSupportedException(
+                aggregation,
+                new HashSet<string>(StringComparer.Ordinal)
+                {
+                    HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count
+                })
+        };
+
+        return new HistoryPoint(bucketStart, result, null);
+    }
+
+    private static double? SampleStandardDeviation(List<double> values)
+    {
+        if (values.Count < 2)
+        {
+            return null; // sample stddev is undefined for n < 2
+        }
+
+        var mean = values.Average();
+        var sumSquares = values.Sum(value => (value - mean) * (value - mean));
+        return Math.Sqrt(sumSquares / (values.Count - 1));
+    }
+
+    // numeric value of a sample for aggregation; null for non-numeric json (decimal/string/enum)
+    private static double? Numeric(Sample sample, bool isUlong)
+    {
+        if (sample.Double is { } doubleValue) return doubleValue;
+        if (sample.Long is { } longValue) return longValue;
+        if (isUlong && sample.Json is { ValueKind: JsonValueKind.Number } json) return json.GetDouble();
+        return null;
+    }
+
+    public void Sweep()
+    {
+        var cutoff = _getUtcNow() - _maxAge;
+        foreach (var buffer in _buffers.Values)
+        {
+            buffer.EvictOlderThan(cutoff);
+        }
+    }
+
+    // Maps a stored Sample to the wire HistoryPoint. Numeric columns -> Number; json columns -> Json;
+    // ulong overflow (json number on a ulong property) -> Number via COALESCE so numeric aggregation works.
+    private static HistoryPoint ToPoint(Sample sample, bool isUlong)
+    {
+        if (sample.Double is { } doubleValue)
+        {
+            return new HistoryPoint(sample.Timestamp, doubleValue, null);
+        }
+
+        if (sample.Long is { } longValue)
+        {
+            return new HistoryPoint(sample.Timestamp, longValue, null);
+        }
+
+        if (sample.Json is { } json)
+        {
+            double? number = isUlong && json.ValueKind == JsonValueKind.Number ? json.GetDouble() : null;
+            return new HistoryPoint(sample.Timestamp, number, json);
+        }
+
+        return new HistoryPoint(sample.Timestamp, null, null); // explicit null sample
     }
 }

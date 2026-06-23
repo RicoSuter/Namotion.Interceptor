@@ -3,7 +3,7 @@
 @using HomeBlaze.History.Sqlite
 @using Namotion.Interceptor
 
-@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SqliteHistoryStore))]
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SqliteHistoryStoreSubject))]
 @implements ISubjectEditComponent
 
 <MudForm>
@@ -74,7 +74,7 @@
     [Parameter]
     public bool IsCreating { get; set; }
 
-    private SqliteHistoryStore? Store => Subject as SqliteHistoryStore;
+    private SqliteHistoryStoreSubject? Store => Subject as SqliteHistoryStoreSubject;
 
     private bool _isEnabled = true;
     private string _databasePath = string.Empty;

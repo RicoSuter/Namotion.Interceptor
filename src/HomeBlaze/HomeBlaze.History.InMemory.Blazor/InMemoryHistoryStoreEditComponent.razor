@@ -3,7 +3,7 @@
 @using HomeBlaze.History.InMemory
 @using Namotion.Interceptor
 
-@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(InMemoryHistoryStore))]
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(InMemoryHistoryStoreSubject))]
 @implements ISubjectEditComponent
 
 <MudForm>
@@ -54,7 +54,7 @@
     [Parameter]
     public bool IsCreating { get; set; }
 
-    private InMemoryHistoryStore? Store => Subject as InMemoryHistoryStore;
+    private InMemoryHistoryStoreSubject? Store => Subject as InMemoryHistoryStoreSubject;
 
     private bool _isEnabled = true;
     private int _priority;

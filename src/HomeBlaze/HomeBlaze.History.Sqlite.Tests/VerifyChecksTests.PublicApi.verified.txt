@@ -8,12 +8,35 @@ namespace HomeBlaze.History.Sqlite
         Weekly = 1,
         Monthly = 2,
     }
+    public sealed class SqliteHistoryStore : HomeBlaze.History.Abstractions.IHistoryStore, System.IDisposable
+    {
+        public static readonly System.Collections.Generic.IReadOnlySet<string> AllAggregations;
+        public SqliteHistoryStore(int priority, string databaseDirectory, HomeBlaze.History.Sqlite.PartitionInterval partitionInterval, System.TimeSpan maxAge, int maxJsonSize, System.Func<System.DateTimeOffset> getUtcNow) { }
+        public HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }
+        public long EstimatedStorageBytes { get; }
+        public string? LastError { get; }
+        public System.DateTimeOffset? LastFlushUtc { get; }
+        public long OversizeCount { get; }
+        public int Priority { get; }
+        public int QueueDepth { get; }
+        public long RecordedCount { get; }
+        public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
+        public void Dispose() { }
+        public System.Threading.Tasks.Task FlushAsync(System.Threading.CancellationToken cancellationToken) { }
+        public HomeBlaze.History.Abstractions.HistoryPoint? GetSampleAtOrBefore(string propertyPath, System.DateTimeOffset asOf) { }
+        public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }
+        public HomeBlaze.History.Abstractions.HistorySeries Query(HomeBlaze.History.Abstractions.HistoryQuery query) { }
+        public System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryAsync(HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken) { }
+        public void Record(string propertyPath, System.DateTimeOffset timestamp, object? value, System.Type propertyType) { }
+        public void RecordMove(System.DateTimeOffset timestamp, string fromPath, string toPath) { }
+        public void Sweep() { }
+    }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("History")]
     [System.ComponentModel.Description("Persists [State] history to partitioned SQLite files (priority 50).")]
-    public class SqliteHistoryStore : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
+    public class SqliteHistoryStoreSubject : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
     {
-        public SqliteHistoryStore(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.Sqlite.SqliteHistoryStore> logger) { }
+        public SqliteHistoryStoreSubject(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject> logger) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int BufferTimeMilliseconds { get; set; }
         public HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }

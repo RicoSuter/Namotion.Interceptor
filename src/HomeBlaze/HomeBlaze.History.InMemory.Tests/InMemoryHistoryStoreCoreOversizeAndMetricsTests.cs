@@ -8,8 +8,8 @@ public class InMemoryHistoryStoreCoreOversizeAndMetricsTests
 {
     private static readonly DateTimeOffset Base = new(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
 
-    private static InMemoryHistoryStoreCore NewCore(int maxJsonSize = 8192, int maxPoints = 1000) =>
-        new(maxPointsPerProperty: maxPoints, maxAge: TimeSpan.FromHours(1),
+    private static InMemoryHistoryStore NewCore(int maxJsonSize = 8192, int maxPoints = 1000) =>
+        new(priority: 100, maxPointsPerProperty: maxPoints, maxAge: TimeSpan.FromHours(1),
             maxJsonSize: maxJsonSize, getUtcNow: () => Base.AddHours(1));
 
     [Fact]

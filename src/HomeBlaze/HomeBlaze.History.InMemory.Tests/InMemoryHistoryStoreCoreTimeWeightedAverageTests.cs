@@ -8,8 +8,8 @@ public class InMemoryHistoryStoreCoreTimeWeightedAverageTests
     private static readonly DateTimeOffset Base = new(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
     private static readonly TimeSpan Bucket = TimeSpan.FromSeconds(10);
 
-    private static InMemoryHistoryStoreCore NewCore() =>
-        new(maxPointsPerProperty: 1000, maxAge: TimeSpan.FromHours(1),
+    private static InMemoryHistoryStore NewCore() =>
+        new(priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromHours(1),
             maxJsonSize: 8192, getUtcNow: () => Base.AddHours(1));
 
     private static HistoryQuery Twa(int fromSecond, int toSecond, HistoryPoint? carrySeed = null) =>

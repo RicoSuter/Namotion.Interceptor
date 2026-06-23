@@ -12,8 +12,8 @@ public sealed class SqliteHistoryStoreCoreBucketedTests : IDisposable
         Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
 
     // A far-future now and a long maxAge so nothing is swept while the bucketed cases run.
-    private SqliteHistoryStoreCore NewCore() =>
-        new(_directory, PartitionInterval.Weekly, TimeSpan.FromHours(1), maxJsonSize: 8192,
+    private SqliteHistoryStore NewCore() =>
+        new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly, TimeSpan.FromHours(1), maxJsonSize: 8192,
             getUtcNow: () => Base.AddHours(1));
 
     private static HistoryQuery BucketedQuery(string aggregation, int fromSecond, int toSecond,
@@ -21,7 +21,7 @@ public sealed class SqliteHistoryStoreCoreBucketedTests : IDisposable
         new("/a/Value", Base.AddSeconds(fromSecond), Base.AddSeconds(toSecond), Bucket, aggregation,
             MaxPoints: 1000, CarrySeed: carrySeed);
 
-    private async Task<SqliteHistoryStoreCore> WithDoublesAsync(params (int second, double value)[] samples)
+    private async Task<SqliteHistoryStore> WithDoublesAsync(params (int second, double value)[] samples)
     {
         var core = NewCore();
         foreach (var (second, value) in samples)

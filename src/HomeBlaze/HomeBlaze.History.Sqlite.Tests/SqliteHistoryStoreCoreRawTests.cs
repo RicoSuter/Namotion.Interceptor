@@ -11,8 +11,8 @@ public sealed class SqliteHistoryStoreCoreRawTests : IDisposable
     private readonly string _directory =
         Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
 
-    private SqliteHistoryStoreCore NewCore(DateTimeOffset now, int maxAgeSeconds = 3600) =>
-        new(_directory, PartitionInterval.Weekly, TimeSpan.FromSeconds(maxAgeSeconds), maxJsonSize: 8192, () => now);
+    private SqliteHistoryStore NewCore(DateTimeOffset now, int maxAgeSeconds = 3600) =>
+        new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly, TimeSpan.FromSeconds(maxAgeSeconds), maxJsonSize: 8192, () => now);
 
     public void Dispose()
     {

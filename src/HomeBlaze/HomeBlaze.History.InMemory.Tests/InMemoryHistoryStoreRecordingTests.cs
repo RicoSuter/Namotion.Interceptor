@@ -13,7 +13,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace HomeBlaze.History.InMemory.Tests;
 
 /// <summary>
-/// Drives <see cref="InMemoryHistoryStore"/> against a real graph wired with the real
+/// Drives <see cref="InMemoryHistoryStoreSubject"/> against a real graph wired with the real
 /// <see cref="SubjectPathResolver"/>, mutates [State] properties, and asserts that changes are
 /// recorded under their canonical property paths.
 /// </summary>
@@ -53,9 +53,9 @@ public class InMemoryHistoryStoreRecordingTests
         return (context, root, rootManager);
     }
 
-    private static InMemoryHistoryStore CreateStore(IInterceptorSubjectContext sharedContext)
+    private static InMemoryHistoryStoreSubject CreateStore(IInterceptorSubjectContext sharedContext)
     {
-        var store = new InMemoryHistoryStore(NullLogger<InMemoryHistoryStore>.Instance);
+        var store = new InMemoryHistoryStoreSubject(NullLogger<InMemoryHistoryStoreSubject>.Instance);
 
         // Share the graph: the store's ChangeQueueProcessor subscription and path resolver are
         // resolved through this fallback, so it observes the whole graph (like an attached subject).
@@ -72,7 +72,7 @@ public class InMemoryHistoryStoreRecordingTests
     /// target value and polls until it lands, so the asserted value is never lost to the startup race.
     /// </summary>
     private static async Task<HistorySeries> RecordAndWaitForValueAsync(
-        InMemoryHistoryStore store, string propertyPath, Action<double> mutate, double targetValue)
+        InMemoryHistoryStoreSubject store, string propertyPath, Action<double> mutate, double targetValue)
     {
         // Warm-up: bridge the startup gap until the subscription is live and recording. Each iteration
         // uses a distinct negative value so the equality check never drops it as a no-op repeat. Driving
@@ -98,7 +98,7 @@ public class InMemoryHistoryStoreRecordingTests
         return QuerySeries(store, propertyPath);
     }
 
-    private static HistorySeries QuerySeries(InMemoryHistoryStore store, string propertyPath) =>
+    private static HistorySeries QuerySeries(InMemoryHistoryStoreSubject store, string propertyPath) =>
         store.QueryAsync(
             new HistoryQuery(propertyPath, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1)),
             CancellationToken.None).GetAwaiter().GetResult();
