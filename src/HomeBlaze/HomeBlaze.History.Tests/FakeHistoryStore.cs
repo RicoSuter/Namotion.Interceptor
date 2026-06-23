@@ -1,7 +1,8 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.History.Abstractions;
 
-namespace HomeBlaze.History.Abstractions.Tests;
+namespace HomeBlaze.History.Tests;
 
 /// <summary>
 /// Configurable in-memory <see cref="IHistoryStore"/> for deterministic merger tests. Holds a flat

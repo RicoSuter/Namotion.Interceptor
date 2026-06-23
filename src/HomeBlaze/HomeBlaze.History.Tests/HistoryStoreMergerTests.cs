@@ -1,7 +1,8 @@
-using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.History;
+using HomeBlaze.History.Abstractions;
 
-namespace HomeBlaze.History.Abstractions.Tests;
+namespace HomeBlaze.History.Tests;
 
 public class HistoryStoreMergerTests
 {

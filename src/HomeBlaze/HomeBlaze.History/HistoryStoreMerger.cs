@@ -1,7 +1,8 @@
 using System.Collections.Immutable;
+using HomeBlaze.History.Abstractions;
 using Namotion.Interceptor.Registry.Abstractions;
 
-namespace HomeBlaze.History.Abstractions;
+namespace HomeBlaze.History;
 
 /// <summary>
 /// Stateless cross-store query merger. Resolves a single <see cref="HistoryQuery"/> against a set

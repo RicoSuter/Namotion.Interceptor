@@ -67,13 +67,6 @@ namespace HomeBlaze.History.Abstractions
         public string PropertyPath { get; init; }
         public bool Truncated { get; init; }
     }
-    public static class HistoryStoreMerger
-    {
-        public static System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryHistoryAsync(this Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken) { }
-        public static System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryHistoryAsync(this System.Collections.Generic.IEnumerable<HomeBlaze.History.Abstractions.IHistoryStore> stores, HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken) { }
-        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistorySeries>> QueryHistoryAsync(this Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry registry, System.Collections.Generic.IReadOnlyList<string> propertyPaths, System.DateTimeOffset from, System.DateTimeOffset to, System.TimeSpan? bucket, string aggregation, int maxPoints, System.Threading.CancellationToken cancellationToken) { }
-        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistorySeries>> QueryHistoryAsync(this System.Collections.Generic.IEnumerable<HomeBlaze.History.Abstractions.IHistoryStore> stores, System.Collections.Generic.IReadOnlyList<string> propertyPaths, System.DateTimeOffset from, System.DateTimeOffset to, System.TimeSpan? bucket, string aggregation, int maxPoints, System.Threading.CancellationToken cancellationToken) { }
-    }
     public interface IHistoryStore
     {
         HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }
