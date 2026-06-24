@@ -83,6 +83,7 @@
     <Project Path="HomeBlaze/HomeBlaze.History.Sqlite/HomeBlaze.History.Sqlite.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.History.Sqlite.Blazor/HomeBlaze.History.Sqlite.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.History.Sqlite.Tests/HomeBlaze.History.Sqlite.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.History.Parity.Tests/HomeBlaze.History.Parity.Tests.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/NuGet/">
     <Project Path="HomeBlaze/Namotion.NuGet.Plugins.Tests/Namotion.NuGet.Plugins.Tests.csproj" />
