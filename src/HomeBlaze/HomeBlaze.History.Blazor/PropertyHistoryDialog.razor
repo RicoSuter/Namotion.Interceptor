@@ -1,0 +1,270 @@
+@using HomeBlaze.History
+@using HomeBlaze.History.Abstractions
+@using Namotion.Interceptor.Registry.Abstractions
+@implements IDisposable
+
+<MudDialog>
+    <DialogContent>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+            <MudSelect T="int" Value="_rangeIndex" ValueChanged="OnRangeChanged" Label="Range" Dense="true" Style="min-width:160px;">
+                @for (var index = 0; index < Presets.Length; index++)
+                {
+                    var captured = index;
+                    <MudSelectItem T="int" Value="captured">@Presets[captured].Label</MudSelectItem>
+                }
+            </MudSelect>
+
+            @if (_useCustom)
+            {
+                <MudDatePicker @bind-Date="_customFrom" @bind-Date:after="LoadAsync" Label="From" />
+                <MudDatePicker @bind-Date="_customTo" @bind-Date:after="LoadAsync" Label="To" />
+            }
+
+            <MudSelect T="string" Value="_aggregation" ValueChanged="OnAggregationChanged" Label="Aggregation" Dense="true" Style="min-width:200px;">
+                @foreach (var aggregation in _aggregations)
+                {
+                    <MudSelectItem T="string" Value="aggregation">@Label(aggregation)</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        <div style="height:360px; margin-top:16px;">
+            @if (_loading)
+            {
+                <MudProgressCircular Indeterminate="true" />
+            }
+            else if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Warning">@_error</MudAlert>
+            }
+            else if (_chartSeries is { Count: > 0 })
+            {
+                <MudChart ChartType="ChartType.Timeseries"
+                          T="double"
+                          ChartSeries="_chartSeries"
+                          ChartOptions="_chartOptions"
+                          Width="100%" Height="340px" />
+            }
+            else if (_tableRows is { Count: > 0 })
+            {
+                <MudSimpleTable Dense="true" Style="max-height:340px; overflow:auto;">
+                    <thead><tr><th>Time</th><th>Value</th></tr></thead>
+                    <tbody>
+                    @foreach (var row in _tableRows)
+                    {
+                        <tr><td>@row.Time.LocalDateTime.ToString("g")</td><td>@row.Value</td></tr>
+                    }
+                    </tbody>
+                </MudSimpleTable>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">No data in this range.</MudText>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter] public string PropertyPath { get; set; } = string.Empty;
+    [Parameter] public string DisplayName { get; set; } = string.Empty;
+    [Parameter] public ISubjectRegistry Registry { get; set; } = default!;
+    [Parameter] public Type PropertyType { get; set; } = typeof(double);
+    [Parameter] public bool IsCumulative { get; set; }
+
+    private static readonly (string Label, TimeSpan? Range)[] Presets =
+    {
+        ("Last hour", TimeSpan.FromHours(1)),
+        ("Last 6 hours", TimeSpan.FromHours(6)),
+        ("Last 24 hours", TimeSpan.FromHours(24)),
+        ("Last 7 days", TimeSpan.FromDays(7)),
+        ("Last 30 days", TimeSpan.FromDays(30)),
+        ("Custom", null),
+    };
+
+    private int _rangeIndex = 2; // default: last 24 hours
+    private bool _useCustom;
+    private DateTime? _customFrom;
+    private DateTime? _customTo;
+
+    private IReadOnlyList<string> _aggregations = Array.Empty<string>();
+    private string _aggregation = HistoryAggregations.Last;
+
+    private bool _loading;
+    private string? _error;
+    private List<ChartSeries<double>>? _chartSeries;
+    private List<(DateTimeOffset Time, string Value)>? _tableRows;
+    private CancellationTokenSource? _loadCts;
+
+    // Single-color palette so the gap-split runs of one logical series share one color
+    // (visual continuity with breaks). TimeLabelFormat / TimeLabelSpacing are updated per range in LoadAsync.
+    private readonly TimeSeriesChartOptions _chartOptions = new()
+    {
+        ChartPalette = new[] { "#2979FF" },
+        LineDisplayType = LineDisplayType.Line,
+        TimeLabelFormat = "HH:mm",
+        TimeLabelSpacing = TimeSpan.FromHours(3)
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var column = HistoryColumns.GetValueColumnFor(PropertyType);
+        var union = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var store in Registry.KnownSubjects.Keys.OfType<IHistoryStore>())
+        {
+            union.UnionWith(store.SupportedAggregations);
+        }
+
+        _aggregations = PropertyHistoryChartModel.GateAggregations(column, IsCumulative, union);
+        _aggregation = _aggregations.Count > 0 ? _aggregations[0] : HistoryAggregations.Last;
+        await LoadAsync();
+    }
+
+    private async Task OnRangeChanged(int index)
+    {
+        _rangeIndex = index;
+        _useCustom = Presets[index].Range is null;
+        await LoadAsync();
+    }
+
+    private async Task OnAggregationChanged(string aggregation)
+    {
+        _aggregation = aggregation;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        // Cancel any in-flight load so a slower earlier query cannot overwrite this newer selection.
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        var cancellationToken = _loadCts.Token;
+
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            var to = _useCustom
+                ? new DateTimeOffset(_customTo ?? DateTime.UtcNow, TimeSpan.Zero)
+                : DateTimeOffset.UtcNow;
+            var from = _useCustom
+                ? new DateTimeOffset(_customFrom ?? DateTime.UtcNow.AddHours(-1), TimeSpan.Zero)
+                : to - Presets[_rangeIndex].Range!.Value;
+
+            if (to <= from)
+            {
+                _error = "The 'to' time must be after 'from'.";
+                _chartSeries = null;
+                _tableRows = null;
+                return;
+            }
+
+            var range = to - from;
+            var bucket = PropertyHistoryChartModel.AutoBucket(range);
+            _chartOptions.TimeLabelFormat = range <= TimeSpan.FromHours(24) ? "HH:mm" : "MM-dd";
+            _chartOptions.TimeLabelSpacing = TimeSpan.FromTicks(Math.Max(range.Ticks / 8, bucket.Ticks));
+
+            var series = await Registry.QueryHistoryAsync(
+                new HistoryQuery(PropertyPath, from, to, bucket, _aggregation, MaxPoints: 1000),
+                cancellationToken);
+
+            // Superseded by a newer load while this query ran; leave the newer result in place.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            BuildView(series);
+        }
+        catch (HistoryAggregationNotSupportedException exception)
+        {
+            _error = exception.Message;
+            _chartSeries = null;
+            _tableRows = null;
+        }
+        catch (OperationCanceledException)
+        {
+            return; // superseded by a newer load; leave its result in place
+        }
+        catch (Exception exception)
+        {
+            _error = "Could not load history: " + exception.Message;
+            _chartSeries = null;
+            _tableRows = null;
+        }
+        finally
+        {
+            // Only the current (non-superseded) load updates the loading state and re-renders.
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                _loading = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private void BuildView(HistorySeries series)
+    {
+        if (series.Points.Any(point => point.Number is not null))
+        {
+            var runs = PropertyHistoryChartModel.SplitIntoGapRuns(series.Points);
+            _chartSeries = runs
+                .Select(run => new ChartSeries<double>
+                {
+                    Name = DisplayName,
+                    Visible = true,
+                    Data = new ChartData<double>(
+                        run.Select(point => (point.Timestamp.UtcDateTime, point.Number!.Value)).ToList())
+                })
+                .ToList();
+            _tableRows = null;
+        }
+        else
+        {
+            _chartSeries = null;
+            _tableRows = series.Points
+                .Where(point => point.Json is not null)
+                .Select(point => (point.Timestamp, point.Json!.Value.ToString()))
+                .ToList();
+        }
+    }
+
+    private static string Label(string aggregation) => aggregation switch
+    {
+        HistoryAggregations.TimeWeightedAverage => "Average",
+        HistoryAggregations.SampleAverage => "Sample Average",
+        _ => aggregation
+    };
+
+    private void Close() => MudDialog?.Close(DialogResult.Ok(true));
+
+    public void Dispose() => _loadCts?.Dispose();
+
+    public static Task<IDialogReference> ShowAsync(
+        IDialogService dialogService,
+        ISubjectRegistry registry,
+        string propertyPath,
+        string displayName,
+        Type propertyType,
+        bool isCumulative)
+    {
+        var parameters = new DialogParameters<PropertyHistoryDialog>
+        {
+            { dialog => dialog.Registry, registry },
+            { dialog => dialog.PropertyPath, propertyPath },
+            { dialog => dialog.DisplayName, displayName },
+            { dialog => dialog.PropertyType, propertyType },
+            { dialog => dialog.IsCumulative, isCumulative }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true };
+        return dialogService.ShowAsync<PropertyHistoryDialog>($"History: {displayName}", parameters, options);
+    }
+}

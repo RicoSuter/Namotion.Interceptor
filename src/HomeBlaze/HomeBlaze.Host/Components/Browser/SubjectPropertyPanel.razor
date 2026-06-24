@@ -1,5 +1,7 @@
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.History.Abstractions
+@using HomeBlaze.History.Blazor
 @using HomeBlaze.Host.Components.Dialogs
 @using HomeBlaze.Storage.Abstractions
 
@@ -329,6 +331,15 @@
             {
                 @displayValue
             }
+            @if (CanShowHistory(prop))
+            {
+                <MudIconButton Icon="@Icons.Material.Filled.ShowChart"
+                               Size="Size.Small"
+                               Class="ml-1"
+                               Style="padding: 0; width: 20px; height: 20px;"
+                               title="Show history"
+                               OnClick="@(() => OpenPropertyHistoryDialogAsync(prop))" />
+            }
         </MudText>
 
         @if (isExpanded)
@@ -385,6 +396,36 @@
 
         var title = GetSubjectTitle();
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
+    }
+
+    private bool CanShowHistory(RegisteredSubjectProperty property)
+    {
+        if (SubjectRegistry is null || !property.HasHistory())
+        {
+            return false;
+        }
+
+        return SubjectRegistry.KnownSubjects.Keys.OfType<IHistoryStore>().Any();
+    }
+
+    private async Task OpenPropertyHistoryDialogAsync(RegisteredSubjectProperty property)
+    {
+        if (Subject is null || SubjectRegistry is null)
+        {
+            return;
+        }
+
+        var basePath = PathResolver.GetPath(Subject, PathStyle.Canonical);
+        if (basePath is null)
+        {
+            return;
+        }
+
+        var path = basePath == "/" ? $"/{property.Name}" : $"{basePath}/{property.Name}";
+
+        var metadata = property.GetStateMetadata();
+        await PropertyHistoryDialog.ShowAsync(
+            DialogService, SubjectRegistry, path, property.Name, property.Type, metadata?.IsCumulative ?? false);
     }
 
     private IReadOnlyList<MethodMetadata> GetMethods() =>
