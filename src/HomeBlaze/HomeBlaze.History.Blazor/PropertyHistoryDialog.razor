@@ -7,7 +7,8 @@
     <DialogContent>
         <div style="display:flex; flex-direction:column; height:100%;">
         <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center; flex:0 0 auto;">
-            <MudSelect T="int" Value="_rangeIndex" ValueChanged="OnRangeChanged" Label="Range" Dense="true" Style="min-width:160px;">
+            <MudSelect T="int" Value="_rangeIndex" ValueChanged="OnRangeChanged" Label="Range" Dense="true" Style="min-width:160px;"
+                       HelperText="@_rangeHint">
                 @for (var index = 0; index < Presets.Length; index++)
                 {
                     var captured = index;
@@ -22,7 +23,7 @@
             }
 
             <MudSelect T="string" Value="_aggregation" ValueChanged="OnAggregationChanged" Label="Aggregation" Dense="true" Style="min-width:200px;"
-                       Disabled="IsRawPeriodSelected" HelperText="@(IsRawPeriodSelected ? "Not applicable to raw samples." : null)">
+                       Disabled="IsRawPeriodSelected" HelperText="@(IsRawPeriodSelected ? "Not applicable to raw samples." : _aggregationHint)">
                 @foreach (var aggregation in _aggregations)
                 {
                     <MudSelectItem T="string" Value="aggregation">@Label(aggregation)</MudSelectItem>
@@ -30,7 +31,7 @@
             </MudSelect>
 
             <MudSelect T="int" Value="_periodIndex" ValueChanged="OnPeriodChanged" Label="Period" Dense="true" Style="min-width:120px;"
-                       HelperText="@_autoBucketHint">
+                       HelperText="@_periodHint">
                 @for (var index = 0; index < PropertyHistoryChartModel.Periods.Count; index++)
                 {
                     var captured = index;
@@ -108,7 +109,11 @@
     private string _aggregation = HistoryAggregations.Last;
 
     private int _periodIndex; // default: Auto (first entry)
-    private string? _autoBucketHint; // shows the bucket Auto resolved to (null for None/explicit periods)
+
+    // Short helper lines under each select, refreshed in LoadAsync so the controls row stays balanced.
+    private string? _rangeHint;
+    private string? _aggregationHint;
+    private string? _periodHint;
 
     // A raw (None) period has no bucket and is not Auto; aggregation does not apply to raw samples.
     private bool IsRawPeriodSelected =>
@@ -205,9 +210,13 @@
 
             var bucket = PropertyHistoryChartModel.ResolveBucket(
                 PropertyHistoryChartModel.Periods[_periodIndex], range, availableCoverage);
-            _autoBucketHint = PropertyHistoryChartModel.Periods[_periodIndex].IsAuto && bucket is { } resolvedBucket
-                ? $"about {PropertyHistoryChartModel.FormatBucket(resolvedBucket)}"
-                : null;
+
+            _rangeHint = range <= TimeSpan.FromHours(24)
+                ? $"{from.LocalDateTime:HH:mm} to {to.LocalDateTime:HH:mm}"
+                : $"{from.LocalDateTime:MMM d, HH:mm} to {to.LocalDateTime:MMM d, HH:mm}";
+            _periodHint = PropertyHistoryChartModel.DescribePeriod(PropertyHistoryChartModel.Periods[_periodIndex], bucket);
+            _aggregationHint = PropertyHistoryChartModel.DescribeAggregation(_aggregation);
+
             _chartOptions.TimeLabelFormat = range <= TimeSpan.FromHours(24) ? "HH:mm" : "MM-dd";
             // For a raw (null bucket) query there is no aggregation interval, so space labels by the range alone.
             var rangeSpacingTicks = range.Ticks / 8;

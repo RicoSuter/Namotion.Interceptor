@@ -86,6 +86,59 @@ public class PropertyHistoryChartModelTests
         Assert.Equal(expected, label);
     }
 
+    [Theory]
+    [InlineData(HistoryAggregations.TimeWeightedAverage, "time-weighted average")]
+    [InlineData(HistoryAggregations.SampleAverage, "count-weighted mean")]
+    [InlineData(HistoryAggregations.Count, "sample count")]
+    [InlineData(HistoryAggregations.StandardDeviation, "sample std. deviation")]
+    public void WhenDescribeAggregation_ThenReturnsShortDescription(string aggregation, string expected)
+    {
+        // Act
+        var description = PropertyHistoryChartModel.DescribeAggregation(aggregation);
+
+        // Assert
+        Assert.Equal(expected, description);
+    }
+
+    [Fact]
+    public void WhenDescribePeriodAutoWithResolvedBucket_ThenReturnsAboutBucket()
+    {
+        // Arrange
+        var auto = PropertyHistoryChartModel.Periods[0];
+
+        // Act
+        var description = PropertyHistoryChartModel.DescribePeriod(auto, TimeSpan.FromSeconds(15));
+
+        // Assert
+        Assert.Equal("about 15s", description);
+    }
+
+    [Fact]
+    public void WhenDescribePeriodRaw_ThenReturnsRawSamples()
+    {
+        // Arrange
+        var none = PropertyHistoryChartModel.Periods.Single(period => period.Label == "None (raw samples)");
+
+        // Act
+        var description = PropertyHistoryChartModel.DescribePeriod(none, resolvedBucket: null);
+
+        // Assert
+        Assert.Equal("raw samples", description);
+    }
+
+    [Fact]
+    public void WhenDescribePeriodExplicit_ThenReturnsBucketLabelWithBuckets()
+    {
+        // Arrange
+        var tenSeconds = PropertyHistoryChartModel.Periods.Single(period => period.Label == "10s");
+
+        // Act
+        var description = PropertyHistoryChartModel.DescribePeriod(tenSeconds, tenSeconds.Bucket);
+
+        // Assert
+        Assert.Equal("10s buckets", description);
+    }
+
     [Fact]
     public void WhenNumericNonCumulative_ThenAllAggregationsOfferedWithTwaFirst()
     {

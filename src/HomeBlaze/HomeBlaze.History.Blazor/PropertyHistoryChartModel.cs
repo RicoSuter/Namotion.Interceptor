@@ -64,6 +64,35 @@ public static class PropertyHistoryChartModel
         return $"{(int)bucket.TotalDays}d";
     }
 
+    /// <summary>Returns a short human description of an aggregation identifier, for a helper line under the select.</summary>
+    public static string DescribeAggregation(string aggregation) => aggregation switch
+    {
+        HistoryAggregations.TimeWeightedAverage => "time-weighted average",
+        HistoryAggregations.SampleAverage => "count-weighted mean",
+        HistoryAggregations.Last => "last value",
+        HistoryAggregations.First => "first value",
+        HistoryAggregations.Minimum => "minimum",
+        HistoryAggregations.Maximum => "maximum",
+        HistoryAggregations.Sum => "sum",
+        HistoryAggregations.Count => "sample count",
+        HistoryAggregations.StandardDeviation => "sample std. deviation",
+        _ => aggregation
+    };
+
+    /// <summary>
+    /// Returns a short human description of a selected period for a helper line: Auto shows its resolved bucket
+    /// ("about 15s") or "auto" if not yet resolved; a fixed period shows "{size} buckets"; None shows "raw samples".
+    /// </summary>
+    public static string DescribePeriod(ChartPeriod period, TimeSpan? resolvedBucket)
+    {
+        if (period.IsAuto)
+        {
+            return resolvedBucket is { } bucket ? $"about {FormatBucket(bucket)}" : "auto";
+        }
+
+        return period.Bucket is { } fixedBucket ? $"{FormatBucket(fixedBucket)} buckets" : "raw samples";
+    }
+
     /// <summary>
     /// Returns a "nice" bucket size approximately <c>target / 200</c> (about 200 buckets across the target span).
     /// When <paramref name="availableCoverage"/> is greater than zero and narrower than <paramref name="range"/>,
