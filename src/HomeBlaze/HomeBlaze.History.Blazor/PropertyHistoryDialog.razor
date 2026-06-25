@@ -26,6 +26,14 @@
                     <MudSelectItem T="string" Value="aggregation">@Label(aggregation)</MudSelectItem>
                 }
             </MudSelect>
+
+            <MudSelect T="int" Value="_periodIndex" ValueChanged="OnPeriodChanged" Label="Period" Dense="true" Style="min-width:120px;">
+                @for (var index = 0; index < PropertyHistoryChartModel.Periods.Count; index++)
+                {
+                    var captured = index;
+                    <MudSelectItem T="int" Value="captured">@PropertyHistoryChartModel.Periods[captured].Label</MudSelectItem>
+                }
+            </MudSelect>
         </div>
 
         <div style="height:360px; margin-top:16px;">
@@ -95,6 +103,8 @@
     private IReadOnlyList<string> _aggregations = Array.Empty<string>();
     private string _aggregation = HistoryAggregations.Last;
 
+    private int _periodIndex; // default: Auto (first entry)
+
     private bool _loading;
     private string? _error;
     private List<ChartSeries<double>>? _chartSeries;
@@ -138,6 +148,12 @@
         await LoadAsync();
     }
 
+    private async Task OnPeriodChanged(int index)
+    {
+        _periodIndex = index;
+        await LoadAsync();
+    }
+
     private async Task LoadAsync()
     {
         // Cancel any in-flight load so a slower earlier query cannot overwrite this newer selection.
@@ -167,9 +183,12 @@
             }
 
             var range = to - from;
-            var bucket = PropertyHistoryChartModel.AutoBucket(range);
+            var bucket = PropertyHistoryChartModel.ResolveBucket(PropertyHistoryChartModel.Periods[_periodIndex], range);
             _chartOptions.TimeLabelFormat = range <= TimeSpan.FromHours(24) ? "HH:mm" : "MM-dd";
-            _chartOptions.TimeLabelSpacing = TimeSpan.FromTicks(Math.Max(range.Ticks / 8, bucket.Ticks));
+            // For a raw (null bucket) query there is no aggregation interval, so space labels by the range alone.
+            var rangeSpacingTicks = range.Ticks / 8;
+            _chartOptions.TimeLabelSpacing = TimeSpan.FromTicks(
+                bucket is null ? rangeSpacingTicks : Math.Max(rangeSpacingTicks, bucket.Value.Ticks));
 
             var series = await Registry.QueryHistoryAsync(
                 new HistoryQuery(PropertyPath, from, to, bucket, _aggregation, MaxPoints: 1000),

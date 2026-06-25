@@ -18,6 +18,42 @@ public static class PropertyHistoryChartModel
         TimeSpan.FromDays(1)
     };
 
+    /// <summary>
+    /// A user-selectable aggregation period for the chart. <see cref="IsAuto"/> entries compute their bucket from the
+    /// current range (so they have no fixed <see cref="Bucket"/>); a null <see cref="Bucket"/> on a non-auto entry
+    /// means a raw query (individual samples, no aggregation).
+    /// </summary>
+    public readonly record struct ChartPeriod(string Label, TimeSpan? Bucket, bool IsAuto);
+
+    /// <summary>
+    /// The selectable periods in display order: Auto (range-derived bucket), None (raw samples), then fixed bucket sizes.
+    /// </summary>
+    public static readonly IReadOnlyList<ChartPeriod> Periods = new[]
+    {
+        new ChartPeriod("Auto", null, IsAuto: true),
+        new ChartPeriod("None", null, IsAuto: false),
+        new ChartPeriod("1s", TimeSpan.FromSeconds(1), IsAuto: false),
+        new ChartPeriod("10s", TimeSpan.FromSeconds(10), IsAuto: false),
+        new ChartPeriod("60s", TimeSpan.FromSeconds(60), IsAuto: false),
+        new ChartPeriod("5m", TimeSpan.FromMinutes(5), IsAuto: false),
+        new ChartPeriod("10m", TimeSpan.FromMinutes(10), IsAuto: false),
+        new ChartPeriod("15m", TimeSpan.FromMinutes(15), IsAuto: false),
+        new ChartPeriod("1h", TimeSpan.FromHours(1), IsAuto: false),
+        new ChartPeriod("4h", TimeSpan.FromHours(4), IsAuto: false),
+        new ChartPeriod("6h", TimeSpan.FromHours(6), IsAuto: false),
+        new ChartPeriod("12h", TimeSpan.FromHours(12), IsAuto: false),
+        new ChartPeriod("24h", TimeSpan.FromHours(24), IsAuto: false),
+    };
+
+    /// <summary>
+    /// Resolves the effective bucket for a selected period: an auto period uses <see cref="AutoBucket"/> over the
+    /// current range; any other period uses its fixed <see cref="ChartPeriod.Bucket"/> (null means a raw query).
+    /// </summary>
+    public static TimeSpan? ResolveBucket(ChartPeriod period, TimeSpan range)
+    {
+        return period.IsAuto ? AutoBucket(range) : period.Bucket;
+    }
+
     /// <summary>Returns a "nice" bucket size approximately <c>range / 200</c> (about 200 buckets across the range).</summary>
     public static TimeSpan AutoBucket(TimeSpan range)
     {

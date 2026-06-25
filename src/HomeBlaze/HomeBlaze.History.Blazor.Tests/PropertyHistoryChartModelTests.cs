@@ -104,6 +104,93 @@ public class PropertyHistoryChartModelTests
         Assert.Equal(3d, runs[1][0].Number);
     }
 
+    [Fact]
+    public void WhenPeriods_ThenContainsExpectedLabelsInOrder()
+    {
+        // Act
+        var labels = PropertyHistoryChartModel.Periods.Select(period => period.Label).ToArray();
+
+        // Assert
+        Assert.Equal(
+            new[] { "Auto", "None", "1s", "10s", "60s", "5m", "10m", "15m", "1h", "4h", "6h", "12h", "24h" },
+            labels);
+    }
+
+    [Fact]
+    public void WhenPeriods_ThenFirstIsAutoAndIsTheOnlyAutoEntry()
+    {
+        // Act
+        var auto = PropertyHistoryChartModel.Periods[0];
+
+        // Assert
+        Assert.Equal("Auto", auto.Label);
+        Assert.True(auto.IsAuto);
+        Assert.Null(auto.Bucket);
+        Assert.Single(PropertyHistoryChartModel.Periods, period => period.IsAuto);
+    }
+
+    [Fact]
+    public void WhenPeriods_ThenNoneHasNullBucketAndIsNotAuto()
+    {
+        // Act
+        var none = PropertyHistoryChartModel.Periods.Single(period => period.Label == "None");
+
+        // Assert
+        Assert.Null(none.Bucket);
+        Assert.False(none.IsAuto);
+    }
+
+    [Fact]
+    public void WhenPeriodsExplicit_ThenFiveMinutesHasMatchingBucket()
+    {
+        // Act
+        var fiveMinutes = PropertyHistoryChartModel.Periods.Single(period => period.Label == "5m");
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(5), fiveMinutes.Bucket);
+        Assert.False(fiveMinutes.IsAuto);
+    }
+
+    [Fact]
+    public void WhenResolveBucketAuto_ThenReturnsAutoBucketForRange()
+    {
+        // Arrange
+        var range = TimeSpan.FromHours(1);
+        var auto = PropertyHistoryChartModel.Periods[0];
+
+        // Act
+        var bucket = PropertyHistoryChartModel.ResolveBucket(auto, range);
+
+        // Assert
+        Assert.Equal(PropertyHistoryChartModel.AutoBucket(range), bucket);
+    }
+
+    [Fact]
+    public void WhenResolveBucketNone_ThenReturnsNull()
+    {
+        // Arrange
+        var none = PropertyHistoryChartModel.Periods.Single(period => period.Label == "None");
+
+        // Act
+        var bucket = PropertyHistoryChartModel.ResolveBucket(none, TimeSpan.FromHours(1));
+
+        // Assert
+        Assert.Null(bucket);
+    }
+
+    [Fact]
+    public void WhenResolveBucketExplicit_ThenReturnsThatBucket()
+    {
+        // Arrange
+        var fiveMinutes = PropertyHistoryChartModel.Periods.Single(period => period.Label == "5m");
+
+        // Act
+        var bucket = PropertyHistoryChartModel.ResolveBucket(fiveMinutes, TimeSpan.FromHours(24));
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(5), bucket);
+    }
+
     // Every numeric store in v1 supports every aggregation; this models that union for the gating tests.
     private static HashSet<string> HistoryEligibilityUnionAll() => new(StringComparer.Ordinal)
     {
