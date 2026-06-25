@@ -29,7 +29,8 @@
                 }
             </MudSelect>
 
-            <MudSelect T="int" Value="_periodIndex" ValueChanged="OnPeriodChanged" Label="Period" Dense="true" Style="min-width:120px;">
+            <MudSelect T="int" Value="_periodIndex" ValueChanged="OnPeriodChanged" Label="Period" Dense="true" Style="min-width:120px;"
+                       HelperText="@_autoBucketHint">
                 @for (var index = 0; index < PropertyHistoryChartModel.Periods.Count; index++)
                 {
                     var captured = index;
@@ -98,7 +99,7 @@
         ("Custom", null),
     };
 
-    private int _rangeIndex = 2; // default: last 24 hours
+    private int _rangeIndex; // default: last hour (index 0), so a fresh system shows recent data
     private bool _useCustom;
     private DateTime? _customFrom;
     private DateTime? _customTo;
@@ -107,6 +108,7 @@
     private string _aggregation = HistoryAggregations.Last;
 
     private int _periodIndex; // default: Auto (first entry)
+    private string? _autoBucketHint; // shows the bucket Auto resolved to (null for None/explicit periods)
 
     // A raw (None) period has no bucket and is not Auto; aggregation does not apply to raw samples.
     private bool IsRawPeriodSelected =>
@@ -193,7 +195,19 @@
             }
 
             var range = to - from;
-            var bucket = PropertyHistoryChartModel.ResolveBucket(PropertyHistoryChartModel.Periods[_periodIndex], range);
+
+            // When the range is far wider than the data that actually exists, an Auto bucket of range/200 can be
+            // larger than any store's coverage, so no bucket fits and the chart is empty. Clamp Auto to the span of
+            // recorded data (the earliest covered instant up to 'to') so a fresh system still renders.
+            var stores = Registry.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray();
+            var earliest = stores.Length == 0 ? (DateTimeOffset?)null : stores.Min(store => store.CurrentCoverage.From);
+            TimeSpan? availableCoverage = earliest is { } coverageStart && coverageStart < to ? to - coverageStart : null;
+
+            var bucket = PropertyHistoryChartModel.ResolveBucket(
+                PropertyHistoryChartModel.Periods[_periodIndex], range, availableCoverage);
+            _autoBucketHint = PropertyHistoryChartModel.Periods[_periodIndex].IsAuto && bucket is { } resolvedBucket
+                ? $"about {PropertyHistoryChartModel.FormatBucket(resolvedBucket)}"
+                : null;
             _chartOptions.TimeLabelFormat = range <= TimeSpan.FromHours(24) ? "HH:mm" : "MM-dd";
             // For a raw (null bucket) query there is no aggregation interval, so space labels by the range alone.
             var rangeSpacingTicks = range.Ticks / 8;

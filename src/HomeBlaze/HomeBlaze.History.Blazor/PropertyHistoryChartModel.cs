@@ -47,20 +47,39 @@ public static class PropertyHistoryChartModel
 
     /// <summary>
     /// Resolves the effective bucket for a selected period: an auto period uses <see cref="AutoBucket"/> over the
-    /// current range; any other period uses its fixed <see cref="ChartPeriod.Bucket"/> (null means a raw query).
+    /// current range (clamped to <paramref name="availableCoverage"/> when supplied); any other period uses its
+    /// fixed <see cref="ChartPeriod.Bucket"/> (null means a raw query).
     /// </summary>
-    public static TimeSpan? ResolveBucket(ChartPeriod period, TimeSpan range)
+    public static TimeSpan? ResolveBucket(ChartPeriod period, TimeSpan range, TimeSpan? availableCoverage = null)
     {
-        return period.IsAuto ? AutoBucket(range) : period.Bucket;
+        return period.IsAuto ? AutoBucket(range, availableCoverage) : period.Bucket;
     }
 
-    /// <summary>Returns a "nice" bucket size approximately <c>range / 200</c> (about 200 buckets across the range).</summary>
-    public static TimeSpan AutoBucket(TimeSpan range)
+    /// <summary>Formats a bucket size as a short human label (for example "10s", "5m", "1h", "1d").</summary>
+    public static string FormatBucket(TimeSpan bucket)
     {
-        var target = TimeSpan.FromTicks(Math.Max(range.Ticks / 200, TimeSpan.TicksPerSecond));
+        if (bucket.TotalSeconds < 60) return $"{(int)bucket.TotalSeconds}s";
+        if (bucket.TotalMinutes < 60) return $"{(int)bucket.TotalMinutes}m";
+        if (bucket.TotalHours < 24) return $"{(int)bucket.TotalHours}h";
+        return $"{(int)bucket.TotalDays}d";
+    }
+
+    /// <summary>
+    /// Returns a "nice" bucket size approximately <c>target / 200</c> (about 200 buckets across the target span).
+    /// When <paramref name="availableCoverage"/> is greater than zero and narrower than <paramref name="range"/>,
+    /// the bucket is computed from the coverage instead, so a range far wider than the recorded data still picks a
+    /// bucket small enough to fit the data (otherwise the buckets would be larger than any store's coverage and
+    /// nothing would render).
+    /// </summary>
+    public static TimeSpan AutoBucket(TimeSpan range, TimeSpan? availableCoverage = null)
+    {
+        var target = availableCoverage is { } coverage && coverage > TimeSpan.Zero && coverage < range
+            ? coverage
+            : range;
+        var targetTicks = TimeSpan.FromTicks(Math.Max(target.Ticks / 200, TimeSpan.TicksPerSecond));
         foreach (var candidate in Ladder)
         {
-            if (candidate >= target)
+            if (candidate >= targetTicks)
             {
                 return candidate;
             }

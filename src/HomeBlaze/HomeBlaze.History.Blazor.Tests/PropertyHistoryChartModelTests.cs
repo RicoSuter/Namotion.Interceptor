@@ -20,6 +20,73 @@ public class PropertyHistoryChartModelTests
     }
 
     [Fact]
+    public void WhenAutoBucketCoverageNarrowerThanRange_ThenClampsBucketToCoverage()
+    {
+        // Arrange - 24h range but only 5 minutes of recorded data.
+        var range = TimeSpan.FromHours(24);
+        var coverage = TimeSpan.FromMinutes(5);
+
+        // Act
+        var bucket = PropertyHistoryChartModel.AutoBucket(range, coverage);
+
+        // Assert - the bucket clamps to the coverage span, much smaller than the 24h-only choice.
+        Assert.Equal(PropertyHistoryChartModel.AutoBucket(coverage), bucket);
+        Assert.True(bucket < PropertyHistoryChartModel.AutoBucket(range));
+    }
+
+    [Fact]
+    public void WhenAutoBucketCoverageWiderThanRange_ThenNoClamp()
+    {
+        // Arrange - coverage wider than the selected range, so the range drives the bucket.
+        var range = TimeSpan.FromHours(1);
+
+        // Act
+        var bucket = PropertyHistoryChartModel.AutoBucket(range, availableCoverage: TimeSpan.FromHours(6));
+
+        // Assert
+        Assert.Equal(PropertyHistoryChartModel.AutoBucket(range), bucket);
+    }
+
+    [Fact]
+    public void WhenAutoBucketCoverageNull_ThenMatchesRangeOnlyBehavior()
+    {
+        // Act
+        var bucket = PropertyHistoryChartModel.AutoBucket(TimeSpan.FromHours(24), availableCoverage: null);
+
+        // Assert - unchanged from the 24h range-only expectation (24h / 200 = 7.2m -> 10m).
+        Assert.Equal(TimeSpan.FromMinutes(10), bucket);
+    }
+
+    [Fact]
+    public void WhenResolveBucketAutoWithNarrowCoverage_ThenReturnsClampedBucket()
+    {
+        // Arrange
+        var auto = PropertyHistoryChartModel.Periods[0];
+        var range = TimeSpan.FromHours(24);
+        var coverage = TimeSpan.FromMinutes(5);
+
+        // Act
+        var bucket = PropertyHistoryChartModel.ResolveBucket(auto, range, coverage);
+
+        // Assert
+        Assert.Equal(PropertyHistoryChartModel.AutoBucket(range, coverage), bucket);
+    }
+
+    [Theory]
+    [InlineData(10, "10s")]
+    [InlineData(5 * 60, "5m")]
+    [InlineData(60 * 60, "1h")]
+    [InlineData(24 * 60 * 60, "1d")]
+    public void WhenFormatBucket_ThenReturnsShortHumanLabel(int totalSeconds, string expected)
+    {
+        // Act
+        var label = PropertyHistoryChartModel.FormatBucket(TimeSpan.FromSeconds(totalSeconds));
+
+        // Assert
+        Assert.Equal(expected, label);
+    }
+
+    [Fact]
     public void WhenNumericNonCumulative_ThenAllAggregationsOfferedWithTwaFirst()
     {
         // Arrange
