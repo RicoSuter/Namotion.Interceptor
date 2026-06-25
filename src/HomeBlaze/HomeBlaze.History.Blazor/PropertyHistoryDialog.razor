@@ -273,7 +273,7 @@
                     Name = DisplayName,
                     Visible = true,
                     Data = new ChartData<double>(
-                        run.Select(point => (point.Timestamp.UtcDateTime, point.Number!.Value)).ToList())
+                        run.Select(point => (point.Timestamp.LocalDateTime, point.Number!.Value)).ToList())
                 })
                 .ToList();
             _tableRows = null;
