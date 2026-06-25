@@ -87,7 +87,9 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
     public partial PartitionInterval PartitionInterval { get; set; }
 
     /// <summary>
-    /// Directory that holds the partition database files. Required; the store reports an error if empty.
+    /// Directory that holds the partition database files. Relative paths resolve under the application data
+    /// directory (outside the HomeBlaze Data folder); absolute paths are used as-is; empty uses the default
+    /// "History" folder.
     /// </summary>
     [Configuration]
     public partial string DatabasePath { get; set; }
@@ -215,30 +217,38 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
             return;
         }
 
-        if (string.IsNullOrEmpty(DatabasePath))
-        {
-            Status = "Error";
-            _logger.LogError("No DatabasePath is configured; cannot persist history to SQLite files.");
-            return;
-        }
-
         var context = ((IInterceptorSubject)this).Context;
 
         var resolver = context.TryGetService<ISubjectPathResolver>();
         if (resolver is null)
         {
             Status = "Error";
+            LastError = "No subject path resolver is registered; cannot record history.";
             _logger.LogError("No ISubjectPathResolver is registered in the context; cannot record history.");
             return;
         }
 
-        var engine = new SqliteHistoryStore(
-            priority: Priority,
-            databaseDirectory: DatabasePath,
-            partitionInterval: PartitionInterval,
-            maxAge: TimeSpan.FromDays(MaxAgeDays),
-            maxJsonSize: MaxJsonSize,
-            getUtcNow: () => DateTimeOffset.UtcNow);
+        var directory = SqliteDatabaseLocation.Resolve(DatabasePath, SqliteDatabaseLocation.DefaultBaseDirectory());
+
+        SqliteHistoryStore engine;
+        try
+        {
+            engine = new SqliteHistoryStore(
+                priority: Priority,
+                databaseDirectory: directory,
+                partitionInterval: PartitionInterval,
+                maxAge: TimeSpan.FromDays(MaxAgeDays),
+                maxJsonSize: MaxJsonSize,
+                getUtcNow: () => DateTimeOffset.UtcNow);
+        }
+        catch (Exception exception)
+        {
+            Status = "Error";
+            LastError = exception.Message;
+            _logger.LogError(exception, "Failed to open the SQLite history directory '{Directory}'.", directory);
+            return;
+        }
+
         _engine = engine;
 
         // Drop detached subjects from the move-detection cache (memory hygiene).
@@ -257,6 +267,9 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
             maxQueueDepth: null,
             logger: _logger);
 
+        _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
+
+        LastError = null;
         Status = "Running";
 
         var flushTask = RunFlushLoopAsync(engine, stoppingToken);

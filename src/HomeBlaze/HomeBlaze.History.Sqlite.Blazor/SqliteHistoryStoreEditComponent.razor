@@ -14,9 +14,7 @@
     <MudTextField @bind-Value="_databasePath"
                   @bind-Value:after="OnFieldChanged"
                   Label="Database Path"
-                  HelperText="Directory that holds the partition database files. Required."
-                  Required="true"
-                  RequiredError="A database path is required."
+                  HelperText="Folder for the SQLite database files. Relative paths are stored under the app data directory (outside your Data folder); absolute paths are used as-is. Leave empty for the default 'History' folder."
                   Class="mt-4" />
 
     <MudSelect T="PartitionInterval"
@@ -94,8 +92,7 @@
     private int _originalBufferTimeMilliseconds;
     private int _originalMaxJsonSize;
 
-    public bool IsValid => !string.IsNullOrWhiteSpace(_databasePath) &&
-                           _priority >= 0 &&
+    public bool IsValid => _priority >= 0 &&
                            _maxAgeDays > 0 &&
                            _flushIntervalSeconds > 0 &&
                            _bufferTimeMilliseconds >= 0 &&
