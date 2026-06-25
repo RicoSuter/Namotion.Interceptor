@@ -20,7 +20,8 @@
                 <MudDatePicker @bind-Date="_customTo" @bind-Date:after="LoadAsync" Label="To" />
             }
 
-            <MudSelect T="string" Value="_aggregation" ValueChanged="OnAggregationChanged" Label="Aggregation" Dense="true" Style="min-width:200px;">
+            <MudSelect T="string" Value="_aggregation" ValueChanged="OnAggregationChanged" Label="Aggregation" Dense="true" Style="min-width:200px;"
+                       Disabled="IsRawPeriodSelected" HelperText="@(IsRawPeriodSelected ? "Not applicable to raw samples." : null)">
                 @foreach (var aggregation in _aggregations)
                 {
                     <MudSelectItem T="string" Value="aggregation">@Label(aggregation)</MudSelectItem>
@@ -104,6 +105,11 @@
     private string _aggregation = HistoryAggregations.Last;
 
     private int _periodIndex; // default: Auto (first entry)
+
+    // A raw (None) period has no bucket and is not Auto; aggregation does not apply to raw samples.
+    private bool IsRawPeriodSelected =>
+        !PropertyHistoryChartModel.Periods[_periodIndex].IsAuto
+        && PropertyHistoryChartModel.Periods[_periodIndex].Bucket is null;
 
     private bool _loading;
     private string? _error;

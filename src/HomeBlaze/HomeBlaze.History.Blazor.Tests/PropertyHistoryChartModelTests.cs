@@ -112,7 +112,7 @@ public class PropertyHistoryChartModelTests
 
         // Assert
         Assert.Equal(
-            new[] { "Auto", "None", "1s", "10s", "60s", "5m", "10m", "15m", "1h", "4h", "6h", "12h", "24h" },
+            new[] { "Auto", "None (raw samples)", "1s", "10s", "60s", "5m", "10m", "15m", "1h", "4h", "6h", "12h", "24h" },
             labels);
     }
 
@@ -133,7 +133,7 @@ public class PropertyHistoryChartModelTests
     public void WhenPeriods_ThenNoneHasNullBucketAndIsNotAuto()
     {
         // Act
-        var none = PropertyHistoryChartModel.Periods.Single(period => period.Label == "None");
+        var none = PropertyHistoryChartModel.Periods.Single(period => period.Label == "None (raw samples)");
 
         // Assert
         Assert.Null(none.Bucket);
@@ -169,7 +169,7 @@ public class PropertyHistoryChartModelTests
     public void WhenResolveBucketNone_ThenReturnsNull()
     {
         // Arrange
-        var none = PropertyHistoryChartModel.Periods.Single(period => period.Label == "None");
+        var none = PropertyHistoryChartModel.Periods.Single(period => period.Label == "None (raw samples)");
 
         // Act
         var bucket = PropertyHistoryChartModel.ResolveBucket(none, TimeSpan.FromHours(1));

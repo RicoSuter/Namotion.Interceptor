@@ -31,7 +31,7 @@ public static class PropertyHistoryChartModel
     public static readonly IReadOnlyList<ChartPeriod> Periods = new[]
     {
         new ChartPeriod("Auto", null, IsAuto: true),
-        new ChartPeriod("None", null, IsAuto: false),
+        new ChartPeriod("None (raw samples)", null, IsAuto: false),
         new ChartPeriod("1s", TimeSpan.FromSeconds(1), IsAuto: false),
         new ChartPeriod("10s", TimeSpan.FromSeconds(10), IsAuto: false),
         new ChartPeriod("60s", TimeSpan.FromSeconds(60), IsAuto: false),
