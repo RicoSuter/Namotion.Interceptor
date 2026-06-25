@@ -184,11 +184,18 @@
         StateHasChanged();
         try
         {
+            // Custom date picks are local dates; interpret them in the local time zone (not UTC) so the
+            // queried window matches what the user picked. Presets anchor to "now"; the chart and labels
+            // convert to local for display.
             var to = _useCustom
-                ? new DateTimeOffset(_customTo ?? DateTime.UtcNow, TimeSpan.Zero)
+                ? (_customTo is { } customTo
+                    ? new DateTimeOffset(DateTime.SpecifyKind(customTo, DateTimeKind.Local))
+                    : DateTimeOffset.Now)
                 : DateTimeOffset.UtcNow;
             var from = _useCustom
-                ? new DateTimeOffset(_customFrom ?? DateTime.UtcNow.AddHours(-1), TimeSpan.Zero)
+                ? (_customFrom is { } customFrom
+                    ? new DateTimeOffset(DateTime.SpecifyKind(customFrom, DateTimeKind.Local))
+                    : to.AddHours(-1))
                 : to - Presets[_rangeIndex].Range!.Value;
 
             if (to <= from)
