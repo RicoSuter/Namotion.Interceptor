@@ -199,14 +199,19 @@ public class HistoryStoreMergerTests
     }
 
     [Fact]
-    public async Task WhenContainingStoreLacksAggregation_ThenBucketIsUnownedAndEligibilityThrows()
+    public async Task WhenNoStoreSupportsTheAggregation_ThenThrowsAndAvailableExcludesRequested()
     {
-        // Arrange: the only store containing the buckets supports just Last, but the query asks Minimum.
+        // A genuine capability gap: no store can compute the requested aggregation at all. The only
+        // store supports just SampleAverage, but the query asks Minimum. Eligibility must throw, and the
+        // reported Available set must NOT contain the requested aggregation, so the message is no longer
+        // self-contradictory ("Minimum is not supported. Available: ...Minimum...").
+        //
+        // Arrange
         var store = new FakeHistoryStore
         {
             Priority = 100,
             CurrentCoverage = new HistoryCoverage(At(0), At(60)),
-            SupportedAggregations = Only(HistoryAggregations.Last)
+            SupportedAggregations = Only(HistoryAggregations.SampleAverage)
         };
         var query = new HistoryQuery("temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Minimum);
 
@@ -214,6 +219,9 @@ public class HistoryStoreMergerTests
         var exception = await Assert.ThrowsAsync<HistoryAggregationNotSupportedException>(
             () => new[] { store }.QueryHistoryAsync(query, CancellationToken.None));
         Assert.Equal(HistoryAggregations.Minimum, exception.Aggregation);
+        Assert.DoesNotContain(HistoryAggregations.Minimum, exception.Available);
+        Assert.Contains(HistoryAggregations.SampleAverage, exception.Available);
+        Assert.Empty(store.ReceivedQueries);
     }
 
     [Fact]
@@ -482,16 +490,59 @@ public class HistoryStoreMergerTests
     // Eligibility -----------------------------------------------------------------------------
 
     [Fact]
-    public async Task WhenAggregationNotServableOverPart_ThenThrowsWithAvailableSet()
+    public async Task WhenCoverageIsNarrowerThanRange_ThenCoveredTailReturnedWithoutThrow()
     {
-        // Arrange: a store covering [0,30) supports Minimum; [30,60) has only a Last-supporting store.
+        // The user's scenario: a single in-memory store with a narrow recent coverage window
+        // ([now-60s, now]) is queried for a carry-dependent aggregation (TimeWeightedAverage) over a
+        // far wider range ([now-24h, now]). A coverage shortfall must NOT be reported as an
+        // aggregation-not-supported error. The covered recent tail is returned and the older,
+        // uncovered range is simply absent (the documented offline-tail behavior).
+        //
+        // Arrange
+        var now = At(24 * 60);
+        var bucket = TimeSpan.FromSeconds(30);
+        var coverageStart = now.AddSeconds(-60);
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(coverageStart, now)
+        }.AddSample(now.AddSeconds(-45), 20).AddSample(now.AddSeconds(-15), 22);
+        var query = new HistoryQuery(
+            "temp", now.AddHours(-24), now, bucket, HistoryAggregations.TimeWeightedAverage);
+
+        // Act: must not throw despite the 24h range exceeding the 60s coverage window.
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert: only the covered recent tail was dispatched and every returned point falls inside
+        // the covered window; the older uncovered range is absent rather than an error.
+        Assert.NotEmpty(series.Points);
+        Assert.All(series.Points, point =>
+        {
+            Assert.True(point.Timestamp >= coverageStart);
+            Assert.True(point.Timestamp < now);
+        });
+        Assert.Single(store.ReceivedQueries);
+        Assert.Equal(coverageStart, store.ReceivedQueries[0].From);
+        Assert.Equal(now, store.ReceivedQueries[0].To);
+    }
+
+    [Fact]
+    public async Task WhenAggregationSupportedButCoverageFallsShort_ThenCoveredBucketsReturnedWithoutThrow()
+    {
+        // A store DOES support the requested aggregation but covers only part of the range. This is a
+        // coverage shortfall, not a capability gap, so it must not throw: the supported-and-covered
+        // buckets are returned and the rest is absent. Here the Minimum-capable store covers [0,30);
+        // the other store covers [30,60) but supports only SampleAverage, so the [30,60) buckets are
+        // unowned for Minimum (honest gaps).
+        //
+        // Arrange
         var minStore = new FakeHistoryStore
         {
             Priority = 100,
             CurrentCoverage = new HistoryCoverage(At(0), At(30)),
             SupportedAggregations = Only(HistoryAggregations.Minimum, HistoryAggregations.Maximum)
-        };
-        var lastStore = new FakeHistoryStore
+        }.AddSample(At(5), 1);
+        var otherStore = new FakeHistoryStore
         {
             Priority = 50,
             CurrentCoverage = new HistoryCoverage(At(30), At(60)),
@@ -499,15 +550,17 @@ public class HistoryStoreMergerTests
         };
         var query = new HistoryQuery("temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Minimum);
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<HistoryAggregationNotSupportedException>(
-            () => new[] { minStore, lastStore }.QueryHistoryAsync(query, CancellationToken.None));
-        Assert.Equal(HistoryAggregations.Minimum, exception.Aggregation);
+        // Act: no throw; only the Minimum-capable covered part is served.
+        var series = await new[] { minStore, otherStore }.QueryHistoryAsync(query, CancellationToken.None);
 
-        // The available set is the union across stores overlapping the range.
-        Assert.Contains(HistoryAggregations.Minimum, exception.Available);
-        Assert.Contains(HistoryAggregations.Maximum, exception.Available);
-        Assert.Contains(HistoryAggregations.SampleAverage, exception.Available);
+        // Assert: the Minimum store served [0,30); the SampleAverage-only store was not dispatched and
+        // every returned point falls inside the covered window.
+        Assert.Single(minStore.ReceivedQueries);
+        Assert.Equal(At(0), minStore.ReceivedQueries[0].From);
+        Assert.Equal(At(30), minStore.ReceivedQueries[0].To);
+        Assert.Empty(otherStore.ReceivedQueries);
+        Assert.NotEmpty(series.Points);
+        Assert.All(series.Points, point => Assert.True(point.Timestamp < At(30)));
     }
 
     [Fact]
@@ -523,13 +576,14 @@ public class HistoryStoreMergerTests
     }
 
     [Fact]
-    public async Task WhenBucketedRangeIsNotBucketAlignedAndCoverageIsEdgeTight_ThenEligibilityThrows()
+    public async Task WhenBucketedRangeIsNotBucketAlignedAndCoverageIsEdgeTight_ThenUnownedBucketsAreHonestGaps()
     {
-        // Eligibility for bucketed queries runs against the bucket-aligned span the planner enumerates,
-        // not the raw [From,To). With 10-minute buckets and From/To at minutes 5 and 25, the planner
-        // enumerates the aligned buckets [0,10), [10,20), [20,30). A store whose coverage is edge-tight
-        // to [5,25) fully contains none of them, so every bucket would be a silent gap. Eligibility must
-        // surface this rather than promise a range the planner cannot serve.
+        // The bucketed planner enumerates the bucket-aligned span, not the raw [From,To). With 10-minute
+        // buckets and From/To at minutes 5 and 25, the aligned buckets are [0,10), [10,20), [20,30). A
+        // store whose coverage is edge-tight to [5,25) fully contains only the middle bucket [10,20);
+        // the two edge buckets spill outside its coverage. Because the store DOES support Minimum, this
+        // is a coverage shortfall, not a capability gap: it must not throw. The fully-contained bucket
+        // is served and the spilling edge buckets are honest gaps (absent).
         //
         // Arrange: a single Minimum-capable store covering exactly the non-aligned [5,25).
         var store = new FakeHistoryStore
@@ -540,11 +594,17 @@ public class HistoryStoreMergerTests
         }.AddSample(At(10), 1);
         var query = new HistoryQuery("temp", At(5), At(25), TimeSpan.FromMinutes(10), HistoryAggregations.Minimum);
 
-        // Act & Assert: the aligned edge buckets are uncovered, so eligibility throws.
-        var exception = await Assert.ThrowsAsync<HistoryAggregationNotSupportedException>(
-            () => new[] { store }.QueryHistoryAsync(query, CancellationToken.None));
-        Assert.Equal(HistoryAggregations.Minimum, exception.Aggregation);
-        Assert.Empty(store.ReceivedQueries);
+        // Act: no throw; only the fully-contained aligned bucket is served.
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert: only the contained bucket [10,20) was dispatched and returned; the edge buckets [0,10)
+        // and [20,30) are absent.
+        Assert.Single(store.ReceivedQueries);
+        Assert.Equal(At(10), store.ReceivedQueries[0].From);
+        Assert.Equal(At(20), store.ReceivedQueries[0].To);
+        var point = Assert.Single(series.Points);
+        Assert.Equal(At(10), point.Timestamp);
+        Assert.Equal(1d, point.Number);
     }
 
     [Fact]

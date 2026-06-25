@@ -79,17 +79,13 @@ public static class HistoryStoreMerger
             .QueryHistoryAsync(propertyPaths, from, to, bucket, aggregation, maxPoints, cancellationToken);
 
     /// <summary>
-    /// Verifies every part of the queried range is servable by some store supporting the requested
-    /// aggregation. Always-available aggregations (<see cref="HistoryAggregations.AlwaysAvailable"/>) skip the check.
-    ///
-    /// For bucketed queries the check runs against the bucket-aligned span the planner actually
-    /// enumerates (from the start of the bucket containing <c>From</c> through the end of the bucket
-    /// containing <c>To</c>), not the raw <c>[From, To)</c>. The bucketed planner assigns each
-    /// epoch-aligned bucket only to a store whose coverage fully contains that bucket, so when
-    /// <c>From</c>/<c>To</c> are not bucket-aligned the edge buckets extend outside <c>[From, To)</c>.
-    /// Checking the aligned span keeps eligibility and per-bucket ownership in agreement: eligibility
-    /// throws iff some bucket the planner would enumerate has no supporting store that fully contains
-    /// it (otherwise that bucket would be a silent gap the eligibility check had promised away).
+    /// Capability-only eligibility check. Always-available aggregations
+    /// (<see cref="HistoryAggregations.AlwaysAvailable"/>) skip the check, and any aggregation that at
+    /// least one store supports proceeds. A coverage shortfall is deliberately NOT an error: the
+    /// planners return the covered buckets/ranges and leave the rest as honest empty/absent buckets
+    /// (the documented offline-tail behavior). Eligibility throws only when no store can compute the
+    /// aggregation at all, and the reported available set then excludes the requested aggregation, so
+    /// the message is never self-contradictory.
     /// </summary>
     internal static void EnsureEligibility(IReadOnlyList<IHistoryStore> ordered, HistoryQuery query)
     {
@@ -98,43 +94,21 @@ public static class HistoryStoreMerger
             return;
         }
 
-        var range = query.Bucket is { } bucket
-            ? new HistoryCoverage(
-                BucketAlignment.BucketStart(query.From, bucket),
-                BucketAlignment.BucketStart(query.To - new TimeSpan(1), bucket) + bucket)
-            : new HistoryCoverage(query.From, query.To);
-
-        // Subtract the coverage of every aggregation-supporting store from the range. Anything left
-        // is a part of the range no supporting store can serve, which is the not-supported case.
-        var uncovered = new List<HistoryCoverage> { range };
-        foreach (var store in ordered)
-        {
-            if (!store.SupportedAggregations.Contains(query.Aggregation))
-            {
-                continue;
-            }
-
-            uncovered = SubtractCoverage(uncovered, store.CurrentCoverage);
-            if (uncovered.Count == 0)
-            {
-                break;
-            }
-        }
-
-        if (uncovered.Count == 0)
+        // Capability check only: if at least one store supports the aggregation, proceed. A coverage
+        // shortfall is NOT an error here; the planners return the covered buckets and leave the rest as
+        // honest empty/absent buckets (matching the documented offline-tail behavior). Eligibility throws
+        // only when no store can compute the aggregation at all.
+        if (ordered.Any(store => store.SupportedAggregations.Contains(query.Aggregation)))
         {
             return;
         }
 
-        // The aggregation is not servable over the whole range. The available set is the union of the
-        // supported aggregations across stores whose coverage overlaps the queried range.
+        // No store supports the aggregation; report the aggregations that ARE available (which correctly
+        // excludes the requested one, so the message is no longer self-contradictory).
         var available = new HashSet<string>(StringComparer.Ordinal);
         foreach (var store in ordered)
         {
-            if (store.CurrentCoverage.Overlaps(range))
-            {
-                available.UnionWith(store.SupportedAggregations);
-            }
+            available.UnionWith(store.SupportedAggregations);
         }
 
         throw new HistoryAggregationNotSupportedException(query.Aggregation, available);
