@@ -3,9 +3,10 @@
 @using Namotion.Interceptor.Registry.Abstractions
 @implements IDisposable
 
-<MudDialog>
+<MudDialog Style="height:80vh; max-height:90vh;">
     <DialogContent>
-        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+        <div style="display:flex; flex-direction:column; height:100%;">
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center; flex:0 0 auto;">
             <MudSelect T="int" Value="_rangeIndex" ValueChanged="OnRangeChanged" Label="Range" Dense="true" Style="min-width:160px;">
                 @for (var index = 0; index < Presets.Length; index++)
                 {
@@ -37,7 +38,7 @@
             </MudSelect>
         </div>
 
-        <div style="height:360px; margin-top:16px;">
+        <div style="flex:1 1 auto; min-height:0; margin-top:16px;">
             @if (_loading)
             {
                 <MudProgressCircular Indeterminate="true" />
@@ -52,11 +53,11 @@
                           T="double"
                           ChartSeries="_chartSeries"
                           ChartOptions="_chartOptions"
-                          Width="100%" Height="340px" />
+                          Width="100%" Height="100%" />
             }
             else if (_tableRows is { Count: > 0 })
             {
-                <MudSimpleTable Dense="true" Style="max-height:340px; overflow:auto;">
+                <MudSimpleTable Dense="true" Style="max-height:100%; overflow:auto;">
                     <thead><tr><th>Time</th><th>Value</th></tr></thead>
                     <tbody>
                     @foreach (var row in _tableRows)
@@ -70,6 +71,7 @@
             {
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">No data in this range.</MudText>
             }
+        </div>
         </div>
     </DialogContent>
     <DialogActions>
@@ -123,6 +125,8 @@
     {
         ChartPalette = new[] { "#2979FF" },
         LineDisplayType = LineDisplayType.Line,
+        // Single-property chart: the legend is redundant and was getting clipped, so hide it.
+        ShowLegend = false,
         TimeLabelFormat = "HH:mm",
         TimeLabelSpacing = TimeSpan.FromHours(3)
     };
@@ -289,7 +293,7 @@
             { dialog => dialog.IsCumulative, isCumulative }
         };
 
-        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true };
         return dialogService.ShowAsync<PropertyHistoryDialog>($"History: {displayName}", parameters, options);
     }
 }
