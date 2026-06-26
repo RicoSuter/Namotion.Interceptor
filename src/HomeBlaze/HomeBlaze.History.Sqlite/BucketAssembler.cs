@@ -136,7 +136,7 @@ internal static class BucketAssembler
                 return new HistoryPoint(bucketStart, partial?.Count ?? 0, null);
 
             case HistoryAggregations.Last:
-                if (partial is { } lastPartial && lastPartial.LastTicks is not null)
+                if (partial is { LastTicks: not null } lastPartial)
                 {
                     carriedNumber = lastPartial.LastNumber;
                     carriedJson = ParseJson(lastPartial.LastJson);
@@ -145,7 +145,7 @@ internal static class BucketAssembler
                 return new HistoryPoint(bucketStart, carriedNumber, carriedJson);
 
             case HistoryAggregations.First:
-                if (partial is { } firstPartial && firstPartial.FirstTicks is not null)
+                if (partial is { FirstTicks: not null } firstPartial)
                 {
                     return new HistoryPoint(bucketStart, firstPartial.FirstNumber, ParseJson(firstPartial.FirstJson));
                 }

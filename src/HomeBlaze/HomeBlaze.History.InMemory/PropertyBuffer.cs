@@ -4,7 +4,7 @@ namespace HomeBlaze.History.InMemory;
 
 internal sealed class PropertyBuffer
 {
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private readonly Sample[] _items;
     private readonly int _capacity;
     private int _start;   // index of the oldest sample

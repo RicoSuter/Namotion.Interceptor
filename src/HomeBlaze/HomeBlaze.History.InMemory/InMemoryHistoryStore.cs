@@ -30,7 +30,6 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         HistoryAggregations.StandardDeviation
     };
 
-    private readonly int _priority;
     private readonly int _maxPointsPerProperty;
     private readonly TimeSpan _maxAge;
     private readonly int _maxJsonSize;
@@ -40,7 +39,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
     private readonly ConcurrentDictionary<string, PropertyBuffer> _buffers = new(StringComparer.Ordinal);
 
     private readonly List<MoveRecord> _moves = new();
-    private readonly object _movesLock = new();
+    private readonly Lock _movesLock = new();
 
     private long _recordedCount;
     private long _oversizeCount;
@@ -48,7 +47,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
     public InMemoryHistoryStore(
         int priority, int maxPointsPerProperty, TimeSpan maxAge, int maxJsonSize, Func<DateTimeOffset> getUtcNow)
     {
-        _priority = priority;
+        Priority = priority;
         _maxPointsPerProperty = maxPointsPerProperty;
         _maxAge = maxAge;
         _maxJsonSize = maxJsonSize;
@@ -56,7 +55,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         _startTime = getUtcNow();
     }
 
-    public int Priority => _priority;
+    public int Priority { get; }
 
     public IReadOnlySet<string> SupportedAggregations => AllAggregations;
 
@@ -102,7 +101,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
                 return new Sample(timestamp, null, Convert.ToDouble(value, CultureInfo.InvariantCulture), null);
 
             case ValueColumn.Long:
-                if (isUlong && value is ulong unsigned && unsigned > long.MaxValue)
+                if (isUlong && value is ulong unsigned and > long.MaxValue)
                 {
                     return new Sample(timestamp, null, null, JsonSerializer.SerializeToElement(unsigned));
                 }

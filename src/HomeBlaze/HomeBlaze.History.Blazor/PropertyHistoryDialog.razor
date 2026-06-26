@@ -312,7 +312,8 @@
         string propertyPath,
         string displayName,
         Type propertyType,
-        bool isCumulative)
+        bool isCumulative,
+        string? unit = null)
     {
         var parameters = new DialogParameters<PropertyHistoryDialog>
         {
@@ -324,6 +325,7 @@
         };
 
         var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true };
-        return dialogService.ShowAsync<PropertyHistoryDialog>($"History: {displayName}", parameters, options);
+        var title = string.IsNullOrEmpty(unit) ? $"History: {displayName}" : $"History: {displayName} ({unit})";
+        return dialogService.ShowAsync<PropertyHistoryDialog>(title, parameters, options);
     }
 }

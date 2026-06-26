@@ -34,7 +34,7 @@ public partial class InMemoryHistoryStoreSubject : BackgroundService, IConfigura
     // cache is cleared on every structural change, so GetPath() is always current; comparing the
     // returned path to the stored one detects a move without depending on lifecycle event delivery.
     private readonly Dictionary<IInterceptorSubject, string> _lastSubjectPath = new();
-    private readonly object _pathCacheLock = new();
+    private readonly Lock _pathCacheLock = new();
 
     private InMemoryHistoryStore? _engine;
 

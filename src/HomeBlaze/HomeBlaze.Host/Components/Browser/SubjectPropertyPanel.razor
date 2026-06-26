@@ -424,8 +424,11 @@
         var path = basePath == "/" ? $"/{property.Name}" : $"{basePath}/{property.Name}";
 
         var metadata = property.GetStateMetadata();
+        var unit = metadata is null || metadata.Unit == StateUnit.Default
+            ? null
+            : StateUnitExtensions.GetUnitSuffix(metadata.Unit);
         await PropertyHistoryDialog.ShowAsync(
-            DialogService, SubjectRegistry, path, property.Name, property.Type, metadata?.IsCumulative ?? false);
+            DialogService, SubjectRegistry, path, property.Name, property.Type, metadata?.IsCumulative ?? false, unit);
     }
 
     private IReadOnlyList<MethodMetadata> GetMethods() =>

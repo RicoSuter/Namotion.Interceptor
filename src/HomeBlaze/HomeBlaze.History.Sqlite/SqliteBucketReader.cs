@@ -181,76 +181,74 @@ internal static class SqliteBucketReader
         var aliases = new List<string>();
 
         var orderedTerms = new List<string>();
-        using (var command = connection.CreateCommand())
+        using var command = connection.CreateCommand();
+        command.Parameters.AddWithValue("@b", bucketTicks);
+        for (var index = 0; index < segments.Count; index++)
         {
-            command.Parameters.AddWithValue("@b", bucketTicks);
-            for (var index = 0; index < segments.Count; index++)
+            var segment = segments[index];
+            if (!aliasByKey.TryGetValue(segment.PartitionKey, out var alias))
             {
-                var segment = segments[index];
-                if (!aliasByKey.TryGetValue(segment.PartitionKey, out var alias))
-                {
-                    alias = "p" + aliases.Count.ToString(CultureInfo.InvariantCulture);
-                    aliases.Add(alias);
-                    aliasByKey[segment.PartitionKey] = alias;
+                alias = "p" + aliases.Count.ToString(CultureInfo.InvariantCulture);
+                aliases.Add(alias);
+                aliasByKey[segment.PartitionKey] = alias;
 
-                    using var attach = connection.CreateCommand();
-                    attach.CommandText = "ATTACH DATABASE @file AS " + alias + ";";
-                    attach.Parameters.AddWithValue("@file", context.PartitionFilePath(segment.PartitionKey));
-                    attach.ExecuteNonQuery();
-                }
-
-                var pathParameter = "@path" + index.ToString(CultureInfo.InvariantCulture);
-                var fromParameter = "@from" + index.ToString(CultureInfo.InvariantCulture);
-                var toParameter = "@to" + index.ToString(CultureInfo.InvariantCulture);
-                orderedTerms.Add(
-                    "SELECT ts, " + numeric + " AS v FROM " + alias + ".history " +
-                    "WHERE path = " + pathParameter + " AND ts >= " + fromParameter + " AND ts < " + toParameter +
-                    " AND " + numeric + " IS NOT NULL");
-                command.Parameters.AddWithValue(pathParameter, segment.Path);
-                command.Parameters.AddWithValue(fromParameter, segment.FromTicks);
-                command.Parameters.AddWithValue(toParameter, segment.ToTicks);
+                using var attach = connection.CreateCommand();
+                attach.CommandText = "ATTACH DATABASE @file AS " + alias + ";";
+                attach.Parameters.AddWithValue("@file", context.PartitionFilePath(segment.PartitionKey));
+                attach.ExecuteNonQuery();
             }
 
-            try
+            var pathParameter = "@path" + index.ToString(CultureInfo.InvariantCulture);
+            var fromParameter = "@from" + index.ToString(CultureInfo.InvariantCulture);
+            var toParameter = "@to" + index.ToString(CultureInfo.InvariantCulture);
+            orderedTerms.Add(
+                "SELECT ts, " + numeric + " AS v FROM " + alias + ".history " +
+                "WHERE path = " + pathParameter + " AND ts >= " + fromParameter + " AND ts < " + toParameter +
+                " AND " + numeric + " IS NOT NULL");
+            command.Parameters.AddWithValue(pathParameter, segment.Path);
+            command.Parameters.AddWithValue(fromParameter, segment.FromTicks);
+            command.Parameters.AddWithValue(toParameter, segment.ToTicks);
+        }
+
+        try
+        {
+            command.CommandText =
+                "WITH ordered AS (" + string.Join(" UNION ALL ", orderedTerms) + "), " +
+                "edged AS (" +
+                "  SELECT ts, v, (ts/@b)*@b AS bucket_start, ((ts/@b)*@b) + @b AS bucket_end, " +
+                "         COALESCE(LEAD(ts) OVER (ORDER BY ts), ((ts/@b)*@b) + @b) AS next_ts, " +
+                "         LAST_VALUE(v) OVER (PARTITION BY (ts/@b)*@b ORDER BY ts " +
+                "             ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_v " +
+                "  FROM ordered" +
+                ") " +
+                "SELECT bucket_start, " +
+                "       MIN(ts) AS first_ts, " +
+                "       SUM(v * (CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts)) AS weighted_sum, " +
+                "       SUM(CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts) AS total_duration, " +
+                "       MAX(last_v) AS last_number " + // last_v is constant within a bucket, so MAX returns it
+                "FROM edged GROUP BY bucket_start ORDER BY bucket_start;";
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
             {
-                command.CommandText =
-                    "WITH ordered AS (" + string.Join(" UNION ALL ", orderedTerms) + "), " +
-                    "edged AS (" +
-                    "  SELECT ts, v, (ts/@b)*@b AS bucket_start, ((ts/@b)*@b) + @b AS bucket_end, " +
-                    "         COALESCE(LEAD(ts) OVER (ORDER BY ts), ((ts/@b)*@b) + @b) AS next_ts, " +
-                    "         LAST_VALUE(v) OVER (PARTITION BY (ts/@b)*@b ORDER BY ts " +
-                    "             ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_v " +
-                    "  FROM ordered" +
-                    ") " +
-                    "SELECT bucket_start, " +
-                    "       MIN(ts) AS first_ts, " +
-                    "       SUM(v * (CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts)) AS weighted_sum, " +
-                    "       SUM(CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts) AS total_duration, " +
-                    "       MAX(last_v) AS last_number " + // last_v is constant within a bucket, so MAX returns it
-                    "FROM edged GROUP BY bucket_start ORDER BY bucket_start;";
+                var bucketStart = reader.GetInt64(0);
+                long? firstTicks = reader.IsDBNull(1) ? null : reader.GetInt64(1);
+                var weightedSum = reader.IsDBNull(2) ? 0d : reader.GetDouble(2);
+                var totalDuration = reader.IsDBNull(3) ? 0d : reader.GetDouble(3);
+                double? lastNumber = reader.IsDBNull(4) ? null : reader.GetDouble(4);
 
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    var bucketStart = reader.GetInt64(0);
-                    long? firstTicks = reader.IsDBNull(1) ? null : reader.GetInt64(1);
-                    var weightedSum = reader.IsDBNull(2) ? 0d : reader.GetDouble(2);
-                    var totalDuration = reader.IsDBNull(3) ? 0d : reader.GetDouble(3);
-                    double? lastNumber = reader.IsDBNull(4) ? null : reader.GetDouble(4);
-
-                    result[bucketStart] = new BucketPartial(
-                        bucketStart, 0, null, null, null, null,
-                        firstTicks, null, null, null, lastNumber, null, weightedSum, totalDuration);
-                }
+                result[bucketStart] = new BucketPartial(
+                    bucketStart, 0, null, null, null, null,
+                    firstTicks, null, null, null, lastNumber, null, weightedSum, totalDuration);
             }
-            finally
+        }
+        finally
+        {
+            foreach (var alias in aliases)
             {
-                foreach (var alias in aliases)
-                {
-                    using var detach = connection.CreateCommand();
-                    detach.CommandText = "DETACH DATABASE " + alias + ";";
-                    detach.ExecuteNonQuery();
-                }
+                using var detach = connection.CreateCommand();
+                detach.CommandText = "DETACH DATABASE " + alias + ";";
+                detach.ExecuteNonQuery();
             }
         }
 
