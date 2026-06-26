@@ -12,6 +12,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
 
 @implements ISubjectComponent
+@implements IDisposable
 @inject ITimeZoneDisplay TimeZone
 
 <CascadingValue Value="@IsEditing" Name="IsEditing">
@@ -70,6 +71,19 @@
     private MarkdownFile? File => Subject as MarkdownFile;
 
     private bool IsLoading => File?.Content is null;
+
+    protected override void OnInitialized()
+    {
+        // The last-modified stamp is formatted through the display time zone, so re-render when it changes.
+        TimeZone.Changed += OnTimeZoneChanged;
+    }
+
+    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        TimeZone.Changed -= OnTimeZoneChanged;
+    }
 
     private record RenderSegment(string? Html, IInterceptorSubject? Widget);
 

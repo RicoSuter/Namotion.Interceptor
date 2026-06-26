@@ -311,6 +311,68 @@ public class PropertyHistoryChartModelTests
         Assert.Equal(TimeSpan.FromMinutes(5), bucket);
     }
 
+    // Treats a wall-clock pick as already being in UTC, isolating the day-inclusion logic from time-zone conversion.
+    private static DateTimeOffset AsUtc(DateTime wallClock) => new(wallClock, TimeSpan.Zero);
+
+    [Fact]
+    public void WhenCustomRangeSingleDay_ThenIncludesWholeSelectedDay()
+    {
+        // Arrange - same From and To day; To is the end of that day so the window spans the full day, not zero.
+        var day = new DateTime(2026, 6, 27);
+
+        // Act
+        var (from, to) = PropertyHistoryChartModel.ResolveCustomRange(day, day, DateTimeOffset.UtcNow, AsUtc);
+
+        // Assert - a single-day pick is a full day, and the dialog's "to must be after from" guard accepts it.
+        Assert.True(to > from);
+        Assert.Equal(TimeSpan.FromDays(1), to - from);
+    }
+
+    [Fact]
+    public void WhenCustomRangeToAfterFrom_ThenToIsStartOfDayAfterSelectedTo()
+    {
+        // Arrange
+        var from = new DateTime(2026, 6, 25);
+        var to = new DateTime(2026, 6, 27);
+
+        // Act
+        var (resolvedFrom, resolvedTo) = PropertyHistoryChartModel.ResolveCustomRange(
+            from, to, DateTimeOffset.UtcNow, AsUtc);
+
+        // Assert - From is start-of-day; the selected To day (27th) is fully included, so the window ends on the 28th.
+        Assert.Equal(new DateTimeOffset(2026, 6, 25, 0, 0, 0, TimeSpan.Zero), resolvedFrom);
+        Assert.Equal(new DateTimeOffset(2026, 6, 28, 0, 0, 0, TimeSpan.Zero), resolvedTo);
+    }
+
+    [Fact]
+    public void WhenCustomRangeInverted_ThenToIsNotAfterFromSoGuardRejects()
+    {
+        // Arrange - From day later than To day.
+        var from = new DateTime(2026, 6, 27);
+        var to = new DateTime(2026, 6, 25);
+
+        // Act
+        var (resolvedFrom, resolvedTo) = PropertyHistoryChartModel.ResolveCustomRange(
+            from, to, DateTimeOffset.UtcNow, AsUtc);
+
+        // Assert - end-of-day shift on To (26th) is still before From (27th), so the to <= from guard rejects it.
+        Assert.True(resolvedTo <= resolvedFrom);
+    }
+
+    [Fact]
+    public void WhenCustomRangeUnset_ThenFallsBackToLastHourEndingAtNow()
+    {
+        // Arrange - neither picker has a value yet (just switched to Custom).
+        var now = new DateTimeOffset(2026, 6, 27, 12, 0, 0, TimeSpan.Zero);
+
+        // Act
+        var (from, to) = PropertyHistoryChartModel.ResolveCustomRange(null, null, now, AsUtc);
+
+        // Assert
+        Assert.Equal(now, to);
+        Assert.Equal(now.AddHours(-1), from);
+    }
+
     // Every numeric store in v1 supports every aggregation; this models that union for the gating tests.
     private static HashSet<string> HistoryEligibilityUnionAll() => new(StringComparer.Ordinal)
     {

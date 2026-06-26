@@ -55,6 +55,22 @@ public static class PropertyHistoryChartModel
         return period.IsAuto ? AutoBucket(range, availableCoverage) : period.Bucket;
     }
 
+    /// <summary>
+    /// Resolves the half-open [from, to) UTC window for a custom date range. The picked "To" date is treated as the
+    /// end of that day (the start of the following day), so the selected To day is fully included and a single picked
+    /// day (From == To) yields a full one-day window instead of an empty one. The picked "From" date stays at the
+    /// start of its day. Wall-clock picks are converted with <paramref name="toUtc"/>; an unset side falls back to
+    /// <paramref name="now"/> (To) or one hour before To (From). A genuinely inverted pick still yields to &lt;= from,
+    /// so the caller's "to must be after from" guard rejects it.
+    /// </summary>
+    public static (DateTimeOffset From, DateTimeOffset To) ResolveCustomRange(
+        DateTime? customFrom, DateTime? customTo, DateTimeOffset now, Func<DateTime, DateTimeOffset> toUtc)
+    {
+        var to = customTo is { } pickedTo ? toUtc(pickedTo.Date.AddDays(1)) : now;
+        var from = customFrom is { } pickedFrom ? toUtc(pickedFrom) : to.AddHours(-1);
+        return (from, to);
+    }
+
     /// <summary>Formats a bucket size as a short human label (for example "10s", "5m", "1h", "1d").</summary>
     public static string FormatBucket(TimeSpan bucket)
     {

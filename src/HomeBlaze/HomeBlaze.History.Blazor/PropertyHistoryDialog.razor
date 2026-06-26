@@ -190,14 +190,21 @@
         try
         {
             // Custom date picks are wall-clock dates; interpret them in the selected display time zone (not
-            // UTC) so the queried window matches what the user picked. Presets anchor to "now"; the chart and
-            // labels convert to the display time zone for rendering.
-            var to = _useCustom
-                ? (_customTo is { } customTo ? TimeZone.ToUtc(customTo) : DateTimeOffset.UtcNow)
-                : DateTimeOffset.UtcNow;
-            var from = _useCustom
-                ? (_customFrom is { } customFrom ? TimeZone.ToUtc(customFrom) : to.AddHours(-1))
-                : to - Presets[_rangeIndex].Range!.Value;
+            // UTC) so the queried window matches what the user picked. The picked To date is treated as the end
+            // of that day (start of the next day), giving a half-open [from, to) window that includes the whole
+            // selected To day, so a single-day pick (From == To) is a full day rather than an empty range.
+            // Presets anchor to "now"; the chart and labels convert to the display time zone for rendering.
+            DateTimeOffset from, to;
+            if (_useCustom)
+            {
+                (from, to) = PropertyHistoryChartModel.ResolveCustomRange(
+                    _customFrom, _customTo, DateTimeOffset.UtcNow, TimeZone.ToUtc);
+            }
+            else
+            {
+                to = DateTimeOffset.UtcNow;
+                from = to - Presets[_rangeIndex].Range!.Value;
+            }
 
             if (to <= from)
             {
@@ -310,6 +317,9 @@
     public void Dispose()
     {
         TimeZone.Changed -= OnTimeZoneChanged;
+        // Cancel before disposing: disposing a CTS does not cancel its token, so an in-flight LoadAsync would
+        // otherwise keep running and call BuildView/StateHasChanged on this disposed component.
+        _loadCts?.Cancel();
         _loadCts?.Dispose();
     }
 
