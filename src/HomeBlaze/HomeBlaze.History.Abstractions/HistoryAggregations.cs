@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace HomeBlaze.History.Abstractions;
 
 /// <summary>
@@ -33,6 +35,16 @@ public static class HistoryAggregations
 
     /// <summary>Sample standard deviation.</summary>
     public const string StandardDeviation = "StandardDeviation";
+
+    /// <summary>
+    /// All aggregation identifiers in canonical display order (the order numeric columns offer them,
+    /// time-weighted average first). The single source of truth for the full set: the MCP boundary and
+    /// the chart gating derive their lists from this instead of re-listing the identifiers.
+    /// </summary>
+    public static readonly ImmutableArray<string> All =
+    [
+        TimeWeightedAverage, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count
+    ];
 
     /// <summary>
     /// Aggregations every store supports regardless of column type. The global eligibility

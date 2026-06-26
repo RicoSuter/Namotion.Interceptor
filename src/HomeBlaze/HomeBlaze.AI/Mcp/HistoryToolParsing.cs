@@ -9,19 +9,9 @@ namespace HomeBlaze.AI.Mcp;
 /// </summary>
 public static class HistoryToolParsing
 {
-    /// <summary>All recognized aggregation identifiers (canonical PascalCase).</summary>
-    public static readonly IReadOnlySet<string> AllAggregations = new HashSet<string>(StringComparer.Ordinal)
-    {
-        HistoryAggregations.Last,
-        HistoryAggregations.First,
-        HistoryAggregations.SampleAverage,
-        HistoryAggregations.TimeWeightedAverage,
-        HistoryAggregations.Minimum,
-        HistoryAggregations.Maximum,
-        HistoryAggregations.Sum,
-        HistoryAggregations.Count,
-        HistoryAggregations.StandardDeviation
-    };
+    /// <summary>All recognized aggregation identifiers (canonical PascalCase), from <see cref="HistoryAggregations.All"/>.</summary>
+    public static readonly IReadOnlySet<string> AllAggregations =
+        new HashSet<string>(HistoryAggregations.All, StringComparer.Ordinal);
 
     /// <summary>
     /// Normalizes a case-insensitive aggregation name to its canonical form, defaulting to

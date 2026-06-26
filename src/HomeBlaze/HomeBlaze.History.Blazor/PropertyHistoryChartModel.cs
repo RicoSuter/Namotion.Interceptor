@@ -141,7 +141,7 @@ public static class PropertyHistoryChartModel
     /// </summary>
     public static IReadOnlyList<string> GateAggregations(ValueColumn column, bool isCumulative, IReadOnlySet<string> storeUnion)
     {
-        string[] ordered = isCumulative
+        IReadOnlyList<string> ordered = isCumulative
             ? new[]
             {
                 HistoryAggregations.Last, HistoryAggregations.First,
@@ -149,13 +149,7 @@ public static class PropertyHistoryChartModel
             }
             : column == ValueColumn.Json
                 ? new[] { HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count }
-                : new[]
-                {
-                    HistoryAggregations.TimeWeightedAverage, HistoryAggregations.SampleAverage,
-                    HistoryAggregations.Minimum, HistoryAggregations.Maximum, HistoryAggregations.Sum,
-                    HistoryAggregations.StandardDeviation, HistoryAggregations.Last,
-                    HistoryAggregations.First, HistoryAggregations.Count
-                };
+                : HistoryAggregations.All;
 
         var allowed = new HashSet<string>(storeUnion, StringComparer.Ordinal);
         allowed.UnionWith(HistoryAggregations.AlwaysAvailable);

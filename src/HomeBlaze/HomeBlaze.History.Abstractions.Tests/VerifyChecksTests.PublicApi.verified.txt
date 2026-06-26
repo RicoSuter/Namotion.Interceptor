@@ -22,6 +22,7 @@ namespace HomeBlaze.History.Abstractions
         public const string StandardDeviation = "StandardDeviation";
         public const string Sum = "Sum";
         public const string TimeWeightedAverage = "TimeWeightedAverage";
+        public static readonly System.Collections.Immutable.ImmutableArray<string> All;
         public static readonly System.Collections.Generic.IReadOnlySet<string> AlwaysAvailable;
     }
     public static class HistoryColumns
