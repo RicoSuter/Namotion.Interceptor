@@ -1,6 +1,8 @@
 @using HomeBlaze.History
 @using HomeBlaze.History.Abstractions
 @using Namotion.Interceptor.Registry.Abstractions
+@using HomeBlaze.Services
+@inject ITimeZoneDisplay TimeZone
 @implements IDisposable
 
 <MudDialog Style="height:80vh; max-height:90vh;">
@@ -64,7 +66,7 @@
                     <tbody>
                     @foreach (var row in _tableRows)
                     {
-                        <tr><td>@row.Time.LocalDateTime.ToString("g")</td><td>@row.Value</td></tr>
+                        <tr><td>@TimeZone.ToZoned(row.Time).ToString("g")</td><td>@row.Value</td></tr>
                     }
                     </tbody>
                 </MudSimpleTable>
@@ -140,6 +142,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        TimeZone.Changed += OnTimeZoneChanged;
         var column = HistoryColumns.GetValueColumnFor(PropertyType);
         var union = new HashSet<string>(StringComparer.Ordinal);
         foreach (var store in Registry.KnownSubjects.Keys.OfType<IHistoryStore>())
@@ -184,18 +187,14 @@
         StateHasChanged();
         try
         {
-            // Custom date picks are local dates; interpret them in the local time zone (not UTC) so the
-            // queried window matches what the user picked. Presets anchor to "now"; the chart and labels
-            // convert to local for display.
+            // Custom date picks are wall-clock dates; interpret them in the selected display time zone (not
+            // UTC) so the queried window matches what the user picked. Presets anchor to "now"; the chart and
+            // labels convert to the display time zone for rendering.
             var to = _useCustom
-                ? (_customTo is { } customTo
-                    ? new DateTimeOffset(DateTime.SpecifyKind(customTo, DateTimeKind.Local))
-                    : DateTimeOffset.Now)
+                ? (_customTo is { } customTo ? TimeZone.ToUtc(customTo) : DateTimeOffset.UtcNow)
                 : DateTimeOffset.UtcNow;
             var from = _useCustom
-                ? (_customFrom is { } customFrom
-                    ? new DateTimeOffset(DateTime.SpecifyKind(customFrom, DateTimeKind.Local))
-                    : to.AddHours(-1))
+                ? (_customFrom is { } customFrom ? TimeZone.ToUtc(customFrom) : to.AddHours(-1))
                 : to - Presets[_rangeIndex].Range!.Value;
 
             if (to <= from)
@@ -219,8 +218,8 @@
                 PropertyHistoryChartModel.Periods[_periodIndex], range, availableCoverage);
 
             _rangeHint = range <= TimeSpan.FromHours(24)
-                ? $"{from.LocalDateTime:HH:mm} to {to.LocalDateTime:HH:mm}"
-                : $"{from.LocalDateTime:MMM d, HH:mm} to {to.LocalDateTime:MMM d, HH:mm}";
+                ? $"{TimeZone.ToZoned(from):HH:mm} to {TimeZone.ToZoned(to):HH:mm}"
+                : $"{TimeZone.ToZoned(from):MMM d, HH:mm} to {TimeZone.ToZoned(to):MMM d, HH:mm}";
             _periodHint = PropertyHistoryChartModel.DescribePeriod(PropertyHistoryChartModel.Periods[_periodIndex], bucket);
             _aggregationHint = PropertyHistoryChartModel.DescribeAggregation(_aggregation);
 
@@ -280,7 +279,7 @@
                     Name = DisplayName,
                     Visible = true,
                     Data = new ChartData<double>(
-                        run.Select(point => (point.Timestamp.LocalDateTime, point.Number!.Value)).ToList())
+                        run.Select(point => (TimeZone.ToZoned(point.Timestamp), point.Number!.Value)).ToList())
                 })
                 .ToList();
             _tableRows = null;
@@ -304,7 +303,13 @@
 
     private void Close() => MudDialog?.Close(DialogResult.Ok(true));
 
-    public void Dispose() => _loadCts?.Dispose();
+    private void OnTimeZoneChanged() => InvokeAsync(LoadAsync);
+
+    public void Dispose()
+    {
+        TimeZone.Changed -= OnTimeZoneChanged;
+        _loadCts?.Dispose();
+    }
 
     public static Task<IDialogReference> ShowAsync(
         IDialogService dialogService,

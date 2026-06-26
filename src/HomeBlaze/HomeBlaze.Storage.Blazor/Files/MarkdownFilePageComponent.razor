@@ -7,10 +7,12 @@
 @using HomeBlaze.Storage.Internal
 @using MudBlazor
 @using Namotion.Interceptor
+@using HomeBlaze.Services
 
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
 
 @implements ISubjectComponent
+@inject ITimeZoneDisplay TimeZone
 
 <CascadingValue Value="@IsEditing" Name="IsEditing">
     <div class="markdown-content" style="position: relative;">
@@ -22,7 +24,7 @@
         {
             <div class="markdown-page-toolbar" style="position: absolute; top: 0.5rem; right: 1rem; display: flex; gap: 0.5rem; align-items: center;">
                 <span style="font-size: 0.8rem; color: rgba(128,128,128,0.7);">
-                    @File?.LastModified.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                    @(File is { } file ? TimeZone.ToZoned(new DateTimeOffset(file.LastModified, TimeSpan.Zero)).ToString("yyyy-MM-dd HH:mm:ss") : "")
                 </span>
             </div>
             @foreach (var segment in GetRenderSegments())
