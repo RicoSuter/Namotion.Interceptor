@@ -335,27 +335,31 @@
             {
                 <span style="display: inline-block; width: 24px;"></span>
             }
-            <strong>@displayName: </strong>
             @{ var displayValue = prop.GetPropertyDisplayValue(value, TimeZone); }
-            @if (displayValue.Contains('\n'))
-            {
-                @foreach (var line in displayValue.Split('\n'))
-                {
-                    <span>@line</span><br />
-                }
-            }
-            else
-            {
-                @displayValue
+            @{
+                RenderFragment nameAndValue =
+                    @<text><strong>@displayName: </strong>@if (displayValue.Contains('\n'))
+                    {
+                        @foreach (var line in displayValue.Split('\n'))
+                        {
+                            <span>@line</span>
+
+                            <br/>
+                        }
+                    }
+                    else
+                    {
+                        @displayValue
+                    }</text>;
             }
             @if (CanShowHistory(prop))
             {
-                <MudIconButton Icon="@Icons.Material.Filled.ShowChart"
-                               Size="Size.Small"
-                               Class="ml-1"
-                               Style="padding: 0; width: 20px; height: 20px;"
-                               title="Show history"
-                               OnClick="@(() => OpenPropertyHistoryDialogAsync(prop))" />
+                <MudLink Color="Color.Inherit" Underline="Underline.Hover" Style="cursor: pointer;"
+                         title="Show history" OnClick="@(() => OpenPropertyHistoryDialogAsync(prop))">@nameAndValue</MudLink>
+            }
+            else
+            {
+                @nameAndValue
             }
         </MudText>
 
