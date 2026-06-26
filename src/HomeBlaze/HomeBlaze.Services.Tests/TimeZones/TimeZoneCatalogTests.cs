@@ -36,4 +36,17 @@ public class TimeZoneCatalogTests
             }
         }
     }
+
+    [Fact]
+    public void WhenZoneListed_ThenNoRawWindowsZoneNamesRemain()
+    {
+        // Act
+        var zones = TimeZoneCatalog.GetZones();
+
+        // Assert
+        // Windows zone ids look like "Mid-Atlantic Standard Time"; only canonical IANA ids should remain.
+        Assert.DoesNotContain(zones, zone =>
+            zone.Id.Contains("Standard Time", StringComparison.OrdinalIgnoreCase) ||
+            zone.Id.Contains("Daylight Time", StringComparison.OrdinalIgnoreCase));
+    }
 }

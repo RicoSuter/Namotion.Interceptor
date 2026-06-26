@@ -56,10 +56,25 @@
     private bool IsZoneSelected(string id) =>
         !TimeZone.Preference.IsAutomatic && TimeZone.IsResolved && TimeZone.Zone!.Id == id;
 
+    private IEnumerable<TimeZoneOption> AllZones()
+    {
+        // The catalog is built from the OS's canonical zones, so a sibling zone the browser reports
+        // (for example Europe/Zurich, which collapses into Europe/Berlin on Windows) may be missing.
+        // Make the currently resolved zone selectable by adding it when the catalog lacks it.
+        if (TimeZone.Zone is { } zone
+            && !Zones.Any(option => string.Equals(option.Id, zone.Id, StringComparison.OrdinalIgnoreCase))
+            && TimeZoneCatalog.CreateOption(zone) is { } current)
+        {
+            return Zones.Prepend(current);
+        }
+
+        return Zones;
+    }
+
     private IEnumerable<TimeZoneOption> FilteredZones() =>
         string.IsNullOrWhiteSpace(_search)
-            ? Zones
-            : Zones.Where(zone => zone.DisplayName.Contains(_search, StringComparison.OrdinalIgnoreCase));
+            ? AllZones()
+            : AllZones().Where(zone => zone.DisplayName.Contains(_search, StringComparison.OrdinalIgnoreCase));
 
     private async Task SelectAutomaticAsync()
     {
