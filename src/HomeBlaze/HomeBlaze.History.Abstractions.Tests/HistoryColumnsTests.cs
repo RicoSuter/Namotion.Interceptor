@@ -15,7 +15,9 @@ public class HistoryColumnsTests
     [InlineData(typeof(float))]
     [InlineData(typeof(double?))]
     [InlineData(typeof(float?))]
-    public void WhenTypeIsFloatingPoint_ThenColumnIsDouble(Type type)
+    [InlineData(typeof(decimal))]
+    [InlineData(typeof(decimal?))]
+    public void WhenTypeIsDoubleFloatOrDecimal_ThenColumnIsDouble(Type type)
     {
         // Arrange & Act
         var column = HistoryColumns.GetValueColumnFor(type);
@@ -48,12 +50,10 @@ public class HistoryColumnsTests
     }
 
     [Theory]
-    [InlineData(typeof(decimal))]
     [InlineData(typeof(string))]
     [InlineData(typeof(SampleEnum))]
-    [InlineData(typeof(decimal?))]
     [InlineData(typeof(SampleEnum?))]
-    public void WhenTypeIsDecimalStringOrEnum_ThenColumnIsJson(Type type)
+    public void WhenTypeIsStringOrEnum_ThenColumnIsJson(Type type)
     {
         // Arrange & Act
         var column = HistoryColumns.GetValueColumnFor(type);

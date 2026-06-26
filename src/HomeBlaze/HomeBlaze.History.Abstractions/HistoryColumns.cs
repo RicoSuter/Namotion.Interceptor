@@ -8,10 +8,10 @@ public enum ValueColumn
     /// <summary>Integer types and bool (bool as 0/1).</summary>
     Long,
 
-    /// <summary>double and float.</summary>
+    /// <summary>double, float, and decimal (decimal also archives its exact text in the persistent store).</summary>
     Double,
 
-    /// <summary>decimal, string, enum, and (v1.1) path references.</summary>
+    /// <summary>string, enum, and (v1.1) path references.</summary>
     Json
 }
 
@@ -27,9 +27,9 @@ public static class HistoryColumns
     public static ValueColumn GetValueColumnFor(Type propertyType)
     {
         var t = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
-        if (t == typeof(double) || t == typeof(float)) return ValueColumn.Double;
+        if (t == typeof(double) || t == typeof(float) || t == typeof(decimal)) return ValueColumn.Double;
         if (IsBigIntCompatible(t)) return ValueColumn.Long;
-        return ValueColumn.Json; // decimal, string, enum, (v1.1) path references
+        return ValueColumn.Json; // string, enum, (v1.1) path references
     }
 
     /// <summary>

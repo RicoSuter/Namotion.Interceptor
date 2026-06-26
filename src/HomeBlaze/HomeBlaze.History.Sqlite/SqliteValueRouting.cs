@@ -52,7 +52,12 @@ internal static class SqliteValueRouting
         switch (column)
         {
             case ValueColumn.Double:
-                return new RoutedRow(new Row(null, Convert.ToDouble(value, CultureInfo.InvariantCulture), null), false);
+                // A decimal routes here so the chart/MCP/aggregations read value_double, but its exact text is
+                // also archived in value_json so the original precision is recoverable later. ToPoint reads
+                // value_double first, so the archive never affects query results. A real double has no exact
+                // decimal text to preserve, so it leaves value_json empty.
+                var archive = value is decimal decimalValue ? JsonSerializer.Serialize(decimalValue) : null;
+                return new RoutedRow(new Row(null, Convert.ToDouble(value, CultureInfo.InvariantCulture), archive), false);
 
             case ValueColumn.Long:
                 if (isUlong && value is ulong unsigned && unsigned > long.MaxValue)

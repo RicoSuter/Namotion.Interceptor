@@ -47,6 +47,21 @@ public class InMemoryHistoryStoreCoreRawTests
     }
 
     [Fact]
+    public void WhenDecimalRecorded_ThenStoredAsNumberForCharting()
+    {
+        // Arrange - decimal routes to the numeric (double) column so the chart and aggregations see a number.
+        var core = NewCore(Base.AddSeconds(10));
+        core.Record("/a/Temperature", Base.AddSeconds(0), 0.1m, typeof(decimal));
+
+        // Act
+        var point = core.Query(new HistoryQuery("/a/Temperature", Base, Base.AddSeconds(10))).Points.Single();
+
+        // Assert - surfaced as Number (graphable), not an opaque Json value
+        Assert.Equal((double)0.1m, point.Number);
+        Assert.Null(point.Json);
+    }
+
+    [Fact]
     public void WhenStringRecorded_ThenStoredInJsonColumn()
     {
         // Arrange

@@ -52,6 +52,22 @@ public sealed class SqliteHistoryStoreCoreRawTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenDecimalRecorded_ThenStoredAsNumberForCharting()
+    {
+        // Arrange - decimal routes to the numeric (double) column so the chart and aggregations see a number.
+        using var core = NewCore(Base.AddSeconds(10));
+        core.Record("/a/Temperature", Base.AddSeconds(0), 0.1m, typeof(decimal));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        var point = core.Query(new HistoryQuery("/a/Temperature", Base, Base.AddSeconds(10))).Points.Single();
+
+        // Assert - surfaced as Number (graphable); the exact decimal is archived in value_json but not surfaced.
+        Assert.Equal((double)0.1m, point.Number);
+        Assert.Null(point.Json);
+    }
+
+    [Fact]
     public async Task WhenLongBoolStringEnumNullRecorded_ThenColumnsRoutedLikeInMemory()
     {
         // Arrange

@@ -30,6 +30,22 @@ public class InMemoryHistoryStoreCoreBucketedTests
             MaxPoints: 1000, CarrySeed: carrySeed);
 
     [Fact]
+    public void WhenDecimalRecorded_ThenNumericAggregationIsSupported()
+    {
+        // Arrange - decimals must support numeric aggregation (not be refused like a Json string/enum).
+        var core = NewCore();
+        core.Record("/a/Value", Base.AddSeconds(1), 1.5m, typeof(decimal));
+        core.Record("/a/Value", Base.AddSeconds(2), 3.5m, typeof(decimal));
+        core.Record("/a/Value", Base.AddSeconds(3), 2.5m, typeof(decimal));
+
+        // Act - single [0,10) bucket, Maximum
+        var point = core.Query(BucketedQuery(HistoryAggregations.Maximum, 0, 10)).Points.Single();
+
+        // Assert
+        Assert.Equal(3.5, point.Number);
+    }
+
+    [Fact]
     public void WhenCount_ThenEmptyBucketIsZero()
     {
         // Arrange - samples only in the first 10s bucket; second bucket empty
