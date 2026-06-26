@@ -73,9 +73,41 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         get
         {
             var now = _getUtcNow();
-            var from = _startTime > now - _maxAge ? _startTime : now - _maxAge;
+            var ageFloor = now - _maxAge;
+
+            // A per-property ring buffer bounded by the count cap can evict older samples well before
+            // _maxAge, so the store may only retain the last few samples even with a large max age. Base
+            // From on the oldest sample actually retained (clamped to the age floor) so the cross-store
+            // merger does not route already-evicted older ranges here and skip the lower-priority store.
+            var oldestRetained = OldestRetainedTimestamp();
+            DateTimeOffset from;
+            if (oldestRetained is { } oldest)
+            {
+                from = oldest > ageFloor ? oldest : ageFloor;
+            }
+            else
+            {
+                from = _startTime > ageFloor ? _startTime : ageFloor;
+            }
+
             return new HistoryCoverage(from, now);
         }
+    }
+
+    // Oldest sample timestamp retained across all buffers, or null when no samples exist. Iterates the
+    // dictionary directly (no Values snapshot) to keep this allocation-light.
+    private DateTimeOffset? OldestRetainedTimestamp()
+    {
+        DateTimeOffset? oldest = null;
+        foreach (var pair in _buffers)
+        {
+            if (pair.Value.OldestTimestamp is { } timestamp && (oldest is null || timestamp < oldest))
+            {
+                oldest = timestamp;
+            }
+        }
+
+        return oldest;
     }
 
     public void Record(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)

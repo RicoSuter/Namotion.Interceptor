@@ -176,6 +176,52 @@ public class InMemoryHistoryStoreCoreRawTests
     }
 
     [Fact]
+    public void WhenCountEvictionDropsOldestSamples_ThenCoverageFromIsOldestRetainedSample()
+    {
+        // Arrange - a small per-property cap with a large max age, so count eviction (not age) bounds the
+        // buffer. The store starts at Base; the clock is advanced before coverage is read.
+        var clock = Base;
+        var core = new InMemoryHistoryStore(
+            priority: 100, maxPointsPerProperty: 2, maxAge: TimeSpan.FromHours(1),
+            maxJsonSize: 8192, getUtcNow: () => clock);
+
+        // Record three samples into a capacity-two ring; the oldest (t=1s) is evicted, leaving t=2s and t=3s.
+        core.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        core.Record("/a/Value", Base.AddSeconds(2), 2d, typeof(double));
+        core.Record("/a/Value", Base.AddSeconds(3), 3d, typeof(double));
+
+        // Advance the clock so now - maxAge sits far below the oldest retained sample.
+        clock = Base.AddSeconds(30);
+
+        // Act
+        var coverage = core.CurrentCoverage;
+
+        // Assert - From is the oldest sample actually retained (t=2s), not now - maxAge nor _startTime; the
+        // store cannot honestly claim coverage back to a time whose samples were evicted by the count cap.
+        Assert.Equal(Base.AddSeconds(2), coverage.From);
+        Assert.Equal(clock, coverage.To);
+    }
+
+    [Fact]
+    public void WhenNoSamplesRecorded_ThenCoverageFromKeepsStartTimeOrMaxAgeFloor()
+    {
+        // Arrange - start at Base, advance the clock, never record a sample.
+        var clock = Base;
+        var core = new InMemoryHistoryStore(
+            priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromHours(1),
+            maxJsonSize: 8192, getUtcNow: () => clock);
+        clock = Base.AddSeconds(30);
+
+        // Act
+        var coverage = core.CurrentCoverage;
+
+        // Assert - with no samples, From keeps the existing max(_startTime, now - maxAge) behavior. Here
+        // now - maxAge (Base + 30s - 1h) is below _startTime (Base), so From == _startTime.
+        Assert.Equal(Base, coverage.From);
+        Assert.Equal(clock, coverage.To);
+    }
+
+    [Fact]
     public void WhenSwept_ThenSamplesOlderThanMaxAgeEvicted()
     {
         // Arrange - now is Base+120s, MaxAge 60s, so anything before Base+60s is stale

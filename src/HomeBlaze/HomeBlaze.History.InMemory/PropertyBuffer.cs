@@ -34,6 +34,13 @@ internal sealed class PropertyBuffer
         get { lock (_lock) { return _count == 0 ? null : _items[_start]; } }
     }
 
+    // Timestamp of the oldest retained sample, or null when empty. Cheaper than reading Oldest when only
+    // the timestamp is needed (no Sample copy), used by coverage to find the true retention floor.
+    public DateTimeOffset? OldestTimestamp
+    {
+        get { lock (_lock) { return _count == 0 ? null : _items[_start].Timestamp; } }
+    }
+
     public Sample? Newest
     {
         get { lock (_lock) { return _count == 0 ? null : _items[Index(_count - 1)]; } }
