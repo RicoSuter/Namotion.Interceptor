@@ -30,10 +30,12 @@ public partial class InMemoryHistoryStoreSubject : BackgroundService, IConfigura
     private readonly ThroughputCounter _incomingThroughput = new();
     private readonly ThroughputCounter _recordedThroughput = new();
 
-    // Last canonical subject path seen per subject, used for move detection. The resolver's own
-    // cache is cleared on every structural change, so GetPath() is always current; comparing the
+    // Last canonical subject path seen per (subject, property), used for move detection. The resolver's
+    // own cache is cleared on every structural change, so GetPath() is always current; comparing the
     // returned path to the stored one detects a move without depending on lifecycle event delivery.
-    private readonly Dictionary<IInterceptorSubject, string> _lastSubjectPath = new();
+    // Keying by property (not just subject) lets each history property of a renamed subject detect the
+    // move independently, so the first property to change does not consume the rename for its siblings.
+    private readonly Dictionary<(IInterceptorSubject Subject, string PropertyName), string> _lastSubjectPath = new();
     private readonly Lock _pathCacheLock = new();
 
     private InMemoryHistoryStore? _engine;
@@ -263,9 +265,10 @@ public partial class InMemoryHistoryStoreSubject : BackgroundService, IConfigura
             var propertyName = change.Property.Name;
             var fullPath = JoinPath(subjectPath, propertyName);
 
+            var cacheKey = (subject, propertyName);
             lock (_pathCacheLock)
             {
-                if (_lastSubjectPath.TryGetValue(subject, out var previousSubjectPath) &&
+                if (_lastSubjectPath.TryGetValue(cacheKey, out var previousSubjectPath) &&
                     !string.Equals(previousSubjectPath, subjectPath, StringComparison.Ordinal))
                 {
                     engine.RecordMove(
@@ -274,7 +277,7 @@ public partial class InMemoryHistoryStoreSubject : BackgroundService, IConfigura
                         fullPath);
                 }
 
-                _lastSubjectPath[subject] = subjectPath;
+                _lastSubjectPath[cacheKey] = subjectPath;
             }
 
             engine.Record(fullPath, change.ChangedTimestamp, change.GetNewValue<object>(), registered.Type);
@@ -331,7 +334,12 @@ public partial class InMemoryHistoryStoreSubject : BackgroundService, IConfigura
         {
             lock (_pathCacheLock)
             {
-                _lastSubjectPath.Remove(change.Subject);
+                // Drop every per-property entry for the detached subject (the key now carries the
+                // property name, so a single Remove no longer suffices).
+                foreach (var key in _lastSubjectPath.Keys.Where(key => key.Subject == change.Subject).ToList())
+                {
+                    _lastSubjectPath.Remove(key);
+                }
             }
         }
     }

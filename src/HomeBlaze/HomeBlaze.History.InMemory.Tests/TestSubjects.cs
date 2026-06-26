@@ -23,11 +23,16 @@ public partial class TestRoot
 }
 
 /// <summary>
-/// Child test subject with a recordable [State] numeric property, recorded under its own canonical path.
+/// Child test subject with two recordable [State] numeric properties, each recorded under its own
+/// canonical path. The second property lets the move-detection test verify that a subject rename is
+/// detected per property, so a sibling property keeps its pre-move history.
 /// </summary>
 [InterceptorSubject]
 public partial class TestChild
 {
     [State]
     public partial double Pressure { get; set; }
+
+    [State]
+    public partial double Humidity { get; set; }
 }

@@ -202,6 +202,64 @@ public class InMemoryHistoryStoreRecordingTests
     }
 
     [Fact]
+    public async Task WhenChildWithTwoHistoryPropertiesReparented_ThenSiblingPropertyKeepsPreMoveHistory()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var child = new TestChild(context);
+        root.Child = child;
+
+        var store = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            // Act
+            // 1. Record a pre-move sample for BOTH history properties at the child's original path
+            //    (/Child/...). This seeds the move-detection cache with the old path for each property.
+            var pressureBefore = await RecordAndWaitForValueAsync(
+                store, "/Child/Pressure", value => child.Pressure = value, 3.3);
+            Assert.Contains(pressureBefore.Points, point => point.Number == 3.3);
+            var humidityBefore = await RecordAndWaitForValueAsync(
+                store, "/Child/Humidity", value => child.Humidity = value, 4.4);
+            Assert.Contains(humidityBefore.Points, point => point.Number == 4.4);
+
+            // 2. Reparent the same child subject so its canonical path changes from /Child to /SecondChild.
+            //    Add the new reference first (the child keeps a parent throughout, so no context detach
+            //    clears the cache), then clear the old slot so the resolver returns the new path.
+            root.SecondChild = child;
+            root.Child = null;
+
+            // 3. Record a post-move sample for Pressure FIRST. This is the property that consumes the
+            //    rename when moves are tracked per subject, which is exactly what must not starve Humidity.
+            var pressureAfter = await RecordAndWaitForValueAsync(
+                store, "/SecondChild/Pressure", value => child.Pressure = value, 7.7);
+            Assert.Contains(pressureAfter.Points, point => point.Number == 7.7);
+
+            // 4. Then record a post-move sample for the sibling Humidity. Per-property move tracking must
+            //    independently detect the rename for Humidity and record its /Child -> /SecondChild leg.
+            var humidityAfter = await RecordAndWaitForValueAsync(
+                store, "/SecondChild/Humidity", value => child.Humidity = value, 8.8);
+            Assert.Contains(humidityAfter.Points, point => point.Number == 8.8);
+
+            // Assert
+            // Querying the new Humidity path must return BOTH the pre-move (4.4) and post-move (8.8)
+            // samples. With per-subject move tracking, Pressure consumes the rename and Humidity's move
+            // leg is never recorded, so its pre-move sample stays orphaned under /Child/Humidity.
+            var series = await store.QueryAsync(
+                new HistoryQuery("/SecondChild/Humidity", DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1)),
+                CancellationToken.None);
+
+            Assert.Contains(series.Points, point => point.Number == 4.4);
+            Assert.Contains(series.Points, point => point.Number == 8.8);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task WhenRunning_ThenCoverageToAdvancesAndPriorityIsHundred()
     {
         // Arrange
