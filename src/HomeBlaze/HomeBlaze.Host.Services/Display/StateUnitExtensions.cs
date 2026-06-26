@@ -45,7 +45,8 @@ public static class StateUnitExtensions
     /// <summary>
     /// Renders a property value with proper formatting including unit support.
     /// </summary>
-    public static string GetPropertyDisplayValue(this RegisteredSubjectProperty property, object? value)
+    public static string GetPropertyDisplayValue(
+        this RegisteredSubjectProperty property, object? value, ITimeZoneDisplay? timeZone = null)
     {
         if (value == null)
         {
@@ -100,8 +101,12 @@ public static class StateUnitExtensions
             double d => d.ToString("0.##", CultureInfo.InvariantCulture),
             float f => f.ToString("0.##", CultureInfo.InvariantCulture),
             decimal m => m.ToString("0.##", CultureInfo.InvariantCulture),
-            DateTime dt => dt.ToString("g"),
-            DateTimeOffset dto => $"{dto.ToLocalTime().ToString("g")} {dto.ToLocalTime():zzz}",
+            DateTime dt => timeZone is not null
+                ? timeZone.Format(dt)
+                : dt.ToString("g"),
+            DateTimeOffset dto => timeZone is not null
+                ? timeZone.Format(dto)
+                : $"{dto.ToLocalTime().ToString("g")} {dto.ToLocalTime():zzz}",
             Enum e => e.ToString(),
             IEnumerable<string> strings => string.Join("\n", strings),
             _ => value.ToString() ?? ""

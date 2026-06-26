@@ -3,13 +3,17 @@
 @using HomeBlaze.History.Abstractions
 @using HomeBlaze.History.Blazor
 @using HomeBlaze.Host.Components.Dialogs
+@using HomeBlaze.Services
 @using HomeBlaze.Storage.Abstractions
+
+@implements IDisposable
 
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
 @inject DeveloperModeService DeveloperMode
 @inject SubjectPathResolver PathResolver
 @inject IServiceProvider ServiceProvider
+@inject ITimeZoneDisplay TimeZone
 
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
 @if (Subject != null)
@@ -214,6 +218,19 @@
     [Parameter]
     public EventCallback OnDelete { get; set; }
     
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        TimeZone.Changed += OnTimeZoneChanged;
+    }
+
+    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        TimeZone.Changed -= OnTimeZoneChanged;
+    }
+
     protected override void OnParametersSet()
     {
         base.OnParametersSet();
@@ -319,7 +336,7 @@
                 <span style="display: inline-block; width: 24px;"></span>
             }
             <strong>@displayName: </strong>
-            @{ var displayValue = prop.GetPropertyDisplayValue(value); }
+            @{ var displayValue = prop.GetPropertyDisplayValue(value, TimeZone); }
             @if (displayValue.Contains('\n'))
             {
                 @foreach (var line in displayValue.Split('\n'))
