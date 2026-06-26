@@ -1,0 +1,58 @@
+@using HomeBlaze.Host.TimeZones
+@using HomeBlaze.Services
+@using MudBlazor
+@implements IDisposable
+
+@inject ITimeZoneDisplay TimeZone
+@inject TimeZoneInterop Interop
+
+<MudMenu Icon="@Icons.Material.Filled.Schedule" Color="Color.Inherit" title="@CurrentLabel" AriaLabel="Select timezone">
+    <div style="min-width: 320px; max-height: 60vh; overflow-y: auto;">
+        <MudTextField @bind-Value="_search" Placeholder="Search timezone" Immediate="true"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Class="px-3 pt-2" />
+        <MudList T="string" Dense="true">
+            <MudListItem T="string" OnClick="@SelectAutomaticAsync">
+                <b>Automatic</b> (this browser)
+            </MudListItem>
+            @foreach (var option in FilteredZones())
+            {
+                <MudListItem T="string" OnClick="@(() => SelectZoneAsync(option.Id))">@option.DisplayName</MudListItem>
+            }
+        </MudList>
+    </div>
+</MudMenu>
+
+@code {
+    private static readonly IReadOnlyList<TimeZoneOption> Zones = TimeZoneCatalog.GetZones();
+    private string _search = string.Empty;
+
+    private string CurrentLabel => TimeZone.IsResolved
+        ? (TimeZone.Preference.IsAutomatic ? $"Automatic ({TimeZone.Zone!.Id})" : TimeZone.Zone!.Id)
+        : "Timezone";
+
+    protected override void OnInitialized() => TimeZone.Changed += OnTimeZoneChanged;
+
+    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
+
+    private IEnumerable<TimeZoneOption> FilteredZones() =>
+        string.IsNullOrWhiteSpace(_search)
+            ? Zones
+            : Zones.Where(zone => zone.DisplayName.Contains(_search, StringComparison.OrdinalIgnoreCase));
+
+    private async Task SelectAutomaticAsync()
+    {
+        var browserZone = await Interop.GetBrowserTimeZoneAsync();
+        TimeZone.SetResolved(TimeZonePreference.Automatic, TimeZoneResolver.Resolve(browserZone));
+        await Interop.SetPreferenceCookieAsync(TimeZonePreference.Automatic.ToCookieValue());
+    }
+
+    private async Task SelectZoneAsync(string id)
+    {
+        var preference = TimeZonePreference.Specific(id);
+        TimeZone.SetResolved(preference, TimeZoneResolver.Resolve(id));
+        await Interop.SetPreferenceCookieAsync(preference.ToCookieValue());
+    }
+
+    public void Dispose() => TimeZone.Changed -= OnTimeZoneChanged;
+}
