@@ -26,6 +26,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RootManager>();
         services.AddSingleton<SubjectPathResolver>();
         services.AddSingleton<DeveloperModeService>();
+        services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 
         return services;
