@@ -119,6 +119,37 @@ public sealed class SqliteHistoryStoreCoreTimeWeightedAverageTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTwaSpansMorePartitionsThanAttachLimit_ThenReadsWithoutAttachError()
+    {
+        // Arrange - 14 daily partition files (one sample per day at the day's UTC midnight). A single TWA
+        // query over the whole range must read all 14 files. The old reader opened the first file as "main"
+        // and ATTACHed every other distinct file, but SQLite caps attached databases at 10, so spanning 11+
+        // partition files threw "too many attached databases". With a 1-day bucket anchored at the Unix epoch,
+        // each bucket boundary falls on a UTC midnight (the daily partition boundary), and the single sample
+        // sits at its bucket start, so each bucket's TWA equals that day's value.
+        var dayStart = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero); // UTC midnight == bucket boundary
+        var dayBucket = TimeSpan.FromDays(1);
+        const int dayCount = 14;
+        using var core = new SqliteHistoryStore(
+            priority: 50, databaseDirectory: _directory, PartitionInterval.Daily, TimeSpan.FromDays(3650),
+            maxJsonSize: 8192, getUtcNow: () => dayStart.AddDays(dayCount + 5));
+        for (var day = 0; day < dayCount; day++)
+        {
+            core.Record("/a/Value", dayStart.AddDays(day), 10d + day, typeof(double));
+        }
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act - one TWA point per day, each equal to that day's held value (10..23).
+        var series = core.Query(new HistoryQuery("/a/Value", dayStart, dayStart.AddDays(dayCount), dayBucket,
+            HistoryAggregations.TimeWeightedAverage, MaxPoints: 1000));
+
+        // Assert
+        Assert.Equal(
+            Enumerable.Range(0, dayCount).Select(day => (double?)(10d + day)).ToArray(),
+            series.Points.Select(point => point.Number).ToArray());
+    }
+
+    [Fact]
     public async Task WhenBucketStraddlesPartitionBoundary_ThenTwaMatchesSinglePartition()
     {
         // Arrange - a 3-day bucket whose interior contains the Monday partition split (weekly partitions

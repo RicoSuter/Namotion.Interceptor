@@ -1,4 +1,3 @@
-using System.Globalization;
 using HomeBlaze.History.Abstractions;
 using Microsoft.Data.Sqlite;
 
@@ -148,19 +147,26 @@ internal static class SqliteBucketReader
     }
 
     // Time-weighted average: per bucket, the IN-BUCKET integral only. Each numeric sample's value is held
-    // over [ts, min(nextNumericTs, bucketEnd)); LEAD bridges across non-numeric/null rows because those are
-    // filtered out of the ordered set (mirroring InMemory, where a null sample leaves the held value unchanged).
-    // The leading interval [bucketStart, firstNumericTs) and empty-bucket carry are supplied by BucketAssembler,
-    // which also needs FirstTicks (the leading-interval boundary) and LastNumber (the carry-advance value).
+    // over [ts, min(nextNumericTs, bucketEnd)); the next numeric sample bridges across non-numeric/null rows
+    // because those are filtered out of the ordered set (mirroring InMemory, where a null sample leaves the
+    // held value unchanged). The leading interval [bucketStart, firstNumericTs) and empty-bucket carry are
+    // supplied by BucketAssembler, which also needs FirstTicks (the leading-interval boundary) and LastNumber
+    // (the carry-advance value).
     //
     // Unlike the other aggregations, TWA cannot be computed per segment then summed: a sample is held until the
-    // NEXT sample, which may live in a LATER partition file OR a LATER move-chain leg's path, so LEAD must see
-    // the union of all segments in one ordered scan (mirroring InMemory, which merges every leg's samples into
-    // one ascending list before integrating). Each distinct partition file is ATTACHed once; one UNION term per
-    // segment selects that segment's path over its tick window from the file's alias.
+    // NEXT sample, which may live in a LATER partition file OR a LATER move-chain leg's path, so the integrator
+    // must see one ascending stream over ALL segments (mirroring InMemory, which merges every leg's samples
+    // into one ascending list before integrating). The old reader produced that stream by ATTACHing every
+    // distinct partition file onto one connection and UNION ALL-ing them, but SQLite caps attached databases at
+    // 10 (SQLITE_MAX_ATTACHED), so a range spanning 11+ partition files threw "too many attached databases".
+    // Instead, read each segment's numeric samples on its own partition connection and merge them in memory:
+    // the segments cover disjoint (path, time) slices (partition files cover disjoint time ranges and move-chain
+    // legs cover disjoint validity windows), so a single ascending sort over the union faithfully reconstructs
+    // the ordered scan the integrator needs, with no attach cap.
     //
-    // v is cast to REAL so v * duration is floating point: tick products are huge (value ~tens times ~10^8
-    // ticks per 10s) and an integer SUM could overflow; the weighted_sum/total_duration RATIO is unit-free.
+    // The value is read as REAL so value * duration is floating point: tick products are huge (value ~tens
+    // times ~10^8 ticks per 10s) and an integer sum could overflow; the weightedSum/totalDuration ratio is
+    // unit-free.
     private static Dictionary<long, BucketPartial> ReadTimeWeightedAveragePartials(
         SqliteReadContext context, IReadOnlyList<ChainSegment> segments, bool isUlong, long bucketTicks)
     {
@@ -174,81 +180,64 @@ internal static class SqliteBucketReader
             ? "CAST(COALESCE(value_double, value_long, CAST(value_json AS REAL)) AS REAL)"
             : "CAST(COALESCE(value_double, value_long) AS REAL)";
 
-        // Open one connection on the first segment's file as "main"; ATTACH every other distinct file once
-        // under a stable alias so each segment can reference its file by alias.
-        var connection = context.OpenPartition(segments[0].PartitionKey);
-        var aliasByKey = new Dictionary<string, string>(StringComparer.Ordinal) { [segments[0].PartitionKey] = "main" };
-        var aliases = new List<string>();
-
-        var orderedTerms = new List<string>();
-        using var command = connection.CreateCommand();
-        command.Parameters.AddWithValue("@b", bucketTicks);
-        for (var index = 0; index < segments.Count; index++)
+        // Collect every segment's numeric (ts, value) rows. Each segment reads only its own path over its tick
+        // window from its own partition file, so a row belongs to exactly one segment (no duplication).
+        var samples = new List<(long Ticks, double Value)>();
+        foreach (var segment in segments)
         {
-            var segment = segments[index];
-            if (!aliasByKey.TryGetValue(segment.PartitionKey, out var alias))
-            {
-                alias = "p" + aliases.Count.ToString(CultureInfo.InvariantCulture);
-                aliases.Add(alias);
-                aliasByKey[segment.PartitionKey] = alias;
-
-                using var attach = connection.CreateCommand();
-                attach.CommandText = "ATTACH DATABASE @file AS " + alias + ";";
-                attach.Parameters.AddWithValue("@file", context.PartitionFilePath(segment.PartitionKey));
-                attach.ExecuteNonQuery();
-            }
-
-            var pathParameter = "@path" + index.ToString(CultureInfo.InvariantCulture);
-            var fromParameter = "@from" + index.ToString(CultureInfo.InvariantCulture);
-            var toParameter = "@to" + index.ToString(CultureInfo.InvariantCulture);
-            orderedTerms.Add(
-                "SELECT ts, " + numeric + " AS v FROM " + alias + ".history " +
-                "WHERE path = " + pathParameter + " AND ts >= " + fromParameter + " AND ts < " + toParameter +
-                " AND " + numeric + " IS NOT NULL");
-            command.Parameters.AddWithValue(pathParameter, segment.Path);
-            command.Parameters.AddWithValue(fromParameter, segment.FromTicks);
-            command.Parameters.AddWithValue(toParameter, segment.ToTicks);
-        }
-
-        try
-        {
+            var connection = context.OpenPartition(segment.PartitionKey);
+            using var command = connection.CreateCommand();
             command.CommandText =
-                "WITH ordered AS (" + string.Join(" UNION ALL ", orderedTerms) + "), " +
-                "edged AS (" +
-                "  SELECT ts, v, (ts/@b)*@b AS bucket_start, ((ts/@b)*@b) + @b AS bucket_end, " +
-                "         COALESCE(LEAD(ts) OVER (ORDER BY ts), ((ts/@b)*@b) + @b) AS next_ts, " +
-                "         LAST_VALUE(v) OVER (PARTITION BY (ts/@b)*@b ORDER BY ts " +
-                "             ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_v " +
-                "  FROM ordered" +
-                ") " +
-                "SELECT bucket_start, " +
-                "       MIN(ts) AS first_ts, " +
-                "       SUM(v * (CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts)) AS weighted_sum, " +
-                "       SUM(CASE WHEN next_ts < bucket_end THEN next_ts ELSE bucket_end END - ts) AS total_duration, " +
-                "       MAX(last_v) AS last_number " + // last_v is constant within a bucket, so MAX returns it
-                "FROM edged GROUP BY bucket_start ORDER BY bucket_start;";
+                "SELECT ts, " + numeric + " AS v FROM history " +
+                "WHERE path = @path AND ts >= @from AND ts < @to AND " + numeric + " IS NOT NULL;";
+            command.Parameters.AddWithValue("@path", segment.Path);
+            command.Parameters.AddWithValue("@from", segment.FromTicks);
+            command.Parameters.AddWithValue("@to", segment.ToTicks);
 
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
-                var bucketStart = reader.GetInt64(0);
-                long? firstTicks = reader.IsDBNull(1) ? null : reader.GetInt64(1);
-                var weightedSum = reader.IsDBNull(2) ? 0d : reader.GetDouble(2);
-                var totalDuration = reader.IsDBNull(3) ? 0d : reader.GetDouble(3);
-                double? lastNumber = reader.IsDBNull(4) ? null : reader.GetDouble(4);
-
-                result[bucketStart] = new BucketPartial(
-                    bucketStart, 0, null, null, null, null,
-                    firstTicks, null, null, null, lastNumber, null, weightedSum, totalDuration);
+                samples.Add((reader.GetInt64(0), reader.GetDouble(1)));
             }
         }
-        finally
+
+        if (samples.Count == 0)
         {
-            foreach (var alias in aliases)
+            return result;
+        }
+
+        // Ascending order by ts reproduces the old "ORDER BY ts" over the UNION ALL. The merged stream is the
+        // single ordered scan the in-bucket integral below needs.
+        samples.Sort(static (left, right) => left.Ticks.CompareTo(right.Ticks));
+
+        // In-bucket integral, equivalent to the old window-function SQL: each sample's value is held over
+        // [ts, min(nextTs, bucketEnd)); the next sample is the global successor (held across buckets, files, and
+        // legs), defaulting to bucketEnd for the final sample. Per bucket: FirstTicks is the earliest sample's
+        // ts (the leading-interval boundary) and LastNumber is the latest sample's value (the carry-advance).
+        for (var index = 0; index < samples.Count; index++)
+        {
+            var (ticks, value) = samples[index];
+            var bucketStart = (ticks / bucketTicks) * bucketTicks;
+            var bucketEnd = bucketStart + bucketTicks;
+            var nextTicks = index + 1 < samples.Count ? samples[index + 1].Ticks : bucketEnd;
+            var duration = (double)((nextTicks < bucketEnd ? nextTicks : bucketEnd) - ticks);
+
+            if (result.TryGetValue(bucketStart, out var partial))
             {
-                using var detach = connection.CreateCommand();
-                detach.CommandText = "DETACH DATABASE " + alias + ";";
-                detach.ExecuteNonQuery();
+                // Ascending order: this is a later sample in the same bucket, so it becomes the new LastNumber.
+                result[bucketStart] = partial with
+                {
+                    WeightedSum = partial.WeightedSum + value * duration,
+                    TotalDuration = partial.TotalDuration + duration,
+                    LastNumber = value
+                };
+            }
+            else
+            {
+                // First (earliest) sample seen for this bucket: it is both FirstTicks and (so far) LastNumber.
+                result[bucketStart] = new BucketPartial(
+                    bucketStart, 0, null, null, null, null,
+                    ticks, null, null, null, value, null, value * duration, duration);
             }
         }
 
