@@ -1,0 +1,72 @@
+@using HomeBlaze.Host.TimeZones
+@using HomeBlaze.Services
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Http
+@implements IDisposable
+
+@inject ITimeZoneDisplay TimeZone
+@inject TimeZoneInterop Interop
+@inject IHttpContextAccessor HttpContextAccessor
+@inject PersistentComponentState ApplicationState
+
+@code {
+    private const string StateKey = "timezone.preference";
+    private PersistingComponentStateSubscription _persistingSubscription;
+
+    protected override void OnInitialized()
+    {
+        _persistingSubscription = ApplicationState.RegisterOnPersisting(PersistPreference);
+
+        // Interactive circuit pass: restore the zone resolved during prerender so a pinned zone
+        // shows correctly on the first interactive render (no placeholder flash).
+        if (ApplicationState.TryTakeFromJson<string>(StateKey, out var persisted) && persisted is not null)
+        {
+            var restored = TimeZonePreference.FromCookieValue(persisted);
+            TimeZone.SetResolved(restored, TimeZoneResolver.Resolve(restored.ZoneId));
+            return;
+        }
+
+        // Prerender pass: read the saved cookie server-side. A pinned zone renders correctly on first
+        // paint. Automatic cannot be resolved here (the browser zone is unknown without JS).
+        var cookie = HttpContextAccessor.HttpContext?.Request.Cookies[TimeZoneInterop.CookieName];
+        var preference = TimeZonePreference.FromCookieValue(cookie);
+        if (!preference.IsAutomatic)
+        {
+            TimeZone.SetResolved(preference, TimeZoneResolver.Resolve(preference.ZoneId));
+        }
+    }
+
+    private Task PersistPreference()
+    {
+        // Persist a pinned zone so the interactive circuit can restore it without re-reading the cookie.
+        // Automatic is intentionally never persisted: the circuit re-detects the browser zone via JS in
+        // OnAfterRenderAsync, and the restore branch above assumes any persisted value is a valid pinned id.
+        if (TimeZone.IsResolved && !TimeZone.Preference.IsAutomatic)
+        {
+            ApplicationState.PersistAsJson(StateKey, TimeZone.Preference.ToCookieValue());
+        }
+
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // First visit (no cookie) or Automatic: detect the browser zone via JS, resolve, and persist.
+        if (!TimeZone.IsResolved || TimeZone.Preference.IsAutomatic)
+        {
+            var browserZone = await Interop.GetBrowserTimeZoneAsync();
+            if (!string.IsNullOrWhiteSpace(browserZone))
+            {
+                TimeZone.SetResolved(TimeZonePreference.Automatic, TimeZoneResolver.Resolve(browserZone));
+                await Interop.SetPreferenceCookieAsync(TimeZonePreference.Automatic.ToCookieValue());
+            }
+        }
+    }
+
+    public void Dispose() => _persistingSubscription.Dispose();
+}
