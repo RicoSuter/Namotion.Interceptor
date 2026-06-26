@@ -106,6 +106,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             Description = "Query recorded history for one or more [State] property paths over a time range. " +
                           "Supports raw samples or bucketed downsampling with an aggregation. Returns a per-path " +
                           "map with a value_type hint, the points (null entries are gaps), and a truncated flag. " +
+                          "All input and output timestamps are UTC. " +
                           "Use browse or search to discover paths first.",
             InputSchema = GetPropertyHistorySchema,
             Handler = HandleGetPropertyHistoryAsync
@@ -197,6 +198,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         }
 
         var paths = pathsElement.EnumerateArray()
+            .Where(element => element.ValueKind == JsonValueKind.String)
             .Select(element => element.GetString())
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path => path!)

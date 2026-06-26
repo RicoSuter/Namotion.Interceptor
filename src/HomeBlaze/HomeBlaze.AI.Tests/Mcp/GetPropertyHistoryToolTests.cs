@@ -35,6 +35,37 @@ public class GetPropertyHistoryToolTests
     }
 
     [Fact]
+    public async Task WhenPathsContainsOnlyNonStringElements_ThenStructuredErrorNotException()
+    {
+        // Act - a non-string element must not throw; it yields the structured "at least one path" error.
+        var json = await InvokeAsync(new
+        {
+            paths = new object[] { 123 },
+            from = "2026-06-24T00:00:00Z"
+        });
+
+        // Assert
+        Assert.True(json.TryGetProperty("error", out var error));
+        Assert.Contains("at least one path", error.GetString());
+    }
+
+    [Fact]
+    public async Task WhenPathsMixesStringAndNonStringElements_ThenNonStringIgnoredAndNoError()
+    {
+        // Act - the non-string element is skipped and the valid string path drives a normal (empty) result.
+        var json = await InvokeAsync(new
+        {
+            paths = new object[] { "/a/Value", 123 },
+            from = "2026-06-24T00:00:00Z",
+            to = "2026-06-24T01:00:00Z"
+        });
+
+        // Assert
+        Assert.False(json.TryGetProperty("error", out _));
+        Assert.True(json.TryGetProperty("/a/Value", out _));
+    }
+
+    [Fact]
     public async Task WhenAggregationUnknown_ThenErrorWithAvailableSet()
     {
         // Act
