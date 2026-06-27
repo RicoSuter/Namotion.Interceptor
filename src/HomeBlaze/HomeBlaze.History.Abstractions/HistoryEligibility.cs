@@ -30,7 +30,7 @@ public static class HistoryEligibility
         var t = Nullable.GetUnderlyingType(type) ?? type;
         if (t == typeof(double) || t == typeof(float)) return true;     // value_double
         if (HistoryColumns.IsBigIntCompatible(t)) return true;          // value_long
-        if (t == typeof(decimal)) return true;                          // value_json (lossless)
+        if (t == typeof(decimal)) return true;                          // value_double (decimal text archived in value_json)
         if (t == typeof(string)) return true;                           // value_json
         if (t.IsEnum) return true;                                      // value_json (enum name)
         return false;                                                   // complex types deferred

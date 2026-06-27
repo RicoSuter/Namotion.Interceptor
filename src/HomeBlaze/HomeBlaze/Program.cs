@@ -83,7 +83,6 @@ typeProvider
     .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly)               // HomeBlaze.History.InMemory.Blazor
     .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject).Assembly)     // HomeBlaze.History.Sqlite
     .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly);               // HomeBlaze.History.Sqlite.Blazor
-// .Blazor edit component assembly (HomeBlaze.History.Sqlite.Blazor) added in 5.8.
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);
