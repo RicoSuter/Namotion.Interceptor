@@ -90,7 +90,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     propertyReference => propertyReference.TryGetSource(out var source) && source == this,
                     WriteChangesViaRetryQueueAsync,
                     _bufferTime,
-                    _logger);
+                    maxQueueDepth: null,
+                    logger: _logger);
 
                 // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
                 // re-apply queued changes locally if the source hasn't changed the property.
@@ -156,11 +157,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         try
         {
             var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
-            if (result is { IsFullySuccessful: false, FailedChanges.IsEmpty: false })
+            if (!result.IsFullySuccessful)
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
                     result.FailedChanges.Length);
-                WriteRetryQueue.Enqueue(result.FailedChanges.ToArray());
+                WriteRetryQueue.Enqueue(result.FailedChanges.AsMemory());
             }
         }
         catch (OperationCanceledException)

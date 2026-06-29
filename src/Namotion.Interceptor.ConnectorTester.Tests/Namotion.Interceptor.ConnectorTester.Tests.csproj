@@ -26,6 +26,7 @@
     <ItemGroup>
         <ProjectReference Include="..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\Namotion.Interceptor.ConnectorTester\Namotion.Interceptor.ConnectorTester.csproj" />
+        <ProjectReference Include="..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     </ItemGroup>
 
 </Project>

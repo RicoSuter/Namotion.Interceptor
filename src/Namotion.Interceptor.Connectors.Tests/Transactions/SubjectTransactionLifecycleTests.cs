@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionLifecycleTests : TransactionTestBase
 {
     [Fact]
-    public async Task BeginTransaction_CreatesActiveTransaction()
+    public async Task WhenTransactionBegun_ThenItBecomesCurrent()
     {
         // Arrange
         var context = CreateContext();
@@ -24,7 +24,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task Dispose_CleansUpWithoutCommit_ImplicitRollback()
+    public async Task WhenDisposedWithoutCommit_ThenPendingChangesAreDiscarded()
     {
         // Arrange
         var context = CreateContext();
@@ -49,35 +49,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BeginTransaction_WhenNested_ThrowsInvalidOperationException()
-    {
-        // Arrange
-        var context = CreateContext();
-        using var transaction1 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-        // Act
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () => await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort));
-
-        // Assert
-        Assert.Contains("Nested transactions are not supported", exception.Message);
-    }
-
-    [Fact]
-    public async Task CommitAsync_WithNoChanges_ReturnsImmediately()
-    {
-        // Arrange
-        var context = CreateContext();
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-        // Act
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Empty(transaction.GetPendingChanges());
-    }
-
-    [Fact]
-    public async Task CommitAsync_AppliesChangesToModel()
+    public async Task WhenCommitted_ThenChangesAreAppliedToModel()
     {
         // Arrange
         var context = CreateContext();
@@ -97,7 +69,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_CleansUpPendingChanges()
+    public async Task WhenCommitted_ThenPendingChangesAreCleared()
     {
         // Arrange
         var context = CreateContext();
@@ -123,59 +95,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_AfterDispose_ThrowsObjectDisposedException()
-    {
-        // Arrange
-        var context = CreateContext();
-        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        transaction.Dispose();
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(
-            async () => await transaction.CommitAsync(CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task CommitAsync_WhenCalledTwice_ThrowsInvalidOperationException()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-
-        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-        {
-            person.FirstName = "John";
-            await transaction.CommitAsync(CancellationToken.None);
-
-            // Act
-            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => transaction.CommitAsync(CancellationToken.None));
-
-            // Assert
-            Assert.Contains("already been committed", exception.Message);
-        }
-    }
-
-    [Fact]
-    public async Task Dispose_CalledMultipleTimes_IsIdempotent()
-    {
-        // Arrange
-        var context = CreateContext();
-        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        Assert.NotNull(SubjectTransaction.Current);
-
-        // Act
-        transaction.Dispose();
-        Assert.Null(SubjectTransaction.Current);
-
-        transaction.Dispose();
-
-        // Assert
-        Assert.Null(SubjectTransaction.Current);
-    }
-
-    [Fact]
-    public async Task AsyncLocalBehavior_CurrentClearedAfterUsingBlock()
+    public async Task WhenUsingBlockEnds_ThenCurrentTransactionIsCleared()
     {
         // Arrange
         var context = CreateContext();
@@ -193,7 +113,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public void InterceptorRegistration_TransactionBeforeObservable()
+    public void WhenContextCreated_ThenTransactionInterceptorPrecedesObservable()
     {
         // Arrange
         var context = CreateContext();

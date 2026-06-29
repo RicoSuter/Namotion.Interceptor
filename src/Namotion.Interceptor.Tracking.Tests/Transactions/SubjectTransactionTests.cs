@@ -134,7 +134,10 @@ public class SubjectTransactionTests
         // Act & Assert
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
-            await transaction.CommitAsync(CancellationToken.None);
+            var commitTask = transaction.CommitAsync(CancellationToken.None);
+            Assert.True(commitTask.IsCompletedSuccessfully, "Empty commit should complete synchronously.");
+            await commitTask;
+            Assert.Empty(transaction.GetPendingChanges());
         }
     }
 
@@ -156,10 +159,11 @@ public class SubjectTransactionTests
 
             // Act & Assert
             var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
-                () => transaction.CommitAsync(CancellationToken.None));
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
 
             Assert.Single(ex.ConflictingProperties);
             Assert.Equal(nameof(Person.FirstName), ex.ConflictingProperties[0].Name);
+            Assert.Contains(nameof(Person.FirstName), ex.Message);
             Assert.Empty(ex.AppliedChanges);
             Assert.Empty(ex.FailedChanges);
         }
@@ -192,16 +196,22 @@ public class SubjectTransactionTests
     [Fact]
     public async Task WhenTransactionAlreadyCommitted_ThenCommitAgainThrows()
     {
-        // Arrange
+        // Arrange: a successful non-empty commit, so the committed state comes from the
+        // full commit path rather than the empty-commit early return.
         var context = CreateTransactionContext();
+        var person = new Person(context);
 
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
+            person.FirstName = "John";
             await transaction.CommitAsync(CancellationToken.None);
+            Assert.Equal("John", person.FirstName);
+            Assert.Empty(transaction.GetPendingChanges());
 
             // Act & Assert
-            await Assert.ThrowsAsync<InvalidOperationException>(
-                () => transaction.CommitAsync(CancellationToken.None));
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+            Assert.Contains("already been committed", exception.Message);
         }
     }
 
@@ -215,7 +225,7 @@ public class SubjectTransactionTests
 
         // Act & Assert
         await Assert.ThrowsAsync<ObjectDisposedException>(
-            () => transaction.CommitAsync(CancellationToken.None));
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
     }
 
     [Fact]
@@ -227,10 +237,11 @@ public class SubjectTransactionTests
         using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             // Act & Assert
-            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             {
                 await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
             });
+            Assert.Contains("Nested transactions are not supported", exception.Message);
         }
     }
 
@@ -395,10 +406,14 @@ public class SubjectTransactionTests
         // Arrange
         var context = CreateTransactionContext();
         var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        Assert.Same(transaction, SubjectTransaction.Current);
 
         // Act & Assert
         transaction.Dispose();
+        Assert.Null(SubjectTransaction.Current);
+
         transaction.Dispose();
+        Assert.Null(SubjectTransaction.Current);
     }
 
     [Fact]
@@ -488,7 +503,7 @@ public class SubjectTransactionTests
 
             // Act & Assert
             var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
-                () => transaction.CommitAsync(CancellationToken.None));
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
 
             Assert.Equal(2, ex.ConflictingProperties.Count);
             Assert.Contains(ex.ConflictingProperties, p => p.Name == nameof(Person.FirstName));
@@ -516,4 +531,148 @@ public class SubjectTransactionTests
         // Assert
         Assert.Equal("Modified", person.FirstName);
     }
+
+    [Fact]
+    public async Task WhenCommittingFromDifferentAsyncFlow_ThenThrows()
+    {
+        // Arrange: begin in a separate flow so its AsyncLocal current-transaction does not reach here.
+        var context = CreateTransactionContext();
+        var transaction = await Task.Run(async () =>
+            await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort));
+
+        // Act & Assert
+        try
+        {
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+            Assert.Contains("async flow", exception.Message);
+        }
+        finally
+        {
+            transaction.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenDisposingFromDifferentAsyncFlow_ThenOtherTransactionSlotIsNotCleared()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+
+        // transaction1 is begun in a separate flow, so its SetCurrent does not reach this flow.
+        // Optimistic locking means neither transaction takes the lock at begin, so they can coexist.
+        var transaction1 = await Task.Run(async () =>
+            await context.BeginTransactionAsync(
+                TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic));
+
+        using var transaction2 = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
+        Assert.Same(transaction2, SubjectTransaction.Current);
+
+        // Act: disposing transaction1 from transaction2's flow must not clear transaction2's slot.
+        transaction1.Dispose();
+
+        // Assert
+        Assert.Same(transaction2, SubjectTransaction.Current);
+    }
+
+    /// <summary>
+    /// Writes nothing to any source but marks each accepted snapshot slot with a fixed source in place,
+    /// emulating a custom writer fulfilling the in-place marking contract.
+    /// </summary>
+    private sealed class MarkingTransactionWriter(object source) : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+        {
+            var span = changes.Span;
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = span[i].WithSource(source);
+            }
+            return new ValueTask<SourceWriteResult>(new SourceWriteResult([], [], [], RevertState: null));
+        }
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
+    }
+
+    [Fact]
+    public async Task WhenCustomWriterMarksSnapshotInPlace_ThenApplyNotificationsCarryThatSource()
+    {
+        // Arrange
+        var source = new object();
+        var changes = new List<SubjectPropertyChange>();
+        var context = CreateTransactionContext();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        context.AddService<ITransactionWriter>(new MarkingTransactionWriter(source));
+
+        var person = new Person(context);
+        changes.Clear();
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert: the local apply published the FirstName change carrying the writer's source.
+        var firstNameChange = Assert.Single(changes, c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Same(source, firstNameChange.Source);
+        Assert.Equal("John", firstNameChange.GetNewValue<string?>());
+    }
+
+    /// <summary>
+    /// Fulfills the writer contract but never marks any snapshot slot, like a custom writer
+    /// predating the in-place marking contract.
+    /// </summary>
+    private sealed class NonMarkingTransactionWriter : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+            => new(new SourceWriteResult([], [], [], RevertState: null));
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
+    }
+
+    [Fact]
+    public async Task WhenCustomWriterDoesNotMarkSnapshot_ThenApplyNotificationsCarryNoSource()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = CreateTransactionContext();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        context.AddService<ITransactionWriter>(new NonMarkingTransactionWriter());
+
+        var person = new Person(context);
+        changes.Clear();
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert: the commit succeeds, but unmarked slots publish with no source, so an outbound
+        // connector queue would not recognize the notification as an echo and would push the value
+        // to the source a second time (the documented graceful degradation for non-marking writers).
+        var firstNameChange = Assert.Single(changes, c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Null(firstNameChange.Source);
+        Assert.Equal("John", firstNameChange.GetNewValue<string?>());
+        Assert.Equal("John", person.FirstName);
+    }
+
 }

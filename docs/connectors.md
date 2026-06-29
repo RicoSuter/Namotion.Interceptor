@@ -103,6 +103,15 @@ await tx.CommitAsync(ct);   // Writes to source first, then applies locally
 
 Choose based on your consistency requirements: local-first for responsiveness, transactions for confirmed delivery.
 
+#### Change notification source semantics
+
+The `Source` of a change notification identifies the system that confirmed the value: inbound updates carry the source they came from, source-bound changes committed through a source transaction carry their owning source, and purely local writes carry `null`. The outbound change queue skips changes whose source is the target source itself, so a committed value is written to its source exactly once, by the commit.
+
+Writes that happen as a consequence of a source-scoped apply differ by kind:
+
+- **Cascade writes** from `OnChanging`/`OnChanged` handlers inherit the source scope and are not pushed back to that source, for inbound updates and transactional commits alike. If a cascade-computed value must reach the source, write it explicitly or do not source-bind the cascade target.
+- **Derived property recalculations** always publish with a `null` source (the local model computed the value, no source confirmed it) and are therefore still pushed to a bound source, whatever triggered the recalculation.
+
 ### Write Retry Queue
 
 `SubjectSourceBase` provides a write retry queue that buffers writes during disconnection. Each connector exposes the queue size through its own configuration (for example, `OpcUaClientConfiguration.WriteRetryQueueSize`); when implementing a custom source, pass `writeRetryQueueSize` to the `SubjectSourceBase` constructor (default: 1000, pass 0 to disable).
@@ -226,7 +235,7 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 **Constructor parameters**: `bufferTime` (default 8ms) controls the change queue batching window. Changes within this window are coalesced into a single `WriteChangesAsync` call. `retryTime` (default 10s) controls the delay between retry attempts when `StartListeningAsync` or the pump loop fails.
 
-**WriteResult**: Return `WriteResult.Success` when all changes were written. Return `WriteResult.Failure(changes, exception)` when all changes failed, or `WriteResult.PartialFailure(changes, exception)` when some succeeded. The base class enqueues the failed changes into the write retry queue automatically.
+**WriteResult**: Return `WriteResult.Success` when all changes were written. Return `WriteResult.Failure(changes, exception)` when all changes failed, or `WriteResult.PartialFailure(changes, exception)` when some succeeded. The failed changes list everything not confirmed written; unlisted changes count as written, and an error with an empty list is treated as the whole batch having failed. The base class enqueues the failed changes into the write retry queue automatically.
 
 #### Registering a Source
 
