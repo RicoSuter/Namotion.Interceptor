@@ -213,11 +213,9 @@ internal static class OpcUaSessionExtensions
                 var nodeId = nodeIds[offset + i];
                 if (i >= actual)
                 {
-                    // Missing result for a requested node: treat as transient (the read path pads
-                    // short responses the same way) so the load aborts and retries instead of
-                    // loading the subject with zero children.
-                    OpcUaStatusCodeClassifier.ThrowIfTransientError(StatusCodes.BadUnexpectedError, "Browse", nodeId);
-                    continue;
+                    // Missing result for a requested node: this slot has no result at all. Abort
+                    // so the load retries instead of loading the subject with zero children.
+                    throw new OpcUaTransientServiceException("Browse", nodeId, (StatusCode)StatusCodes.BadUnexpectedError);
                 }
 
                 var browseResult = response.Results[i];
@@ -406,10 +404,19 @@ internal static class OpcUaSessionExtensions
             await ReleaseContinuationPointsAsync(session, orphanCps, logger).ConfigureAwait(false);
         }
 
-        for (var i = 0; i < process; i++)
+        for (var i = 0; i < count; i++)
         {
-            var browseResult = nextResponse.Results[i];
             var nodeId = current[offset + i].NodeId;
+            if (i >= actual)
+            {
+                // Server returned fewer results than continuation points sent: this slot has no
+                // result at all. Abort so the load retries instead of silently truncating this
+                // node's children. The caller's catch releases the continuation point still
+                // pending in `current` for this slot.
+                throw new OpcUaTransientServiceException("BrowseNext", nodeId, (StatusCode)StatusCodes.BadUnexpectedError);
+            }
+
+            var browseResult = nextResponse.Results[i];
             if (!StatusCode.IsGood(browseResult.StatusCode))
             {
                 OpcUaStatusCodeClassifier.ThrowIfTransientError(browseResult.StatusCode, "BrowseNext", nodeId);

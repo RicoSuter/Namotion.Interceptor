@@ -187,6 +187,7 @@ internal sealed class OpcUaSubjectLoader
             CancellationToken cancellationToken)
     {
         var childEntries = new List<ChildEntry>(distinctReferences.Count);
+        var stagedDynamicNames = new HashSet<string>();
 
         for (var i = 0; i < distinctReferences.Count; i++)
         {
@@ -222,6 +223,20 @@ internal sealed class OpcUaSubjectLoader
 
             if (!addAsDynamic)
             {
+                continue;
+            }
+
+            // A server may return two siblings with the same BrowseName but different NodeIds
+            // (allowed when reached via different reference types). They survive
+            // DistinctByResolvedNodeId because the NodeIds differ, and the TryGetProperty check
+            // above does not catch them because the first is only added later in
+            // LoadChildPropertiesAsync. Skip the second here so AddProperty is never called twice
+            // with the same name (which would throw a duplicate-key ArgumentException).
+            if (!stagedDynamicNames.Add(nodeReference.BrowseName.Name))
+            {
+                _logger.LogWarning(
+                    "Skipping OPC UA child '{BrowseName}' (NodeId: {NodeId}): a sibling reference already staged a dynamic property with this BrowseName under the same parent.",
+                    nodeReference.BrowseName.Name, nodeReference.NodeId);
                 continue;
             }
 

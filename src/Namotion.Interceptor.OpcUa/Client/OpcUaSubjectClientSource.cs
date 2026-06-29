@@ -517,7 +517,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
     }
 
-    private async Task<ReferenceDescription?> TryGetRootNodeAsync(Session session, CancellationToken cancellationToken)
+    internal async Task<ReferenceDescription?> TryGetRootNodeAsync(ISession session, CancellationToken cancellationToken)
     {
         if (_configuration.RootPath is { Length: > 0 } rootPath)
         {
@@ -537,7 +537,21 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                     return match;
                 }
 
-                currentNodeId = ExpandedNodeId.ToNodeId(match.NodeId, session.NamespaceUris);
+                // ToNodeId returns null when the matched reference carries a namespace URI that
+                // is not registered in the session's NamespaceTable. Return null so the caller
+                // logs "could not find root node" and retries, instead of browsing a null NodeId
+                // on the next iteration (which throws ArgumentNullException deep in the browse
+                // primitive). Symmetric with the null-BrowseName tolerance in FindChildByBrowseName.
+                var resolvedNodeId = ExpandedNodeId.ToNodeId(match.NodeId, session.NamespaceUris);
+                if (resolvedNodeId is null)
+                {
+                    _logger.LogWarning(
+                        "Root path segment '{Segment}' resolved to ExpandedNodeId '{NodeId}' whose namespace URI is not registered in the session's NamespaceTable; cannot continue resolving the root node.",
+                        rootPath[i], match.NodeId);
+                    return null;
+                }
+
+                currentNodeId = resolvedNodeId;
             }
         }
 
@@ -651,7 +665,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     }
 
     private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
-        Session session,
+        ISession session,
         NodeId nodeId,
         CancellationToken cancellationToken)
     {
