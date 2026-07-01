@@ -30,7 +30,7 @@ internal sealed class OpcUaSubjectLoader
         _ownership = ownership;
         _source = source;
         _logger = logger;
-        _attributeLoader = new OpcUaAttributeLoader(configuration, subject, this, logger);
+        _attributeLoader = new OpcUaAttributeLoader(subject, this, configuration, logger);
     }
 
     internal void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, OpcUaLoadContext context)
@@ -297,12 +297,9 @@ internal sealed class OpcUaSubjectLoader
             {
                 var (nodeReference, resolvedNodeId, property) = stateChildEntries[i];
 
-                if (property is null)
-                {
-                    property = TryCreateDynamicProperty(
-                        stateRegisteredSubject, nodeReference, resolvedNodeId,
-                        objectTypeMap, variableTypeMap, context.Session);
-                }
+                property ??= TryCreateDynamicProperty(
+                    stateRegisteredSubject, nodeReference, resolvedNodeId,
+                    objectTypeMap, variableTypeMap, context.Session);
 
                 if (property is null)
                 {
@@ -316,7 +313,7 @@ internal sealed class OpcUaSubjectLoader
 
                 if (property.IsSubjectReference)
                 {
-                    if (nodeConfiguration.NodeClass == Mapping.OpcUaNodeClass.Variable)
+                    if (nodeConfiguration.NodeClass == OpcUaNodeClass.Variable)
                     {
                         pendingVariableSubjects.Add((property, resolvedNodeId));
                     }

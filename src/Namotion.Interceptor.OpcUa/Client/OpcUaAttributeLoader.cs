@@ -15,20 +15,20 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// </summary>
 internal sealed class OpcUaAttributeLoader
 {
-    private readonly OpcUaClientConfiguration _configuration;
     private readonly IInterceptorSubject _subject;
     private readonly OpcUaSubjectLoader _loader;
+    private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
     public OpcUaAttributeLoader(
-        OpcUaClientConfiguration configuration,
         IInterceptorSubject subject,
         OpcUaSubjectLoader loader,
+        OpcUaClientConfiguration configuration,
         ILogger logger)
     {
-        _configuration = configuration;
         _subject = subject;
         _loader = loader;
+        _configuration = configuration;
         _logger = logger;
     }
 
