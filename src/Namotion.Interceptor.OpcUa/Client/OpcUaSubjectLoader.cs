@@ -567,7 +567,10 @@ internal sealed class OpcUaSubjectLoader
 
     // Reuses existing children when possible: dictionaries match by browse name,
     // collections match by index position (so server-side reordering between loads
-    // rebinds existing subjects to new items).
+    // rebinds existing subjects to new items). Note: if DistinctByResolvedNodeId drops
+    // a reference (logged), later collection positions shift and can rebind to a
+    // different existing subject; only the object NodeId would be a drop-stable key,
+    // and it is not retained across loads.
     private async Task<List<(ReferenceDescription Node, IInterceptorSubject Subject)>> ResolveChildSubjectsAsync(
         RegisteredSubjectProperty property,
         List<(ReferenceDescription Reference, NodeId NodeId)> childNodes,

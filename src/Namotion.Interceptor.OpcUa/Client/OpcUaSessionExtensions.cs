@@ -92,8 +92,10 @@ internal static class OpcUaSessionExtensions
     /// <summary>
     /// Deduplicates browse references by resolving each <see cref="ExpandedNodeId"/>
     /// to a canonical <see cref="NodeId"/> via the session's namespace table.
-    /// References with unresolvable namespace URIs or missing BrowseName are skipped
-    /// so downstream consumers can safely access <c>Reference.BrowseName.Name</c>.
+    /// References with unresolvable namespace URIs, missing BrowseName, or a duplicate
+    /// resolved NodeId are skipped (each skip is logged) so downstream consumers can
+    /// safely access <c>Reference.BrowseName.Name</c>. Because skips shorten the result,
+    /// consumers that align it positionally (e.g. collection child reuse) can shift.
     /// </summary>
     public static List<(ReferenceDescription Reference, NodeId NodeId)> DistinctByResolvedNodeId(
         this ISession session,
@@ -121,6 +123,9 @@ internal static class OpcUaSessionExtensions
             }
             if (!seen.Add(nodeId))
             {
+                logger.LogWarning(
+                    "Skipping duplicate browse reference '{BrowseName}' resolving to already-seen NodeId '{NodeId}'.",
+                    reference.BrowseName.Name, nodeId);
                 continue;
             }
             result.Add((reference, nodeId));
@@ -169,9 +174,9 @@ internal static class OpcUaSessionExtensions
                 "BrowseAsync rejected batch of {Count} nodes ({StatusCode}). Splitting into smaller batches.",
                 count, ex.StatusCode);
 
-            var mid = offset + count / 2;
-            await BrowseBatchAsync(session, nodeIds, offset, mid, maxReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
-            await BrowseBatchAsync(session, nodeIds, mid, end, maxReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
+            var midpoint = offset + count / 2;
+            await BrowseBatchAsync(session, nodeIds, offset, midpoint, maxReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseBatchAsync(session, nodeIds, midpoint, end, maxReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -182,29 +187,10 @@ internal static class OpcUaSessionExtensions
                 "BrowseAsync returned {Actual} results but {Expected} were requested. Clamping to preserve positional alignment.",
                 actual, count);
         }
-        var process = Math.Min(actual, count);
-
-        // Collect continuation points from Good-status results upfront so they
-        // can be released if ThrowIfTransientError aborts during result processing.
-        // CPs from bad-status results are released immediately: following them
-        // with BrowseNext would re-add references for nodes the processing loop
-        // intentionally skips.
+        // Collect continuation points from good in-range results upfront so they can be
+        // released if ThrowIfTransientError aborts during result processing.
         var continuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
-        var orphanCps = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
-        for (var i = 0; i < process; i++)
-        {
-            if (response.Results[i].ContinuationPoint is { Length: > 0 } cp)
-            {
-                if (StatusCode.IsGood(response.Results[i].StatusCode))
-                    continuationPoints.Add((nodeIds[offset + i], cp));
-                else
-                    orphanCps.Add((nodeIds[offset + i], cp));
-            }
-        }
-        if (orphanCps.Count > 0)
-        {
-            await ReleaseContinuationPointsAsync(session, orphanCps, logger).ConfigureAwait(false);
-        }
+        await CollectContinuationPointsAsync(session, response.Results, count, i => nodeIds[offset + i], continuationPoints, logger).ConfigureAwait(false);
 
         try
         {
@@ -318,7 +304,7 @@ internal static class OpcUaSessionExtensions
             return;
         }
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var releaseTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var batchSize = GetMaxNodesPerBrowse(session);
         for (var offset = 0; offset < continuationPoints.Count; offset += batchSize)
         {
@@ -330,12 +316,48 @@ internal static class OpcUaSessionExtensions
                 {
                     collection.Add(continuationPoints[i].ContinuationPoint);
                 }
-                await session.BrowseNextAsync(null, true, collection, cts.Token).ConfigureAwait(false);
+                await session.BrowseNextAsync(null, true, collection, releaseTimeout.Token).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 logger.LogDebug(ex, "Best-effort release of continuation points failed at offset {Offset}.", offset);
             }
+        }
+    }
+
+    /// <summary>
+    /// Routes continuation points from a browse or browse-next response: good in-range results go to
+    /// <paramref name="goodPoints"/> (the caller releases these if it later aborts), while bad-status
+    /// results and any extras the server returned beyond <paramref name="count"/> are released
+    /// immediately so unfollowed pages do not leak server-side.
+    /// </summary>
+    private static async Task CollectContinuationPointsAsync(
+        ISession session,
+        BrowseResultCollection results,
+        int count,
+        Func<int, NodeId> nodeIdAt,
+        List<(NodeId NodeId, byte[] ContinuationPoint)> goodPoints,
+        ILogger logger)
+    {
+        List<(NodeId NodeId, byte[] ContinuationPoint)>? orphanedPoints = null;
+        for (var i = 0; i < results.Count; i++)
+        {
+            if (results[i].ContinuationPoint is { Length: > 0 } continuationPoint)
+            {
+                if (i < count && StatusCode.IsGood(results[i].StatusCode))
+                {
+                    goodPoints.Add((nodeIdAt(i), continuationPoint));
+                }
+                else
+                {
+                    (orphanedPoints ??= []).Add((i < count ? nodeIdAt(i) : NodeId.Null, continuationPoint));
+                }
+            }
+        }
+
+        if (orphanedPoints is { Count: > 0 })
+        {
+            await ReleaseContinuationPointsAsync(session, orphanedPoints, logger).ConfigureAwait(false);
         }
     }
 
@@ -350,17 +372,17 @@ internal static class OpcUaSessionExtensions
         CancellationToken cancellationToken)
     {
         var count = end - offset;
-        var cpCollection = new ByteStringCollection(count);
+        var continuationPointCollection = new ByteStringCollection(count);
         for (var i = offset; i < end; i++)
         {
-            cpCollection.Add(current[i].ContinuationPoint);
+            continuationPointCollection.Add(current[i].ContinuationPoint);
         }
 
         BrowseNextResponse nextResponse;
         try
         {
             nextResponse = await session.BrowseNextAsync(
-                null, false, cpCollection, cancellationToken).ConfigureAwait(false);
+                null, false, continuationPointCollection, cancellationToken).ConfigureAwait(false);
         }
         catch (ServiceResultException ex) when (count > 1 && OpcUaStatusCodeClassifier.IsBatchTooLarge(ex))
         {
@@ -368,9 +390,9 @@ internal static class OpcUaSessionExtensions
                 "BrowseNextAsync rejected batch of {Count} continuation points ({StatusCode}). Splitting into smaller batches.",
                 count, ex.StatusCode);
 
-            var mid = offset + count / 2;
-            await BrowseNextBatchAsync(session, current, offset, mid, result, next, logger, cancellationToken).ConfigureAwait(false);
-            await BrowseNextBatchAsync(session, current, mid, end, result, next, logger, cancellationToken).ConfigureAwait(false);
+            var midpoint = offset + count / 2;
+            await BrowseNextBatchAsync(session, current, offset, midpoint, result, next, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseNextBatchAsync(session, current, midpoint, end, result, next, logger, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -382,27 +404,9 @@ internal static class OpcUaSessionExtensions
                 actual, count);
         }
 
-        var process = Math.Min(actual, count);
-
-        // Collect CPs from Good-status results upfront so they're in `next`
-        // before ThrowIfTransientError can abort. The caller releases `next` on
-        // exception. CPs from bad-status results are released immediately to
-        // avoid following pagination for nodes whose results are discarded.
-        var orphanCps = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
-        for (var i = 0; i < process; i++)
-        {
-            if (nextResponse.Results[i].ContinuationPoint is { Length: > 0 } cp)
-            {
-                if (StatusCode.IsGood(nextResponse.Results[i].StatusCode))
-                    next.Add((current[offset + i].NodeId, cp));
-                else
-                    orphanCps.Add((current[offset + i].NodeId, cp));
-            }
-        }
-        if (orphanCps.Count > 0)
-        {
-            await ReleaseContinuationPointsAsync(session, orphanCps, logger).ConfigureAwait(false);
-        }
+        // Collect fresh continuation points into `next` (the caller releases them on abort)
+        // before the processing loop can throw.
+        await CollectContinuationPointsAsync(session, nextResponse.Results, count, i => current[offset + i].NodeId, next, logger).ConfigureAwait(false);
 
         for (var i = 0; i < count; i++)
         {
@@ -463,9 +467,9 @@ internal static class OpcUaSessionExtensions
             // Halving may split a caller's logical pair (e.g. DataType+ValueRank) across
             // two batches. That's safe: each sub-batch is independently padded to its
             // requested length, so the flat allResults stays aligned with nodesToRead.
-            var mid = batchStart + count / 2;
-            await ReadSingleBatchAsync(session, nodesToRead, batchStart, mid, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
-            await ReadSingleBatchAsync(session, nodesToRead, mid, batchEnd, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
+            var midpoint = batchStart + count / 2;
+            await ReadSingleBatchAsync(session, nodesToRead, batchStart, midpoint, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
+            await ReadSingleBatchAsync(session, nodesToRead, midpoint, batchEnd, timestampsToReturn, allResults, logger, cancellationToken).ConfigureAwait(false);
             return;
         }
 
