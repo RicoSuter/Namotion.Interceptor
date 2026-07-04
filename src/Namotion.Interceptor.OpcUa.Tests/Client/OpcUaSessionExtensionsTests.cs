@@ -388,6 +388,53 @@ public class OpcUaSessionExtensionsTests
         Assert.Equal(missingNodeId, exception.NodeId);
     }
 
+    [Fact]
+    public async Task WhenServerReportsIntOverflowingOperationLimit_ThenBrowseUsesDefaultBatchLimit()
+    {
+        // Arrange: a buggy or hostile server can report MaxNodesPerBrowse above int.MaxValue;
+        // an unclamped uint-to-int cast would produce a negative batch size and corrupt the
+        // batching loop math.
+        var firstNodeId = new NodeId(1001, 2);
+        var secondNodeId = new NodeId(1002, 2);
+        var mockSession = CreateMockSession();
+        mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits { MaxNodesPerBrowse = uint.MaxValue });
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection descriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var _ in descriptions)
+                {
+                    results.Add(new BrowseResult
+                    {
+                        References =
+                        [
+                            new ReferenceDescription { BrowseName = new QualifiedName("Child"), NodeId = new ExpandedNodeId(new NodeId(3001, 2)) }
+                        ]
+                    });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        // Act
+        var result = await mockSession.Object.BrowseNodesAsync(
+            [firstNodeId, secondNodeId],
+            maxReferencesPerNode: 1000,
+            maxContinuationRounds: 100,
+            NullLogger<OpcUaSessionExtensionsTests>.Instance,
+            CancellationToken.None);
+
+        // Assert
+        Assert.True(result.ContainsKey(firstNodeId));
+        Assert.True(result.ContainsKey(secondNodeId));
+    }
+
     private static Mock<ISession> CreateMockSession()
     {
         var mockSession = new Mock<ISession>();

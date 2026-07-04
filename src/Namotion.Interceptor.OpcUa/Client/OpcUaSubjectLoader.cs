@@ -193,13 +193,6 @@ internal sealed class OpcUaSubjectLoader
         {
             var (nodeReference, resolvedNodeId) = distinctReferences[i];
 
-            if (string.IsNullOrEmpty(nodeReference.BrowseName?.Name))
-            {
-                _logger.LogWarning(
-                    "Skipping node with null or empty BrowseName (NodeId: {NodeId}).", nodeReference.NodeId);
-                continue;
-            }
-
             var property = await _configuration.Mapper
                 .TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, session, _subject), registeredSubject, cancellationToken)
                 .ConfigureAwait(false);
@@ -379,6 +372,11 @@ internal sealed class OpcUaSubjectLoader
         }
 
         object? value = null;
+        // Added eagerly rather than staged in the load context: if the load fails later,
+        // the property survives on non-staged subjects (root and reused children), but the
+        // next load re-matches it via the mapper's NodeIdentifier priority (the attached
+        // OpcUaNodeAttribute carries the exact NodeId) and re-monitors it, so the leftover
+        // is transient rather than torn state.
         return registeredSubject.AddProperty(
             nodeReference.BrowseName.Name,
             inferredType,

@@ -704,6 +704,17 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return; // Already disposed
         }
 
+        // DisposeAsync can run without a completed StopAsync (e.g. HomeBlaze disposes in a
+        // finally block when detach fails or times out). An in-flight reconnect holds
+        // _structureLock across network I/O, so cancel it first; otherwise the uncancellable
+        // wait below stalls disposal until the reconnect finishes naturally.
+        var reconnectCts = _reconnectCts;
+        if (reconnectCts is not null)
+        {
+            try { await reconnectCts.CancelAsync().ConfigureAwait(false); }
+            catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
+        }
+
         await _structureLock.WaitAsync().ConfigureAwait(false);
         try
         {

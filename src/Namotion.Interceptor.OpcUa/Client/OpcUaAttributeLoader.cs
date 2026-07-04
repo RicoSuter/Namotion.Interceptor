@@ -231,6 +231,9 @@ internal sealed class OpcUaAttributeLoader
             }
 
             object? value = null;
+            // Like TryCreateDynamicProperty: added eagerly, so a leftover from a failed load
+            // survives, but MatchKnownAttributes re-matches it on the next load (via its
+            // attached OpcUaNodeAttribute mapping) and re-monitors it.
             var dynamicAttribute = entry.OwnerProperty.AddAttribute(
                 entry.BrowseName,
                 inferredType,

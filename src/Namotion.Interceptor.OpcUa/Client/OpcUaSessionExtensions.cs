@@ -8,10 +8,12 @@ internal static class OpcUaSessionExtensions
 {
     private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
 
-    // Soft cap when a server reports 0/null for its per-call operation limit.
+    // Soft cap when a server reports 0/null (or an int-overflowing value) for its
+    // per-call operation limit. The upper clamp keeps a hostile or buggy server from
+    // producing a negative batch size, which would corrupt the batching loop math.
     private const int DefaultBatchLimit = 256;
 
-    private static int ToBatchLimit(uint? limit) => limit is > 0 ? (int)limit : DefaultBatchLimit;
+    private static int ToBatchLimit(uint? limit) => limit is > 0 and <= int.MaxValue ? (int)limit : DefaultBatchLimit;
 
     private static int GetMaxNodesPerBrowse(ISession session) => ToBatchLimit(session.OperationLimits?.MaxNodesPerBrowse);
 
@@ -288,10 +290,8 @@ internal static class OpcUaSessionExtensions
             throw;
         }
 
-        if (current.Count > 0)
-        {
-            await ReleaseContinuationPointsAsync(session, current, logger).ConfigureAwait(false);
-        }
+        // Only non-empty when the round cap broke out of the loop early; no-op otherwise.
+        await ReleaseContinuationPointsAsync(session, current, logger).ConfigureAwait(false);
     }
 
     private static async Task ReleaseContinuationPointsAsync(
