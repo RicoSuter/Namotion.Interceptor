@@ -529,7 +529,17 @@ internal sealed class OpcUaSubjectLoader
 
         foreach (var (property, nodeId) in pendingCollections)
         {
-            var rawChildren = browseResults.TryGetValue(nodeId, out var r) ? r : [];
+            if (!browseResults.TryGetValue(nodeId, out var rawChildren))
+            {
+                // Missing entry = the browse failed with a permanent bad status (transient
+                // failures abort the whole load). Keep the property's current items rather
+                // than overwriting them with an empty collection; the next load retries.
+                _logger.LogWarning(
+                    "Skipping OPC UA collection '{Subject}.{Property}' (NodeId: {NodeId}): browse failed this load; existing items are preserved.",
+                    property.Subject.GetType().Name, property.Name, nodeId);
+                continue;
+            }
+
             var childNodes = context.DistinctByResolvedNodeId(rawChildren);
 
             var children = await ResolveChildSubjectsAsync(property, childNodes, isDictionary: false, context).ConfigureAwait(false);
@@ -541,10 +551,39 @@ internal sealed class OpcUaSubjectLoader
 
         foreach (var (property, nodeId) in pendingDictionaries)
         {
-            var rawChildren = browseResults.TryGetValue(nodeId, out var r) ? r : [];
+            if (!browseResults.TryGetValue(nodeId, out var rawChildren))
+            {
+                // Same contract as the collection branch above: absent = failed, not empty.
+                _logger.LogWarning(
+                    "Skipping OPC UA dictionary '{Subject}.{Property}' (NodeId: {NodeId}): browse failed this load; existing entries are preserved.",
+                    property.Subject.GetType().Name, property.Name, nodeId);
+                continue;
+            }
+
             var childNodes = context.DistinctByResolvedNodeId(rawChildren);
 
-            var children = await ResolveChildSubjectsAsync(property, childNodes, isDictionary: true, context).ConfigureAwait(false);
+            // Two children can extract to the same dictionary key (e.g. 'Items[a]' and a
+            // bracket-less sibling 'a'). Dedupe before subjects are created so the loser is
+            // never staged, claimed, or monitored (it would be committed yet unreachable
+            // from the graph); the first reference wins, matching the sibling dedup in
+            // ClassifyChildReferencesAsync.
+            var seenKeys = new HashSet<string>(childNodes.Count);
+            var dedupedChildNodes = new List<(ReferenceDescription Reference, NodeId NodeId)>(childNodes.Count);
+            foreach (var childNode in childNodes)
+            {
+                if (seenKeys.Add(ExtractDictionaryKey(childNode.Reference.BrowseName.Name)))
+                {
+                    dedupedChildNodes.Add(childNode);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Skipping OPC UA dictionary child '{BrowseName}' (NodeId: {NodeId}): a sibling already produced the same dictionary key.",
+                        childNode.Reference.BrowseName.Name, childNode.NodeId);
+                }
+            }
+
+            var children = await ResolveChildSubjectsAsync(property, dedupedChildNodes, isDictionary: true, context).ConfigureAwait(false);
 
             var entries = new Dictionary<object, IInterceptorSubject>(children.Count);
             foreach (var (node, subject) in children)

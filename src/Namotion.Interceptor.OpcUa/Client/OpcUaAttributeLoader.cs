@@ -230,6 +230,20 @@ internal sealed class OpcUaAttributeLoader
                 continue;
             }
 
+            // Two entries in the same round can stage the same (property, browse name):
+            // sibling parents with identical BrowseNames but different NodeIds resolve to
+            // the same owner property, and the TryGetAttribute pre-check in
+            // CollectDynamicAttributesAsync runs before any attribute is created. Re-check
+            // here so the duplicate is skipped instead of crashing AddAttribute with a
+            // duplicate-key exception (which would abort the load and recur on every retry).
+            if (entry.OwnerProperty.TryGetAttribute(entry.BrowseName) is not null)
+            {
+                _logger.LogWarning(
+                    "Skipping dynamic attribute '{AttributeName}' on property '{PropertyName}' (NodeId: {NodeId}): an attribute with this name was already created by a sibling entry in this round.",
+                    entry.BrowseName, entry.OwnerProperty.Name, entry.ChildNode.NodeId);
+                continue;
+            }
+
             object? value = null;
             // Like TryCreateDynamicProperty: added eagerly, so a leftover from a failed load
             // survives, but MatchKnownAttributes re-matches it on the next load (via its

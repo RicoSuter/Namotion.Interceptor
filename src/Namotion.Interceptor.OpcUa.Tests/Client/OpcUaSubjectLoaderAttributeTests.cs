@@ -124,6 +124,61 @@ public class OpcUaSubjectLoaderAttributeTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
+    public async Task WhenSiblingParentsStageSameDynamicAttribute_ThenDuplicateIsSkippedWithoutCrash()
+    {
+        // Arrange: two sibling Variable references share the BrowseName "ServerStatus" but
+        // point to different NodeIds, and both resolve to the same declared property via the
+        // mapper's BrowseName match. Each parent NodeId exposes a dynamic Variable child
+        // named "EngineeringUnits", so both (property, parent) entries stage the same
+        // (property, browse name) attribute within one round. The second AddAttribute would
+        // throw a duplicate-key exception and abort the load on every retry; the loader
+        // must skip the duplicate instead.
+        var statusNodeId1 = new NodeId(5001, 2);
+        var statusNodeId2 = new NodeId(5002, 2);
+        var unitsNodeId1 = new NodeId(6001, 2);
+        var unitsNodeId2 = new NodeId(6002, 2);
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [new NodeId(1, 0)] =
+            [
+                CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId1)),
+                CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId2))
+            ],
+            [statusNodeId1] = [CreateTestReferenceDescription("EngineeringUnits", new ExpandedNodeId(unitsNodeId1))],
+            [statusNodeId2] = [CreateTestReferenceDescription("EngineeringUnits", new ExpandedNodeId(unitsNodeId2))]
+        });
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [unitsNodeId1] = (DataTypeIds.String, -1),
+            [unitsNodeId2] = (DataTypeIds.String, -1)
+        });
+
+        var (loader, _) = CreateLoader(shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var serverStatus = registeredSubject.AddProperty(
+            "ServerStatus",
+            typeof(int),
+            _ => 0,
+            (_, _) => { },
+            new OpcUaNodeAttribute("ServerStatus", null, "opc"));
+
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act - must not throw a duplicate-key exception
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: exactly one "EngineeringUnits" attribute exists, bound to the first
+        // parent's child NodeId (browse order wins, matching the sibling property dedup).
+        Assert.NotNull(serverStatus.TryGetAttribute("EngineeringUnits"));
+        Assert.Contains(monitoredItems, item => unitsNodeId1.Equals(item.StartNodeId));
+        Assert.DoesNotContain(monitoredItems, item => unitsNodeId2.Equals(item.StartNodeId));
+    }
+
+    [Fact]
     public async Task WhenAttributeParentNodeIdWasVisitedInEarlierRound_ThenAttributesAreStillLoaded()
     {
         // Arrange: VarA (NodeId 100) and VarB (NodeId 200) are top-level dynamic Variables.

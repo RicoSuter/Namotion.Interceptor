@@ -28,6 +28,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
     private volatile CancellationTokenSource? _reconnectCts; // Cancelled by KillAsync to abort in-flight reconnection
+    private volatile CancellationTokenSource? _loadCts; // Cancelled by DisposeAsync to abort an in-flight initial load
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     private volatile bool _isStarted;
@@ -117,34 +118,46 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             ReconnectionMetrics.RecordInitialConnection();
             _logger.LogInformation("Connected to OPC UA server successfully.");
 
-            await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            // Linked CTS so DisposeAsync can abort an in-flight initial load: the load
+            // holds _structureLock across network I/O and DisposeAsync waits on that lock
+            // uncancellably (mirrors the _reconnectCts pattern for reconnects).
+            using var loadCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _loadCts = loadCts;
             try
             {
-                var loadStopwatch = Stopwatch.StartNew();
-
-                var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
-                if (rootNode is not null)
+                await _structureLock.WaitAsync(loadCts.Token).ConfigureAwait(false);
+                try
                 {
-                    var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
-                    if (monitoredItems.Count > 0)
+                    var loadStopwatch = Stopwatch.StartNew();
+
+                    var rootNode = await TryGetRootNodeAsync(session, loadCts.Token).ConfigureAwait(false);
+                    if (rootNode is not null)
                     {
-                        await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+                        var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, loadCts.Token).ConfigureAwait(false);
+                        if (monitoredItems.Count > 0)
+                        {
+                            await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, loadCts.Token).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("No OPC UA monitored items found.");
+                        }
                     }
                     else
                     {
-                        _logger.LogWarning("No OPC UA monitored items found.");
+                        _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
                     }
-                }
-                else
-                {
-                    _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
-                }
 
-                _logger.LogInformation("OPC UA subject loading and subscription setup completed in {ElapsedMs}ms.", loadStopwatch.ElapsedMilliseconds);
+                    _logger.LogInformation("OPC UA subject loading and subscription setup completed in {ElapsedMs}ms.", loadStopwatch.ElapsedMilliseconds);
+                }
+                finally
+                {
+                    _structureLock.Release();
+                }
             }
             finally
             {
-                _structureLock.Release();
+                _loadCts = null;
             }
 
             _isStarted = true;
@@ -161,7 +174,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                     catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-lifetime disposal."); }
                 });
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _disposed == 1)
         {
             await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
@@ -705,9 +718,16 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
 
         // DisposeAsync can run without a completed StopAsync (e.g. HomeBlaze disposes in a
-        // finally block when detach fails or times out). An in-flight reconnect holds
-        // _structureLock across network I/O, so cancel it first; otherwise the uncancellable
-        // wait below stalls disposal until the reconnect finishes naturally.
+        // finally block when detach fails or times out). An in-flight initial load or
+        // reconnect holds _structureLock across network I/O, so cancel both first;
+        // otherwise the uncancellable wait below stalls disposal until they finish naturally.
+        var loadCts = _loadCts;
+        if (loadCts is not null)
+        {
+            try { await loadCts.CancelAsync().ConfigureAwait(false); }
+            catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
+        }
+
         var reconnectCts = _reconnectCts;
         if (reconnectCts is not null)
         {

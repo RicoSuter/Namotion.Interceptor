@@ -4,6 +4,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Performance;
 using Namotion.Interceptor.Tracking.Change;
@@ -146,6 +147,21 @@ internal class SubscriptionManager : IAsyncDisposable
 
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             _subscriptions.TryAdd(subscription, 0);
+        }
+
+        // A subject can detach while items are still being registered above: its
+        // RemoveItemsForSubject scan runs before the entries exist and removes nothing,
+        // then the registration lands afterwards, leaving stale items that route
+        // notifications into a detached subject. Sweep after registration; a detach
+        // from here on sees the completed registrations and removes normally.
+        foreach (var property in _monitoredItems.Values)
+        {
+            var subject = property.Reference.Subject;
+            if (subject.TryGetRegisteredSubject() is null)
+            {
+                RemoveItemsForSubject(subject);
+                _pollingManager?.RemoveItemsForSubject(subject);
+            }
         }
     }
 
