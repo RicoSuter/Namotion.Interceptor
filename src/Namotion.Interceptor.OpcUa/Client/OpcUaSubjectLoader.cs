@@ -282,6 +282,29 @@ internal sealed class OpcUaSubjectLoader
         var pendingCollections = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
         var pendingDictionaries = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
 
+        // Two sibling references with different NodeIds can map to the same property
+        // (legal OPC UA, e.g. reached via different reference types). For subject,
+        // collection, and dictionary properties the assignments are deferred, so the
+        // duplicate would create, stage, claim, and monitor a second subject tree that
+        // the final assignment then overwrites, leaving committed orphans. Dedupe by
+        // destination property; the first reference wins (browse order), matching the
+        // dynamic-property sibling dedup. Plain values and Variable-typed subject
+        // references keep their own smaller-NodeId dedup rules downstream.
+        var structuredPropertyTargets = new HashSet<RegisteredSubjectProperty>();
+
+        bool TryClaimStructuredTarget(RegisteredSubjectProperty targetProperty, ReferenceDescription reference, NodeId nodeId)
+        {
+            if (structuredPropertyTargets.Add(targetProperty))
+            {
+                return true;
+            }
+
+            _logger.LogWarning(
+                "Skipping OPC UA child '{BrowseName}' (NodeId: {NodeId}): another sibling reference already targets property '{Subject}.{Property}' in this load; the first reference wins.",
+                reference.BrowseName.Name, nodeId, targetProperty.Subject.GetType().Name, targetProperty.Name);
+            return false;
+        }
+
         foreach (var (stateSubject, stateRegisteredSubject, stateChildEntries) in subjectStates)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
@@ -312,6 +335,11 @@ internal sealed class OpcUaSubjectLoader
                     }
                     else
                     {
+                        if (!TryClaimStructuredTarget(property, nodeReference, resolvedNodeId))
+                        {
+                            continue;
+                        }
+
                         var result = await PrepareSubjectReferenceAsync(
                             property, nodeReference, resolvedNodeId, stateSubject,
                             context).ConfigureAwait(false);
@@ -325,10 +353,20 @@ internal sealed class OpcUaSubjectLoader
                 }
                 else if (property.IsSubjectCollection)
                 {
+                    if (!TryClaimStructuredTarget(property, nodeReference, resolvedNodeId))
+                    {
+                        continue;
+                    }
+
                     pendingCollections.Add((property, resolvedNodeId));
                 }
                 else if (property.IsSubjectDictionary)
                 {
+                    if (!TryClaimStructuredTarget(property, nodeReference, resolvedNodeId))
+                    {
+                        continue;
+                    }
+
                     pendingDictionaries.Add((property, resolvedNodeId));
                 }
                 else

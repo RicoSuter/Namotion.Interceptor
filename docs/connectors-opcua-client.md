@@ -100,7 +100,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 
         // Performance tuning
         BufferTime = TimeSpan.FromMilliseconds(10),
-        RetryTime = TimeSpan.FromSeconds(1)
+        RetryTime = TimeSpan.FromSeconds(1)   // overrides the 10s default for faster reconnects
     });
 ```
 

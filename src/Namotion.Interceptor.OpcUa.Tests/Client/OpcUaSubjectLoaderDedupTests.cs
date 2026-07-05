@@ -1,7 +1,10 @@
 using Namotion.Interceptor.Registry;
 using Moq;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -429,4 +432,173 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
         // Assert: ReadAsync should be called once (for 1 unique variable), not twice
         Assert.Equal(1, readCallCount);
     }
+
+    [Fact]
+    public async Task WhenSiblingReferencesTargetSameSubjectProperty_ThenSecondIsSkippedAndNoOrphanIsCreated()
+    {
+        // Arrange: two sibling Object references share the BrowseName "Device" but point to
+        // different NodeIds, and both map to the same subject-reference property. Assignments
+        // are deferred in the batched loader, so without dedup the second reference would see
+        // property.Children still empty, create and stage a second subject, fully load it,
+        // and the final last-wins assignment would leave it as a committed orphan with live
+        // claims and monitored items.
+        var rootId = new NodeId(1, 0);
+        var deviceId1 = new NodeId(5001, 2);
+        var deviceId2 = new NodeId(5002, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] =
+            [
+                CreateObjectReferenceDescription("Device", new ExpandedNodeId(deviceId1)),
+                CreateObjectReferenceDescription("Device", new ExpandedNodeId(deviceId2))
+            ],
+            [deviceId1] = [],
+            [deviceId2] = []
+        };
+
+        var mockSession = CreateMockSession();
+        var browsedNodeIds = SetupBrowseAsyncWithTracking(mockSession, browseTree);
+
+        var (loader, _) = CreateLoader();
+
+        var modelContext = InterceptorSubjectContext.Create().WithRegistry();
+        var container = new DuplicateSubjectRefContainer(modelContext);
+        new LifecycleInterceptor().AttachSubjectToContext(container);
+        var registry = modelContext.TryGetService<ISubjectRegistry>()!;
+        var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
+
+        var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
+
+        // Act
+        await loader.LoadSubjectAsync(container, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: one subject assigned and exactly one new subject in the registry. The
+        // losing reference's subtree must never be browsed: without dedup the loser is
+        // created, staged, and loaded before the last-wins assignment detaches it again,
+        // wasting round-trips and leaving stale server-side monitored items.
+        Assert.NotNull(container.Device);
+        var newSubjects = registry.KnownSubjects.Keys.Except(preLoadKeys).ToArray();
+        var newSubject = Assert.Single(newSubjects);
+        Assert.Same(container.Device, newSubject);
+        Assert.Contains(deviceId1, browsedNodeIds);
+        Assert.DoesNotContain(deviceId2, browsedNodeIds);
+    }
+
+    [Fact]
+    public async Task WhenSiblingReferencesTargetSameCollectionProperty_ThenSecondIsSkipped()
+    {
+        // Arrange: two sibling Object references both map to the same collection property.
+        // Without dedup, each parent's children would be created, staged, and loaded, and the
+        // last-wins assignment would orphan the first parent's fully loaded children.
+        var rootId = new NodeId(1, 0);
+        var itemsId1 = new NodeId(6001, 2);
+        var itemsId2 = new NodeId(6002, 2);
+        var child1Id = new NodeId(6101, 2);
+        var child2Id = new NodeId(6201, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] =
+            [
+                CreateObjectReferenceDescription("Items", new ExpandedNodeId(itemsId1)),
+                CreateObjectReferenceDescription("Items", new ExpandedNodeId(itemsId2))
+            ],
+            [itemsId1] = [CreateObjectReferenceDescription("Items[0]", new ExpandedNodeId(child1Id))],
+            [itemsId2] = [CreateObjectReferenceDescription("Items[0]", new ExpandedNodeId(child2Id))],
+            [child1Id] = [],
+            [child2Id] = []
+        };
+
+        var mockSession = CreateMockSession();
+        var browsedNodeIds = SetupBrowseAsyncWithTracking(mockSession, browseTree);
+
+        var (loader, _) = CreateLoader();
+
+        var modelContext = InterceptorSubjectContext.Create().WithRegistry();
+        var container = new DuplicateCollectionContainer(modelContext);
+        new LifecycleInterceptor().AttachSubjectToContext(container);
+        var registry = modelContext.TryGetService<ISubjectRegistry>()!;
+        var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
+
+        var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
+
+        // Act
+        await loader.LoadSubjectAsync(container, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: the first reference wins; only its child exists in the collection and in
+        // the registry, and the losing parent's subtree is never browsed (without dedup its
+        // children are created, staged, and loaded before the last-wins assignment detaches
+        // them again).
+        Assert.NotNull(container.Items);
+        Assert.Single(container.Items);
+        var newSubjects = registry.KnownSubjects.Keys.Except(preLoadKeys).ToArray();
+        Assert.Single(newSubjects);
+        Assert.Contains(itemsId1, browsedNodeIds);
+        Assert.DoesNotContain(itemsId2, browsedNodeIds);
+    }
+
+    [Fact]
+    public async Task WhenSiblingReferencesTargetSameDictionaryProperty_ThenSecondIsSkipped()
+    {
+        // Arrange: two sibling Object references both map to the same dictionary property.
+        // The existing child-key dedup only covers duplicates inside one dictionary node,
+        // not two parent references targeting the same property.
+        var rootId = new NodeId(1, 0);
+        var itemsId1 = new NodeId(7001, 2);
+        var itemsId2 = new NodeId(7002, 2);
+        var childAId = new NodeId(7101, 2);
+        var childBId = new NodeId(7201, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] =
+            [
+                CreateObjectReferenceDescription("Items", new ExpandedNodeId(itemsId1)),
+                CreateObjectReferenceDescription("Items", new ExpandedNodeId(itemsId2))
+            ],
+            [itemsId1] = [CreateObjectReferenceDescription("Items[a]", new ExpandedNodeId(childAId))],
+            [itemsId2] = [CreateObjectReferenceDescription("Items[b]", new ExpandedNodeId(childBId))],
+            [childAId] = [],
+            [childBId] = []
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+
+        var (loader, _) = CreateLoader();
+
+        var modelContext = InterceptorSubjectContext.Create().WithRegistry();
+        var container = new StringKeyDictionaryContainer(modelContext);
+        new LifecycleInterceptor().AttachSubjectToContext(container);
+        var registry = modelContext.TryGetService<ISubjectRegistry>()!;
+        var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
+
+        var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
+
+        // Act
+        await loader.LoadSubjectAsync(container, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: the first reference wins; the dictionary holds its entry only, and no
+        // orphaned subject from the losing parent exists in the registry.
+        Assert.NotNull(container.Items);
+        var entry = Assert.Single(container.Items);
+        Assert.Equal("a", entry.Key);
+        var newSubjects = registry.KnownSubjects.Keys.Except(preLoadKeys).ToArray();
+        Assert.Single(newSubjects);
+    }
+}
+
+[InterceptorSubject]
+public partial class DuplicateSubjectRefContainer
+{
+    [OpcUaNode("Device")]
+    public partial DictionaryReuseItem? Device { get; set; }
+}
+
+[InterceptorSubject]
+public partial class DuplicateCollectionContainer
+{
+    [OpcUaNode("Items")]
+    public partial DictionaryReuseItem[]? Items { get; set; }
 }

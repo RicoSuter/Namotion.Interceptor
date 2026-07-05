@@ -174,6 +174,38 @@ public class OpcUaSubjectLoaderTestsBase
             });
     }
 
+    /// <summary>
+    /// Like <see cref="SetupBrowseAsync"/> but also records every browsed NodeId, so tests
+    /// can assert that specific subtrees were (not) visited.
+    /// </summary>
+    private protected static HashSet<NodeId> SetupBrowseAsyncWithTracking(Mock<ISession> mockSession, Dictionary<NodeId, ReferenceDescription[]> browseTree)
+    {
+        var browsedNodeIds = new HashSet<NodeId>();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var desc in browseDescriptions)
+                {
+                    browsedNodeIds.Add(desc.NodeId);
+                    var children = new ReferenceDescriptionCollection();
+                    if (browseTree.TryGetValue(desc.NodeId, out var refs))
+                    {
+                        children.AddRange(refs);
+                    }
+                    results.Add(new BrowseResult { References = children });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+        return browsedNodeIds;
+    }
+
     private protected static Mock<ISession> CreateMockSessionWithNoChildren()
     {
         var mockSession = CreateMockSession();
