@@ -30,7 +30,7 @@ internal sealed class OpcUaSubjectLoader
         _ownership = ownership;
         _source = source;
         _logger = logger;
-        _attributeLoader = new OpcUaAttributeLoader(configuration, subject, this, logger);
+        _attributeLoader = new OpcUaAttributeLoader(subject, this, configuration, logger);
     }
 
     internal void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, OpcUaLoadContext context)
@@ -187,17 +187,11 @@ internal sealed class OpcUaSubjectLoader
             CancellationToken cancellationToken)
     {
         var childEntries = new List<ChildEntry>(distinctReferences.Count);
+        var stagedDynamicNames = new HashSet<string>();
 
         for (var i = 0; i < distinctReferences.Count; i++)
         {
             var (nodeReference, resolvedNodeId) = distinctReferences[i];
-
-            if (string.IsNullOrEmpty(nodeReference.BrowseName?.Name))
-            {
-                _logger.LogWarning(
-                    "Skipping node with null or empty BrowseName (NodeId: {NodeId}).", nodeReference.NodeId);
-                continue;
-            }
 
             var property = await _configuration.Mapper
                 .TryGetPropertyAsync(new OpcUaLookupKey(nodeReference, session, _subject), registeredSubject, cancellationToken)
@@ -222,6 +216,20 @@ internal sealed class OpcUaSubjectLoader
 
             if (!addAsDynamic)
             {
+                continue;
+            }
+
+            // A server may return two siblings with the same BrowseName but different NodeIds
+            // (allowed when reached via different reference types). They survive
+            // DistinctByResolvedNodeId because the NodeIds differ, and the TryGetProperty check
+            // above does not catch them because the first is only added later in
+            // LoadChildPropertiesAsync. Skip the second here so AddProperty is never called twice
+            // with the same name (which would throw a duplicate-key ArgumentException).
+            if (!stagedDynamicNames.Add(nodeReference.BrowseName.Name))
+            {
+                _logger.LogWarning(
+                    "Skipping OPC UA child '{BrowseName}' (NodeId: {NodeId}): a sibling reference already staged a dynamic property with this BrowseName under the same parent.",
+                    nodeReference.BrowseName.Name, nodeReference.NodeId);
                 continue;
             }
 
@@ -282,12 +290,9 @@ internal sealed class OpcUaSubjectLoader
             {
                 var (nodeReference, resolvedNodeId, property) = stateChildEntries[i];
 
-                if (property is null)
-                {
-                    property = TryCreateDynamicProperty(
-                        stateRegisteredSubject, nodeReference, resolvedNodeId,
-                        objectTypeMap, variableTypeMap, context.Session);
-                }
+                property ??= TryCreateDynamicProperty(
+                    stateRegisteredSubject, nodeReference, resolvedNodeId,
+                    objectTypeMap, variableTypeMap, context.Session);
 
                 if (property is null)
                 {
@@ -301,7 +306,7 @@ internal sealed class OpcUaSubjectLoader
 
                 if (property.IsSubjectReference)
                 {
-                    if (nodeConfiguration.NodeClass == Mapping.OpcUaNodeClass.Variable)
+                    if (nodeConfiguration.NodeClass == OpcUaNodeClass.Variable)
                     {
                         pendingVariableSubjects.Add((property, resolvedNodeId));
                     }
@@ -367,6 +372,11 @@ internal sealed class OpcUaSubjectLoader
         }
 
         object? value = null;
+        // Added eagerly rather than staged in the load context: if the load fails later,
+        // the property survives on non-staged subjects (root and reused children), but the
+        // next load re-matches it via the mapper's NodeIdentifier priority (the attached
+        // OpcUaNodeAttribute carries the exact NodeId) and re-monitors it, so the leftover
+        // is transient rather than torn state.
         return registeredSubject.AddProperty(
             nodeReference.BrowseName.Name,
             inferredType,
@@ -519,7 +529,17 @@ internal sealed class OpcUaSubjectLoader
 
         foreach (var (property, nodeId) in pendingCollections)
         {
-            var rawChildren = browseResults.TryGetValue(nodeId, out var r) ? r : [];
+            if (!browseResults.TryGetValue(nodeId, out var rawChildren))
+            {
+                // Missing entry = the browse failed with a permanent bad status (transient
+                // failures abort the whole load). Keep the property's current items rather
+                // than overwriting them with an empty collection; the next load retries.
+                _logger.LogWarning(
+                    "Skipping OPC UA collection '{Subject}.{Property}' (NodeId: {NodeId}): browse failed this load; existing items are preserved.",
+                    property.Subject.GetType().Name, property.Name, nodeId);
+                continue;
+            }
+
             var childNodes = context.DistinctByResolvedNodeId(rawChildren);
 
             var children = await ResolveChildSubjectsAsync(property, childNodes, isDictionary: false, context).ConfigureAwait(false);
@@ -531,10 +551,39 @@ internal sealed class OpcUaSubjectLoader
 
         foreach (var (property, nodeId) in pendingDictionaries)
         {
-            var rawChildren = browseResults.TryGetValue(nodeId, out var r) ? r : [];
+            if (!browseResults.TryGetValue(nodeId, out var rawChildren))
+            {
+                // Same contract as the collection branch above: absent = failed, not empty.
+                _logger.LogWarning(
+                    "Skipping OPC UA dictionary '{Subject}.{Property}' (NodeId: {NodeId}): browse failed this load; existing entries are preserved.",
+                    property.Subject.GetType().Name, property.Name, nodeId);
+                continue;
+            }
+
             var childNodes = context.DistinctByResolvedNodeId(rawChildren);
 
-            var children = await ResolveChildSubjectsAsync(property, childNodes, isDictionary: true, context).ConfigureAwait(false);
+            // Two children can extract to the same dictionary key (e.g. 'Items[a]' and a
+            // bracket-less sibling 'a'). Dedupe before subjects are created so the loser is
+            // never staged, claimed, or monitored (it would be committed yet unreachable
+            // from the graph); the first reference wins, matching the sibling dedup in
+            // ClassifyChildReferencesAsync.
+            var seenKeys = new HashSet<string>(childNodes.Count);
+            var dedupedChildNodes = new List<(ReferenceDescription Reference, NodeId NodeId)>(childNodes.Count);
+            foreach (var childNode in childNodes)
+            {
+                if (seenKeys.Add(ExtractDictionaryKey(childNode.Reference.BrowseName.Name)))
+                {
+                    dedupedChildNodes.Add(childNode);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Skipping OPC UA dictionary child '{BrowseName}' (NodeId: {NodeId}): a sibling already produced the same dictionary key.",
+                        childNode.Reference.BrowseName.Name, childNode.NodeId);
+                }
+            }
+
+            var children = await ResolveChildSubjectsAsync(property, dedupedChildNodes, isDictionary: true, context).ConfigureAwait(false);
 
             var entries = new Dictionary<object, IInterceptorSubject>(children.Count);
             foreach (var (node, subject) in children)
@@ -552,7 +601,10 @@ internal sealed class OpcUaSubjectLoader
 
     // Reuses existing children when possible: dictionaries match by browse name,
     // collections match by index position (so server-side reordering between loads
-    // rebinds existing subjects to new items).
+    // rebinds existing subjects to new items). Note: if DistinctByResolvedNodeId drops
+    // a reference (logged), later collection positions shift and can rebind to a
+    // different existing subject; only the object NodeId would be a drop-stable key,
+    // and it is not retained across loads.
     private async Task<List<(ReferenceDescription Node, IInterceptorSubject Subject)>> ResolveChildSubjectsAsync(
         RegisteredSubjectProperty property,
         List<(ReferenceDescription Reference, NodeId NodeId)> childNodes,

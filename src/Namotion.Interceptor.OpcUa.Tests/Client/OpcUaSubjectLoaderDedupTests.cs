@@ -328,6 +328,52 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
+    public async Task WhenSiblingsShareBrowseNameButHaveDifferentNodeIds_ThenSecondIsSkippedAndLoadSucceeds()
+    {
+        // Arrange: two sibling variable references share the BrowseName "State" but point to
+        // different NodeIds. OPC UA allows this when the same name is reached via different
+        // reference types (e.g. HasComponent + HasProperty). DistinctByResolvedNodeId keeps
+        // both (the NodeIds differ), so the loader must not attempt to add a "State" property
+        // twice; the second AddProperty would otherwise throw a duplicate-key ArgumentException.
+        var stateNodeId1 = new NodeId(5001, 2);
+        var stateNodeId2 = new NodeId(5002, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [new NodeId(1, 0)] =
+            [
+                CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId1)),
+                CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId2))
+            ]
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [stateNodeId1] = (DataTypeIds.Int32, -1),
+            [stateNodeId2] = (DataTypeIds.Int32, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act - must not throw "duplicate key" ArgumentException
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: exactly one "State" property is declared, bound to the FIRST sibling's NodeId.
+        // Browse order wins (the later duplicate is dropped), so a regression that flipped to
+        // "last wins" would be caught here, not just the absence of a crash.
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        Assert.Single(registeredSubject.Properties.Where(p => p.Name == "State"));
+        var monitoredItem = Assert.Single(monitoredItems);
+        Assert.Equal(stateNodeId1, monitoredItem.StartNodeId);
+    }
+
+    [Fact]
     public async Task WhenTwoSubjectsShareDynamicVariable_ThenReadIsNotDuplicated()
     {
         // Arrange: two parent Object nodes each have the same child Variable node.

@@ -113,6 +113,49 @@ public class OpcUaSubjectLoaderFailureTests
     }
 
     [Fact]
+    public void WhenApplyFailsMidway_ThenOwnershipFromPreviousLoadIsRetained()
+    {
+        // Arrange: simulate a reload. "PreOwned" is already owned by this source from a
+        // previous successful load; "NewlyClaimed" is claimed for the first time by this
+        // Apply. A queued root op then throws mid-Apply. The rollback must release only
+        // the claim this Apply established: releasing pre-existing ownership would leave
+        // application writes unrouted until the next successful retry.
+        var (_, source, subject) = CreateFixture();
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+
+        var preOwned = registeredSubject.AddProperty("PreOwned", typeof(int), _ => 0, (_, _) => { });
+        var newlyClaimed = registeredSubject.AddProperty("NewlyClaimed", typeof(int), _ => 0, (_, _) => { });
+        var throwing = registeredSubject.AddProperty("Throwing", typeof(int), _ => 0,
+            (_, _) => throw new InvalidOperationException("Setter failure aborts Apply."));
+
+        Assert.True(source.Ownership.ClaimSource(preOwned.Reference));
+
+        var mockSession = CreateMockSession();
+        using var context = new OpcUaLoadContext(
+            mockSession.Object,
+            subject,
+            source.Ownership,
+            source,
+            maxReferencesPerNode: 1000,
+            maxBrowseContinuations: 100,
+            NullLogger<OpcUaSubjectClientSource>.Instance,
+            CancellationToken.None);
+
+        context.QueueClaim(preOwned.Reference, new NodeId(9001, 2), new MonitoredItem(NullTelemetryContext.Instance));
+        context.QueueClaim(newlyClaimed.Reference, new NodeId(9002, 2), new MonitoredItem(NullTelemetryContext.Instance));
+        context.QueueOrApplySetValue(source, throwing, 42);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => context.Apply());
+
+        // The pre-existing ownership survives the rollback; the claim newly established
+        // by this Apply is released.
+        Assert.True(preOwned.Reference.TryGetSource(out var owner));
+        Assert.Same(source, owner);
+        Assert.False(newlyClaimed.Reference.TryGetSource(out _));
+    }
+
+    [Fact]
     public async Task WhenLoadFailsAndRetries_ThenSecondAttemptSucceedsCleanly()
     {
         // Arrange: first browse of Status fails transient, second browse succeeds

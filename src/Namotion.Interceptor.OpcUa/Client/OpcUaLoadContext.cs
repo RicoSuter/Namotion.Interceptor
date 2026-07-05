@@ -188,12 +188,13 @@ internal sealed class OpcUaLoadContext : IDisposable
     /// a new root child appear finds all of the child's leaves already source-owned.
     /// </summary>
     /// <remarks>
-    /// Atomicity is best-effort, not all-or-nothing. The catch-path releases any
-    /// source claims already committed during this Apply call, but root mutations
+    /// Atomicity is best-effort, not all-or-nothing. The catch-path releases only the
+    /// source claims newly established during this Apply call (ownership that predates
+    /// this Apply, e.g. from a previous successful load, is retained), but root mutations
     /// (<see cref="QueueOrApplySetValue"/> ops on the root subject) that ran before
     /// the throw cannot be undone because prior values were not captured. After a
-    /// mid-Apply throw, expect: (a) ownership consistent (released for everything
-    /// not still owned by Apply), (b) some root properties may hold subject
+    /// mid-Apply throw, expect: (a) ownership consistent (this Apply's new claims
+    /// released, pre-existing ownership kept), (b) some root properties may hold subject
     /// references whose <see cref="Dispose"/> rollback then detaches their staged
     /// subjects from the registry. A retry then re-creates fresh subjects and
     /// re-assigns the same root properties.
@@ -209,6 +210,14 @@ internal sealed class OpcUaLoadContext : IDisposable
         {
             foreach (var (property, nodeId, monitoredItem) in _pendingClaims)
             {
+                // A reload re-claims properties this source already owns from a previous
+                // successful load (ClaimSource is idempotent-true for the same source).
+                // Track only claims newly established by THIS Apply so the rollback below
+                // cannot strip pre-existing ownership it never created, which would leave
+                // application writes unrouted until the next successful retry.
+                var alreadyOwned = property.TryGetSource(out var existingSource) &&
+                    ReferenceEquals(existingSource, _source);
+
                 if (!_ownership.ClaimSource(property))
                 {
                     _logger.LogError(
@@ -216,7 +225,10 @@ internal sealed class OpcUaLoadContext : IDisposable
                         property.Subject.GetType().Name, property.Name);
                     continue;
                 }
-                committedClaims.Add(property);
+                if (!alreadyOwned)
+                {
+                    committedClaims.Add(property);
+                }
                 property.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
                 MonitoredItems.Add(monitoredItem);
             }

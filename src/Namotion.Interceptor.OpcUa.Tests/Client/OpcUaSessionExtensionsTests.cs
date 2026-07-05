@@ -334,6 +334,107 @@ public class OpcUaSessionExtensionsTests
         Assert.Equal(missingNodeId, exception.NodeId);
     }
 
+    [Fact]
+    public async Task WhenBrowseNextReturnsFewerResultsThanRequested_ThenThrowsTransientServiceException()
+    {
+        // Arrange: the initial browse returns two nodes, each with a continuation point. The
+        // follow-up BrowseNext is sent both continuation points but the server returns only one
+        // result. The missing node must surface as a transient failure (mirroring the initial
+        // Browse path) so the load retries, rather than silently truncating that node's children
+        // and leaking its continuation point.
+        var returnedNodeId = new NodeId(1001, 2);
+        var missingNodeId = new NodeId(1002, 2);
+        var mockSession = CreateMockSession();
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseResponse
+            {
+                Results =
+                [
+                    new BrowseResult { References = [], ContinuationPoint = [0xAA] },
+                    new BrowseResult { References = [], ContinuationPoint = [0xBB] }
+                ],
+                DiagnosticInfos = []
+            });
+
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<bool>(),
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseNextResponse
+            {
+                Results = [new BrowseResult { References = [] }],
+                DiagnosticInfos = []
+            });
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<OpcUaTransientServiceException>(() =>
+            mockSession.Object.BrowseNodesAsync(
+                [returnedNodeId, missingNodeId],
+                maxReferencesPerNode: 1000,
+                maxContinuationRounds: 100,
+                NullLogger<OpcUaSessionExtensionsTests>.Instance,
+                CancellationToken.None));
+
+        Assert.Equal("BrowseNext", exception.Operation);
+        Assert.Equal(missingNodeId, exception.NodeId);
+    }
+
+    [Fact]
+    public async Task WhenServerReportsIntOverflowingOperationLimit_ThenBrowseUsesDefaultBatchLimit()
+    {
+        // Arrange: a buggy or hostile server can report MaxNodesPerBrowse above int.MaxValue;
+        // an unclamped uint-to-int cast would produce a negative batch size and corrupt the
+        // batching loop math.
+        var firstNodeId = new NodeId(1001, 2);
+        var secondNodeId = new NodeId(1002, 2);
+        var mockSession = CreateMockSession();
+        mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits { MaxNodesPerBrowse = uint.MaxValue });
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection descriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var _ in descriptions)
+                {
+                    results.Add(new BrowseResult
+                    {
+                        References =
+                        [
+                            new ReferenceDescription { BrowseName = new QualifiedName("Child"), NodeId = new ExpandedNodeId(new NodeId(3001, 2)) }
+                        ]
+                    });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        // Act
+        var result = await mockSession.Object.BrowseNodesAsync(
+            [firstNodeId, secondNodeId],
+            maxReferencesPerNode: 1000,
+            maxContinuationRounds: 100,
+            NullLogger<OpcUaSessionExtensionsTests>.Instance,
+            CancellationToken.None);
+
+        // Assert
+        Assert.True(result.ContainsKey(firstNodeId));
+        Assert.True(result.ContainsKey(secondNodeId));
+    }
+
     private static Mock<ISession> CreateMockSession()
     {
         var mockSession = new Mock<ISession>();

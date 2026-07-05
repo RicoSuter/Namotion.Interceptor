@@ -174,7 +174,8 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
                         propertyFilter: IsPropertyIncluded,
                         writeHandler: WriteChangesAsync,
                         _configuration.BufferTime,
-                        _logger);
+                        maxQueueDepth: null,
+                        logger: _logger);
 
                     await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
                 }

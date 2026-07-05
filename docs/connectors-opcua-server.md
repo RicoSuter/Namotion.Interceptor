@@ -99,7 +99,7 @@ await server.StartAsync(cancellationToken);
 | `NamespaceUri` | `string` | "http://namotion.com/Interceptor/" | Primary namespace URI for custom nodes |
 | `ValueConverter` | `OpcUaValueConverter` | *required* | Converts between C# properties and OPC UA values |
 | `Mapper` | `IPropertyMapper<OpcUaPropertyMapping>` | OpcUaCompositeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
-| `BufferTime` | `TimeSpan?` | 8ms | Time window to buffer incoming property changes before publishing to clients |
+| `BufferTime` | `TimeSpan?` | 8ms | Window that coalesces interceptor property changes before they are written to the OPC UA nodes. This is server-side change batching, distinct from the OPC UA publishing interval that governs when the server delivers node updates to subscribed clients (see [Publishing intervals and client negotiation](#publishing-intervals-and-client-negotiation)) |
 | `TelemetryContext` | `ITelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |
 | `CleanCertificateStore` | `bool` | true | Remove old certificates from the application certificate store on startup |
@@ -161,22 +161,32 @@ public class MyServerConfiguration : OpcUaServerConfiguration
 
 ### Default Server Quotas
 
-The following limits are configured by default. Override `CreateApplicationInstanceAsync()` to customize:
+The following limits are configured by default. They are set on the SDK `ServerConfiguration`, except `MaxNodesPerRead`, `MaxNodesPerWrite`, `MaxNodesPerBrowse`, and `MaxMonitoredItemsPerCall`, which live on `ServerConfiguration.OperationLimits`. Override `CreateApplicationInstanceAsync()` to customize:
 
-| Setting | Default |
-|---------|---------|
-| Max sessions | 100 |
-| Session timeout | 10s - 3600s |
-| Max browse continuation points | 100 |
-| Min publishing interval | 50ms |
-| Max publishing interval | 3600s |
-| Max message queue size | 10,000 |
-| Max notification queue size | 10,000 |
-| Max notifications per publish | 10,000 |
-| MaxNodesPerRead | 4,000 |
-| MaxNodesPerWrite | 4,000 |
-| MaxNodesPerBrowse | 4,000 |
-| MaxMonitoredItemsPerCall | 4,000 |
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `MaxSessionCount` | 100 | Maximum number of concurrent client sessions |
+| `MinSessionTimeout` | 10s | Shortest session timeout the server will negotiate |
+| `MaxSessionTimeout` | 3600s | Longest session timeout the server will negotiate; a session is dropped once the client is silent past the negotiated value |
+| `MaxBrowseContinuationPoints` | 100 | Concurrent browse continuation points the server retains per session |
+| `MinPublishingInterval` | 50ms | Fastest publishing interval the server grants to a subscription |
+| `MaxPublishingInterval` | 3600s | Slowest publishing interval the server grants to a subscription |
+| `PublishingResolution` | 25ms | Granularity to which a requested publishing interval is rounded |
+| `MaxSubscriptionLifetime` | 3600s | How long a subscription survives without client keep-alive or acknowledgement |
+| `MinMetadataSamplingInterval` | 1000ms | Floor for sampling of metadata nodes (does not affect regular value monitoring) |
+| `MaxMessageQueueSize` | 10,000 | Publish responses retained per subscription for republish requests |
+| `MaxNotificationQueueSize` | 10,000 | Notifications buffered per monitored item before the queue overflows |
+| `MaxNotificationsPerPublish` | 10,000 | Maximum notifications packed into a single publish response |
+| `MaxNodesPerRead` | 4,000 | Maximum nodes a single Read request may target |
+| `MaxNodesPerWrite` | 4,000 | Maximum nodes a single Write request may target |
+| `MaxNodesPerBrowse` | 4,000 | Maximum nodes a single Browse request may target |
+| `MaxMonitoredItemsPerCall` | 4,000 | Maximum monitored items created or modified in a single call |
+
+### Publishing intervals and client negotiation
+
+The publishing settings above are the bounds this server uses to *revise* the publishing interval a client requests when it creates a subscription (see the client-side [subscription pipeline: sampling vs publishing](connectors-opcua-client.md#the-subscription-pipeline-sampling-vs-publishing)). A client asks for a publishing interval; the server clamps it to `[MinPublishingInterval, MaxPublishingInterval]` and rounds it to a multiple of `PublishingResolution` (25ms), then returns the revised value. `MaxSubscriptionLifetime` bounds how long a subscription survives without client acknowledgement (paired with the client's keep-alive and lifetime counts).
+
+Because this server is backed by the interceptor model rather than a physical device, there is no per-item sampling of an external source: value changes originate from interceptor property changes (coalesced by `BufferTime`), and `MinMetadataSamplingInterval` only sets the floor for metadata sampling. Client-requested sampling intervals are still negotiated per monitored item, but the effective change rate is driven by how fast the model changes, not by server-side polling.
 
 ## Subject Deduplication
 

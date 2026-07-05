@@ -91,7 +91,7 @@ builder.Services.AddOpcUaSubjectClientSource(
         DefaultSamplingInterval = 0,      // 0 = exception-based (immediate), null = server decides
         DefaultPublishingInterval = 100,
         DefaultQueueSize = 10,
-        MaximumItemsPerSubscription = 1000,
+        MaxItemsPerSubscription = 1000,
 
         // Data change filter (null = use OPC UA library defaults)
         DefaultDataChangeTrigger = null,  // StatusValue (report on value change)
@@ -151,7 +151,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `SubscriptionKeepAliveCount` | 10 | Keep-alive count for subscriptions |
 | `SubscriptionLifetimeCount` | 100 | Lifetime count (must be >= 3x keep-alive count) |
 | `SubscriptionPriority` | 0 | Subscription priority (0 = server default) |
-| `SubscriptionMaximumNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
+| `SubscriptionMaxNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
 | `MinPublishRequestCount` | 3 | Minimum outstanding publish requests |
 | `SubscriptionSequentialPublishing` | false | Process messages in order (reduces throughput) |
 
@@ -177,7 +177,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `MaximumReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
+| `MaxReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
 
 ## Security
 
@@ -254,6 +254,37 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 ```
 
 ## Monitoring & Subscriptions
+
+### The subscription pipeline: sampling vs publishing
+
+A subscription delivers data in two stages, governed by two different intervals at two different scopes:
+
+```
+ PLC tag / variable
+      │
+      │  sampling interval     (per monitored item)
+      ▼  server samples the source, applies deadband/trigger
+ per-item queue                (QueueSize, DiscardOldest)
+      │
+      │  publishing interval   (per subscription)
+      ▼  server batches all queued notifications from all items
+    client
+```
+
+- **Sampling interval** (`DefaultSamplingInterval`, per monitored item): how often the *server* reads the underlying source for a new value. Sets data freshness and change resolution.
+- **Publishing interval** (`DefaultPublishingInterval`, per subscription): how often the *server* packages the notifications queued across *all* items in the subscription and sends them in one response. Sets network and batching overhead.
+
+One subscription has a single publishing interval shared by many monitored items, each with its own sampling interval and queue.
+
+**How they combine with queue size.** Between publishes, each item keeps sampling into its queue:
+
+- Sample fast, publish slower, deeper queue (e.g. sampling 100 ms, publishing 1000 ms, `QueueSize = 10`): the server captures every 100 ms change and delivers up to 10 of them in a single round-trip, keeping fidelity while cutting network chatter.
+- Same setup with `QueueSize = 1`: intermediate changes coalesce and you receive only the latest value per publish.
+- Publishing faster than sampling gains nothing; sampling faster than the source changes only wastes server CPU.
+
+**Both are requests, not guarantees.** The client asks for these values; the server *revises* them to what it can honor (it cannot sample faster than its scan cycle) and returns the revised sampling interval, publishing interval, and queue size. This client reads the revised sampling interval back and, for the `SamplingInterval = 0` case, uses it to schedule read-after-writes (see [Read After Write Fallback](#read-after-write-fallback)).
+
+For choosing sampling interval `0` vs `>0` specifically (exception-based vs sampling), see the next section.
 
 ### Sampling vs Exception-Based Monitoring
 
