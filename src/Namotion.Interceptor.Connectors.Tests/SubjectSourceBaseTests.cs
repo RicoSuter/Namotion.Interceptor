@@ -21,6 +21,11 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        // The ChangeQueueProcessor subscription is now created before StartListeningAsync
+        // (capture-early), so the mocked context must provide the change queue upfront.
+        subjectContextMock
+            .Setup(s => s.TryGetService<PropertyChangeQueue>())
+            .Returns(new PropertyChangeQueue());
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock
@@ -105,6 +110,114 @@ public class SubjectSourceBaseTests
         // Assert
         Assert.NotNull(changes);
         Assert.Equal("Bar", changes.First().GetNewValue<string?>());
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsWrittenWhileInitialStateLoads_ThenChangeIsStillWrittenToSource()
+    {
+        // Arrange: a property write that happens after connection effects become observable
+        // in the model but before the change pump subscribes must not be lost. The write is
+        // issued inside LoadInitialStateAsync, which runs before the ChangeQueueProcessor
+        // was created prior to the capture-early fix, so the change was silently dropped.
+        var propertyChangedChannel = new PropertyChangeQueue();
+
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.AddService(propertyChangedChannel);
+
+        var subject = new Person(context);
+
+        var receivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = _ =>
+            {
+                subject.FirstName = "written-during-load";
+                return Task.FromResult<Action?>(null);
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedChanges.Enqueue(change);
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.FirstName)),
+            message: "Expected the write made during initial state load to reach the source");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        var received = receivedChanges.First(c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Equal("written-during-load", received.GetNewValue<string?>());
+    }
+
+    [Fact]
+    public async Task WhenQueuedWriteIsSupersededByInitialState_ThenStaleWriteIsNotSent()
+    {
+        // Arrange: a write captured while the source is connecting is overwritten by the
+        // initial-state snapshot before the pump flushes. Sending it would push a value
+        // the model no longer holds back to the source, so it must be dropped.
+        var propertyChangedChannel = new PropertyChangeQueue();
+
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.AddService(propertyChangedChannel);
+
+        var subject = new Person(context);
+
+        var receivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        var initialStateApplied = false;
+        TestSubjectSource source = null!;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = _ =>
+            {
+                subject.FirstName = "stale-user-write";
+                return Task.FromResult<Action?>(() =>
+                {
+                    subject.TryGetRegisteredSubject()!
+                        .TryGetProperty(nameof(Person.FirstName))!
+                        .SetValueFromSource(source, null, null, "server-value");
+                    initialStateApplied = true;
+                });
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedChanges.Enqueue(change);
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Volatile.Read(ref initialStateApplied),
+            message: "Expected initial state to be applied");
+
+        // Sentinel write after the snapshot: once it arrives at the source, any earlier
+        // flush containing the stale FirstName write would already have been delivered.
+        subject.LastName = "sentinel";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.LastName)),
+            message: "Expected the sentinel write to reach the source");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert: the superseded write was dropped; the snapshot value is not echoed back.
+        Assert.DoesNotContain(receivedChanges, c => c.Property.Name == nameof(Person.FirstName));
     }
 
     [Fact]
@@ -901,6 +1014,11 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        // The ChangeQueueProcessor subscription is now created before StartListeningAsync
+        // (capture-early), so the mocked context must provide the change queue upfront.
+        subjectContextMock
+            .Setup(s => s.TryGetService<PropertyChangeQueue>())
+            .Returns(new PropertyChangeQueue());
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock

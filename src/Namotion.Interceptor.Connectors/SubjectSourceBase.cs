@@ -79,11 +79,14 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         {
             try
             {
-                _propertyWriter.StartBuffering();
-                await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
-
-                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
-
+                // Create the processor (and its change-queue subscription) BEFORE any
+                // model-visible effect of the connection: an application that reacts to
+                // connect-time state (e.g. a Connected flag flipping true) by writing a
+                // property would otherwise race the subscription and lose the write
+                // silently. Draining only starts with ProcessAsync below, after initial
+                // state is applied, so the ownership filter sees the claims established
+                // during the load, and writes superseded by the initial-state snapshot
+                // are dropped at flush time by the processor's staleness check.
                 using var processor = new ChangeQueueProcessor(
                     this,
                     _context,
@@ -92,6 +95,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     _bufferTime,
                     maxQueueDepth: null,
                     logger: _logger);
+
+                _propertyWriter.StartBuffering();
+                await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
+
+                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
 
                 // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
                 // re-apply queued changes locally if the source hasn't changed the property.

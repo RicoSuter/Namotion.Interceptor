@@ -27,6 +27,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly int? _maxQueueDepth;
     private long _dropCount;
     private int _flushGate; // 0 = free, 1 = flushing
+    private DateTimeOffset _processingStartedAt; // set once at ProcessAsync start; changes queued before this are backlog
     private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
 
     /// <summary>
@@ -102,6 +103,8 @@ public class ChangeQueueProcessor : IDisposable
     /// <returns>The task.</returns>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
+        _processingStartedAt = DateTimeOffset.UtcNow;
+
         using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -154,6 +157,11 @@ public class ChangeQueueProcessor : IDisposable
 
                 if (periodicTimer is null)
                 {
+                    if (IsSuperseded(in change))
+                    {
+                        continue;
+                    }
+
                     // Immediate path: send a single change without buffering (zero allocation)
                     _immediateBuffer[0] = change;
                     try
@@ -186,6 +194,38 @@ public class ChangeQueueProcessor : IDisposable
         {
             try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
             await flushTask.ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// True when a backlog change (queued before processing started, i.e. while the
+    /// source was still connecting) has been superseded: its new value no longer matches
+    /// the property's current model value because the initial-state snapshot or a later
+    /// write overwrote it. Sending it would push a value the model no longer holds.
+    /// Changes queued after processing started are never checked, keeping the steady-state
+    /// hot path allocation-free and its semantics unchanged. Fails open: when the current
+    /// value cannot be read, the change is sent rather than risk losing a write.
+    /// </summary>
+    private bool IsSuperseded(in SubjectPropertyChange change)
+    {
+        if (change.ChangedTimestamp >= _processingStartedAt)
+        {
+            return false;
+        }
+
+        var getValue = change.Property.Metadata.GetValue;
+        if (getValue is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return !Equals(getValue(change.Property.Subject), change.GetNewValue<object?>());
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -260,6 +300,23 @@ public class ChangeQueueProcessor : IDisposable
             {
                 Array.Reverse(_flushDedupedBuffer, 0, _flushDedupedCount);
             }
+
+            // Drop superseded backlog changes: a change captured while the source was
+            // still connecting (queued before ProcessAsync started) whose new value no
+            // longer matches the property's current model value was overwritten by the
+            // initial-state snapshot. Sending it would push a value the model no longer
+            // holds. Steady-state changes are never checked (see IsSuperseded), so this
+            // costs one timestamp comparison per change outside the connect window.
+            var keptCount = 0;
+            for (var i = 0; i < _flushDedupedCount; i++)
+            {
+                var candidate = _flushDedupedBuffer[i];
+                if (!IsSuperseded(in candidate))
+                {
+                    _flushDedupedBuffer[keptCount++] = candidate;
+                }
+            }
+            _flushDedupedCount = keptCount;
 
             if (_flushDedupedCount > 0)
             {
