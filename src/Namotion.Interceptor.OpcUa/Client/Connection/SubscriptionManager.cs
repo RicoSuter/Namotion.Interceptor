@@ -93,7 +93,7 @@ internal class SubscriptionManager : IAsyncDisposable
         _shuttingDown = false;
 
         var itemCount = monitoredItems.Count;
-        var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
+        var maximumItemsPerSubscription = _configuration.MaxItemsPerSubscription;
         for (var i = 0; i < itemCount; i += maximumItemsPerSubscription)
         {
             var subscription = new Subscription(session.DefaultSubscription)
@@ -105,7 +105,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
                 LifetimeCount = _configuration.SubscriptionLifetimeCount,
                 Priority = _configuration.SubscriptionPriority,
-                MaxNotificationsPerPublish = _configuration.SubscriptionMaximumNotificationsPerPublish,
+                MaxNotificationsPerPublish = _configuration.SubscriptionMaxNotificationsPerPublish,
                 RepublishAfterTransfer = true, // Enable SDK's automatic republish of missed messages after transfer
                 SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
             };
