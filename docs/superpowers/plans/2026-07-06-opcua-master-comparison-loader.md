@@ -25,10 +25,11 @@
 
 Every task ends with: implement, run the task's tests to green, then verify with Codex, then commit. The Codex step is a gate before the commit.
 
-- Command: `codex exec review --uncommitted "<task focus>"`. `--uncommitted` reviews staged, unstaged, and untracked changes, so run it after the `git checkout`/edits for the task but before `git add`/`git commit`, so it sees only this task's changes.
+- Command (verified on codex-cli 0.142.5 in this environment): `codex exec --dangerously-bypass-approvals-and-sandbox "Review the uncommitted changes in this repository using git status and git diff, including untracked files. <task focus>. Do not modify any files."` Run it after the `git checkout`/edits for the task but before `git add`/`git commit`, so it sees only this task's changes.
+- Where a task step below spells the command as `codex exec review --uncommitted "<task focus>"`, run the adapted form above instead. Rationale: this codex version rejects a custom prompt combined with `--uncommitted`, and its internal bubblewrap sandbox cannot start here (`bwrap: loopback: Operation not permitted`), so the headless bypass flag is required. The bypass is acceptable only because this environment is already externally sandboxed.
+- Tell the reviewer to ignore two unrelated dirty files if present: the modified `.claude/settings.local.json` and the untracked `docs/superpowers/specs/2026-06-19-websocket-protocol-reliability-design.md`.
 - Treat Codex output as review feedback, not gospel (see superpowers:receiving-code-review). Apply real correctness findings: missed or wrong signatures, weakened assertions, dangling references, leftover old config names, behavior drift from the frozen contract. For any finding you reject, record one line on why.
 - If a fix changes code, re-run this task's test command before committing.
-- Codex review is read-only. Approve its read/inspect commands when prompted, or run it headless with `--dangerously-bypass-approvals-and-sandbox` only because this environment is already externally sandboxed.
 - If `codex` is not on PATH (`which codex`), skip this step and note the skip in the task handoff rather than blocking the commit.
 
 ## Verified reference facts
