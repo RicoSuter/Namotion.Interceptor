@@ -21,6 +21,16 @@
 - Style: nullable enabled, warnings as errors, descriptive names (no abbreviations), minimal comments (explain only the non-obvious), no em dashes in docs or comments. Never include AI attribution in commit messages.
 - Do not commit inside subagents. Commit at task boundaries as the plan directs.
 
+## Verification protocol (Codex)
+
+Every task ends with: implement, run the task's tests to green, then verify with Codex, then commit. The Codex step is a gate before the commit.
+
+- Command: `codex exec review --uncommitted "<task focus>"`. `--uncommitted` reviews staged, unstaged, and untracked changes, so run it after the `git checkout`/edits for the task but before `git add`/`git commit`, so it sees only this task's changes.
+- Treat Codex output as review feedback, not gospel (see superpowers:receiving-code-review). Apply real correctness findings: missed or wrong signatures, weakened assertions, dangling references, leftover old config names, behavior drift from the frozen contract. For any finding you reject, record one line on why.
+- If a fix changes code, re-run this task's test command before committing.
+- Codex review is read-only. Approve its read/inspect commands when prompted, or run it headless with `--dangerously-bypass-approvals-and-sandbox` only because this environment is already externally sandboxed.
+- If `codex` is not on PATH (`which codex`), skip this step and note the skip in the task handoff rather than blocking the commit.
+
 ## Verified reference facts
 
 - `MonitoredItemFactory.Create(OpcUaClientConfiguration configuration, NodeId nodeId, RegisteredSubjectProperty property, IInterceptorSubject rootSubject)` returns `MonitoredItem`.
@@ -98,7 +108,12 @@ git rm src/Namotion.Interceptor.OpcUa.Tests/Client/AutoHealingTests.cs \
 Run: `dotnet build src/Namotion.Interceptor.OpcUa.Tests/Namotion.Interceptor.OpcUa.Tests.csproj`
 Expected: build errors for missing production types and renamed config properties. This is the red baseline; do not fix by weakening tests.
 
-- [ ] **Step 4: Commit the freeze checkpoint**
+- [ ] **Step 4: Verify the change with Codex**
+
+Run: `codex exec review --uncommitted "Confirm all thirteen PR 313 test files and the public API snapshot were copied verbatim and the two superseded test files were deleted. Flag any missing file, accidental edit, or wrong path."`
+Address any real finding, then re-run the Step 3 build check if anything changed. See the Verification protocol.
+
+- [ ] **Step 5: Commit the freeze checkpoint**
 
 ```bash
 git add src/Namotion.Interceptor.OpcUa.Tests
@@ -182,7 +197,12 @@ Replace each hit with the new name. Leave the loader alone (it is rewritten late
 Run: `dotnet test src/Namotion.Interceptor.OpcUa.Tests --filter "FullyQualifiedName~OpcUaClientConfigurationTests"`
 Expected: build may still fail elsewhere (missing classifier and plan types), but the config test compiles against the new properties. If the whole test assembly cannot build yet, defer running until Task 6 and instead build only the production project here: `dotnet build src/Namotion.Interceptor.OpcUa/Namotion.Interceptor.OpcUa.csproj` and expect it to succeed once renames are applied.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Verify the change with Codex**
+
+Run: `codex exec review --uncommitted "Confirm the three config properties were renamed at every reference across the OpcUa project, the two new bounds and validations match what OpcUaClientConfigurationTests expects, and no old maxima name (MaximumItemsPerSubscription, MaximumReferencesPerNode, SubscriptionMaximumNotificationsPerPublish) remains outside obj/."`
+Address any real finding, then re-run the Step 6 build/test check if code changed. See the Verification protocol.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.OpcUa/Client/OpcUaClientConfiguration.cs
@@ -240,7 +260,12 @@ Expected: the copied files compile. The old master loader still exists at this p
 Run: `dotnet test src/Namotion.Interceptor.OpcUa.Tests --filter "FullyQualifiedName~OpcUaStatusCodeClassifierTests|FullyQualifiedName~OpcUaSessionExtensionsTests|FullyQualifiedName~OpcUaTypeResolverTests|FullyQualifiedName~SubscriptionHealthMonitorTests"`
 Expected: these groups PASS once the test assembly builds. Confirm the classifier asserts 11 permanent codes, `BadTooManyMonitoredItems` transient, and `Good`/`Uncertain` neither. If the full test assembly still cannot build (missing plan types), verify only that the production project builds and defer running until Task 6.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verify the change with Codex**
+
+Run: `codex exec review --uncommitted "Confirm the seven copied files integrate on this branch, reference no PR 313 loader internals (OpcUaLoadContext, OpcUaSubjectLoader, OpcUaAttributeLoader), and use the renamed config properties. Flag any dangling reference or copy error."`
+Address any real finding, then re-run the Step 4 tests if code changed. See the Verification protocol.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.OpcUa/Client/OpcUaStatusCodeClassifier.cs \
@@ -306,7 +331,12 @@ Replace the inline browse-name matching in `TryGetRootNodeAsync` with a call to 
 Run: `dotnet test src/Namotion.Interceptor.OpcUa.Tests --filter "FullyQualifiedName~OpcUaRootPathResolutionTests"`
 Expected: PASS (3 tests) once the test assembly builds. If the assembly cannot build yet, build the production project and defer running until Task 6.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verify the change with Codex**
+
+Run: `codex exec review --uncommitted "Confirm TryGetRootNodeAsync is internal accepting ISession and FindChildByBrowseName matches what OpcUaRootPathResolutionTests expects (null browse name skipped, no match returns null), with no behavior change to root discovery."`
+Address any real finding, then re-run the Step 4 tests if code changed. See the Verification protocol.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.OpcUa/Client/OpcUaSubjectClientSource.cs
@@ -464,7 +494,12 @@ internal sealed class OpcUaLoadPlan
 Run: `dotnet build src/Namotion.Interceptor.OpcUa/Namotion.Interceptor.OpcUa.csproj`
 Expected: builds (the old loader is still present and unchanged).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Verify the change with Codex**
+
+Run: `codex exec review --uncommitted "Verify OpcUaLoadPlan performs no durable mutation until Commit, the commit order claims ownership and stamps metadata before assigning subjects onto root, the smaller-node-id tie-break in AddClaim is correct, and rollback releases only claims and metadata established this commit without restoring root values."`
+Address any real finding, then re-run the Step 2 build if code changed. See the Verification protocol.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.OpcUa/Client/LoadPlan/OpcUaLoadPlan.cs
@@ -631,7 +666,12 @@ Expected: PASS (10 + 11 + 3 + 4 tests). Iterate on the planner until green; use 
 Run: `dotnet test src/Namotion.Interceptor.OpcUa.Tests --filter "FullyQualifiedName~OpcUaStatusCodeClassifierTests|FullyQualifiedName~OpcUaSessionExtensionsTests|FullyQualifiedName~OpcUaTypeResolverTests|FullyQualifiedName~SubscriptionHealthMonitorTests|FullyQualifiedName~OpcUaRootPathResolutionTests|FullyQualifiedName~OpcUaClientConfigurationTests"`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Verify the change with Codex**
+
+Run: `codex exec review --uncommitted "Verify discovery has no durable side effects (no ClaimSource, SetValueFromSource, AddFallbackContext, or AddProperty during planning), uses MonitoredItemFactory.Create(config, nodeId, property, rootSubject) and CreateSubjectAsync correctly, defers all value assignments to the plan, and reproduces PR 313 dedup, subject reuse, browse-failed-vs-empty, and attribute-depth-cap behavior. Flag any weakened frozen-test assertion."`
+Address any real finding, then re-run the Step 5 through Step 7 tests if code changed. See the Verification protocol.
+
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.OpcUa/Client/LoadPlan/OpcUaLoadPlanner.cs \
@@ -705,7 +745,12 @@ Expected: PASS (8 tests): discovery failure leaves root at pre-load state with e
 Run: `dotnet test src/Namotion.Interceptor.OpcUa.Tests --filter "FullyQualifiedName~OpcUaSubjectLoader"`
 Expected: PASS across base, core, batching, dedup, dictionary-reuse, attribute, and failure tests.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verify the change with Codex**
+
+Run: `codex exec review --uncommitted "Confirm only WhenApplyFailsMidway was re-pointed to OpcUaLoadPlan, its assertions are unchanged (pre-existing ownership retained, newly claimed released), and the other seven failure tests were not edited or weakened."`
+Address any real finding, then re-run the Step 3 tests if code changed. See the Verification protocol.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.OpcUa.Tests/Client/OpcUaSubjectLoaderFailureTests.cs
@@ -829,7 +874,12 @@ The harness builds a `DynamicSubject` on `InterceptorSubjectContext.Create().Wit
 Run: `dotnet test src/Namotion.Interceptor.OpcUa.Tests --filter "FullyQualifiedName~OpcUaSubscriptionCallbackGatingTests"`
 Expected: FAIL if `ApplyDataChange` does not gate on `_callbacksEnabled` (the pre-enable assertion would see 42). PASS once the gate is in place.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Verify the change with Codex**
+
+Run: `codex exec review --uncommitted "Verify ApplyDataChange no-ops until _callbacksEnabled is true, the flag is set only as the final step of CreateBatchedSubscriptionsAsync and reset to false at setup start and in DisposeAsync, and the SDK OnFastDataChange path funnels through ApplyDataChange. Flag any race where a notification can reach a subject mid-setup."`
+Address any real finding, then re-run the Step 5 test if code changed. See the Verification protocol.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.OpcUa/Client/Connection/SubscriptionManager.cs \
@@ -929,7 +979,12 @@ Expected: FAIL if registration runs before the sweep. PASS once sweep precedes s
 Run: `dotnet test src/Namotion.Interceptor.OpcUa.Tests --filter "FullyQualifiedName~OpcUaSubscriptionCallbackGatingTests|FullyQualifiedName~OpcUaSubscriptionSweepOrderingTests|FullyQualifiedName~SubscriptionHealthMonitorTests|FullyQualifiedName~ReadAfterWriteManagerTests"`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verify the change with Codex**
+
+Run: `codex exec review --uncommitted "Verify the detached-subject sweep runs before read-after-write registration, survivor registration excludes swept subjects via _monitoredItems membership, TryGetRegisteredSubject() is the attachment check, and callbacks are enabled only after both. Flag any stale read-after-write registration for a detached subject."`
+Address any real finding, then re-run the Step 3 and Step 4 tests if code changed. See the Verification protocol.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.OpcUa/Client/Connection/SubscriptionManager.cs \
@@ -1000,7 +1055,12 @@ git diff --stat master..HEAD -- src/Namotion.Interceptor.OpcUa src/Namotion.Inte
 
 Note files changed, insertions, deletions, and the passing suites (targeted, non-integration, full) in the comparison doc.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 9: Verify the change with Codex**
+
+Run: `codex exec review --uncommitted "Confirm the client source still drives LoadSubjectAsync then CreateSubscriptionsAsync, the public API snapshot reflects only intended public changes with no internal type leaked, the docs use the renamed config properties and describe the four phases and two new behaviors, and no em dashes were introduced."`
+Address any real finding, then re-run the Step 2 and Step 3 checks if code changed. See the Verification protocol.
+
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.OpcUa/Client/OpcUaSubjectClientSource.cs \
