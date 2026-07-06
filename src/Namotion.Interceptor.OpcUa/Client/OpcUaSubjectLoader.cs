@@ -99,7 +99,9 @@ internal class OpcUaSubjectLoader
                 }
 
                 // Infer CLR type from OPC UA variable metadata if possible
-                var inferredType = await _configuration.TypeResolver!.TryGetTypeForNodeAsync(session, nodeReference, cancellationToken).ConfigureAwait(false);
+                var typeMap = await _configuration.TypeResolver!.ResolveVariableTypesAsync(session, [nodeReference], cancellationToken).ConfigureAwait(false);
+                typeMap.TryGetValue(resolvedNodeId, out var mappedType);
+                var inferredType = mappedType;
                 if (inferredType is null)
                 {
                     _logger.LogWarning(
@@ -225,7 +227,9 @@ internal class OpcUaSubjectLoader
             if (!addAsDynamic)
                 continue;
 
-            var inferredType = await _configuration.TypeResolver!.TryGetTypeForNodeAsync(session, childNode, cancellationToken).ConfigureAwait(false);
+            var attrTypeMap = await _configuration.TypeResolver!.ResolveVariableTypesAsync(session, [childNode], cancellationToken).ConfigureAwait(false);
+            var attrResolvedNodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
+            var inferredType = attrResolvedNodeId is not null && attrTypeMap.TryGetValue(attrResolvedNodeId, out var attrMappedType) ? attrMappedType : null;
             if (inferredType is null)
             {
                 _logger.LogWarning(
