@@ -82,7 +82,7 @@ builder.Services.AddOpcUaSubjectClientSource(
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
 
         // Optional
-        RootName = "Machines",
+        RootPath = ["Machines"],
         DefaultNamespaceUri = "http://factory.com/machines",
         ApplicationName = "MyOpcUaClient",
         ReconnectInterval = TimeSpan.FromSeconds(5),
@@ -468,11 +468,11 @@ builder.Services.AddOpcUaSubjectClientSource(
 **Smart retry logic:**
 - Retries transient errors: `BadTooManyMonitoredItems`, `BadOutOfService`, `BadMonitoringModeUnsupported`
 - Skips permanent errors: `BadNodeIdUnknown`
-- Health checks run at configurable intervals (minimum: 5 seconds)
+- Health checks run at configurable intervals (minimum: 1 second)
 - Items that permanently don't support subscriptions automatically fall back to polling
 
 **Configuration validation:**
-- `SubscriptionHealthCheckInterval` minimum of 5 seconds enforced
+- `SubscriptionHealthCheckInterval` minimum of 1 second enforced
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 

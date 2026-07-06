@@ -153,7 +153,11 @@ internal class SubscriptionManager : IAsyncDisposable
         // RemoveItemsForSubject scan runs before the entries exist and removes nothing,
         // then the registration lands afterwards, leaving stale items that route
         // notifications into a detached subject. Sweep after registration; a detach
-        // from here on sees the completed registrations and removes normally.
+        // from here on sees the completed registrations and removes normally. This
+        // narrows rather than hermetically closes the window: a notification arriving
+        // between ApplyChanges and this sweep can still write into the detached subject,
+        // which is benign because the subject is unreachable from the model, and closing
+        // it fully would cost a registry lookup on the notification hot path.
         foreach (var property in _monitoredItems.Values)
         {
             var subject = property.Reference.Subject;
