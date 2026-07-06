@@ -114,13 +114,14 @@ Delivery rules:
 - Events from a single source are delivered in order (the pump is single-threaded); claim events from concurrent connect activity of different sources may interleave.
 - Handlers must be fast and non-blocking, the same rule as for tracking observables. Claim bursts are real: an OPC UA browse can claim thousands of properties in one connect cycle. Diagnostics UIs throttle or sample on their side.
 - A throwing handler is caught and logged; it must not break the claim path or the pump (a buggy handler must not flip a source back to `Connecting` in an endless loop).
+- Handlers can be invoked while internal locks are held: the attach/detach catch-up and the ownership releases performed by `SourceOwnershipManager` during detach run inside the lifecycle interceptor's lock. Handlers observe; they must not mutate the object graph or claim/release properties.
 
 ### Emission points
 
 Each event kind is emitted at the lowest level that knows the truth:
 
 - **`PropertyClaimed` / `PropertyReleased`: emitted by `SetSource` and `RemoveSource` themselves**, not by `SourceOwnershipManager`. The documented contract tells sources to claim by calling `SetSource(this)` directly, and the low-level ownership API is public, so emission at the primitive is the only way the stream stays trustworthy. Emission happens only on actual ownership transitions: an idempotent re-claim by the same source and a rejected claim (property owned by a different source) emit nothing, and `RemoveSource` emits only when it actually removed the ownership entry. The internal compare-and-set is adjusted to distinguish "newly added" from "already present".
-- The tracker is resolved via `property.Subject.Context` (service resolution walks fallback contexts). If no tracker service exists, emission is a null check and a no-op, so plain contexts and benchmarks pay nothing.
+- Trackers are resolved via `property.Subject.Context.GetServices<SourceStateTracker>()` (service resolution walks fallback contexts) and the event is delivered to every resolved tracker. Single-service resolution would throw for a subject attached to two trees (multi-parent subjects see both trees' trackers through their fallback contexts); iterating handles that case and gives the right semantics, since a property visible in two trees appears on both streams. The result is a cached `ImmutableArray`, usually of length 0 or 1; when empty, emission is a no-op, so plain contexts and benchmarks pay nothing.
 - **`StateChanged`: raised by the source itself** (the pump in `SubjectSourceBase`). The tracker, subscribed since registration, forwards each event to the stream.
 - **`SourceRegistered` / `SourceUnregistered`: emitted by the tracker** in `Register`/`Unregister` (called from `SubjectSourceBase.StartAsync` and dispose).
 - `SourceOwnershipManager` has no eventing role. It remains a convenience for claimed-set bookkeeping and automatic release on subject detach; its releases go through `RemoveSource` and therefore appear on the stream like any other.
@@ -136,6 +137,8 @@ Registering at start instead of at construction has three consequences:
 - `Register` is idempotent (a re-register is a no-op that emits nothing), which makes stop/start cycles safe.
 
 Custom `ISubjectSource` implementations that do not derive from `SubjectSourceBase` register themselves once fully constructed and started, and unregister on dispose.
+
+Two robustness contracts: the tracker does not require lifecycle tracking (created on a context without `WithLifecycle()`, for example by a wait on a source-less tree, the attach/detach catch-up is disabled and registration, stream, and waits work normally; unlike `SourceOwnershipManager` it never throws for a missing lifecycle interceptor), and `Unregister` of a source that was never registered is a no-op.
 
 ```csharp
 public class SourceStateTracker
@@ -233,14 +236,16 @@ Consumers interested in a single property use the same protocol: wait once, then
 - A stopped source that still owns properties reports `Stopped` per property, meaning "will not synchronize again while stopped".
 - Ownership release on subject detach (existing `SourceOwnershipManager` behavior) reverts properties to `NoSource` and appears on the stream as `PropertyReleased`.
 - Disposing a source without stopping it first still publishes `Stopped`: the disposal fallback transitions and raises before unregistering, so the stream sees `StateChanged` to `Stopped` followed by `SourceUnregistered`.
+- Connectors release ownership before unregistering: their dispose path runs `SourceOwnershipManager.Dispose` (releasing all claims through `RemoveSource`) before calling the base dispose, so `PropertyReleased` events precede `SourceUnregistered` on the stream. The OPC UA client already follows this order; it is the documented convention for connector dispose implementations.
 - A stopped source that is started again re-registers idempotently (no duplicate `SourceRegistered`) and transitions `Stopped` to `Connecting` at pump entry.
-- A source that is constructed but never started is not registered: it does not appear in `Sources` and does not affect the wait.
+- A source that is constructed but never started is not registered: it does not appear in `Sources` and does not affect the wait. Disposing it raises `Stopped` on the source's own `StateChanged` event only; no tracker is involved and nothing appears on any stream.
 - Claiming a property of a subject that is not attached to any tree with a tracker emits no event at claim time (the tracker resolution finds no service); the claim enters the stream via attach catch-up when the subject joins a tree. This is documented on `SetSource`.
 
 ## Affected Code
 
 - `Namotion.Interceptor.Connectors`: `SourceState`, `SourceEventKind`, `SourceEvent`, `ISubjectSource` members (`State`, `LastSynchronizedAt`, `PendingWriteCount`, `StateChanged`), `SubjectSourceBase` transitions (pump entry, catch, finally, disposal fallback) and `StartAsync` registration, `SourceStateTracker` (including the lifecycle attach/detach catch-up and internal wait bookkeeping), context wait extensions, `GetSourceState` property extension, emission logic in `SetSource`/`RemoveSource` (including the added-versus-existing distinction in the compare-and-set).
 - Built-in connectors (OPC UA, MQTT, WebSocket): no source changes expected; they inherit from `SubjectSourceBase` and claim through the existing paths.
+- Test doubles that implement `ISubjectSource` directly (for example `ConcurrentTestSource` and `BlockingTestSource` in `Namotion.Interceptor.Connectors.Tests`) gain the four new members.
 - Public API snapshot tests: `ISubjectSource` changes will fail `VerifyChecksTests.PublicApi` in affected projects; the new `.verified.txt` snapshots are accepted as part of the change.
 - `docs/connectors.md`: new "Source state and events" section covering the state model, the stream, the consumer protocol (including the hosted-waiter `ApplicationStarted` guidance), and the breaking-change note for custom `ISubjectSource` implementers.
 
@@ -250,7 +255,8 @@ In `Namotion.Interceptor.Connectors.Tests`, following the `When<Condition>_Then<
 
 - Pump transitions via a fake source: `Connecting` initially; `Synchronized` after initial load; back to `Connecting` on pump failure; `Stopped` on cancellation; `LastSynchronizedAt` set exactly on entering `Synchronized` and preserved through a later disconnect; a restarted source transitions `Stopped` to `Connecting` at pump entry and can synchronize again.
 - Sticky `Stopped`: after the disposal fallback set `Stopped`, a late pump transition (catch-path `Connecting` or in-flight `Synchronized`) neither overwrites the state nor emits an event.
-- Registration lifecycle: `StartAsync` registers the source and `SourceRegistered` precedes any `StateChanged` of that source on the stream; `Register` is idempotent (a stop/start cycle emits no duplicate `SourceRegistered`); a constructed but never started source is not registered and does not affect the wait; disposing without stopping emits `Stopped` before `SourceUnregistered`; after unregistration the tracker no longer forwards the source's events.
+- Registration lifecycle: `StartAsync` registers the source and `SourceRegistered` precedes any `StateChanged` of that source on the stream; `Register` is idempotent (a stop/start cycle emits no duplicate `SourceRegistered`); a constructed but never started source is not registered and does not affect the wait; disposing without stopping emits `Stopped` before `SourceUnregistered`; disposing a never-started source does not throw and emits nothing to the stream; `Unregister` of a never-registered source is a no-op; after unregistration the tracker no longer forwards the source's events.
+- Tracker robustness: a tracker created on a context without lifecycle tracking supports registration, stream, and waits without throwing (catch-up disabled); a claim on a subject attached to two trees with different trackers throws nothing and appears on both streams.
 - Attach/detach catch-up: attaching a subject with already-claimed properties emits `PropertyClaimed` for each; detaching a subject with still-claimed properties emits `PropertyReleased`; releases performed by `SourceOwnershipManager` during detach produce no duplicate events; without public stream subscribers the catch-up scan is skipped; a pending wait alone does not trigger the scan.
 - Claim/release emission: a fresh claim emits `PropertyClaimed`; an idempotent re-claim by the same source emits nothing; a rejected claim (owned by another source) emits nothing; `RemoveSource` emits `PropertyReleased` only on actual removal; claims without a tracker in the context emit nothing and do not throw.
 - Handler robustness: a throwing subscriber is logged and breaks neither the claim path nor the pump.
