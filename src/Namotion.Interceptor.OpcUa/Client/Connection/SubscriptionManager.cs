@@ -436,7 +436,13 @@ internal class SubscriptionManager : IAsyncDisposable
 
                 if (!SubscriptionHealthMonitor.IsRetryable(monitoredItem))
                 {
-                    continue; // permanent errors are dropped at creation; a runtime transition to permanent-bad is left in place until reconnect
+                    // A runtime transition to permanent-bad is left in the subscription until reconnect,
+                    // but drop any heal counter so the map only tracks currently-retryable failing items.
+                    if (!_healAttempts.IsEmpty)
+                    {
+                        _healAttempts.TryRemove(monitoredItem.ClientHandle, out _);
+                    }
+                    continue;
                 }
 
                 var attempts = _healAttempts.AddOrUpdate(monitoredItem.ClientHandle, 1, static (_, current) => current + 1);

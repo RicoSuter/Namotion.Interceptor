@@ -441,10 +441,10 @@ builder.Services.AddOpcUaSubjectClientSource(
 - Nodes that do not support subscriptions (`BadNotSupported`, `BadMonitoredItemFilterUnsupported`) fall back to polling immediately when enabled.
 - Skips permanent design-time errors (`BadNodeIdUnknown`, `BadAttributeIdInvalid`, `BadIndexRangeInvalid`).
 - Reconnect re-attempts a real subscription for every item, so escalation to polling is not permanent.
-- Health checks run at configurable intervals (minimum: 5 seconds).
+- Health checks run at configurable intervals (minimum: 1 second, default: 5 seconds).
 
 **Configuration validation:**
-- `SubscriptionHealthCheckInterval` minimum of 5 seconds enforced
+- `SubscriptionHealthCheckInterval` minimum of 1 second enforced
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
