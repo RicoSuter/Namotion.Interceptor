@@ -110,6 +110,9 @@ internal class SubscriptionManager : IAsyncDisposable
         _subscriptions.Clear();
         _monitoredItems.Clear();
         _healAttempts.Clear();
+        // On reconnect, re-attempt every owned property as a real subscription; failed nodes are
+        // re-added to polling. Prevents double delivery of an escalated item that later recovers.
+        _pollingManager?.Clear();
 
         // Reset shutdown flag AFTER clearing collections - prevents old callbacks from processing
         // during the window between flag reset and collection clearing (defense-in-depth).
@@ -289,8 +292,8 @@ internal class SubscriptionManager : IAsyncDisposable
             switch (ClassifyFailedItem(statusCode, pollingEnabled))
             {
                 case FailedMonitoredItemDisposition.KeepForRetry:
-                    // Leave it in the subscription and in _monitoredItems so the health monitor
-                    // heals it. Removing it here silently orphaned transiently-failed items.
+                    // Keep it in the subscription so the health monitor heals it; removing it here
+                    // silently orphaned transiently-failed items.
                     keptForRetry++;
                     _logger.LogWarning("OPC UA monitored item {DisplayName} failed transiently ({Status}); keeping it for the health monitor to retry.",
                         monitoredItem.DisplayName, statusCode);
@@ -405,11 +408,9 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Escalates retryable monitored items that keep failing after the health monitor has retried
-    /// them: once an item exceeds <see cref="MaxHealAttemptsBeforeEscalation"/> it falls back to
-    /// polling. Items that recover reset their attempt count, and reconnect re-attempts a real
-    /// subscription for every owned item, so escalation is not permanent. Only runs when polling is
-    /// enabled; see <see cref="MaxHealAttemptsBeforeEscalation"/> for the polling-disabled case.
+    /// Escalates a retryable item that keeps failing past <see cref="MaxHealAttemptsBeforeEscalation"/>
+    /// to polling instead of retrying forever. Runs only when polling is enabled; reconnect clears the
+    /// polling set and re-attempts every item, so escalation is not permanent.
     /// </summary>
     public async Task EscalatePersistentlyFailedItemsAsync(CancellationToken cancellationToken)
     {
@@ -435,7 +436,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
                 if (!SubscriptionHealthMonitor.IsRetryable(monitoredItem))
                 {
-                    continue; // permanent errors are handled at creation time
+                    continue; // permanent errors are dropped at creation; a runtime transition to permanent-bad is left in place until reconnect
                 }
 
                 var attempts = _healAttempts.AddOrUpdate(monitoredItem.ClientHandle, 1, static (_, current) => current + 1);

@@ -175,6 +175,15 @@ internal sealed class PollingManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Removes all polled items so a subscription (re)creation re-attempts every owned property;
+    /// nodes that fail again are re-added. Prevents double delivery of a recovered escalated item.
+    /// </summary>
+    public void Clear()
+    {
+        _pollingItems.Clear();
+    }
+
     private async Task PollLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
