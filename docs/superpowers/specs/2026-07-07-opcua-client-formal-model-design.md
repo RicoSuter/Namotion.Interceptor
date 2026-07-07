@@ -62,6 +62,15 @@ Liveness:
 - Manual reconnect and buffering: `OpcUaSubjectClientSource.ReconnectSessionAsync` (buffer, create session, recreate subscriptions, load state and resume).
 - Stall and force-reset: `SessionManager.TryForceResetIfStalled`.
 
+### Update: enriched for PR #359 (two leads confirmed as real bugs)
+
+Formalizing these invariants surfaced two places where the clean model diverged from the code. Both turned out to be real defects and were fixed in PR #359, and the model was then enriched so its mutation checks reproduce the pre-fix behavior:
+
+- **Partial re-subscription (fix 1).** `subscribed: [Items -> BOOLEAN]` became `cover: [Items -> {Subscribed, Retrying, Polling, Orphaned}]`, with `HealItem` and `EscalateItem` actions. A transient subscription failure goes to `Retrying` and is healed or escalated to `Polling`, never to `Orphaned`. `NoOrphanedItem` (no `Orphaned` at `SessionActive`) is mutation-proven: sending transient failures to `Orphaned` reproduces the pre-fix `FilterOutFailedMonitoredItemsAsync` drop and TLC finds the counterexample.
+- **Abandon window (fix 2).** Added an explicit `Abandoning` state between `ReconnectingSdk` and `ReconnectingManual`, and the invariant `BufferingCoversAbandon` (buffering is on from the moment of abandon). Mutation-proven: not buffering at abandon reproduces the pre-fix `AbandonCurrentSession` gap and TLC reports a violation.
+
+The convergence liveness now requires every item covered (subscribed or escalated to polling). Model checks at `Items = {i1, i2}`, `PollingEnabled = TRUE`, 66 reachable states. See `docs/formal/opcua-client/OpcUaClient.md`.
+
 ## Toolchain
 
 TLA+ with the TLC model checker (TLC runs on the JVM). Set up as a rootless, no-Docker toolchain under `tools/tla/`, proven working in this environment:
