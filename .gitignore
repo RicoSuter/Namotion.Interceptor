@@ -386,3 +386,11 @@ src/HomeBlaze/HomeBlaze/PluginsCache/
 # Performance pass artifacts
 benchmark_*.md
 .claude/scheduled_tasks.lock
+
+# TLA+ toolchain cache (downloaded JRE + tla2tools.jar)
+tools/tla/.cache/
+# TLC scratch output
+tools/tla/**/states/
+
+# TLC scratch output under formal models
+docs/formal/**/states/
