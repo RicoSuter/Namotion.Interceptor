@@ -28,18 +28,6 @@ internal enum FailedMonitoredItemDisposition
     Drop
 }
 
-/// <summary>
-/// What to do with a retryable monitored item that keeps failing to heal.
-/// </summary>
-internal enum HealDecision
-{
-    /// <summary>Still within the retry bound: let the health monitor keep retrying.</summary>
-    KeepRetrying,
-
-    /// <summary>Retry bound exceeded and polling available: move the item to the polling fallback.</summary>
-    EscalateToPolling
-}
-
 internal class SubscriptionManager : IAsyncDisposable
 {
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
@@ -328,29 +316,9 @@ internal class SubscriptionManager : IAsyncDisposable
             }
         }
 
-        if (removedItems?.Count > 0)
+        if (removedItems is { Count: > 0 })
         {
-            foreach (var monitoredItem in removedItems)
-            {
-                subscription.RemoveItem(monitoredItem);
-            }
-
-            try
-            {
-                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "ApplyChanges after removing failed items still failed. Continuing with remaining OPC UA monitored items.");
-            }
-
-            if (polledItems?.Count > 0 && _pollingManager != null)
-            {
-                foreach (var item in polledItems)
-                {
-                    _pollingManager.AddItem(item);
-                }
-            }
+            await RemoveAndFallBackToPollingAsync(subscription, removedItems, polledItems ?? [], cancellationToken).ConfigureAwait(false);
         }
 
         if (removedItems?.Count > 0 || keptForRetry > 0)
@@ -395,30 +363,56 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Decides what to do with a retryable item that keeps failing to heal, once polling fallback
-    /// is available: keep retrying within the bound, then escalate to polling. With polling disabled
-    /// the caller never escalates, so the health monitor keeps retrying and the item self-heals.
+    /// Whether a retryable item that keeps failing should be escalated to polling (its retry bound
+    /// was exceeded) rather than kept for the health monitor to retry.
     /// </summary>
-    internal static HealDecision DecideHealAction(int consecutiveFailures, int maxAttempts)
+    internal static bool ShouldEscalateToPolling(int consecutiveFailures, int maxAttempts)
     {
-        return consecutiveFailures < maxAttempts
-            ? HealDecision.KeepRetrying
-            : HealDecision.EscalateToPolling;
+        return consecutiveFailures >= maxAttempts;
+    }
+
+    /// <summary>
+    /// Removes the given items from the SDK subscription and applies the change (tolerating an
+    /// ApplyChanges failure), then hands the polled items to the polling manager.
+    /// </summary>
+    private async Task RemoveAndFallBackToPollingAsync(
+        Subscription subscription,
+        IReadOnlyList<MonitoredItem> toRemove,
+        IReadOnlyList<MonitoredItem> toPoll,
+        CancellationToken cancellationToken)
+    {
+        foreach (var monitoredItem in toRemove)
+        {
+            subscription.RemoveItem(monitoredItem);
+        }
+
+        try
+        {
+            await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "ApplyChanges after removing failed OPC UA monitored items failed. Continuing with the remaining items.");
+        }
+
+        if (_pollingManager is not null)
+        {
+            foreach (var monitoredItem in toPoll)
+            {
+                _pollingManager.AddItem(monitoredItem);
+            }
+        }
     }
 
     /// <summary>
     /// Escalates retryable monitored items that keep failing after the health monitor has retried
-    /// them. An item that exceeds <see cref="MaxHealAttemptsBeforeEscalation"/> consecutive failed
-    /// heals falls back to polling instead of being retried forever. With polling disabled there is
-    /// no better target, so the item is never dropped: the health monitor keeps retrying and it
-    /// self-heals once the node recovers. Items that recover reset their attempt count, and reconnect
-    /// re-attempts a real subscription for every owned item, so escalation is not permanent.
+    /// them: once an item exceeds <see cref="MaxHealAttemptsBeforeEscalation"/> it falls back to
+    /// polling. Items that recover reset their attempt count, and reconnect re-attempts a real
+    /// subscription for every owned item, so escalation is not permanent. Only runs when polling is
+    /// enabled; see <see cref="MaxHealAttemptsBeforeEscalation"/> for the polling-disabled case.
     /// </summary>
     public async Task EscalatePersistentlyFailedItemsAsync(CancellationToken cancellationToken)
     {
-        // Escalation only has a target when polling is available. With polling disabled there is
-        // nothing better than letting the health monitor keep retrying, which self-heals once the
-        // node recovers, so a retryable item is never dropped.
         if (!_configuration.EnablePollingFallback || _pollingManager is null)
         {
             return;
@@ -446,7 +440,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
                 var attempts = _healAttempts.AddOrUpdate(monitoredItem.ClientHandle, 1, static (_, current) => current + 1);
 
-                if (DecideHealAction(attempts, MaxHealAttemptsBeforeEscalation) == HealDecision.EscalateToPolling)
+                if (ShouldEscalateToPolling(attempts, MaxHealAttemptsBeforeEscalation))
                 {
                     (toEscalate ??= []).Add(monitoredItem);
                 }
@@ -461,22 +455,9 @@ internal class SubscriptionManager : IAsyncDisposable
             {
                 _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
                 _healAttempts.TryRemove(monitoredItem.ClientHandle, out _);
-                subscription.RemoveItem(monitoredItem);
             }
 
-            try
-            {
-                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "ApplyChanges after escalating persistently-failed OPC UA monitored items to polling failed.");
-            }
-
-            foreach (var monitoredItem in toEscalate)
-            {
-                _pollingManager.AddItem(monitoredItem);
-            }
+            await RemoveAndFallBackToPollingAsync(subscription, toEscalate, toEscalate, cancellationToken).ConfigureAwait(false);
 
             _logger.LogWarning(
                 "Escalated {Count} persistently-failing monitored items to polling in subscription {SubscriptionId} after {Max} retries.",
