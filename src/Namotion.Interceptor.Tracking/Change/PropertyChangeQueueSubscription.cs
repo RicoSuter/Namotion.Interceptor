@@ -22,6 +22,12 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     }
 
     /// <summary>
+    /// Number of changes currently queued. Exact only from the consumer thread while no
+    /// producers are racing; concurrent enqueues may or may not be included in the snapshot.
+    /// </summary>
+    internal int Count => _queue.Count;
+
+    /// <summary>
     /// Enqueues a property change. Thread-safe and can be called concurrently from multiple threads.
     /// </summary>
     /// <param name="item">The property change to enqueue.</param>

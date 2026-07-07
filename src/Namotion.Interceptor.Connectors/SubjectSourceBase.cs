@@ -79,14 +79,12 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         {
             try
             {
-                // Create the processor (and its change-queue subscription) BEFORE any
-                // model-visible effect of the connection: an application that reacts to
-                // connect-time state (e.g. a Connected flag flipping true) by writing a
-                // property would otherwise race the subscription and lose the write
-                // silently. Draining only starts with ProcessAsync below, after initial
-                // state is applied, so the ownership filter sees the claims established
-                // during the load, and writes superseded by the initial-state snapshot
-                // are dropped at flush time by the processor's staleness check.
+                // Create the processor (and its change queue subscription) before any
+                // model-visible effect of the connection, so application writes made
+                // while connecting are captured instead of silently lost. Draining only
+                // starts with ProcessAsync below, after the initial state is applied:
+                // the ownership filter then sees the claims established during the load,
+                // and captured writes the load overwrote are dropped as superseded.
                 using var processor = new ChangeQueueProcessor(
                     this,
                     _context,
