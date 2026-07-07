@@ -28,6 +28,18 @@ internal enum FailedMonitoredItemDisposition
     Drop
 }
 
+/// <summary>
+/// What to do with a retryable monitored item that keeps failing to heal.
+/// </summary>
+internal enum HealDecision
+{
+    /// <summary>Still within the retry bound: let the health monitor keep retrying.</summary>
+    KeepRetrying,
+
+    /// <summary>Retry bound exceeded and polling available: move the item to the polling fallback.</summary>
+    EscalateToPolling
+}
+
 internal class SubscriptionManager : IAsyncDisposable
 {
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
@@ -42,6 +54,12 @@ internal class SubscriptionManager : IAsyncDisposable
 
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
+    private readonly ConcurrentDictionary<uint, int> _healAttempts = new();
+
+    // Consecutive failed heal ticks a retryable item tolerates before it is escalated to polling
+    // instead of being retried forever. With polling disabled there is no escalation target, so the
+    // item keeps being retried and self-heals once the node recovers.
+    internal const int MaxHealAttemptsBeforeEscalation = 3;
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
@@ -103,6 +121,7 @@ internal class SubscriptionManager : IAsyncDisposable
         }
         _subscriptions.Clear();
         _monitoredItems.Clear();
+        _healAttempts.Clear();
 
         // Reset shutdown flag AFTER clearing collections - prevents old callbacks from processing
         // during the window between flag reset and collection clearing (defense-in-depth).
@@ -376,6 +395,96 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Decides what to do with a retryable item that keeps failing to heal, once polling fallback
+    /// is available: keep retrying within the bound, then escalate to polling. With polling disabled
+    /// the caller never escalates, so the health monitor keeps retrying and the item self-heals.
+    /// </summary>
+    internal static HealDecision DecideHealAction(int consecutiveFailures, int maxAttempts)
+    {
+        return consecutiveFailures < maxAttempts
+            ? HealDecision.KeepRetrying
+            : HealDecision.EscalateToPolling;
+    }
+
+    /// <summary>
+    /// Escalates retryable monitored items that keep failing after the health monitor has retried
+    /// them. An item that exceeds <see cref="MaxHealAttemptsBeforeEscalation"/> consecutive failed
+    /// heals falls back to polling instead of being retried forever. With polling disabled there is
+    /// no better target, so the item is never dropped: the health monitor keeps retrying and it
+    /// self-heals once the node recovers. Items that recover reset their attempt count, and reconnect
+    /// re-attempts a real subscription for every owned item, so escalation is not permanent.
+    /// </summary>
+    public async Task EscalatePersistentlyFailedItemsAsync(CancellationToken cancellationToken)
+    {
+        // Escalation only has a target when polling is available. With polling disabled there is
+        // nothing better than letting the health monitor keep retrying, which self-heals once the
+        // node recovers, so a retryable item is never dropped.
+        if (!_configuration.EnablePollingFallback || _pollingManager is null)
+        {
+            return;
+        }
+
+        foreach (var subscription in _subscriptions.Keys)
+        {
+            List<MonitoredItem>? toEscalate = null;
+
+            foreach (var monitoredItem in subscription.MonitoredItems)
+            {
+                if (!SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
+                {
+                    if (!_healAttempts.IsEmpty)
+                    {
+                        _healAttempts.TryRemove(monitoredItem.ClientHandle, out _); // recovered: reset
+                    }
+                    continue;
+                }
+
+                if (!SubscriptionHealthMonitor.IsRetryable(monitoredItem))
+                {
+                    continue; // permanent errors are handled at creation time
+                }
+
+                var attempts = _healAttempts.AddOrUpdate(monitoredItem.ClientHandle, 1, static (_, current) => current + 1);
+
+                if (DecideHealAction(attempts, MaxHealAttemptsBeforeEscalation) == HealDecision.EscalateToPolling)
+                {
+                    (toEscalate ??= []).Add(monitoredItem);
+                }
+            }
+
+            if (toEscalate is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            foreach (var monitoredItem in toEscalate)
+            {
+                _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
+                _healAttempts.TryRemove(monitoredItem.ClientHandle, out _);
+                subscription.RemoveItem(monitoredItem);
+            }
+
+            try
+            {
+                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ApplyChanges after escalating persistently-failed OPC UA monitored items to polling failed.");
+            }
+
+            foreach (var monitoredItem in toEscalate)
+            {
+                _pollingManager.AddItem(monitoredItem);
+            }
+
+            _logger.LogWarning(
+                "Escalated {Count} persistently-failing monitored items to polling in subscription {SubscriptionId} after {Max} retries.",
+                toEscalate.Count, subscription.Id, MaxHealAttemptsBeforeEscalation);
+        }
+    }
+
+    /// <summary>
     /// Removes monitored items for a detached subject. Idempotent.
     /// Note: OPC UA subscription items remain on server until session ends.
     /// This just cleans up local tracking to avoid memory leaks.
@@ -387,6 +496,7 @@ internal class SubscriptionManager : IAsyncDisposable
             if (kvp.Value.Reference.Subject == subject)
             {
                 _monitoredItems.TryRemove(kvp.Key, out _);
+                _healAttempts.TryRemove(kvp.Key, out _);
             }
         }
     }

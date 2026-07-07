@@ -34,4 +34,24 @@ public class FailedMonitoredItemDispositionTests
         // Assert
         Assert.Equal(expected, disposition.ToString());
     }
+
+    [Theory]
+    // Within the retry bound: keep letting the health monitor retry.
+    [InlineData(1, nameof(HealDecision.KeepRetrying))]
+    [InlineData(2, nameof(HealDecision.KeepRetrying))]
+    // Bound reached: escalate to polling instead of retrying the subscription forever.
+    [InlineData(3, nameof(HealDecision.EscalateToPolling))]
+    [InlineData(4, nameof(HealDecision.EscalateToPolling))]
+    public void WhenRetryableItemKeepsFailing_ThenItEscalatesToPollingAfterTheBound(
+        int consecutiveFailures, string expected)
+    {
+        // Arrange
+        const int maxAttempts = 3;
+
+        // Act
+        var decision = SubscriptionManager.DecideHealAction(consecutiveFailures, maxAttempts);
+
+        // Assert
+        Assert.Equal(expected, decision.ToString());
+    }
 }
