@@ -4,10 +4,13 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Opc.Ua;
+using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
@@ -26,19 +29,43 @@ internal sealed class SubscriptionManagerTestHarness
     public OpcUaSubjectClientSource Source { get; }
     public SubjectPropertyWriter PropertyWriter { get; }
 
+    /// <summary>
+    /// Read-after-write spy injected by <see cref="CreateWithReadAfterWriteSpy"/>.
+    /// Null when built with <see cref="Create"/>.
+    /// </summary>
+    public ReadAfterWriteRegistrarSpy? ReadAfterWriteSpy { get; }
+
     private SubscriptionManagerTestHarness(
         IInterceptorSubject subject,
         OpcUaSubjectClientSource source,
         SubjectPropertyWriter propertyWriter,
-        SubscriptionManager manager)
+        SubscriptionManager manager,
+        ReadAfterWriteRegistrarSpy? readAfterWriteSpy = null)
     {
         _subject = subject;
         Source = source;
         PropertyWriter = propertyWriter;
         Manager = manager;
+        ReadAfterWriteSpy = readAfterWriteSpy;
     }
 
     public static SubscriptionManagerTestHarness Create()
+        => Build(readAfterWriteRegistrar: null);
+
+    /// <summary>
+    /// Builds the harness with a recording <see cref="ReadAfterWriteRegistrarSpy"/> injected
+    /// as the SubscriptionManager's read-after-write registrar.
+    /// The spy records every <c>RegisterProperty</c> call unconditionally (no filter).
+    /// </summary>
+    public static SubscriptionManagerTestHarness CreateWithReadAfterWriteSpy()
+    {
+        var spy = new ReadAfterWriteRegistrarSpy();
+        return Build(spy, spy);
+    }
+
+    private static SubscriptionManagerTestHarness Build(
+        IReadAfterWriteRegistrar? readAfterWriteRegistrar,
+        ReadAfterWriteRegistrarSpy? spy = null)
     {
         var context = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
         var subject = new DynamicSubject(context);
@@ -72,11 +99,11 @@ internal sealed class SubscriptionManagerTestHarness
             source,
             propertyWriter,
             pollingManager: null,
-            readAfterWriteManager: null,
+            readAfterWriteManager: readAfterWriteRegistrar,
             configuration,
             NullLogger<OpcUaSubjectClientSource>.Instance);
 
-        return new SubscriptionManagerTestHarness(subject, source, propertyWriter, manager);
+        return new SubscriptionManagerTestHarness(subject, source, propertyWriter, manager, spy);
     }
 
     /// <summary>
@@ -100,6 +127,53 @@ internal sealed class SubscriptionManagerTestHarness
     }
 
     /// <summary>
+    /// Registers a monitored item for a new child subject, then immediately detaches that
+    /// child subject from the registry so that <c>TryGetRegisteredSubject()</c> returns null.
+    /// Returns the property whose subject is now detached.
+    /// </summary>
+    public RegisteredSubjectProperty RegisterMonitoredItemThenDetachSubject(uint clientHandle, string propertyName)
+    {
+        var context = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
+        var childSubject = new DynamicSubject(context);
+
+        var registeredChild = childSubject.TryGetRegisteredSubject()
+            ?? throw new InvalidOperationException("Child subject has no registered subject.");
+
+        double storedValue = 0d;
+        var property = registeredChild.AddProperty<double>(
+            propertyName,
+            getValue: _ => storedValue,
+            setValue: (_, value) => storedValue = value is double d ? d : 0d);
+
+        Manager.MonitoredItemsForTesting[clientHandle] = property;
+
+        // Detach the child subject from its context so TryGetRegisteredSubject() returns null.
+        context.TryGetLifecycleInterceptor()!.DetachSubjectFromContext(childSubject);
+
+        return property;
+    }
+
+    /// <summary>
+    /// Returns the current SDK MonitoredItem collection to pass to
+    /// <c>RegisterSurvivorsForReadAfterWriteForTesting</c>. Items are created via
+    /// <see cref="CreatedMonitoredItem"/> so that <c>Status.Created</c> is true.
+    /// Call this after registering all items with <see cref="RegisterMonitoredItem"/>
+    /// and <see cref="RegisterMonitoredItemThenDetachSubject"/>.
+    /// </summary>
+    public IReadOnlyCollection<MonitoredItem> MonitoredItemSnapshot()
+    {
+        // Build a fake created MonitoredItem for every entry in the manager's dictionary.
+        // The snapshot is called AFTER Sweep, so detached handles may already be absent,
+        // but we build it from all registered handles for test flexibility.
+        var items = new List<MonitoredItem>();
+        foreach (var (clientHandle, property) in Manager.MonitoredItemsForTesting)
+        {
+            items.Add(CreatedMonitoredItem.Create(clientHandle, new NodeId(clientHandle, 2), 0, property));
+        }
+        return items;
+    }
+
+    /// <summary>
     /// Reads the current value of a dynamic property by name.
     /// </summary>
     public object? GetValue(string name)
@@ -109,4 +183,59 @@ internal sealed class SubscriptionManagerTestHarness
 
         return registeredSubject.TryGetProperty(name)?.GetValue();
     }
+}
+
+/// <summary>
+/// Records every <c>RegisterProperty</c> call. Does not apply any filter.
+/// </summary>
+internal sealed class ReadAfterWriteRegistrarSpy : IReadAfterWriteRegistrar
+{
+    private readonly List<RegisteredSubjectProperty> _registeredSubjects = [];
+
+    public IReadOnlyList<RegisteredSubjectProperty> RegisteredSubjects => _registeredSubjects;
+
+    public void RegisterProperty(NodeId nodeId, RegisteredSubjectProperty property, int? requestedSamplingInterval, TimeSpan revisedSamplingInterval)
+    {
+        _registeredSubjects.Add(property);
+    }
+}
+
+/// <summary>
+/// A MonitoredItem subclass that calls <c>SetCreateResult</c> in its constructor so that
+/// <c>Status.Created</c> is true and <c>ClientHandle</c> matches the supplied value.
+/// Used only in tests to build snapshot items without a live OPC UA session.
+/// </summary>
+internal sealed class CreatedMonitoredItem : MonitoredItem
+{
+    private CreatedMonitoredItem(uint clientHandle, NodeId nodeId, double revisedIntervalMs, object handle)
+        : base(clientHandle, NullTelemetryContext.Instance)
+    {
+        Handle = handle;
+        StartNodeId = nodeId;
+
+        var request = new MonitoredItemCreateRequest
+        {
+            ItemToMonitor = new ReadValueId
+            {
+                NodeId = nodeId,
+                AttributeId = Opc.Ua.Attributes.Value
+            },
+            RequestedParameters = new MonitoringParameters
+            {
+                ClientHandle = clientHandle,
+                SamplingInterval = revisedIntervalMs
+            }
+        };
+        var result = new MonitoredItemCreateResult
+        {
+            StatusCode = StatusCodes.Good,
+            MonitoredItemId = clientHandle == 0 ? 1u : clientHandle,
+            RevisedSamplingInterval = revisedIntervalMs
+        };
+
+        SetCreateResult(request, result, 0, new DiagnosticInfoCollection(), new ResponseHeader());
+    }
+
+    public static CreatedMonitoredItem Create(uint clientHandle, NodeId nodeId, double revisedIntervalMs, object handle)
+        => new(clientHandle, nodeId, revisedIntervalMs, handle);
 }

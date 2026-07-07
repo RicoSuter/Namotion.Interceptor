@@ -21,7 +21,7 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly PollingManager? _pollingManager;
-    private readonly ReadAfterWriteManager? _readAfterWriteManager;
+    private readonly IReadAfterWriteRegistrar? _readAfterWriteManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -64,7 +64,7 @@ internal class SubscriptionManager : IAsyncDisposable
         OpcUaSubjectClientSource source,
         SubjectPropertyWriter propertyWriter,
         PollingManager? pollingManager,
-        ReadAfterWriteManager? readAfterWriteManager,
+        IReadAfterWriteRegistrar? readAfterWriteManager,
         OpcUaClientConfiguration configuration,
         ILogger logger)
     {
@@ -148,34 +148,18 @@ internal class SubscriptionManager : IAsyncDisposable
 
             await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
 
-            // Register properties with ReadAfterWriteManager now that we know revised sampling intervals
-            RegisterPropertiesWithReadAfterWriteManager(subscription);
-
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             _subscriptions.TryAdd(subscription, 0);
         }
 
-        // A subject can detach while items are still being registered above: its
-        // RemoveItemsForSubject scan runs before the entries exist and removes nothing,
-        // then the registration lands afterwards, leaving stale items that route
-        // notifications into a detached subject. Sweep after registration; a detach
-        // from here on sees the completed registrations and removes normally. This
-        // narrows rather than hermetically closes the window: a notification arriving
-        // between ApplyChanges and this sweep can still write into the detached subject,
-        // which is benign because the subject is unreachable from the model, and closing
-        // it fully would cost a registry lookup on the notification hot path.
-        foreach (var property in _monitoredItems.Values)
-        {
-            var subject = property.Reference.Subject;
-            if (subject.TryGetRegisteredSubject() is null)
-            {
-                RemoveItemsForSubject(subject);
-                _pollingManager?.RemoveItemsForSubject(subject);
-            }
-        }
+        // Sweep before read-after-write registration so a subject that detached during setup
+        // is never registered. Callbacks stay gated until after both the sweep and survivor
+        // registration complete, so no notification can reach a subject during setup.
+        SweepDetachedSubjects();
 
-        // Open the gate only after all subscriptions are registered and the detached-subject
-        // sweep has run, so notifications cannot write into subjects during setup.
+        RegisterSurvivors(_subscriptions.Keys.SelectMany(s => s.MonitoredItems).ToArray());
+
+        // Open the gate only after the sweep and survivor registration are complete.
         _callbacksEnabled = true;
     }
 
@@ -384,25 +368,56 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Registers all successfully created monitored items with ReadAfterWriteManager.
-    /// Called after ApplyChangesAsync when we know the revised sampling intervals.
+    /// Removes monitored items for every subject that is no longer in the registry.
+    /// Returns the deduplicated list of subjects that were swept.
     /// </summary>
-    private void RegisterPropertiesWithReadAfterWriteManager(Subscription subscription)
+    private IReadOnlyList<IInterceptorSubject> SweepDetachedSubjects()
+    {
+        var swept = new HashSet<IInterceptorSubject>();
+        foreach (var property in _monitoredItems.Values)
+        {
+            var subject = property.Reference.Subject;
+            if (subject.TryGetRegisteredSubject() is null && swept.Add(subject))
+            {
+                RemoveItemsForSubject(subject);
+                _pollingManager?.RemoveItemsForSubject(subject);
+            }
+        }
+
+        return swept.Count == 0
+            ? Array.Empty<IInterceptorSubject>()
+            : [.. swept];
+    }
+
+    /// <summary>
+    /// Registers read-after-write tracking for monitored items whose subject survived the sweep.
+    /// Only items that are created on the server and still present in <c>_monitoredItems</c>
+    /// (the sweep removed detached subjects' handles) are registered.
+    /// Returns the client handles that were registered.
+    /// </summary>
+    private IReadOnlyList<uint> RegisterSurvivors(IReadOnlyCollection<MonitoredItem> monitoredItems)
     {
         if (_readAfterWriteManager is null)
         {
-            return;
+            return Array.Empty<uint>();
         }
 
-        foreach (var item in subscription.MonitoredItems)
+        var registered = new List<uint>();
+        foreach (var item in monitoredItems)
         {
-            if (item is { Handle: RegisteredSubjectProperty property, Status.Created: true })
+            if (item is { Handle: RegisteredSubjectProperty property, Status.Created: true } &&
+                _monitoredItems.ContainsKey(item.ClientHandle))
             {
-                var requestedInterval = GetRequestedSamplingInterval(property);
-                var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
-                _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval);
+                _readAfterWriteManager.RegisterProperty(
+                    item.StartNodeId,
+                    property,
+                    GetRequestedSamplingInterval(property),
+                    TimeSpan.FromMilliseconds(item.Status.SamplingInterval));
+                registered.Add(item.ClientHandle);
             }
         }
+
+        return registered;
     }
 
     /// <summary>
@@ -457,6 +472,9 @@ internal class SubscriptionManager : IAsyncDisposable
     internal bool AreCallbacksEnabledForTesting => _callbacksEnabled;
     internal void EnableCallbacksForTesting() => _callbacksEnabled = true;
     internal IDictionary<uint, RegisteredSubjectProperty> MonitoredItemsForTesting => _monitoredItems;
+
+    internal IReadOnlyList<IInterceptorSubject> SweepDetachedSubjectsForTesting() => SweepDetachedSubjects();
+    internal IReadOnlyList<uint> RegisterSurvivorsForReadAfterWriteForTesting(IReadOnlyCollection<MonitoredItem> monitoredItems) => RegisterSurvivors(monitoredItems);
 
     public async ValueTask DisposeAsync()
     {
