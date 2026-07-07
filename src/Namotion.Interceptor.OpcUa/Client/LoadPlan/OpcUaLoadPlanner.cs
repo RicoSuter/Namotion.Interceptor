@@ -10,13 +10,18 @@ using Opc.Ua.Client;
 namespace Namotion.Interceptor.OpcUa.Client.LoadPlan;
 
 /// <summary>
-/// Pure discovery planner: browses an OPC UA address space starting from a root node and
+/// Discovery planner: browses an OPC UA address space starting from a root node and
 /// builds an <see cref="OpcUaLoadPlan"/> that captures all claims, value assignments, and
-/// staged-subject links needed for the load. No live side effects occur during planning.
-/// <see cref="OpcUaLoadPlan.Commit"/> applies the plan atomically after discovery succeeds.
+/// staged-subject links needed for the load. Ownership claims, root assignments, values,
+/// subscriptions, and read-after-write registration are all deferred to
+/// <see cref="OpcUaLoadPlan.Commit"/>, which applies the plan after discovery succeeds.
+/// Two live side effects do occur during discovery, because nested dynamic discovery needs
+/// them: dynamic properties are added eagerly to their subjects, and newly created child
+/// subjects are linked into the parent context so their own children are discoverable.
 /// On any planning failure the planner rolls back all staged-subject links it established
-/// during discovery (deepest-first, mirroring the order they were added), so no subjects
-/// leak into the registry on error.
+/// (deepest-first, mirroring the order they were added), so no subjects leak into the
+/// registry on error; a leftover eager dynamic property is transient and is re-matched by
+/// the next load through its attached node-id attribute.
 /// </summary>
 internal sealed class OpcUaLoadPlanner
 {

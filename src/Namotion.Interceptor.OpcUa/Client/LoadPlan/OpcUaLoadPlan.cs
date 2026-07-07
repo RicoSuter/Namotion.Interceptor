@@ -112,7 +112,9 @@ internal sealed class OpcUaLoadPlan
         }
         catch
         {
-            // Commit boundary: release the ownership and metadata this commit established; do not restore root values.
+            // Commit boundary: release the ownership and metadata this commit established. Root values
+            // assigned above, and node-id stamps written onto properties this source already owned from a
+            // previous load, are not restored; the next retry (or reconnect ClearAll) reconciles them.
             foreach (var (property, key) in committedClaims)
             {
                 try
