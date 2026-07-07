@@ -91,7 +91,7 @@ builder.Services.AddOpcUaSubjectClientSource(
         DefaultSamplingInterval = 0,      // 0 = exception-based (immediate), null = server decides
         DefaultPublishingInterval = 100,
         DefaultQueueSize = 10,
-        MaximumItemsPerSubscription = 1000,
+        MaxItemsPerSubscription = 1000,
 
         // Data change filter (null = use OPC UA library defaults)
         DefaultDataChangeTrigger = null,  // StatusValue (report on value change)
@@ -151,7 +151,8 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `SubscriptionKeepAliveCount` | 10 | Keep-alive count for subscriptions |
 | `SubscriptionLifetimeCount` | 100 | Lifetime count (must be >= 3x keep-alive count) |
 | `SubscriptionPriority` | 0 | Subscription priority (0 = server default) |
-| `SubscriptionMaximumNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
+| `MaxItemsPerSubscription` | 1000 | Max monitored items per subscription batch |
+| `SubscriptionMaxNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
 | `MinPublishRequestCount` | 3 | Minimum outstanding publish requests |
 | `SubscriptionSequentialPublishing` | false | Process messages in order (reduces throughput) |
 
@@ -177,7 +178,18 @@ Beyond the settings shown above, the following properties are available on `OpcU
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `MaximumReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
+| `MaxReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
+| `MaxBrowseContinuations` | 100 | Max BrowseNext continuation rounds per browse (bounds pagination so a server returning endless continuation points cannot loop the loader) |
+| `MaxAttributeTraversals` | 100 | Max attribute-traversal depth (attributes of attributes) during loading |
+
+## Loading Model
+
+The client loads the server address space into the subject graph in four phases with clear boundaries. Discovery and validation are fully retry-clean: a transient failure in either leaves no ownership claims, no subscription or read-after-write registrations, and no orphaned subjects, so the load simply retries from a clean state. Only commit and subscribe change durable state.
+
+1. **Discover.** Browse and read the address space (batched, with `MaxReferencesPerNode` and `MaxBrowseContinuations` bounding each browse) and build an in-memory load plan. Discovery defers source-ownership claims, root assignments, and initial values into the plan as plain data; it does not claim ownership, assign root properties, register subscriptions, or register read-after-write. Two things do happen eagerly during discovery so that nested dynamic structure is discoverable: dynamic properties found on the server are added to their subjects, and newly created child subjects are linked into the parent context. Both are transient on a discovery failure. The staged-subject linking is rolled back, and a leftover dynamic property is re-matched and re-monitored by the next load through its attached node-id attribute.
+2. **Validate.** Deduplicate and resolve deterministic address-space conflicts in the plan: duplicate dynamic property or attribute names, duplicate structured targets, duplicate dictionary keys, and multiple browse paths to the same value property (resolved by keeping the smaller node id). A container whose browse failed this round is left untouched so existing items are preserved rather than overwritten with an empty collection.
+3. **Commit.** Apply the accepted plan to the graph in one bounded, ordered phase: claim source ownership and stamp node-id metadata before assigning subjects onto root, so an observer reacting to a root change already sees the ownership claim. If commit fails midway, ownership and metadata claimed during this commit are released; root property values assigned during commit are the documented commit boundary and are not restored.
+4. **Subscribe.** Create subscriptions and monitored items, prune failed items, then sweep subjects that detached during setup before registering read-after-write, so a subject that detached is never registered. Data-change callbacks are enabled only as the final step, after all of the above, so a notification can never write into a subject mid-setup.
 
 ## Security
 
