@@ -12,6 +12,22 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client.Connection;
 
+/// <summary>
+/// How a monitored item that failed to (re-)create should be handled, aligned with
+/// <see cref="SubscriptionHealthMonitor.IsRetryable(Opc.Ua.Client.MonitoredItem)"/>.
+/// </summary>
+internal enum FailedMonitoredItemDisposition
+{
+    /// <summary>Transient failure: leave the item in the subscription so the health monitor retries it.</summary>
+    KeepForRetry,
+
+    /// <summary>Node does not support subscriptions: move it to the polling fallback.</summary>
+    FallbackToPolling,
+
+    /// <summary>Permanent failure: remove the item; retrying cannot succeed.</summary>
+    Drop
+}
+
 internal class SubscriptionManager : IAsyncDisposable
 {
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
@@ -248,41 +264,54 @@ internal class SubscriptionManager : IAsyncDisposable
 
     private async Task FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
     {
-        List<MonitoredItem>? failedItems = null;
+        List<MonitoredItem>? removedItems = null;
         List<MonitoredItem>? polledItems = null;
+        var keptForRetry = 0;
+
+        var pollingEnabled = _configuration.EnablePollingFallback && _pollingManager != null;
 
         foreach (var monitoredItem in subscription.MonitoredItems)
         {
-            if (SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
+            if (!SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
             {
-                failedItems ??= [];
-                failedItems.Add(monitoredItem);
+                continue;
+            }
 
-                _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
+            var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
 
-                var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
+            switch (ClassifyFailedItem(statusCode, pollingEnabled))
+            {
+                case FailedMonitoredItemDisposition.KeepForRetry:
+                    // Leave it in the subscription and in _monitoredItems so the health monitor
+                    // heals it. Removing it here silently orphaned transiently-failed items.
+                    keptForRetry++;
+                    _logger.LogWarning("OPC UA monitored item {DisplayName} failed transiently ({Status}); keeping it for the health monitor to retry.",
+                        monitoredItem.DisplayName, statusCode);
+                    break;
 
-                // Check if we should fall back to polling for this item
-                if (_configuration.EnablePollingFallback &&
-                    _pollingManager != null &&
-                    IsSubscriptionUnsupported(statusCode))
-                {
+                case FailedMonitoredItemDisposition.FallbackToPolling:
+                    removedItems ??= [];
+                    removedItems.Add(monitoredItem);
+                    _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
                     polledItems ??= [];
                     polledItems.Add(monitoredItem);
                     _logger.LogWarning("Monitored item {DisplayName} does not support subscriptions ({Status}), falling back to polling",
                         monitoredItem.DisplayName, statusCode);
-                }
-                else
-                {
-                    _logger.LogError("OPC UA monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}",
+                    break;
+
+                case FailedMonitoredItemDisposition.Drop:
+                    removedItems ??= [];
+                    removedItems.Add(monitoredItem);
+                    _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
+                    _logger.LogError("OPC UA monitored item creation failed permanently for {DisplayName} (Handle={Handle}): {Status}",
                         monitoredItem.DisplayName, monitoredItem.ClientHandle, statusCode);
-                }
+                    break;
             }
         }
 
-        if (failedItems?.Count > 0)
+        if (removedItems?.Count > 0)
         {
-            foreach (var monitoredItem in failedItems)
+            foreach (var monitoredItem in removedItems)
             {
                 subscription.RemoveItem(monitoredItem);
             }
@@ -296,7 +325,6 @@ internal class SubscriptionManager : IAsyncDisposable
                 _logger.LogWarning(ex, "ApplyChanges after removing failed items still failed. Continuing with remaining OPC UA monitored items.");
             }
 
-            // Add items that support polling to polling manager
             if (polledItems?.Count > 0 && _pollingManager != null)
             {
                 foreach (var item in polledItems)
@@ -304,23 +332,14 @@ internal class SubscriptionManager : IAsyncDisposable
                     _pollingManager.AddItem(item);
                 }
             }
+        }
 
-            var failedCount = failedItems.Count;
-            var polledCount = polledItems?.Count;
-            if (polledCount > 0)
-            {
-                _logger.LogWarning(
-                    "Removed {Removed} failed monitored items from subscription " +
-                    "{SubscriptionId}. {Polled} items switched to polling fallback.",
-                    failedCount, subscription.Id, polledCount);
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "Removed {Removed} failed monitored items " +
-                    "from subscription {SubscriptionId}.",
-                    failedCount, subscription.Id);
-            }
+        if (removedItems?.Count > 0 || keptForRetry > 0)
+        {
+            _logger.LogWarning(
+                "Subscription {SubscriptionId}: removed {Removed} failed monitored items " +
+                "({Polled} switched to polling), kept {Kept} for the health monitor to retry.",
+                subscription.Id, removedItems?.Count ?? 0, polledItems?.Count ?? 0, keptForRetry);
         }
     }
 
@@ -335,6 +354,25 @@ internal class SubscriptionManager : IAsyncDisposable
         // Note: BadAttributeIdInvalid is a permanent error - polling won't work either, so excluded
         return statusCode == StatusCodes.BadNotSupported ||
                statusCode == StatusCodes.BadMonitoredItemFilterUnsupported;
+    }
+
+    /// <summary>
+    /// Decides how a failed monitored item should be handled. Transient failures are kept in the
+    /// subscription so <see cref="SubscriptionHealthMonitor"/> can heal them (previously they were
+    /// dropped, which silently orphaned the item until an unrelated full reconnect).
+    /// </summary>
+    internal static FailedMonitoredItemDisposition ClassifyFailedItem(StatusCode statusCode, bool pollingEnabled)
+    {
+        if (IsSubscriptionUnsupported(statusCode))
+        {
+            return pollingEnabled
+                ? FailedMonitoredItemDisposition.FallbackToPolling
+                : FailedMonitoredItemDisposition.Drop;
+        }
+
+        return SubscriptionHealthMonitor.IsRetryable(statusCode)
+            ? FailedMonitoredItemDisposition.KeepForRetry
+            : FailedMonitoredItemDisposition.Drop;
     }
 
     /// <summary>
