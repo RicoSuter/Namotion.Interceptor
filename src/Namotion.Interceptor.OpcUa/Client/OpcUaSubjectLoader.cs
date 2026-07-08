@@ -512,7 +512,7 @@ internal class OpcUaSubjectLoader
         var response = await session.BrowseAsync(
             null,
             null,
-            _configuration.MaximumReferencesPerNode,
+            _configuration.MaxReferencesPerNode,
             browseDescriptions,
             cancellationToken).ConfigureAwait(false);
 

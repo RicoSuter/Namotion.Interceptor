@@ -119,8 +119,8 @@ internal class SubscriptionManager : IAsyncDisposable
         _shuttingDown = false;
 
         var itemCount = monitoredItems.Count;
-        var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
-        for (var i = 0; i < itemCount; i += maximumItemsPerSubscription)
+        var maxItemsPerSubscription = _configuration.MaxItemsPerSubscription;
+        for (var i = 0; i < itemCount; i += maxItemsPerSubscription)
         {
             var subscription = new Subscription(session.DefaultSubscription)
             {
@@ -131,7 +131,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
                 LifetimeCount = _configuration.SubscriptionLifetimeCount,
                 Priority = _configuration.SubscriptionPriority,
-                MaxNotificationsPerPublish = _configuration.SubscriptionMaximumNotificationsPerPublish,
+                MaxNotificationsPerPublish = _configuration.SubscriptionMaxNotificationsPerPublish,
                 RepublishAfterTransfer = true, // Enable SDK's automatic republish of missed messages after transfer
                 SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
             };
@@ -144,7 +144,7 @@ internal class SubscriptionManager : IAsyncDisposable
             subscription.FastDataChangeCallback += OnFastDataChange;
             await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
 
-            var batchEnd = Math.Min(i + maximumItemsPerSubscription, itemCount);
+            var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
             for (var j = i; j < batchEnd; j++)
             {
                 var item = monitoredItems[j];
