@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -29,6 +30,7 @@ public class ChangeQueueProcessorTests
                 return ValueTask.CompletedTask;
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
+            maxQueueDepth: null,
             logger: NullLogger.Instance);
 
         // Act - enqueue multiple changes to the same property and trigger flush
@@ -69,6 +71,7 @@ public class ChangeQueueProcessorTests
                 return ValueTask.CompletedTask;
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
+            maxQueueDepth: null,
             logger: NullLogger.Instance);
 
         // Act - enqueue changes to different properties
@@ -107,6 +110,7 @@ public class ChangeQueueProcessorTests
                 return ValueTask.CompletedTask;
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
+            maxQueueDepth: null,
             logger: NullLogger.Instance);
 
         // Act - enqueue in order: A, B, A (last occurrence of A is after B)
@@ -150,6 +154,7 @@ public class ChangeQueueProcessorTests
                 return ValueTask.CompletedTask;
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
+            maxQueueDepth: null,
             logger: NullLogger.Instance);
 
         // Act - trigger flush without enqueuing anything
@@ -175,6 +180,7 @@ public class ChangeQueueProcessorTests
             propertyFilter: _ => true,
             writeHandler: (_, _) => ValueTask.CompletedTask,
             bufferTime: TimeSpan.FromMilliseconds(50),
+            maxQueueDepth: null,
             logger: NullLogger.Instance);
 
         // Act & Assert - should not throw
@@ -206,6 +212,7 @@ public class ChangeQueueProcessorTests
                 await allowFlush.Task;
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
+            maxQueueDepth: null,
             logger: NullLogger.Instance);
 
         // Act - enqueue and start first flush
@@ -229,6 +236,97 @@ public class ChangeQueueProcessorTests
 
         // Assert - only one flush executed (concurrent flush skipped, not blocked)
         Assert.Equal(1, flushCount);
+    }
+
+    [Fact]
+    public async Task WhenBoundedQueueOverflows_ThenOldestChangesAreDropped()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeQueue();
+
+        var subject = new Person(context);
+
+        // A large buffer time keeps the periodic flush from draining the queue during the test, so the
+        // bound is exercised purely by enqueue-side overflow. A non-null source ensures the direct
+        // (source-less) property changes are not filtered out as self-originated.
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMinutes(10),
+            maxQueueDepth: 2,
+            logger: NullLogger.Instance);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act - five changes into a buffer bounded to two; the three oldest must be dropped
+        for (var i = 1; i <= 5; i++)
+        {
+            subject.FirstName = $"v{i}";
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.DropCount >= 3,
+            message: "Three of the five changes should be dropped");
+
+        // Assert
+        Assert.Equal(3, processor.DropCount);
+
+        // Cleanup
+        await cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Fact]
+    public async Task WhenUnbounded_ThenNoChangesAreDropped()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeQueue();
+
+        var subject = new Person(context);
+
+        var lastWritten = "";
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    lastWritten = change.GetNewValue<string>() ?? lastWritten;
+                }
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMilliseconds(20),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act - five changes through an unbounded buffer; all must flow, none dropped
+        for (var i = 1; i <= 5; i++)
+        {
+            subject.FirstName = $"v{i}";
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => lastWritten == "v5",
+            message: "The newest change should be flushed");
+
+        // Assert
+        Assert.Equal(0, processor.DropCount);
+
+        // Cleanup
+        await cancellation.CancelAsync();
+        await processing;
     }
 
     private static void EnqueueChange(

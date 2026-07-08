@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Tests.Models;
 
 namespace HomeBlaze.Services.Tests;

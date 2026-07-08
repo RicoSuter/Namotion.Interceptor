@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -14,7 +15,7 @@ namespace HomeBlaze.Services;
 /// Supports canonical notation (/Items[0]/Name) and route notation (/Items/0/Name).
 /// Implements lifecycle handling to invalidate caches when subjects are attached/detached.
 /// </summary>
-public class SubjectPathResolver : ILifecycleHandler
+public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
 {
     private readonly RootManager _rootManager;
 

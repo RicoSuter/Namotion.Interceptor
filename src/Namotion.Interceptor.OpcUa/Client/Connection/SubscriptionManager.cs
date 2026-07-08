@@ -12,6 +12,22 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client.Connection;
 
+/// <summary>
+/// How a monitored item that failed to (re-)create should be handled, aligned with
+/// <see cref="OpcUaStatusCodeClassifier.IsTransientError"/>.
+/// </summary>
+internal enum FailedMonitoredItemDisposition
+{
+    /// <summary>Transient failure: leave the item in the subscription so the health monitor retries it.</summary>
+    KeepForRetry,
+
+    /// <summary>Node does not support subscriptions: move it to the polling fallback.</summary>
+    FallbackToPolling,
+
+    /// <summary>Permanent failure: remove the item; retrying cannot succeed.</summary>
+    Drop
+}
+
 internal class SubscriptionManager : IAsyncDisposable
 {
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
@@ -26,6 +42,12 @@ internal class SubscriptionManager : IAsyncDisposable
 
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
+    private readonly ConcurrentDictionary<uint, int> _healAttempts = new();
+
+    // Consecutive failed heal ticks a retryable item tolerates before it is escalated to polling
+    // instead of being retried forever. With polling disabled there is no escalation target, so the
+    // item keeps being retried and self-heals once the node recovers.
+    internal const int MaxHealAttemptsBeforeEscalation = 3;
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
@@ -87,14 +109,18 @@ internal class SubscriptionManager : IAsyncDisposable
         }
         _subscriptions.Clear();
         _monitoredItems.Clear();
+        _healAttempts.Clear();
+        // On reconnect, re-attempt every owned property as a real subscription; failed nodes are
+        // re-added to polling. Prevents double delivery of an escalated item that later recovers.
+        _pollingManager?.Clear();
 
         // Reset shutdown flag AFTER clearing collections - prevents old callbacks from processing
         // during the window between flag reset and collection clearing (defense-in-depth).
         _shuttingDown = false;
 
         var itemCount = monitoredItems.Count;
-        var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
-        for (var i = 0; i < itemCount; i += maximumItemsPerSubscription)
+        var maxItemsPerSubscription = _configuration.MaxItemsPerSubscription;
+        for (var i = 0; i < itemCount; i += maxItemsPerSubscription)
         {
             var subscription = new Subscription(session.DefaultSubscription)
             {
@@ -105,7 +131,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
                 LifetimeCount = _configuration.SubscriptionLifetimeCount,
                 Priority = _configuration.SubscriptionPriority,
-                MaxNotificationsPerPublish = _configuration.SubscriptionMaximumNotificationsPerPublish,
+                MaxNotificationsPerPublish = _configuration.SubscriptionMaxNotificationsPerPublish,
                 RepublishAfterTransfer = true, // Enable SDK's automatic republish of missed messages after transfer
                 SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
             };
@@ -118,7 +144,7 @@ internal class SubscriptionManager : IAsyncDisposable
             subscription.FastDataChangeCallback += OnFastDataChange;
             await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
 
-            var batchEnd = Math.Min(i + maximumItemsPerSubscription, itemCount);
+            var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
             for (var j = i; j < batchEnd; j++)
             {
                 var item = monitoredItems[j];
@@ -248,79 +274,62 @@ internal class SubscriptionManager : IAsyncDisposable
 
     private async Task FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
     {
-        List<MonitoredItem>? failedItems = null;
+        List<MonitoredItem>? removedItems = null;
         List<MonitoredItem>? polledItems = null;
+        var keptForRetry = 0;
+
+        var pollingEnabled = _configuration.EnablePollingFallback && _pollingManager != null;
 
         foreach (var monitoredItem in subscription.MonitoredItems)
         {
-            if (SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
+            if (!SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
             {
-                failedItems ??= [];
-                failedItems.Add(monitoredItem);
+                continue;
+            }
 
-                _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
+            var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
 
-                var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
+            switch (ClassifyFailedItem(statusCode, pollingEnabled))
+            {
+                case FailedMonitoredItemDisposition.KeepForRetry:
+                    // Keep it in the subscription so the health monitor heals it; removing it here
+                    // silently orphaned transiently-failed items.
+                    keptForRetry++;
+                    _logger.LogWarning("OPC UA monitored item {DisplayName} failed transiently ({Status}); keeping it for the health monitor to retry.",
+                        monitoredItem.DisplayName, statusCode);
+                    break;
 
-                // Check if we should fall back to polling for this item
-                if (_configuration.EnablePollingFallback &&
-                    _pollingManager != null &&
-                    IsSubscriptionUnsupported(statusCode))
-                {
+                case FailedMonitoredItemDisposition.FallbackToPolling:
+                    removedItems ??= [];
+                    removedItems.Add(monitoredItem);
+                    _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
                     polledItems ??= [];
                     polledItems.Add(monitoredItem);
                     _logger.LogWarning("Monitored item {DisplayName} does not support subscriptions ({Status}), falling back to polling",
                         monitoredItem.DisplayName, statusCode);
-                }
-                else
-                {
-                    _logger.LogError("OPC UA monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}",
+                    break;
+
+                case FailedMonitoredItemDisposition.Drop:
+                    removedItems ??= [];
+                    removedItems.Add(monitoredItem);
+                    _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
+                    _logger.LogError("OPC UA monitored item creation failed permanently for {DisplayName} (Handle={Handle}): {Status}",
                         monitoredItem.DisplayName, monitoredItem.ClientHandle, statusCode);
-                }
+                    break;
             }
         }
 
-        if (failedItems?.Count > 0)
+        if (removedItems is { Count: > 0 })
         {
-            foreach (var monitoredItem in failedItems)
-            {
-                subscription.RemoveItem(monitoredItem);
-            }
+            await RemoveAndFallBackToPollingAsync(subscription, removedItems, polledItems ?? [], cancellationToken).ConfigureAwait(false);
+        }
 
-            try
-            {
-                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "ApplyChanges after removing failed items still failed. Continuing with remaining OPC UA monitored items.");
-            }
-
-            // Add items that support polling to polling manager
-            if (polledItems?.Count > 0 && _pollingManager != null)
-            {
-                foreach (var item in polledItems)
-                {
-                    _pollingManager.AddItem(item);
-                }
-            }
-
-            var failedCount = failedItems.Count;
-            var polledCount = polledItems?.Count;
-            if (polledCount > 0)
-            {
-                _logger.LogWarning(
-                    "Removed {Removed} failed monitored items from subscription " +
-                    "{SubscriptionId}. {Polled} items switched to polling fallback.",
-                    failedCount, subscription.Id, polledCount);
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "Removed {Removed} failed monitored items " +
-                    "from subscription {SubscriptionId}.",
-                    failedCount, subscription.Id);
-            }
+        if (removedItems?.Count > 0 || keptForRetry > 0)
+        {
+            _logger.LogWarning(
+                "Subscription {SubscriptionId}: removed {Removed} failed monitored items " +
+                "({Polled} switched to polling), kept {Kept} for the health monitor to retry.",
+                subscription.Id, removedItems?.Count ?? 0, polledItems?.Count ?? 0, keptForRetry);
         }
     }
 
@@ -338,6 +347,132 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Decides how a failed monitored item should be handled. Transient failures are kept in the
+    /// subscription so <see cref="SubscriptionHealthMonitor"/> can heal them (previously they were
+    /// dropped, which silently orphaned the item until an unrelated full reconnect).
+    /// </summary>
+    internal static FailedMonitoredItemDisposition ClassifyFailedItem(StatusCode statusCode, bool pollingEnabled)
+    {
+        if (IsSubscriptionUnsupported(statusCode))
+        {
+            return pollingEnabled
+                ? FailedMonitoredItemDisposition.FallbackToPolling
+                : FailedMonitoredItemDisposition.Drop;
+        }
+
+        return OpcUaStatusCodeClassifier.IsTransientError(statusCode)
+            ? FailedMonitoredItemDisposition.KeepForRetry
+            : FailedMonitoredItemDisposition.Drop;
+    }
+
+    /// <summary>
+    /// Whether a retryable item that keeps failing should be escalated to polling (its retry bound
+    /// was exceeded) rather than kept for the health monitor to retry.
+    /// </summary>
+    internal static bool ShouldEscalateToPolling(int consecutiveFailures, int maxAttempts)
+    {
+        return consecutiveFailures >= maxAttempts;
+    }
+
+    /// <summary>
+    /// Removes the given items from the SDK subscription and applies the change (tolerating an
+    /// ApplyChanges failure), then hands the polled items to the polling manager.
+    /// </summary>
+    private async Task RemoveAndFallBackToPollingAsync(
+        Subscription subscription,
+        IReadOnlyList<MonitoredItem> toRemove,
+        IReadOnlyList<MonitoredItem> toPoll,
+        CancellationToken cancellationToken)
+    {
+        foreach (var monitoredItem in toRemove)
+        {
+            subscription.RemoveItem(monitoredItem);
+        }
+
+        try
+        {
+            await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "ApplyChanges after removing failed OPC UA monitored items failed. Continuing with the remaining items.");
+        }
+
+        if (_pollingManager is not null)
+        {
+            foreach (var monitoredItem in toPoll)
+            {
+                _pollingManager.AddItem(monitoredItem);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Escalates a retryable item that keeps failing past <see cref="MaxHealAttemptsBeforeEscalation"/>
+    /// to polling instead of retrying forever. Runs only when polling is enabled; reconnect clears the
+    /// polling set and re-attempts every item, so escalation is not permanent.
+    /// </summary>
+    public async Task EscalatePersistentlyFailedItemsAsync(CancellationToken cancellationToken)
+    {
+        if (!_configuration.EnablePollingFallback || _pollingManager is null)
+        {
+            return;
+        }
+
+        foreach (var subscription in _subscriptions.Keys)
+        {
+            List<MonitoredItem>? toEscalate = null;
+
+            foreach (var monitoredItem in subscription.MonitoredItems)
+            {
+                if (!SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
+                {
+                    if (!_healAttempts.IsEmpty)
+                    {
+                        _healAttempts.TryRemove(monitoredItem.ClientHandle, out _); // recovered: reset
+                    }
+                    continue;
+                }
+
+                if (!SubscriptionHealthMonitor.IsRetryable(monitoredItem))
+                {
+                    // A runtime transition to permanent-bad is left in the subscription until reconnect,
+                    // but drop any heal counter so the map only tracks currently-retryable failing items.
+                    if (!_healAttempts.IsEmpty)
+                    {
+                        _healAttempts.TryRemove(monitoredItem.ClientHandle, out _);
+                    }
+                    continue;
+                }
+
+                var attempts = _healAttempts.AddOrUpdate(monitoredItem.ClientHandle, 1, static (_, current) => current + 1);
+
+                if (ShouldEscalateToPolling(attempts, MaxHealAttemptsBeforeEscalation))
+                {
+                    (toEscalate ??= []).Add(monitoredItem);
+                }
+            }
+
+            if (toEscalate is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            foreach (var monitoredItem in toEscalate)
+            {
+                _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
+                _healAttempts.TryRemove(monitoredItem.ClientHandle, out _);
+            }
+
+            await RemoveAndFallBackToPollingAsync(subscription, toEscalate, toEscalate, cancellationToken).ConfigureAwait(false);
+
+            _logger.LogWarning(
+                "Escalated {Count} persistently-failing monitored items to polling in subscription {SubscriptionId} after {Max} retries.",
+                toEscalate.Count, subscription.Id, MaxHealAttemptsBeforeEscalation);
+        }
+    }
+
+    /// <summary>
     /// Removes monitored items for a detached subject. Idempotent.
     /// Note: OPC UA subscription items remain on server until session ends.
     /// This just cleans up local tracking to avoid memory leaks.
@@ -349,6 +484,7 @@ internal class SubscriptionManager : IAsyncDisposable
             if (kvp.Value.Reference.Subject == subject)
             {
                 _monitoredItems.TryRemove(kvp.Key, out _);
+                _healAttempts.TryRemove(kvp.Key, out _);
             }
         }
     }

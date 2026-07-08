@@ -90,7 +90,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     propertyReference => propertyReference.TryGetSource(out var source) && source == this,
                     WriteChangesViaRetryQueueAsync,
                     _bufferTime,
-                    _logger);
+                    maxQueueDepth: null,
+                    logger: _logger);
 
                 // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
                 // re-apply queued changes locally if the source hasn't changed the property.
