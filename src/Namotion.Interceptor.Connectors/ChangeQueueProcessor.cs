@@ -128,9 +128,11 @@ public class ChangeQueueProcessor : IDisposable
     /// <returns>The task.</returns>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
-        // Changes already queued now were captured while the source was still connecting.
-        // They are ignored at dequeue when superseded, i.e. the initial state load or a
-        // later write has already overwritten their value in the model (see IsSuperseded).
+        // Snapshot of changes already queued at drain start. Any the model has moved past are
+        // dropped at dequeue (see IsSuperseded). This is inert for source connectors: SubjectSourceBase
+        // already drains and reconciles connect/reconnect-window writes into the retry queue before
+        // ProcessAsync runs, so only current values remain here. It stays live for servers, which create
+        // the processor before publishing. Removing this now-source-inert path is a deferred cleanup.
         var queuedBeforeStart = _subscription.Count;
 
         using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;

@@ -40,6 +40,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
 
+        // The retry queue also carries writes captured while (re)connecting. With size 0 it is
+        // disabled, and those connect/reconnect-window writes are dropped rather than reconciled.
         if (writeRetryQueueSize > 0)
         {
             WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
