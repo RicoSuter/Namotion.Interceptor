@@ -154,13 +154,18 @@ The base class handles everything else: retry loop with backoff, buffering durin
 Each iteration of the sealed `ExecuteAsync` runs the following sequence. On failure, the base disposes the listen lifetime, waits `retryTime` (default 10s), and restarts from the top. Only `OperationCanceledException` when the host stopping token is cancelled exits the loop. All other exceptions (including internal protocol timeouts) trigger a retry.
 
 ```
-ExecuteAsync (retry loop)
- ├── new ChangeQueueProcessor()   ← subscribes now, capturing local writes made while connecting
- ├── StartBuffering()
- ├── StartListeningAsync()        ← your hook: connect + spawn monitor
- ├── LoadInitialStateAndResume()   ← calls your LoadInitialStateAsync, then replays buffer
- ├── ReapplyRetryQueue()           ← optimistic re-apply of queued writes
- └── ProcessAsync()                ← runs ChangeQueueProcessor, calls your WriteChangesAsync
+ExecuteAsync
+ ├── create source-lifetime subscription  ← captures local writes continuously (no gap across reconnects)
+ └── retry loop (per connection attempt)
+      ├── Task.Delay(retryTime)            ← retries only; the subscription keeps capturing during the wait
+      ├── drain owned writes → retry queue ← park writes captured since the last attempt (caps memory)
+      ├── StartBuffering()
+      ├── StartListeningAsync()            ← your hook: connect + spawn monitor
+      ├── LoadInitialStateAndResume()      ← calls your LoadInitialStateAsync, then replays buffer
+      ├── drain owned writes → retry queue ← park connect-window writes
+      ├── ReconcileRetryQueueAsync()       ← restore / send / drop queued writes vs current state
+      ├── new ChangeQueueProcessor()       ← connected phase; reuses the source-lifetime subscription
+      └── ProcessAsync()                   ← drains changes, calls your WriteChangesAsync
 ```
 
 #### ISubjectSource Interface

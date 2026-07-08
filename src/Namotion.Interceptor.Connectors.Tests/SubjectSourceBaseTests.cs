@@ -576,7 +576,7 @@ public class SubjectSourceBaseTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
-            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+            message: "Expected retry queue to be drained by ReconcileRetryQueueAsync");
         await source.StopAsync(CancellationToken.None);
 
         // Assert - server wins, change was dropped
@@ -631,7 +631,7 @@ public class SubjectSourceBaseTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
-            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+            message: "Expected retry queue to be drained by ReconcileRetryQueueAsync");
         await source.StopAsync(CancellationToken.None);
 
         // Assert - server wins
@@ -685,7 +685,7 @@ public class SubjectSourceBaseTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
-            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+            message: "Expected retry queue to be drained by ReconcileRetryQueueAsync");
         await source.StopAsync(CancellationToken.None);
 
         // Assert - server wins
@@ -747,7 +747,7 @@ public class SubjectSourceBaseTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
-            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+            message: "Expected retry queue to be drained by ReconcileRetryQueueAsync");
         await source.StopAsync(CancellationToken.None);
 
         // Assert - all dropped, server values remain
@@ -801,7 +801,7 @@ public class SubjectSourceBaseTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
-            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+            message: "Expected retry queue to be drained by ReconcileRetryQueueAsync");
         await source.StopAsync(CancellationToken.None);
 
         // Assert - null != "ServerValue" -> conflict, dropped
