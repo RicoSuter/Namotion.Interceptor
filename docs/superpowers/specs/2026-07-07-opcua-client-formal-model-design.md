@@ -57,7 +57,7 @@ Liveness:
 - If `linkUp` eventually stays true, the client eventually reaches `SessionActive` with all items subscribed and stays there (`<>[]Converged`). This catches infinite reconnect or stall loops. The weaker "converges at least once" form is satisfied by the first activation and cannot detect a failure to re-converge after a reconnect, so the stay-converged form is used.
 
 ### Code anchors (for faithful extraction)
-- Session transitions and the single hook: `OpcUaSubjectClientSource.OnCurrentSessionChanged` (`src/Namotion.Interceptor.OpcUa/Client/OpcUaSubjectClientSource.cs:566`).
+- Session transitions and the single hook: `OpcUaSubjectClientSource.OnCurrentSessionChanged` (in `OpcUaSubjectClientSource.cs`; referenced by method since #359 and #364 shifted line numbers).
 - SDK auto-reconnect and transfer: `SessionManager.OnKeepAlive` / `OnReconnectComplete`.
 - Manual reconnect and buffering: `OpcUaSubjectClientSource.ReconnectSessionAsync` (buffer, create session, recreate subscriptions, load state and resume).
 - Stall and force-reset: `SessionManager.TryForceResetIfStalled`.
@@ -70,6 +70,10 @@ Formalizing these invariants surfaced two places where the clean model diverged 
 - **Abandon window (fix 2).** Added an explicit `Abandoning` state between `ReconnectingSdk` and `ReconnectingManual`, and the invariant `BufferingCoversAbandon` (buffering is on from the moment of abandon). Mutation-proven: not buffering at abandon reproduces the pre-fix `AbandonCurrentSession` gap and TLC reports a violation.
 
 The convergence liveness now requires every item covered (subscribed or escalated to polling). Model checks at `Items = {i1, i2}`, `PollingEnabled = TRUE`, 66 reachable states. See `docs/formal/opcua-client/OpcUaClient.md`.
+
+### Verified against merged master (#364)
+
+PR #364 later centralized status-code classification into `OpcUaStatusCodeClassifier` and changed which codes count as transient, but kept the disposition categories (`KeepForRetry`, `FallbackToPolling`, `Drop`) and the escalation bound (`MaxHealAttemptsBeforeEscalation`). The health monitor still retries transient failures (`SubscriptionHealthMonitor.IsRetryable` now delegates to the classifier). So the abstract coverage behavior the model captures is unchanged, and the model re-checks green against merged master (which includes #359 and #364) with no edits.
 
 ## Toolchain
 
