@@ -10,7 +10,7 @@
 
 **Depends on:** PR #359 merged to master (this instruments the fixed client), and Phase 2a complete (`gen-trace-spec.sh`, `check-traces.sh`, Community Modules toolchain).
 
-**Grounded sites (fix branch, will shift on merge; confirm before editing):** buffering `SubjectPropertyWriter.StartBuffering` / resume in `Namotion.Interceptor.Connectors`; session `SessionManager.SetSession` (`:242,:396,:553,:621,:751`) and `AbandonCurrentSession` (`:605`); coverage `SubscriptionManager` around `subscription.AddItem` (`:151`), `ClassifyFailedItem` (`:292/:354`), `EscalatePersistentlyFailedItemsAsync` (`:415`).
+**Grounded sites (referenced by method; verified present on merged master):** buffering `SubjectPropertyWriter.StartBuffering` / resume (`LoadInitialStateAndResumeAsync`) in `Namotion.Interceptor.Connectors`; session `SessionManager.SetSession` and `AbandonCurrentSession`; coverage `SubscriptionManager` around `subscription.AddItem`, the `ClassifyFailedItem` disposition switch, and `EscalatePersistentlyFailedItemsAsync`. Note: #364 centralized the transient/permanent decision into `OpcUaStatusCodeClassifier` (used by both `ClassifyFailedItem` and `SubscriptionHealthMonitor.IsRetryable`); the disposition categories and the coverage-transition sites are unchanged, so the instrumentation points are the same.
 
 **Three hard points, addressed as spikes (Tasks 1, 6, 7 handle them):**
 1. `AsyncLocal` flows via `ExecutionContext` to the client's own `Task.Run` loops if the sink is set before `StartAsync`, but the OPC UA SDK's callback threads (`OnKeepAlive`, `OnReconnectComplete`) may not carry it, so SDK-path session events can be lost. Task 6 spikes the capture.
@@ -391,7 +391,7 @@ Add `ModelTrace.Set("state", "<value>")` right after each concrete transition, u
 - Connecting: when `CreateSessionAsync` begins the connect. Value `"Connecting"`.
 - SessionActive: after subscriptions are created and initial state loaded (end of `StartListeningAsync` success; and after `SdkReconnect` transfer success at `SetSession(reconnectedSession)`; and after `ManualReconnectRecreate` success). Value `"SessionActive"`.
 - ReconnectingSdk: in `OnKeepAlive` when a bad status triggers `BeginReconnect`. Value `"ReconnectingSdk"`.
-- Abandoning: at the top of `AbandonCurrentSession` (`:605`). Value `"Abandoning"`.
+- Abandoning: at the top of `AbandonCurrentSession`. Value `"Abandoning"`.
 - ReconnectingManual: when the manual reconnect begins (`ReconnectSessionAsync`, after `StartBuffering`). Value `"ReconnectingManual"`.
 - Faulted: in the manual-reconnect exception path. Value `"Faulted"`.
 - Stalled / ForceReset: in `TryForceResetIfStalled`. Values `"Stalled"` then `"ReconnectingManual"`.
@@ -427,9 +427,9 @@ Emit `cover` per item using its node id as the key.
 
 - [ ] **Step 1: Emit at each coverage transition**
 
-- Subscribed: after `subscription.AddItem(item)` succeeds and the item is confirmed good (`:151` region, after `FilterOutFailedMonitoredItemsAsync` keeps it). `ModelTrace.SetItem("cover", nodeId, "Subscribed")`.
-- Retrying: in `FilterOutFailedMonitoredItemsAsync` when `ClassifyFailedItem(...) == KeepForRetry` (`:292`). `ModelTrace.SetItem("cover", nodeId, "Retrying")`.
-- Polling: when an item moves to polling, in `FallbackToPolling` handling and in `EscalatePersistentlyFailedItemsAsync` (`:415`) at `_pollingManager.AddItem`. `ModelTrace.SetItem("cover", nodeId, "Polling")`.
+- Subscribed: after `subscription.AddItem(item)` succeeds and the item is confirmed good (after `FilterOutFailedMonitoredItemsAsync` keeps it). `ModelTrace.SetItem("cover", nodeId, "Subscribed")`.
+- Retrying: in `FilterOutFailedMonitoredItemsAsync` when `ClassifyFailedItem(...) == KeepForRetry`. `ModelTrace.SetItem("cover", nodeId, "Retrying")`.
+- Polling: when an item moves to polling, in the `FallbackToPolling` handling and in `EscalatePersistentlyFailedItemsAsync` at `_pollingManager.AddItem`. `ModelTrace.SetItem("cover", nodeId, "Polling")`.
 - Subscribed (healed): in `SubscriptionHealthMonitor` when a retrying item recovers. `ModelTrace.SetItem("cover", nodeId, "Subscribed")`.
 
 Use the item's `StartNodeId.ToString()` as the key, consistent everywhere.
