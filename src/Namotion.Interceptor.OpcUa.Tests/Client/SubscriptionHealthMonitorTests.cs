@@ -47,6 +47,7 @@ public class SubscriptionHealthMonitorTests
 
     [Theory]
     [InlineData(StatusCodes.BadNodeIdUnknown)]
+    [InlineData(StatusCodes.BadNodeIdInvalid)]
     [InlineData(StatusCodes.BadAttributeIdInvalid)]
     [InlineData(StatusCodes.BadIndexRangeInvalid)]
     [InlineData(StatusCodes.BadTypeMismatch)]
