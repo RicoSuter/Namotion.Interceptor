@@ -66,6 +66,8 @@ This ensures:
 - Updates are applied in the correct order relative to the initial state
 - Stale queued writes don't overwrite newer source values
 
+Local writes made while the source is connecting are captured too, not only inbound updates: the outbound change subscription is created before `StartListeningAsync`, so a connect-window write survives instead of falling into a gap. When draining starts it reconciles to the model's current value, the same source-wins policy as the retry re-apply above (the last two rows of [Write Consistency Guarantees](#write-consistency-guarantees) below give both outcomes). A same-property write races the initial-state load, so its winner is timing-dependent: write after the connection has settled (post-connect writes are always sent), or use source transactions, when you need a deterministic result.
+
 ### Write Consistency Guarantees
 
 Property writes to sources follow a **local-first** model: the local property is updated immediately, and the change is sent to the source asynchronously. This means the local model and the source can be temporarily out of sync.
@@ -76,6 +78,8 @@ Property writes to sources follow a **local-first** model: the local property is
 | Write fails, retry succeeds | Updated immediately | Updated on retry | Eventually in sync |
 | Disconnect + reconnect, source unchanged | Initial state restores source state, retry re-applies change | Receives change via fresh write | In sync |
 | Disconnect + reconnect, source changed | Initial state applies source's new value, retry dropped | Unchanged (source wins) | In sync |
+| Write during connect, source leaves the property alone | Local write kept | Sent as a fresh write once draining starts | In sync |
+| Write during connect, initial state overwrites the property | Source value kept | Write dropped | In sync (source wins) |
 
 In all cases, the local model and source converge after reconnection. However, in the last scenario the local model temporarily shows a value that the source never accepted. Users may briefly see the local value before it snaps back to the source's value on reconnect.
 
@@ -151,6 +155,7 @@ Each iteration of the sealed `ExecuteAsync` runs the following sequence. On fail
 
 ```
 ExecuteAsync (retry loop)
+ ├── new ChangeQueueProcessor()   ← subscribes now, capturing local writes made while connecting
  ├── StartBuffering()
  ├── StartListeningAsync()        ← your hook: connect + spawn monitor
  ├── LoadInitialStateAndResume()   ← calls your LoadInitialStateAsync, then replays buffer
