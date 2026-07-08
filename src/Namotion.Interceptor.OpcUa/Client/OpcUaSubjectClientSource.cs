@@ -377,6 +377,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             sessionManager.Subscriptions,
             cancellationToken).ConfigureAwait(false);
 
+        await sessionManager.SubscriptionManager
+            .EscalatePersistentlyFailedItemsAsync(cancellationToken).ConfigureAwait(false);
+
         return false;
     }
 

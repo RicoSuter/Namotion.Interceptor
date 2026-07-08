@@ -606,6 +606,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         Debug.Assert(Monitor.IsEntered(_reconnectingLock), "AbandonCurrentSession must be called inside _reconnectingLock.");
 
+        // The abandoned subscription's callback stays attached, so buffer until the manual reconnect
+        // reloads and replays state; the authoritative reload makes discarding these updates safe.
+        _propertyWriter.StartBuffering();
+
         var oldSession = Volatile.Read(ref _session);
         if (oldSession is not null)
         {

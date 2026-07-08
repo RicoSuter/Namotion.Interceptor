@@ -47,13 +47,11 @@ public class SubscriptionHealthMonitorTests
 
     [Theory]
     [InlineData(StatusCodes.BadNodeIdUnknown)]
+    [InlineData(StatusCodes.BadNodeIdInvalid)]
     [InlineData(StatusCodes.BadAttributeIdInvalid)]
     [InlineData(StatusCodes.BadIndexRangeInvalid)]
     [InlineData(StatusCodes.BadTypeMismatch)]
-    [InlineData(StatusCodes.BadUserAccessDenied)]
     [InlineData(StatusCodes.BadSecurityModeInsufficient)]
-    [InlineData(StatusCodes.BadNotImplemented)]
-    [InlineData(StatusCodes.BadNotReadable)]
     [InlineData(StatusCodes.BadNotWritable)]
     [InlineData(StatusCodes.BadWriteNotSupported)]
     public void WhenItemHasPermanentBadStatus_ThenIsRetryableReturnsFalse(uint statusCode)
@@ -73,6 +71,11 @@ public class SubscriptionHealthMonitorTests
     [InlineData(StatusCodes.BadOutOfService)]
     [InlineData(StatusCodes.BadTimeout)]
     [InlineData(StatusCodes.BadCommunicationError)]
+    // Access-scoped codes stay retryable: a server-side permission or AccessLevel change can make
+    // the same monitored item succeed without a reconnect, and the health monitor is what notices.
+    [InlineData(StatusCodes.BadUserAccessDenied)]
+    [InlineData(StatusCodes.BadNotReadable)]
+    [InlineData(StatusCodes.BadNotImplemented)]
     public void WhenItemHasTransientBadStatus_ThenIsRetryableReturnsTrue(uint statusCode)
     {
         // Arrange
