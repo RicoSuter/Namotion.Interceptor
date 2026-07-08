@@ -445,6 +445,31 @@ public class ChangeQueueProcessorTests
         await processing;
     }
 
+    [Fact]
+    public void WhenDrainingImmediately_ThenReturnsQueuedItemsThenFalse()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeQueue();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        subject.FirstName = "A";
+        subject.FirstName = "B";
+
+        // Act
+        var drained = new List<string?>();
+        while (subscription.TryDequeueImmediate(out var change))
+        {
+            drained.Add(change.GetNewValue<string?>());
+        }
+
+        // Assert
+        Assert.Equal(["A", "B"], drained);
+        Assert.False(subscription.TryDequeueImmediate(out _));
+    }
+
     private static void EnqueueChange(
         ChangeQueueProcessor processor,
         PropertyReference property,
