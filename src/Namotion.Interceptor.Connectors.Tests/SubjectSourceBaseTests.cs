@@ -963,6 +963,34 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenRetryChangeMatchesCurrentModelValue_ThenItIsSentToSource()
+    {
+        // Arrange: a retry-queued change whose new value is already the current model value
+        // (the write survived the load) must be sent, not dropped. The 2-way re-apply dropped it.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "ClientValue" }; // model already holds the new value
+
+        var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { }); // load leaves FirstName alone
+
+        // Retry queue: Original -> ClientValue (new value already in the model)
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "ClientValue");
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert - the change was sent to the source (flush branch), not dropped
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.FirstName) &&
+            c.GetNewValue<string?>() == "ClientValue");
+        Assert.Equal("ClientValue", subject.FirstName);
+    }
+
+    [Fact]
     public async Task WhenStartListeningAsyncFails_ThenRetriesAndEventuallySucceeds()
     {
         // Arrange

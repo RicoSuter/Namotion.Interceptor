@@ -99,10 +99,9 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
                 await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
 
-                // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
-                // re-apply queued changes locally if the source hasn't changed the property.
-                // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
-                ReapplyRetryQueue();
+                // Single reconcile point after initial state load: restore (source unchanged),
+                // send (already current), or drop (source diverged). See ReconcileRetryQueueAsync.
+                await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
 
                 await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
             }
@@ -181,7 +180,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         }
     }
 
-    private void ReapplyRetryQueue()
+    private async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
     {
         var retryChanges = WriteRetryQueue?.DrainForLocalReapply();
         if (retryChanges is null || retryChanges.Length == 0)
@@ -189,49 +188,63 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
             return;
         }
 
-        var applied = 0;
+        var restored = 0;
+        var sent = 0;
         var dropped = 0;
         var failed = 0;
+        List<SubjectPropertyChange>? toSend = null;
+
         foreach (var change in retryChanges)
         {
             try
             {
                 var property = change.Property;
                 var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
-                var oldValue = change.GetOldValue<object>();
 
-                if (Equals(currentValue, oldValue))
+                if (Equals(currentValue, change.GetNewValue<object?>()))
                 {
-                    // Server hasn't changed this property - re-apply client's change locally.
-                    // The interceptor chain fires, ChangeQueueProcessor captures the change, and sends it to the source.
+                    // Already the current model value: the source has not received it, so send it.
+                    (toSend ??= []).Add(change);
+                    sent++;
+                }
+                else if (Equals(currentValue, change.GetOldValue<object?>()))
+                {
+                    // Source still at the baseline the write was based on: restore locally. The
+                    // connected phase captures and sends the re-applied write.
                     property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object>());
-                    applied++;
+                    restored++;
                 }
                 else
                 {
+                    // Source diverged from the baseline: source wins.
                     dropped++;
                 }
             }
             catch (Exception exception)
             {
                 _logger.LogWarning(exception,
-                    "Failed to re-apply retry queue change for property '{PropertyName}', dropping.",
+                    "Failed to reconcile retry queue change for property '{PropertyName}', dropping.",
                     change.Property.Name);
                 failed++;
             }
         }
 
+        if (toSend is not null)
+        {
+            WriteRetryQueue!.Enqueue(toSend.ToArray());
+            await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+        }
+
         if (dropped > 0 || failed > 0)
         {
             _logger.LogWarning(
-                "Retry queue optimistic re-apply: {Applied} re-applied, {Dropped} dropped (source wins), {Failed} failed.",
-                applied, dropped, failed);
+                "Retry queue reconcile: {Restored} restored, {Sent} sent, {Dropped} dropped (source wins), {Failed} failed.",
+                restored, sent, dropped, failed);
         }
-        else if (applied > 0)
+        else if (restored > 0 || sent > 0)
         {
             _logger.LogInformation(
-                "Retry queue optimistic re-apply: {Applied} changes re-applied.",
-                applied);
+                "Retry queue reconcile: {Restored} restored, {Sent} sent.", restored, sent);
         }
     }
 
