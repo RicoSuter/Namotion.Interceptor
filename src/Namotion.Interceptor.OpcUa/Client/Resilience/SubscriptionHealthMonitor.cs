@@ -93,7 +93,11 @@ internal sealed class SubscriptionHealthMonitor
     internal static bool IsRetryable(MonitoredItem item)
     {
         var statusCode = item.Status?.Error?.StatusCode ?? StatusCodes.Good;
+        return IsRetryable(statusCode);
+    }
 
+    internal static bool IsRetryable(StatusCode statusCode)
+    {
         // Design-time errors - don't retry (permanent errors)
         if (statusCode == StatusCodes.BadNodeIdUnknown ||
             statusCode == StatusCodes.BadAttributeIdInvalid ||
