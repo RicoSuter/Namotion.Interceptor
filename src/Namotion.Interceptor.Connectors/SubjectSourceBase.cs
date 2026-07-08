@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -75,33 +76,45 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Source-lifetime capture: one subscription for the whole source, so writes are captured
+        // continuously (including during the retry delay) and never fall into a no-subscription gap.
+        using var subscription = _context.CreatePropertyChangeQueueSubscription();
+
+        var firstAttempt = true;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // Create the processor (and its change queue subscription) before any
-                // model-visible effect of the connection, so application writes made
-                // while connecting are captured instead of silently lost. Draining only
-                // starts with ProcessAsync below, after the initial state is applied:
-                // the ownership filter then sees the claims established during the load,
-                // and captured writes the load overwrote are dropped as superseded.
-                using var processor = new ChangeQueueProcessor(
-                    this,
-                    _context,
-                    propertyReference => propertyReference.TryGetSource(out var source) && source == this,
-                    WriteChangesViaRetryQueueAsync,
-                    _bufferTime,
-                    maxQueueDepth: null,
-                    logger: _logger);
+                if (!firstAttempt)
+                {
+                    await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
+                }
+                firstAttempt = false;
+
+                // Park writes captured since the previous attempt (retry delay + any failed attempt).
+                // This also caps memory across repeated failed attempts.
+                DrainOwnedWritesToRetryQueue(subscription);
 
                 _propertyWriter.StartBuffering();
                 await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
                 await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
 
-                // Single reconcile point after initial state load: restore (source unchanged),
-                // send (already current), or drop (source diverged). See ReconcileRetryQueueAsync.
+                // Park connect-window writes captured during listen/load.
+                DrainOwnedWritesToRetryQueue(subscription);
+
+                // Single reconcile point: restore (source unchanged), send (already current), drop (diverged).
                 await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
+
+                // Connected phase reuses the source-lifetime subscription and does not own it.
+                using var processor = new ChangeQueueProcessor(
+                    this,
+                    subscription,
+                    propertyReference => propertyReference.TryGetSource(out var source) && source == this,
+                    WriteChangesViaRetryQueueAsync,
+                    _bufferTime,
+                    maxQueueDepth: null,
+                    logger: _logger);
 
                 await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
             }
@@ -112,14 +125,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to listen for changes in source.");
-                try
-                {
-                    await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
+                // The next iteration delays before reconnecting, with the subscription still capturing.
             }
         }
     }
@@ -177,6 +183,35 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         {
             _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Length);
             WriteRetryQueue.Enqueue(changes);
+        }
+    }
+
+    private void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
+    {
+        List<SubjectPropertyChange>? owned = null;
+        while (subscription.TryDequeueImmediate(out var change))
+        {
+            if (WriteRetryQueue is null)
+            {
+                continue; // drain-and-discard: without a retry queue there is nothing to reconcile
+            }
+
+            if (change.Source == this)
+            {
+                continue; // this source's own applies (inbound / source-tagged)
+            }
+
+            if (!(change.Property.TryGetSource(out var source) && source == this))
+            {
+                continue; // not owned by this source
+            }
+
+            (owned ??= []).Add(change);
+        }
+
+        if (owned is not null)
+        {
+            WriteRetryQueue!.Enqueue(owned.ToArray());
         }
     }
 

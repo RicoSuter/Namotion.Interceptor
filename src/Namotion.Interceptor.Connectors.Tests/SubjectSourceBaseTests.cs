@@ -1029,6 +1029,57 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenPropertyIsWrittenWhileNotConnected_ThenChangeReachesSourceOnReconnect()
+    {
+        // Arrange: the first connection attempt writes a property and then fails. Under the old
+        // per-connection subscription that write was lost (no subscription across the retry gap).
+        // The source-lifetime subscription must capture it and deliver it on the next attempt.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context);
+
+        var receivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        var attempts = 0;
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            retryTime: TimeSpan.FromMilliseconds(50))
+        {
+            StartListeningOverride = (_, _) =>
+            {
+                var attempt = Interlocked.Increment(ref attempts);
+                if (attempt == 1)
+                {
+                    // Write while connecting, then fail the attempt. Captured, then the pump retries.
+                    subject.FirstName = "written-while-not-connected";
+                    throw new InvalidOperationException("first attempt fails");
+                }
+                return Task.FromResult<IAsyncDisposable?>(null);
+            },
+            LoadInitialStateOverride = _ => Task.FromResult<Action?>(null), // load leaves FirstName alone
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedChanges.Enqueue(change);
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.FirstName)),
+            message: "Expected the write made while not connected to reach the source on reconnect");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        var received = receivedChanges.First(c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Equal("written-while-not-connected", received.GetNewValue<string?>());
+    }
+
+    [Fact]
     public async Task WhenStartListeningOverrideSpawnsTaskAndThrows_ThenSpawnedTaskIsCleanedUpBeforeRethrow()
     {
         // Spec section 11 R2: per-connector StartListeningAsync overrides must own their
