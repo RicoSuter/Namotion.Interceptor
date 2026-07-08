@@ -47,6 +47,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
 
     private readonly PropertyChangeQueueSubscription _subscription;
+    private readonly bool _ownsSubscription;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeQueueProcessor"/> class.
@@ -86,6 +87,7 @@ public class ChangeQueueProcessor : IDisposable
         try
         {
             _subscription = context.CreatePropertyChangeQueueSubscription();
+            _ownsSubscription = true;
         }
         catch
         {
@@ -93,6 +95,30 @@ public class ChangeQueueProcessor : IDisposable
             _flushDedupedBuffer = null!;
             throw;
         }
+    }
+
+    /// <summary>
+    /// Initializes the processor with an externally owned subscription. The caller keeps ownership:
+    /// <see cref="Dispose"/> does not dispose the subscription. Use this when the subscription must
+    /// outlive the processor, for example a source-lifetime subscription reused across reconnects.
+    /// </summary>
+    internal ChangeQueueProcessor(
+        object? source,
+        PropertyChangeQueueSubscription subscription,
+        Func<PropertyReference, bool> propertyFilter,
+        Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
+        TimeSpan? bufferTime,
+        int? maxQueueDepth,
+        ILogger logger)
+    {
+        _source = source;
+        _propertyFilter = propertyFilter;
+        _writeHandler = writeHandler;
+        _logger = logger;
+        _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+        _maxQueueDepth = maxQueueDepth;
+        _subscription = subscription;
+        _ownsSubscription = false;
     }
 
     /// <summary>
@@ -356,7 +382,10 @@ public class ChangeQueueProcessor : IDisposable
             return;
         }
 
-        _subscription.Dispose();
+        if (_ownsSubscription)
+        {
+            _subscription.Dispose();
+        }
 
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
         if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)

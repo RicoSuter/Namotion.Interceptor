@@ -446,6 +446,34 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
+    public void WhenConstructedWithExternalSubscription_ThenDisposeDoesNotDisposeIt()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeQueue();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        var processor = new ChangeQueueProcessor(
+            source: null,
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMilliseconds(50),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        // Act
+        processor.Dispose();
+
+        // Assert - the externally owned subscription is still capturing (not disposed/completed)
+        subject.FirstName = "still-capturing";
+        Assert.True(subscription.TryDequeueImmediate(out var change));
+        Assert.Equal("still-capturing", change.GetNewValue<string?>());
+    }
+
+    [Fact]
     public void WhenDrainingImmediately_ThenReturnsQueuedItemsThenFalse()
     {
         // Arrange
