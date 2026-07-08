@@ -78,6 +78,16 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // A missing PropertyChangeQueue means the source can capture no writes: a configuration error,
+        // so fail fast with an actionable message instead of running silently inert. Detect it precisely
+        // (null-check, not catch-all) so unrelated subscription failures surface with their own diagnosis.
+        if (_context.TryGetService<PropertyChangeQueue>() is null)
+        {
+            throw new InvalidOperationException(
+                "Cannot start source: no PropertyChangeQueue is registered in the interceptor context. " +
+                "Add WithPropertyChangeQueue() or WithFullPropertyTracking() to the context configuration.");
+        }
+
         // Source-lifetime capture: one subscription for the whole source, so writes are captured
         // continuously (including during the retry delay) and never fall into a no-subscription gap.
         using var subscription = _context.CreatePropertyChangeQueueSubscription();
@@ -190,14 +200,18 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
     private void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
     {
+        // No retry queue: still drain the subscription to empty it, but there is nothing to reconcile.
+        if (WriteRetryQueue is null)
+        {
+            while (subscription.TryDequeueImmediate(out _))
+            {
+            }
+            return;
+        }
+
         List<SubjectPropertyChange>? owned = null;
         while (subscription.TryDequeueImmediate(out var change))
         {
-            if (WriteRetryQueue is null)
-            {
-                continue; // drain-and-discard: without a retry queue there is nothing to reconcile
-            }
-
             if (change.Source == this)
             {
                 continue; // this source's own applies (inbound / source-tagged)
@@ -213,7 +227,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
         if (owned is not null)
         {
-            WriteRetryQueue!.Enqueue(owned.ToArray());
+            WriteRetryQueue.Enqueue(owned.ToArray());
         }
     }
 
@@ -248,7 +262,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 {
                     // Source still at the baseline the write was based on: restore locally. The
                     // connected phase captures and sends the re-applied write.
-                    property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object>());
+                    property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object?>());
                     restored++;
                 }
                 else

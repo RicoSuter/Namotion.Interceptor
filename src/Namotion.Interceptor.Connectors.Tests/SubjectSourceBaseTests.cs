@@ -221,6 +221,24 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenContextHasNoPropertyChangeQueue_ThenSourceFailsFastWithActionableMessage()
+    {
+        // Arrange: without WithFullPropertyTracking/WithPropertyChangeQueue the source cannot capture
+        // any writes. That is a configuration error, so the pump must fail fast at startup with a
+        // message naming the missing service and the fix, not run silently inert or throw a cryptic
+        // "service not found" from deep in the pump.
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var subject = new Person(context);
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance);
+
+        // Act & Assert - StartAsync surfaces the faulted ExecuteAsync task
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => source.StartAsync(CancellationToken.None));
+        Assert.Contains("PropertyChangeQueue", exception.Message);
+        Assert.Contains("WithFullPropertyTracking", exception.Message);
+    }
+
+    [Fact]
     public async Task WhenWriteChangesThrowsException_ThenErrorIsLoggedAndServiceContinues()
     {
         // Arrange
