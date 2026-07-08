@@ -108,7 +108,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
-    public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute.
