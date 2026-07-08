@@ -568,6 +568,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     internal void OnCurrentSessionChanged(ISession? previousSession, ISession? currentSession)
     {
+        _writer?.ClearReportedDroppedNodes();
+
         var handler = CurrentSessionChanged;
         if (handler is null)
         {
@@ -585,6 +587,11 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     }
 
     internal static bool IsTransientWriteError(StatusCode statusCode) => OutboundWriter.IsTransientWriteError(statusCode);
+
+    internal static bool IsPermanentWriteError(StatusCode statusCode) => OutboundWriter.IsPermanentWriteError(statusCode);
+
+    internal static bool ShouldDropFailedWrite(StatusCode statusCode, bool dropPermanentWriteFailures)
+        => OutboundWriter.ShouldDropFailedWrite(statusCode, dropPermanentWriteFailures);
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)

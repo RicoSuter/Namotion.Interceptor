@@ -54,6 +54,18 @@ public class OpcUaClientConfiguration
     public int WriteRetryQueueSize { get; set; } = 1000;
 
     /// <summary>
+    /// Gets or sets whether to drop writes that fail with a permanent OPC UA status code
+    /// (BadNodeIdUnknown, BadAttributeIdInvalid, BadTypeMismatch, BadWriteNotSupported,
+    /// BadUserAccessDenied, BadNotWritable) from the retry queue instead of retrying them every cycle.
+    /// Each dropped NodeId is logged once at warning level for the lifetime of the connector instance.
+    /// When false, all failed writes are retried indefinitely (pre-fix behavior). Set this to false
+    /// only if the server changes AccessLevel, role assignments, or address-space membership at runtime
+    /// and you want the connector to recover automatically without an explicit re-write from the application.
+    /// Default is true.
+    /// </summary>
+    public bool DropPermanentWriteFailures { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the interval for subscription health checks and auto-healing attempts. Default is 5 seconds.
     /// Failed monitored items (excluding design-time errors like BadNodeIdUnknown) are retried at this interval.
     /// This also determines how quickly the health check loop picks up work deferred from SDK reconnection.

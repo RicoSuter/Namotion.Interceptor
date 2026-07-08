@@ -521,6 +521,7 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `OperationTimeout` | 30s | Timeout for individual OPC UA operations |
 | `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
+| `DropPermanentWriteFailures` | true | Drop writes that fail with a permanent status code instead of retrying every cycle (see [Write Error Handling](#write-error-handling)) |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
 | `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
 
@@ -640,6 +641,23 @@ Round-trip identity is preserved for the common cross-parent DAG: if the server-
 ## Write Error Handling
 
 When a batch write to the OPC UA server partially fails, the client throws an `OpcUaWriteException`. The exception distinguishes between transient failures (connectivity issues, timeouts that may succeed on retry) and permanent failures (invalid nodes, access denied; should not be retried). The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
+
+### Permanent failure dropping
+
+By default (`OpcUaClientConfiguration.DropPermanentWriteFailures = true`), writes that fail with a permanent OPC UA status code are removed from the retry queue instead of being retried on every write cycle. The following codes are treated as permanent:
+
+| Status code | Cause |
+|-------------|-------|
+| `BadAttributeIdInvalid` | Wrong attribute targeted (configuration error) |
+| `BadTypeMismatch` | Value type does not match the node's `DataType` |
+| `BadWriteNotSupported` | Server does not support writes for this node |
+| `BadNodeIdUnknown` | NodeId not present in the address space |
+| `BadUserAccessDenied` | Current user lacks write permission |
+| `BadNotWritable` | Node's `AccessLevel` does not include `CurrentWrite` |
+
+Each dropped NodeId is logged once per session at warning level. The dropped-set is cleared on every session change (manual reconnect, transferred-subscription failure, stall reset), so a new session re-evaluates each NodeId fresh and operators get a new log line if a previously-broken node is still broken after reconnection. The application is still informed of every failure batch via `OpcUaWriteException`; only the *retry* of dropped writes is suppressed. Subsequent user-initiated writes to the same property retry naturally as fresh writes.
+
+Set `DropPermanentWriteFailures = false` only if the server changes `AccessLevel`, role assignments, or address-space membership at runtime *and* you want the connector to recover automatically without an explicit re-write from the application. With dropping disabled, every permanent failure stays in the retry queue and is re-attempted on every write cycle for the lifetime of the connector.
 
 ## Diagnostics
 
