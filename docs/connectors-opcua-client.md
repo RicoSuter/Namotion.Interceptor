@@ -91,7 +91,7 @@ builder.Services.AddOpcUaSubjectClientSource(
         DefaultSamplingInterval = 0,      // 0 = exception-based (immediate), null = server decides
         DefaultPublishingInterval = 100,
         DefaultQueueSize = 10,
-        MaximumItemsPerSubscription = 1000,
+        MaxItemsPerSubscription = 1000,
 
         // Data change filter (null = use OPC UA library defaults)
         DefaultDataChangeTrigger = null,  // StatusValue (report on value change)
@@ -100,7 +100,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 
         // Performance tuning
         BufferTime = TimeSpan.FromMilliseconds(10),
-        RetryTime = TimeSpan.FromSeconds(1)
+        RetryTime = TimeSpan.FromSeconds(10)   // delay between reconnect attempts
     });
 ```
 
@@ -151,7 +151,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `SubscriptionKeepAliveCount` | 10 | Keep-alive count for subscriptions |
 | `SubscriptionLifetimeCount` | 100 | Lifetime count (must be >= 3x keep-alive count) |
 | `SubscriptionPriority` | 0 | Subscription priority (0 = server default) |
-| `SubscriptionMaximumNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
+| `SubscriptionMaxNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
 | `MinPublishRequestCount` | 3 | Minimum outstanding publish requests |
 | `SubscriptionSequentialPublishing` | false | Process messages in order (reduces throughput) |
 
@@ -177,7 +177,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `MaximumReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
+| `MaxReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
 
 ## Security
 

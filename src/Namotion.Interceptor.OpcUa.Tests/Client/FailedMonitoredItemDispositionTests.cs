@@ -21,10 +21,19 @@ public class FailedMonitoredItemDispositionTests
     [InlineData(StatusCodes.BadNotSupported, true, nameof(FailedMonitoredItemDisposition.FallbackToPolling))]
     [InlineData(StatusCodes.BadMonitoredItemFilterUnsupported, true, nameof(FailedMonitoredItemDisposition.FallbackToPolling))]
     [InlineData(StatusCodes.BadNotSupported, false, nameof(FailedMonitoredItemDisposition.Drop))]
+    // Access-scoped errors: role permissions and AccessLevel are mutable server-side, so the item
+    // is kept for retry. Dropping it would forfeit both in-session recovery routes and leave the
+    // property dark until the next reconnect.
+    [InlineData(StatusCodes.BadUserAccessDenied, true, nameof(FailedMonitoredItemDisposition.KeepForRetry))]
+    [InlineData(StatusCodes.BadNotReadable, true, nameof(FailedMonitoredItemDisposition.KeepForRetry))]
+    [InlineData(StatusCodes.BadNotImplemented, true, nameof(FailedMonitoredItemDisposition.KeepForRetry))]
     // Permanent design-time errors: dropping is correct, retrying never succeeds.
     [InlineData(StatusCodes.BadNodeIdUnknown, true, nameof(FailedMonitoredItemDisposition.Drop))]
     [InlineData(StatusCodes.BadAttributeIdInvalid, true, nameof(FailedMonitoredItemDisposition.Drop))]
     [InlineData(StatusCodes.BadIndexRangeInvalid, true, nameof(FailedMonitoredItemDisposition.Drop))]
+    // Bound to the SecureChannel's MessageSecurityMode: only a new channel can change it, and
+    // reconnect re-attempts every item, so the drop boundary matches the recovery boundary.
+    [InlineData(StatusCodes.BadSecurityModeInsufficient, true, nameof(FailedMonitoredItemDisposition.Drop))]
     public void WhenItemFailsToCreate_ThenDispositionMatchesRetryability(
         uint statusCode, bool pollingEnabled, string expected)
     {
