@@ -651,8 +651,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 // Calling ClearSessionAsync here would race: it disposes the session that
                 // ReconnectSessionAsync just created, causing BadSessionNotActivated on the
                 // next read and triggering a permanent failure loop.
-                try { await reconnectCts.CancelAsync().ConfigureAwait(false); }
-                catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
+                await CancelSafelyAsync(reconnectCts).ConfigureAwait(false);
             }
             else
             {
@@ -661,12 +660,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
                 // If ReconnectSessionAsync started between our _reconnectCts check and ClearSessionAsync,
                 // cancel it to speed up recovery instead of waiting for it to fail naturally.
-                var lateCts = _reconnectCts;
-                if (lateCts is not null)
-                {
-                    try { await lateCts.CancelAsync().ConfigureAwait(false); }
-                    catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
-                }
+                await CancelSafelyAsync(_reconnectCts).ConfigureAwait(false);
             }
         }
     }
@@ -726,6 +720,17 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
     }
 
+    private static async Task CancelSafelyAsync(CancellationTokenSource? cts)
+    {
+        if (cts is null)
+        {
+            return;
+        }
+
+        try { await cts.CancelAsync().ConfigureAwait(false); }
+        catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
@@ -737,19 +742,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         // finally block when detach fails or times out). An in-flight initial load or
         // reconnect holds _structureLock across network I/O, so cancel both first;
         // otherwise the uncancellable wait below stalls disposal until they finish naturally.
-        var loadCts = _loadCts;
-        if (loadCts is not null)
-        {
-            try { await loadCts.CancelAsync().ConfigureAwait(false); }
-            catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
-        }
-
-        var reconnectCts = _reconnectCts;
-        if (reconnectCts is not null)
-        {
-            try { await reconnectCts.CancelAsync().ConfigureAwait(false); }
-            catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
-        }
+        await CancelSafelyAsync(_loadCts).ConfigureAwait(false);
+        await CancelSafelyAsync(_reconnectCts).ConfigureAwait(false);
 
         await _structureLock.WaitAsync().ConfigureAwait(false);
         try

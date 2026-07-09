@@ -37,6 +37,10 @@ internal sealed class OpcUaLoadPlanner
     // The order matches AddFallbackContext call order so rollback runs deepest-first.
     private readonly List<(IInterceptorSubject Subject, IInterceptorSubjectContext ParentContext)> _discoveryLinks = new();
 
+    // Discovery-only reuse maps (pure data; never mutate the live graph).
+    private readonly Dictionary<NodeId, IInterceptorSubject> _subjectsByNodeId = new();
+    private readonly HashSet<IInterceptorSubject> _loadedSubjects = new();
+
     public OpcUaLoadPlanner(
         IInterceptorSubject rootSubject,
         OpcUaClientConfiguration configuration,
@@ -104,7 +108,7 @@ internal sealed class OpcUaLoadPlanner
         }
 
         // Phase 1: filter and batch-browse
-        var (validSubjects, allBrowseResults) = await FilterAndBrowseSubjectsAsync(subjects, plan, session, cancellationToken).ConfigureAwait(false);
+        var (validSubjects, allBrowseResults) = await FilterAndBrowseSubjectsAsync(subjects, session, cancellationToken).ConfigureAwait(false);
         if (validSubjects.Count == 0)
         {
             return;
@@ -146,7 +150,6 @@ internal sealed class OpcUaLoadPlanner
         Dictionary<NodeId, IReadOnlyList<ReferenceDescription>> BrowseResults)>
         FilterAndBrowseSubjectsAsync(
             IReadOnlyList<(ReferenceDescription Node, IInterceptorSubject Subject)> subjects,
-            OpcUaLoadPlan plan,
             ISession session,
             CancellationToken cancellationToken)
     {
@@ -155,7 +158,7 @@ internal sealed class OpcUaLoadPlanner
 
         foreach (var (node, subject) in subjects)
         {
-            if (!plan.LoadedSubjects.Add(subject))
+            if (!_loadedSubjects.Add(subject))
             {
                 continue;
             }
@@ -431,7 +434,7 @@ internal sealed class OpcUaLoadPlanner
         ISession session,
         CancellationToken cancellationToken)
     {
-        if (plan.SubjectsByNodeId.TryGetValue(resolvedNodeId, out var reusedSubject))
+        if (_subjectsByNodeId.TryGetValue(resolvedNodeId, out var reusedSubject))
         {
             plan.AddValueAssignment(_source, property, reusedSubject);
             return null;
@@ -447,7 +450,7 @@ internal sealed class OpcUaLoadPlanner
             RegisterStagedSubject(subjectToLoad, parentSubject.Context, plan);
         }
 
-        plan.SubjectsByNodeId.TryAdd(resolvedNodeId, subjectToLoad);
+        _subjectsByNodeId.TryAdd(resolvedNodeId, subjectToLoad);
         return (subjectToLoad, existingSubject is null);
     }
 
@@ -679,7 +682,7 @@ internal sealed class OpcUaLoadPlanner
 
             if (childSubject is null)
             {
-                plan.SubjectsByNodeId.TryGetValue(nodeId, out childSubject);
+                _subjectsByNodeId.TryGetValue(nodeId, out childSubject);
             }
 
             var isFreshlyCreated = childSubject is null;
@@ -691,7 +694,7 @@ internal sealed class OpcUaLoadPlanner
                 RegisterStagedSubject(childSubject, property.Subject.Context, plan);
             }
 
-            plan.SubjectsByNodeId.TryAdd(nodeId, childSubject);
+            _subjectsByNodeId.TryAdd(nodeId, childSubject);
             children.Add((childNode, childSubject));
         }
 

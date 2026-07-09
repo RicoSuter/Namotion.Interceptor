@@ -183,15 +183,20 @@ internal class SubscriptionManager : IAsyncDisposable
         // registration complete, so no notification can reach a subject during setup.
         SweepDetachedSubjects();
 
-        RegisterSurvivors(_subscriptions.Keys.SelectMany(s => s.MonitoredItems).ToArray());
+        RegisterSurvivors(_subscriptions.Keys.SelectMany(s => s.MonitoredItems));
 
         // Open the gate only after the sweep and survivor registration are complete.
         _callbacksEnabled = true;
     }
 
+    // Inbound notifications are dropped while shutting down or before the setup gate opens.
+    // OnFastDataChange and the ApplyDataChange test seam share this predicate so the gating
+    // test exercises the same flag the live callback checks.
+    private bool AreCallbacksSuppressed => _shuttingDown || !_callbacksEnabled;
+
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
-        if (_shuttingDown || !_callbacksEnabled)
+        if (AreCallbacksSuppressed)
         {
             return;
         }
@@ -505,9 +510,8 @@ internal class SubscriptionManager : IAsyncDisposable
 
     /// <summary>
     /// Removes monitored items for every subject that is no longer in the registry.
-    /// Returns the deduplicated list of subjects that were swept.
     /// </summary>
-    private IReadOnlyList<IInterceptorSubject> SweepDetachedSubjects()
+    private void SweepDetachedSubjects()
     {
         var swept = new HashSet<IInterceptorSubject>();
         foreach (var property in _monitoredItems.Values)
@@ -519,26 +523,20 @@ internal class SubscriptionManager : IAsyncDisposable
                 _pollingManager?.RemoveItemsForSubject(subject);
             }
         }
-
-        return swept.Count == 0
-            ? Array.Empty<IInterceptorSubject>()
-            : [.. swept];
     }
 
     /// <summary>
     /// Registers read-after-write tracking for monitored items whose subject survived the sweep.
     /// Only items that are created on the server and still present in <c>_monitoredItems</c>
     /// (the sweep removed detached subjects' handles) are registered.
-    /// Returns the client handles that were registered.
     /// </summary>
-    private IReadOnlyList<uint> RegisterSurvivors(IReadOnlyCollection<MonitoredItem> monitoredItems)
+    private void RegisterSurvivors(IEnumerable<MonitoredItem> monitoredItems)
     {
         if (_readAfterWriteManager is null)
         {
-            return Array.Empty<uint>();
+            return;
         }
 
-        var registered = new List<uint>();
         foreach (var item in monitoredItems)
         {
             if (item is { Handle: RegisteredSubjectProperty property, Status.Created: true } &&
@@ -549,11 +547,8 @@ internal class SubscriptionManager : IAsyncDisposable
                     property,
                     GetRequestedSamplingInterval(property),
                     TimeSpan.FromMilliseconds(item.Status.SamplingInterval));
-                registered.Add(item.ClientHandle);
             }
         }
-
-        return registered;
     }
 
     /// <summary>
@@ -579,7 +574,7 @@ internal class SubscriptionManager : IAsyncDisposable
     /// </summary>
     internal void ApplyDataChange(uint clientHandle, DateTimeOffset timestamp, object? value)
     {
-        if (_shuttingDown || !_callbacksEnabled)
+        if (AreCallbacksSuppressed)
         {
             return;
         }
@@ -609,8 +604,8 @@ internal class SubscriptionManager : IAsyncDisposable
     internal void EnableCallbacksForTesting() => _callbacksEnabled = true;
     internal IDictionary<uint, RegisteredSubjectProperty> MonitoredItemsForTesting => _monitoredItems;
 
-    internal IReadOnlyList<IInterceptorSubject> SweepDetachedSubjectsForTesting() => SweepDetachedSubjects();
-    internal IReadOnlyList<uint> RegisterSurvivorsForReadAfterWriteForTesting(IReadOnlyCollection<MonitoredItem> monitoredItems) => RegisterSurvivors(monitoredItems);
+    internal void SweepDetachedSubjectsForTesting() => SweepDetachedSubjects();
+    internal void RegisterSurvivorsForReadAfterWriteForTesting(IEnumerable<MonitoredItem> monitoredItems) => RegisterSurvivors(monitoredItems);
 
     public async ValueTask DisposeAsync()
     {

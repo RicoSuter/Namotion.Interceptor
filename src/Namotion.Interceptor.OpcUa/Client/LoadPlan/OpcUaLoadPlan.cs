@@ -17,10 +17,6 @@ internal sealed class OpcUaLoadPlan
     private readonly List<(object Source, RegisteredSubjectProperty Property, object? Value)> _stagedValues = new();
     private readonly List<(object Source, RegisteredSubjectProperty Property, object? Value)> _rootAssignments = new();
 
-    // Discovery-only reuse maps (pure data; never mutate the live graph).
-    public Dictionary<NodeId, IInterceptorSubject> SubjectsByNodeId { get; } = new();
-    public HashSet<IInterceptorSubject> LoadedSubjects { get; } = new();
-
     public OpcUaLoadPlan(IInterceptorSubject rootSubject, ILogger logger)
     {
         _rootSubject = rootSubject;

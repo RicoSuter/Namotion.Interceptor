@@ -20,19 +20,15 @@ public class OpcUaSubscriptionSweepOrderingTests
         };
 
         // Act
-        var swept = harness.Manager.SweepDetachedSubjectsForTesting();
-        var registered = harness.Manager.RegisterSurvivorsForReadAfterWriteForTesting(snapshotBeforeSweep);
+        harness.Manager.SweepDetachedSubjectsForTesting();
+        harness.Manager.RegisterSurvivorsForReadAfterWriteForTesting(snapshotBeforeSweep);
 
-        // Assert: the detached subject's handle (2) is swept
-        Assert.Contains(detachedProperty.Reference.Subject, swept);
-        Assert.DoesNotContain(survivorProperty.Reference.Subject, swept);
+        // Assert: the sweep removed the detached subject's handle (2) and kept the survivor (1)
+        Assert.False(harness.Manager.MonitoredItemsForTesting.ContainsKey(2));
+        Assert.True(harness.Manager.MonitoredItemsForTesting.ContainsKey(1));
 
         // Assert: only the survivor is registered for read-after-write
         Assert.Contains(survivorProperty, harness.ReadAfterWriteSpy!.RegisteredSubjects);
         Assert.DoesNotContain(detachedProperty, harness.ReadAfterWriteSpy!.RegisteredSubjects);
-
-        // Assert: returned handle list matches expected survivors/excluded
-        Assert.Contains(1u, registered);
-        Assert.DoesNotContain(2u, registered);
     }
 }
