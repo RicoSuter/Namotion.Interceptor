@@ -6,7 +6,7 @@
 
 **Architecture:** The model is the single source of truth. A generator reads the model's `VARIABLES` declaration and emits a trace-check module that pins each variable to the recorded values and requires each recorded step to satisfy the model's `Next`. Because we derive the item set per trace and emit full snapshots, every variable pins uniformly (`v = Trace[i].v`), so the generator needs no per-variable special casing and there is nothing to hand-keep in sync. A driver script runs it per behavior. No C# and no production code in this phase.
 
-**Tech Stack:** TLA+ / TLC 2.19 (rootless under `tools/tla/`), TLA+ Community Modules (`CommunityModules-deps.jar`), bash.
+**Tech Stack:** TLA+ / TLC (`tla2tools.jar` v1.8.0, rootless under `tools/tla/`), TLA+ Community Modules (`CommunityModules-deps.jar`), bash.
 
 **Scope:** Phase 2a. Phase 2b (the `[Conditional("MODELTRACE")]` C# helper, the sink, and instrumenting the client) is a separate plan. See `docs/superpowers/specs/2026-07-08-opcua-client-trace-validation-design.md`.
 

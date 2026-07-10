@@ -79,7 +79,7 @@ PR #364 later centralized status-code classification into `OpcUaStatusCodeClassi
 
 TLA+ with the TLC model checker (TLC runs on the JVM). Set up as a rootless, no-Docker toolchain under `tools/tla/`, proven working in this environment:
 
-- `tools/tla/bootstrap.sh` downloads pinned artifacts into `tools/tla/.cache/` (gitignored): `tla2tools.jar` v1.7.4 (TLC 2.19) and, only when no system Java is present, a portable Temurin JRE 17. Both are SHA-256 verified.
+- `tools/tla/bootstrap.sh` downloads pinned artifacts into `tools/tla/.cache/` (gitignored): `tla2tools.jar` v1.8.0 (required by the Community Modules) and, only when no system Java is present, a portable Temurin JRE 17. Both are SHA-256 verified.
 - `tools/tla/tlc <Module.tla>` runs the checker, preferring a system Java (`JAVA_HOME` or PATH) and falling back to the portable JRE.
 - Self-test: `tools/tla/tlc selftest/Smoke.tla` reports "No error has been found".
 - CI: add `actions/setup-java` (Temurin 17), then call `tools/tla/bootstrap.sh` (fetches only the ~2 MB jar, since system Java is present) and `tools/tla/tlc`. The identical wrapper runs locally and in CI; cache `tools/tla/.cache/` for speed.
