@@ -360,11 +360,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
             // not need a WithChangedTimestamp scope active to share the time with the dependent).
             derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
-        }
 
-        if (derivedProperty.Subject is IRaisePropertyChanged raiser)
-        {
-            raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+            // The raise stays inside the scope: generated raisers clear the source themselves, but
+            // a hand-written IRaisePropertyChanged implementation does not, and INPC handlers must
+            // observe local origin for derived notifications regardless of the raiser.
+            if (derivedProperty.Subject is IRaisePropertyChanged raiser)
+            {
+                raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+            }
         }
     }
 

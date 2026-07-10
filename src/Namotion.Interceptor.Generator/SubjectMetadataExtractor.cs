@@ -111,13 +111,23 @@ internal static class SubjectMetadataExtractor
                     (IsGeneratedSubject(baseOfCurrent) || ImplementsInterface(baseOfCurrent, KnownTypes.IRaisePropertyChanged));
                 if (!currentInheritsInpc)
                 {
-                    // For source-declared subjects the generated interface list is invisible here, so
-                    // IRaisePropertyChanged in the symbol's own interface list is user-declared: that
-                    // subject saw inherited INPC at generation time and emitted no wrapped raise.
-                    if (current.DeclaringSyntaxReferences.Length > 0 &&
-                        current.Interfaces.Any(i => ImplementsInterface(i, KnownTypes.IRaisePropertyChanged)))
+                    if (current.DeclaringSyntaxReferences.Length > 0)
                     {
-                        return true; // manual implementer: its raise is hand-written and unwrapped
+                        // Source-declared: the generated interface list is invisible here, so
+                        // IRaisePropertyChanged in the symbol's own interface list is user-declared:
+                        // that subject saw inherited INPC at generation time and emitted no wrapped raise.
+                        if (current.Interfaces.Any(i => ImplementsInterface(i, KnownTypes.IRaisePropertyChanged)))
+                        {
+                            return true; // manual implementer: its raise is hand-written and unwrapped
+                        }
+                    }
+                    else if (!HasGeneratedRaiseMarker(current))
+                    {
+                        // Metadata-only: generated interfaces are visible, so the interface list cannot
+                        // distinguish generated from manual. The generated raise carries a GeneratedCode
+                        // marker; no marker means a hand-written raise or pre-marker generator output,
+                        // both unwrapped.
+                        return true;
                     }
 
                     return false; // generated owner found: descendants inherit a wrapped raise
@@ -135,6 +145,21 @@ internal static class SubjectMetadataExtractor
     private static bool IsGeneratedSubject(INamedTypeSymbol type)
     {
         return HasInterceptorSubjectAttribute(type) || ImplementsInterface(type, KnownTypes.IInterceptorSubject);
+    }
+
+    /// <summary>
+    /// Whether the type declares a RaisePropertyChanged carrying the GeneratedCode marker the
+    /// generator emits on its wrapped (local-origin) raise. Used for metadata-only symbols.
+    /// </summary>
+    private static bool HasGeneratedRaiseMarker(INamedTypeSymbol type)
+    {
+        return type.GetMembers("RaisePropertyChanged")
+            .OfType<IMethodSymbol>()
+            .Any(method => method.GetAttributes().Any(attribute =>
+                attribute.AttributeClass?.Name == "GeneratedCodeAttribute" &&
+                attribute.ConstructorArguments.Length == 2 &&
+                attribute.ConstructorArguments[0].Value is string tool &&
+                tool == "Namotion.Interceptor.Generator"));
     }
 
     private static string GetNamespace(ClassDeclarationSyntax classDeclaration)

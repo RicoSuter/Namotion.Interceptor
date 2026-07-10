@@ -120,9 +120,14 @@ internal static class SubjectCodeGenerator
             return;
         }
 
+        // The GeneratedCode marker lets the extractor recognize a wrapped (local-origin) raise on
+        // metadata-only base symbols, where generated and hand-written interface lists are
+        // indistinguishable. No marker means manual or pre-marker generator output; subclasses
+        // then wrap the raise at their call sites.
         builder.Append("""
                     public event PropertyChangedEventHandler? PropertyChanged;
 
+                    [System.CodeDom.Compiler.GeneratedCode("Namotion.Interceptor.Generator", "1.0.0")]
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     protected void RaisePropertyChanged(string propertyName)
                     {
