@@ -1,4 +1,4 @@
-namespace HomeBlaze.Services;
+namespace HomeBlaze.Abstractions;
 
 /// <summary>
 /// Path style for subject paths.

@@ -10,7 +10,8 @@ namespace Namotion.Interceptor.Connectors
     }
     public class ChangeQueueProcessor : System.IDisposable
     {
-        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, System.TimeSpan? bufferTime, Microsoft.Extensions.Logging.ILogger logger) { }
+        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, System.TimeSpan? bufferTime, int? maxQueueDepth, Microsoft.Extensions.Logging.ILogger logger) { }
+        public long DropCount { get; }
         public void Dispose() { }
         public System.Threading.Tasks.Task ProcessAsync(System.Threading.CancellationToken cancellationToken) { }
     }
@@ -98,6 +99,12 @@ namespace Namotion.Interceptor.Connectors
     {
         [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<!0>))]
         public static System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesInBatchesAsync(this Namotion.Interceptor.Connectors.ISubjectSource source, System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class ThroughputCounter
+    {
+        public ThroughputCounter() { }
+        public double CurrentRate { get; }
+        public void Add(int count) { }
     }
     public readonly struct WriteResult
     {
