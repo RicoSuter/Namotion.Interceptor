@@ -150,10 +150,14 @@ public readonly struct SubjectChangeContext
     public static SubjectChangeContextScope WithLocalOrigin()
     {
         var previousState = _current;
-        _current = new SubjectChangeContext(
-            previousState._changedTimestamp,
-            previousState._receivedTimestamp,
-            null);
+        if (previousState.Source is not null)
+        {
+            _current = new SubjectChangeContext(
+                previousState._changedTimestamp,
+                previousState._receivedTimestamp,
+                null);
+        }
+
         return new SubjectChangeContextScope(previousState);
     }
 

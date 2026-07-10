@@ -219,6 +219,36 @@ public partial class DimmableLight : Light
         return Verify(generatedSource);
     }
 
+    [Fact]
+    public Task WhenGeneratingClassWithImplementedHooks_ThenOnlyImplementedHookCallsAreWrappedInLocalOriginScope()
+    {
+        // Arrange
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class SampleSubject
+{
+    public partial string? Hooked { get; set; }
+    public partial string? NotHooked { get; set; }
+
+    partial void OnHookedChanging(ref string? newValue, ref bool cancel)
+    {
+    }
+
+    partial void OnHookedChanged(string? newValue)
+    {
+    }
+}";
+
+        // Act
+        var generated = GeneratedSourceCode(source);
+
+        // Assert
+        var generatedSource = generated.Single().SourceText.ToString();
+        return Verify(generatedSource);
+    }
+
     private static IEnumerable<GeneratedSourceResult> GeneratedSourceCode(string source)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);

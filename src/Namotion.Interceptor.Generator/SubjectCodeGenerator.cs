@@ -132,6 +132,12 @@ internal static class SubjectCodeGenerator
                             return;
                         }
 
+                        if (SubjectChangeContext.Current.Source is null)
+                        {
+                            handler.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+                            return;
+                        }
+
                         using (SubjectChangeContext.WithLocalOrigin())
                         {
                             handler.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));

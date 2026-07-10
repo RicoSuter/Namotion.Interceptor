@@ -21,7 +21,7 @@ using System.Text.Json.Serialization;
 
 namespace YourDefaultNamespace
 {
-    public partial class Sensor : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class SampleSubject : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -77,59 +77,90 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Value",
+                    "Hooked",
                     new SubjectPropertyMetadata(
-                        typeof(Sensor).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((Sensor)o).Value,
-                        (o, v) => ((Sensor)o).Value = (double)v,
+                        typeof(SampleSubject).GetProperty(nameof(Hooked), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((SampleSubject)o).Hooked,
+                        (o, v) => ((SampleSubject)o).Hooked = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
-                    "Status",
+                    "NotHooked",
                     new SubjectPropertyMetadata(
-                        typeof(global::ISensor).GetProperty(nameof(global::ISensor.Status), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((global::ISensor)o).Status,
-                        null,
-                        isIntercepted: false,
+                        typeof(SampleSubject).GetProperty(nameof(NotHooked), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((SampleSubject)o).NotHooked,
+                        (o, v) => ((SampleSubject)o).NotHooked = (string)v,
+                        isIntercepted: true,
                         isDynamic: false)
                 },
             }
             .ToFrozenDictionary();
 
-        public Sensor()
+        public SampleSubject()
         {
         }
 
-        public Sensor(IInterceptorSubjectContext context) : this()
+        public SampleSubject(IInterceptorSubjectContext context) : this()
         {
             ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }
 
-        private double _Value;
+        private string _Hooked;
 
-        public partial double Value
+        public partial string Hooked
         {
             get
             {
-                return GetPropertyValue<double>(nameof(Value), static (o) => ((Sensor)o)._Value);
+                return GetPropertyValue<string>(nameof(Hooked), static (o) => ((SampleSubject)o)._Hooked);
             }
             set
             {
                 var newValue = value;
                 var cancel = false;
-                OnValueChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Value), newValue, _Value, static (o, v) => ((Sensor)o)._Value = v))
+                using (SubjectChangeContext.WithLocalOrigin())
                 {
-                    OnValueChanged(_Value);
-                    RaisePropertyChanged(nameof(Value));
+                    OnHookedChanging(ref newValue, ref cancel);
+                }
+                if (!cancel && SetPropertyValue(nameof(Hooked), newValue, _Hooked, static (o, v) => ((SampleSubject)o)._Hooked = v))
+                {
+                    using (SubjectChangeContext.WithLocalOrigin())
+                    {
+                        OnHookedChanged(_Hooked);
+                    }
+                    RaisePropertyChanged(nameof(Hooked));
                 }
             }
         }
 
-        partial void OnValueChanging(ref double newValue, ref bool cancel);
+        partial void OnHookedChanging(ref string newValue, ref bool cancel);
 
-        partial void OnValueChanged(double newValue);
+        partial void OnHookedChanged(string newValue);
+
+        private string _NotHooked;
+
+        public partial string NotHooked
+        {
+            get
+            {
+                return GetPropertyValue<string>(nameof(NotHooked), static (o) => ((SampleSubject)o)._NotHooked);
+            }
+            set
+            {
+                var newValue = value;
+                var cancel = false;
+                OnNotHookedChanging(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof(NotHooked), newValue, _NotHooked, static (o, v) => ((SampleSubject)o)._NotHooked = v))
+                {
+                    OnNotHookedChanged(_NotHooked);
+                    RaisePropertyChanged(nameof(NotHooked));
+                }
+            }
+        }
+
+        partial void OnNotHookedChanging(ref string newValue, ref bool cancel);
+
+        partial void OnNotHookedChanged(string newValue);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)

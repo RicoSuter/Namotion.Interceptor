@@ -111,6 +111,15 @@ internal static class SubjectMetadataExtractor
                     (IsGeneratedSubject(baseOfCurrent) || ImplementsInterface(baseOfCurrent, KnownTypes.IRaisePropertyChanged));
                 if (!currentInheritsInpc)
                 {
+                    // For source-declared subjects the generated interface list is invisible here, so
+                    // IRaisePropertyChanged in the symbol's own interface list is user-declared: that
+                    // subject saw inherited INPC at generation time and emitted no wrapped raise.
+                    if (current.DeclaringSyntaxReferences.Length > 0 &&
+                        current.Interfaces.Any(i => ImplementsInterface(i, KnownTypes.IRaisePropertyChanged)))
+                    {
+                        return true; // manual implementer: its raise is hand-written and unwrapped
+                    }
+
                     return false; // generated owner found: descendants inherit a wrapped raise
                 }
             }

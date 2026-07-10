@@ -77,4 +77,41 @@ public class HookScopeGenerationTests
         // unwrapped and the subscriber would observe the source instead of null.
         Assert.Null(sourceSeenDuringRaise);
     }
+
+    [Fact]
+    public void WhenBaseSubjectManuallyImplementsInpcItself_ThenChildRaiseRunsUnderLocalOriginScope()
+    {
+        // Arrange: SelfInpcChild : SelfInpcSubject, where the parent is a generated subject that
+        // declares IRaisePropertyChanged manually in its own base list. No generated level owns a
+        // wrapped raise, so the child setter must wrap the parent's manual raise at its call site.
+        var subject = new SelfInpcChild();
+        var source = new object();
+        object? sourceSeenDuringRaise = "sentinel";
+        subject.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
+
+        // Act
+        using (SubjectChangeContext.WithSource(source))
+        {
+            subject.ChildName = "value";
+        }
+
+        // Assert
+        Assert.Null(sourceSeenDuringRaise);
+    }
+
+    [Fact]
+    public void WhenLocalWriteRaisesPropertyChanged_ThenHandlerSeesNullSource()
+    {
+        // Arrange: the generated RaisePropertyChanged skips the local-origin scope when the ambient
+        // source is already null; the handler must still observe a null source.
+        var person = new PersonWithSelectiveHooks();
+        object? sourceSeenDuringRaise = "sentinel";
+        person.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
+
+        // Act
+        person.NotHooked = "value";
+
+        // Assert
+        Assert.Null(sourceSeenDuringRaise);
+    }
 }
