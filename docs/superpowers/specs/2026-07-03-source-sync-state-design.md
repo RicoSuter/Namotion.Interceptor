@@ -83,7 +83,7 @@ Transitions happen on the pump path plus one disposal fallback:
 Implementation notes:
 
 - The state is stored in an `int` field (the enum's underlying value) so it works with `Volatile.Read` and `Interlocked.CompareExchange`. All transitions go through a compare-exchange helper with two rules: a transition to the current state is a no-op (no duplicate events), and `Stopped` is sticky, meaning only the pump-entry transition (restart) may leave it. Stickiness makes the disposal fallback race-free against a dying pump: a late catch-block `Connecting` or an in-flight `Synchronized` cannot overwrite `Stopped`.
-- `LastSynchronizedAt` is stored as UTC ticks in a `long` field (`0` means never synchronized), written with `Interlocked.Exchange` immediately before the `Synchronized` transition and read with `Interlocked.Read`, materialized to `DateTimeOffset?` in the property getter. This is the same pattern as `PropertyReference.SetWriteTimestamp`; a `DateTimeOffset?` field would tear under concurrent access.
+- `LastSynchronizedAt` is stored as UTC ticks in a `long` field (`0` means never synchronized), written with `Interlocked.Exchange` immediately after a successful transition to `Synchronized` and before the event is raised, so handlers always observe the fresh value; a rejected transition (an in-flight `Synchronized` losing against sticky `Stopped` during dispose) leaves the timestamp untouched. It is read with `Interlocked.Read` and materialized to `DateTimeOffset?` in the property getter. This is the same pattern as `PropertyReference.SetWriteTimestamp`; a `DateTimeOffset?` field would tear under concurrent access.
 - Each transition raises the source's own `StateChanged` event after the field is updated, from the thread performing the transition (normally the pump, the disposing thread for the fallback). The raise helper wraps handler invocation in try/catch with logging: a throwing subscriber must not be treated as a pump failure (otherwise a buggy `Synchronized` handler would flip the source back to `Connecting` in an endless loop).
 
 ### The source event stream
@@ -104,8 +104,8 @@ public readonly record struct SourceEvent(
     SourceEventKind Kind,
     ISubjectSource Source,
     PropertyReference? Property,   // set for PropertyClaimed/PropertyReleased, otherwise null
-    SourceState OldState,          // meaningful for StateChanged; otherwise the source's current state
-    SourceState NewState,
+    SourceState OldState,          // StateChanged: the source's previous state; ownership events: the property's previous effective state
+    SourceState NewState,          // StateChanged: the source's new state; ownership events: the property's new effective state
     DateTimeOffset Timestamp);
 ```
 
@@ -121,7 +121,7 @@ Delivery rules:
 
 Each event kind is emitted at the lowest level that knows the truth:
 
-- **`PropertyClaimed` / `PropertyReleased`: emitted by `SetSource` and `RemoveSource` themselves**, not by `SourceOwnershipManager`. The documented contract tells sources to claim by calling `SetSource(this)` directly, and the low-level ownership API is public, so emission at the primitive is the only way the stream stays trustworthy. Emission happens only on actual ownership transitions: an idempotent re-claim by the same source and a rejected claim (property owned by a different source) emit nothing, and `RemoveSource` emits only when it actually removed the ownership entry. To distinguish a fresh claim from a re-claim atomically, `PropertyReference` gains `TryAddPropertyData(key, value)`, the add-if-absent mirror of the existing `TryRemovePropertyData`; `SetSource` switches from `GetOrSetPropertyData` to it. `RemoveSource` already reports actual removal.
+- **`PropertyClaimed` / `PropertyReleased`: emitted by `SetSource` and `RemoveSource` themselves**, not by `SourceOwnershipManager`. The documented contract tells sources to claim by calling `SetSource(this)` directly, and the low-level ownership API is public, so emission at the primitive is the only way the stream stays trustworthy. Emission happens only on actual ownership transitions: an idempotent re-claim by the same source and a rejected claim (property owned by a different source) emit nothing, and `RemoveSource` emits only when it actually removed the ownership entry. To distinguish a fresh claim from a re-claim atomically, `PropertyReference` gains `TryAddPropertyData(key, value)`, the add-if-absent mirror of the existing `TryRemovePropertyData`; `SetSource` switches from `GetOrSetPropertyData` to it. `RemoveSource` already reports actual removal. Ownership events describe the property's effective-state transition, not the source's: `PropertyClaimed` carries `Unclaimed` to the owning source's state, `PropertyReleased` carries the state at release to `Unclaimed`. The attach/detach catch-up emits with the same payload rule. This makes "apply `NewState`" universally correct for per-property consumers; a release can never leave a stale `Synchronized` behind.
 - Monitors are resolved via `property.Subject.Context.GetServices<SourceMonitor>()` (service resolution walks fallback contexts) and the event is delivered to every resolved monitor. Single-service resolution would throw for a subject attached to two trees (multi-parent subjects see both trees' monitors through their fallback contexts); iterating handles that case and gives the right semantics, since a property visible in two trees appears on both streams. The result is a cached `ImmutableArray`, usually of length 0 or 1; when empty, emission is a no-op, so plain contexts and benchmarks pay nothing.
 - **`StateChanged`: raised by the source itself** (the pump in `SubjectSourceBase`). The monitor, subscribed since registration, forwards each event to the stream.
 - **`SourceRegistered` / `SourceUnregistered`: emitted by the monitor** in `Register`/`Unregister` (called from `SubjectSourceBase.StartAsync` and dispose).
@@ -152,8 +152,8 @@ Two robustness contracts: the monitor does not require lifecycle tracking (on a 
 ```csharp
 public class SourceMonitor
 {
-    IReadOnlyList<ISubjectSource> Sources { get; }        // snapshot
-    IDisposable Subscribe(Action<SourceEvent> handler);   // typed event stream
+    IReadOnlyList<ISubjectSource> Sources { get; }              // snapshot for polling consumers
+    SourceSubscription Subscribe(Action<SourceEvent> handler);  // typed event stream
 
     void Register(ISubjectSource source);                 // idempotent
     void Unregister(ISubjectSource source);
@@ -161,9 +161,14 @@ public class SourceMonitor
     Task WaitForSourcesSynchronizedAsync(CancellationToken cancellationToken = default);           // all sources
     Task WaitForSourcesSynchronizedAsync(Func<ISubjectSource, bool> filter, CancellationToken cancellationToken = default);
 }
+
+public sealed class SourceSubscription : IDisposable
+{
+    ImmutableArray<ISubjectSource> Sources { get; }   // snapshot captured atomically with the subscription
+}
 ```
 
-On `Register` the monitor subscribes to the source's `StateChanged` event and forwards its events to the stream; on `Unregister` it unsubscribes. Registration precedes the pump start, so `SourceRegistered` precedes any forwarded `StateChanged` of that source. Subscription and registration are serialized by the monitor, so the documented consumption pattern is race-free: subscribe first, then read the `Sources` snapshot; every change after the snapshot arrives as an event. Each subscription is stamped with the queue's current sequence number, so events enqueued before the subscription are never delivered to it and the exactly-once contract survives asynchronous delivery. The wait methods are internal stateful consumers of registration, unregistration, and state-change notifications, notified synchronously at the emission points rather than through the delivery queue, so wait correctness does not depend on drain latency; they are tracked separately from public stream subscribers (see the catch-up cost guard below).
+On `Register` the monitor subscribes to the source's `StateChanged` event and forwards its events to the stream; on `Unregister` it unsubscribes. Registration precedes the pump start, so `SourceRegistered` precedes any forwarded `StateChanged` of that source. Subscription and registration are serialized by the monitor, and `Subscribe` captures the `Sources` snapshot atomically with the subscription under that serialization, returning it on the `SourceSubscription` handle. Reading `monitor.Sources` separately after subscribing is not race-free (a source registered between the two calls appears in both the snapshot and the stream, so a naive consumer double-counts it); the handle's snapshot is the correct baseline. Each subscription is stamped with the queue's current sequence number, so events enqueued before the subscription are never delivered to it: the handle's snapshot plus the delivered events observe every change exactly once. The wait methods are internal stateful consumers of registration, unregistration, and state-change notifications, notified synchronously at the emission points rather than through the delivery queue, so wait correctness does not depend on drain latency; they are tracked separately from public stream subscribers (see the catch-up cost guard below).
 
 ### View catch-up on subject attach and detach
 
@@ -197,7 +202,7 @@ public static SourceMonitor GetSourceMonitor(this IInterceptorSubjectContext con
 
 It resolves through the fallback chain (so calling it on a child subject's context finds the tree monitor). If no monitor is resolvable, it throws `InvalidOperationException` with guidance to call `WithSourceMonitoring()` on the tree root context; a missing monitor would otherwise surface as a silent forever-block. If multiple monitors are resolvable (one configured locally and one on a shared ancestor context, or a multi-parent subject attached to two trees), it throws and directs the caller to `GetServices<SourceMonitor>()`: combining monitors is a semantic decision that belongs at the callsite, for example `Task.WhenAll` over each monitor's wait to mean "all trees are live". Each monitor applies the empty-set rule to its own sources, so waiting on a configured tree before any source exists blocks until the first source registers.
 
-The startup race for hosted waiters is closed by the hosting model itself. Sources register during host startup, when the host calls their `StartAsync` sequentially. A waiter that runs before host startup completes could observe a partially registered set: if an early source synchronizes before a later source is started, the wait could complete prematurely. The built-in guarantee against this is `IHostApplicationLifetime.ApplicationStarted`: once it fires, every DI-registered source has been started and is therefore registered. Hosted waiters await `ApplicationStarted` first (a few lines with a `TaskCompletionSource` registered on the token); code that runs after the host has started needs nothing. Even without the guard the window is small, because a source would have to complete its network connect and initial load faster than the host finishes starting the remaining services; the guard makes premature completion impossible rather than unlikely.
+The startup race for hosted waiters is closed by the hosting model itself. Sources register during host startup, when the host calls their `StartAsync` sequentially. A waiter that runs before host startup completes could observe a partially registered set: if an early source synchronizes before a later source is started, the wait could complete prematurely. The built-in guarantee against this is `IHostApplicationLifetime.ApplicationStarted`: once it fires, every DI-registered source has been started and is therefore registered. Hosted waiters await `ApplicationStarted` first (a few lines with a `TaskCompletionSource` registered on the token), but only from code that runs outside host startup, such as `BackgroundService.ExecuteAsync` or other post-start code. Awaiting the token inside `IHostedService.StartAsync` deadlocks the host, because `ApplicationStarted` only fires after every `StartAsync` has returned. Code that runs after the host has started needs nothing. Even without the guard the window is small, because a source would have to complete its network connect and initial load faster than the host finishes starting the remaining services; the guard makes premature completion impossible rather than unlikely.
 
 Dynamic sources that do not exist yet at call time cannot be known by any mechanism. Applications that create sources dynamically (for example HomeBlaze device loading) coordinate at the application level: finish starting sources, then wait, or rely on mid-wait registration pickup.
 
@@ -221,6 +226,7 @@ Per-property change observation needs no dedicated API: a property's effective s
 // Phase 0 (hosted waiters only): ensure host startup finished, so every
 // DI-registered source has been started and is registered.
 // (IHostApplicationLifetime.ApplicationStarted awaited via TaskCompletionSource.)
+// Run this from ExecuteAsync or other post-start code, never inside StartAsync.
 await applicationStartedTask;
 
 // Phase 1: wait until claiming is over and every source finished subscribe-read-replay
@@ -242,13 +248,13 @@ The updater follows the stream contracts:
 
 - Because delivery is asynchronous, serialized, and outside all locks, the updater writes `ConnectionState` directly in the callback; it needs no queue or dispatcher of its own. `ConnectionState` is eventually consistent, which is acceptable for its purpose.
 - The stream does not replay, so a late-starting updater bootstraps by subscribing first and then initializing from a registry walk using `GetSourceState()` as the authoritative read. Events racing the walk re-apply idempotent writes, so the view self-heals.
-- On `PropertyClaimed`/`PropertyReleased` it updates the single property (the event's `NewState` carries the source state, so no extra read is needed); on `StateChanged` it walks its own attributed properties and updates those owned by the transitioning source via `TryGetSource`. The updater knows its attributed set by construction, so no per-source claimed-set query is needed on the API.
+- On `PropertyClaimed`/`PropertyReleased` it updates the single property (the event's `NewState` carries the property's new effective state, `Unclaimed` for releases, so no extra read is needed); on `StateChanged` it walks its own attributed properties and updates those owned by the transitioning source via `TryGetSource`. The updater knows its attributed set by construction, so no per-source claimed-set query is needed on the API.
 
 The costs are opt-in and scoped: a permanently subscribed updater keeps the attach/detach catch-up scan active, each source transition costs one write per attributed property of that source, and the attributes are real registry members visible to other connectors unless filtered. These are exactly the costs the rejected built-in `@syncState` attribute would have imposed on every claimed property of every application; here the application pays them only where it declares the attributes.
 
 ### Diagnostics
 
-- A dashboard subscribes to the stream once and reads the `Sources` snapshot: source list with `State`, `LastSynchronizedAt`, and `PendingWriteCount` (all on the `ISubjectSource` surface), claim/release activity as it happens, and per-property state by filtering events for the properties on screen.
+- A dashboard subscribes to the stream once and starts from the subscription's snapshot: source list with `State`, `LastSynchronizedAt`, and `PendingWriteCount` (all on the `ISubjectSource` surface), claim/release activity as it happens, and per-property state by filtering events for the properties on screen.
 - Notification granularity is proportionate: state transitions are per source (all properties of a source flip together), claims and releases are per property but occur only on connect cycles and topology changes.
 
 ### Edge cases
@@ -269,7 +275,7 @@ One pull request implements the whole design, based on master (the design touche
 ## Affected Code
 
 - `Namotion.Interceptor` (core): `PropertyReference.TryAddPropertyData(key, value)`, the atomic add-if-absent counterpart to `TryRemovePropertyData`; the core public API snapshot updates accordingly.
-- `Namotion.Interceptor.Connectors`: `SourceState`, `SourceEventKind`, `SourceEvent`, `ISubjectSource` members (`State`, `LastSynchronizedAt`, `PendingWriteCount`, `StateChanged`), `SubjectSourceBase` transitions (pump entry, catch, finally, disposal fallback) and `StartAsync` registration, `SourceMonitor` (including the lifecycle attach/detach catch-up and internal wait bookkeeping), the `WithSourceMonitoring()` context extension, the `GetSourceMonitor()` accessor extension, `GetSourceState` property extension, emission logic in `SetSource`/`RemoveSource` (built on `TryAddPropertyData`).
+- `Namotion.Interceptor.Connectors`: `SourceState`, `SourceEventKind`, `SourceEvent`, `ISubjectSource` members (`State`, `LastSynchronizedAt`, `PendingWriteCount`, `StateChanged`), `SubjectSourceBase` transitions (pump entry, catch, finally, disposal fallback) and `StartAsync` registration, `SourceMonitor` and `SourceSubscription` (including the lifecycle attach/detach catch-up and internal wait bookkeeping), the `WithSourceMonitoring()` context extension, the `GetSourceMonitor()` accessor extension, `GetSourceState` property extension, emission logic in `SetSource`/`RemoveSource` (built on `TryAddPropertyData`).
 - Built-in connectors (OPC UA, MQTT, WebSocket): no source changes expected; they inherit from `SubjectSourceBase` and claim through the existing paths.
 - Test doubles that implement `ISubjectSource` directly (for example `ConcurrentTestSource` and `BlockingTestSource` in `Namotion.Interceptor.Connectors.Tests`) gain the four new members.
 - Public API snapshot tests: `ISubjectSource` changes will fail `VerifyChecksTests.PublicApi` in affected projects; the new `.verified.txt` snapshots are accepted as part of the change.
@@ -280,14 +286,15 @@ One pull request implements the whole design, based on master (the design touche
 In `Namotion.Interceptor.Connectors.Tests`, following the `When<Condition>_Then<ExpectedBehavior>` naming and event-based synchronization (no hardcoded waits):
 
 - Pump transitions via a fake source: `Connecting` initially; `Synchronized` after initial load; back to `Connecting` on pump failure; `Stopped` on cancellation; `LastSynchronizedAt` set exactly on entering `Synchronized` and preserved through a later disconnect; a restarted source transitions `Stopped` to `Connecting` at pump entry and can synchronize again.
-- Sticky `Stopped`: after the disposal fallback set `Stopped`, a late pump transition (catch-path `Connecting` or in-flight `Synchronized`) neither overwrites the state nor emits an event.
+- Sticky `Stopped`: after the disposal fallback set `Stopped`, a late pump transition (catch-path `Connecting` or in-flight `Synchronized`) neither overwrites the state, nor emits an event, nor updates `LastSynchronizedAt`.
 - Registration lifecycle: `StartAsync` registers the source and `SourceRegistered` precedes any `StateChanged` of that source on the stream; `Register` is idempotent (a stop/start cycle emits no duplicate `SourceRegistered`); a constructed but never started source is not registered and does not affect the wait; disposing without stopping emits `Stopped` before `SourceUnregistered`; disposing a never-started source does not throw and emits nothing to the stream; `Unregister` of a never-registered source is a no-op; after unregistration the monitor no longer forwards the source's events.
 - Monitor robustness: a monitor on a context without lifecycle tracking supports registration, stream, and waits without throwing (catch-up disabled); a claim on a subject attached to two trees with different monitors throws nothing and appears on both streams; a source started on a context without any monitor runs untracked and does not throw; `GetSourceMonitor()` on a context without a monitor throws `InvalidOperationException` with configuration guidance; with monitors on both a local and an ancestor context it throws, while `GetServices<SourceMonitor>()` returns both so the consumer can combine waits explicitly.
 - `TryAddPropertyData` (core): returns true and stores the value when the key is absent; returns false and leaves the existing value untouched when present.
 - Attach/detach catch-up: attaching a subject with already-claimed properties emits `PropertyClaimed` for each; detaching a subject with still-claimed properties emits `PropertyReleased`; releases performed by `SourceOwnershipManager` during detach produce no duplicate events; without public stream subscribers the catch-up scan is skipped; a pending wait alone does not trigger the scan.
 - Claim/release emission: a fresh claim emits `PropertyClaimed`; an idempotent re-claim by the same source emits nothing; a rejected claim (owned by another source) emits nothing; `RemoveSource` emits `PropertyReleased` only on actual removal; claims without a monitor in the context emit nothing and do not throw.
 - Handler robustness: a throwing subscriber is logged by the drain loop and breaks neither the other subscribers nor any emitting path; a handler that writes a registry attribute directly in the callback succeeds, including for events originating from the attach/detach catch-up (no deadlock, no reentrancy failure).
-- Subscription consistency: subscribe-then-snapshot observes every subsequent change exactly once; events enqueued before the subscription are not delivered to it; delivery order matches enqueue order.
+- Subscription consistency: the `SourceSubscription` snapshot plus the delivered events observe every change exactly once, including a source registering concurrently with `Subscribe`; events enqueued before the subscription are not delivered to it; delivery order matches enqueue order.
+- Ownership event payloads: `PropertyClaimed` carries `Unclaimed` to the owning source's state; `PropertyReleased` carries the state at release to `Unclaimed`, including for releases performed during detach.
 - Wait semantics: completes only when all non-`Stopped` sources are `Synchronized`; empty set blocks; a source registered mid-wait is included and re-blocks the wait when `Connecting`; filter overload scopes correctly; cancellation propagates.
 - Per-property: `Unclaimed` for a property no source has claimed, `Connecting` for claimed while loading, `Synchronized` for claimed after load, `Stopped` for a claimed property of a stopped source.
 
