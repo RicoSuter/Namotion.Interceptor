@@ -248,7 +248,7 @@ The updater follows the stream contracts:
 
 - Because delivery is asynchronous, serialized, and outside all locks, the updater writes `ConnectionState` directly in the callback; it needs no queue or dispatcher of its own. `ConnectionState` is eventually consistent, which is acceptable for its purpose.
 - The stream does not replay, so a late-starting updater bootstraps by subscribing first and then initializing from a registry walk using `GetSourceState()` as the authoritative read. Events racing the walk re-apply idempotent writes, so the view self-heals.
-- On `PropertyClaimed`/`PropertyReleased` it updates the single property (the event's `NewState` carries the property's new effective state, `Unclaimed` for releases, so no extra read is needed); on `StateChanged` it walks its own attributed properties and updates those owned by the transitioning source via `TryGetSource`. The updater knows its attributed set by construction, so no per-source claimed-set query is needed on the API.
+- On `PropertyClaimed`/`PropertyReleased` it updates the single property (the event's `NewState` carries the property's new effective state, `Unclaimed` for releases, so no extra read is needed). On `StateChanged` it updates the affected properties using a small per-source index it maintains as a side effect of the claim and release events it already handles, seeded by the bootstrap walk; for a small static attributed set, walking its own attributed properties and checking ownership via `TryGetSource` works too. Either way, no per-source claimed-set query is needed on the API. Serialized delivery makes the index single-writer; only the bootstrap walk shares a small uncontended lock with the handler.
 
 The costs are opt-in and scoped: a permanently subscribed updater keeps the attach/detach catch-up scan active, each source transition costs one write per attributed property of that source, and the attributes are real registry members visible to other connectors unless filtered. These are exactly the costs the rejected built-in `@syncState` attribute would have imposed on every claimed property of every application; here the application pays them only where it declares the attributes.
 
@@ -270,7 +270,7 @@ The costs are opt-in and scoped: a permanently subscribed updater keeps the atta
 
 ## Delivery
 
-One pull request implements the whole design, based on master (the design touches only the core and Connectors packages plus docs; the in-flight OPC UA loader work touches neither). The PR updates `docs/connectors.md` as the permanent documentation, including the availability-attributes scenario above as a worked sample (stored `ConnectionState` attribute, derived `IsAvailable`, updater subscribing to the monitor stream and writing directly in the callback), and deletes this spec at the end, once the design is implemented.
+One pull request implements the whole design, based on master (the design touches only the core and Connectors packages plus docs; the in-flight OPC UA loader work touches neither). The PR adds `docs/connectors-source-monitoring.md` as the permanent documentation (following the existing `connectors-` feature-page convention, linked from `docs/connectors.md`), including the availability-attributes scenario above as a worked sample (stored `ConnectionState` attribute, derived `IsAvailable`, updater with its per-source index writing directly in the callback), and deletes this spec at the end, once the design is implemented.
 
 ## Affected Code
 
@@ -279,7 +279,7 @@ One pull request implements the whole design, based on master (the design touche
 - Built-in connectors (OPC UA, MQTT, WebSocket): no source changes expected; they inherit from `SubjectSourceBase` and claim through the existing paths.
 - Test doubles that implement `ISubjectSource` directly (for example `ConcurrentTestSource` and `BlockingTestSource` in `Namotion.Interceptor.Connectors.Tests`) gain the four new members.
 - Public API snapshot tests: `ISubjectSource` changes will fail `VerifyChecksTests.PublicApi` in affected projects; the new `.verified.txt` snapshots are accepted as part of the change.
-- `docs/connectors.md`: new "Source state and events" section covering the state model, the stream, the consumer protocol (including the hosted-waiter `ApplicationStarted` guidance), and the breaking-change note for custom `ISubjectSource` implementers; the context recipe gains `WithSourceMonitoring()`.
+- Documentation: a new `docs/connectors-source-monitoring.md` page covering the state model, the stream and its delivery contract, waits and the consumer protocol (including the hosted-waiter `ApplicationStarted` guidance), the breaking-change note for custom `ISubjectSource` implementers, and the availability-attributes worked sample with the per-source index; `docs/connectors.md` gains a short linking section and its context recipe gains `WithSourceMonitoring()`.
 
 ## Testing
 
