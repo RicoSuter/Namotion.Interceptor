@@ -122,7 +122,25 @@ namespace YourDefaultNamespace
                 {
                     OnHookedChanging(ref newValue, ref cancel);
                 }
-                if (!cancel && SetPropertyValue(nameof(Hooked), newValue, _Hooked, static (o, v) => ((SampleSubject)o)._Hooked = v))
+                if (cancel)
+                {
+                    return;
+                }
+
+                bool written;
+                if (!EqualityComparer<string>.Default.Equals(newValue, value))
+                {
+                    using (SubjectChangeContext.WithLocalOrigin())
+                    {
+                        written = SetPropertyValue(nameof(Hooked), newValue, _Hooked, static (o, v) => ((SampleSubject)o)._Hooked = v);
+                    }
+                }
+                else
+                {
+                    written = SetPropertyValue(nameof(Hooked), newValue, _Hooked, static (o, v) => ((SampleSubject)o)._Hooked = v);
+                }
+
+                if (written)
                 {
                     using (SubjectChangeContext.WithLocalOrigin())
                     {

@@ -105,13 +105,16 @@ Choose based on your consistency requirements: local-first for responsiveness, t
 
 #### Change notification source semantics
 
-The `Source` of a change notification identifies the system that confirmed the value: inbound updates carry the source they came from, source-bound changes committed through a source transaction carry their owning source, and purely local writes carry `null`. The outbound change queue skips changes whose source is the target source itself, so a committed value is written to its source exactly once, by the commit.
+The `Source` of a change notification identifies the system that confirmed the value: a change carries a source only when its stored value is exactly the value that source sent (inbound update) or confirmed (source transaction commit); everything else carries `null`. The outbound change queue skips changes whose source is the target source itself, so a committed value is written to its source exactly once, by the commit.
 
 Writes that happen as a consequence of a source-scoped apply are local origin: the local model computed them, so they publish with a `null` source and flow to bound sources like any local write.
 
 - **Cascade writes** from `OnChanging`/`OnChanged` handlers publish with a `null` source, for inbound updates and transactional commits alike, and are therefore delivered to a bound source instead of being suppressed as echoes. Writing a cascade value explicitly into a transaction is still the way to get confirmed, atomic delivery; it is now optional for delivery to happen at all.
+- **Transformed trigger values**: when an `OnChanging` hook changes the incoming value itself (a clamp or normalization via `ref newValue`), the stored value is locally computed, so the write publishes with a `null` source and the corrected value is delivered back to the bound source, converging the source to the model. Such transforms must be projections (applying the hook to its own output changes nothing, like clamping); a non-idempotent transform would produce a correction loop against the source. Reference-typed values must be reassigned, not mutated in place, for the transform to be detected. Transaction commits are unaffected: the hook transforms at capture, so the source confirms the already-transformed value and the commit apply keeps its source stamp truthfully.
 - **Derived property recalculations** always publish with a `null` source (the local model computed the value, no source confirmed it) and are pushed to a bound source, whatever triggered the recalculation.
 - **`INotifyPropertyChanged` handler write-backs** publish with a `null` source as well. INPC handlers should react (UI refresh, logging, forwarding) rather than mutate the model; if they do mutate, those writes are local origin.
+
+Lifecycle attach/detach handlers are not wrapped in a local-origin scope: they run infrastructure logic and must not mutate model properties. A handler that writes anyway inherits the ambient scope, with all consequences.
 
 ### Write Retry Queue
 

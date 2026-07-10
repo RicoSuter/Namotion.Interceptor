@@ -173,8 +173,8 @@ internal static class SubjectMetadataExtractor
         // First pass: collect names of On{X}Changing/On{X}Changed partial method bodies that are
         // actually implemented (have a block or expression body), across all partial declarations.
         // Name-only matching is deliberately over-approximate: a false positive costs one redundant
-        // scope around a compiler-erased call; a false negative would silently restore source
-        // inheritance for that hook.
+        // scope around a compiler-erased call plus a per-write equality comparison in the setter;
+        // a false negative would silently restore source inheritance for that hook.
         var implementedHookMethods = new HashSet<string>();
         foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
         {

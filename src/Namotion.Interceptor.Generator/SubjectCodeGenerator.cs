@@ -342,8 +342,38 @@ internal static class SubjectCodeGenerator
                 builder.AppendLine($"                On{property.Name}Changing(ref newValue, ref cancel);");
             }
 
-            builder.AppendLine($"                if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
-            builder.AppendLine("                {");
+            var setPropertyValueCall = $"SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v)";
+            if (property.HasChangingHook)
+            {
+                // A Changing hook may transform the incoming value (ref newValue). The stored value
+                // is then locally computed, not what the ambient source sent or confirmed, so the
+                // write publishes as local origin and flows back to bound sources.
+                builder.AppendLine("                if (cancel)");
+                builder.AppendLine("                {");
+                builder.AppendLine("                    return;");
+                builder.AppendLine("                }");
+                builder.AppendLine();
+                builder.AppendLine("                bool written;");
+                builder.AppendLine($"                if (!EqualityComparer<{property.FullTypeName}>.Default.Equals(newValue, value))");
+                builder.AppendLine("                {");
+                builder.AppendLine("                    using (SubjectChangeContext.WithLocalOrigin())");
+                builder.AppendLine("                    {");
+                builder.AppendLine($"                        written = {setPropertyValueCall};");
+                builder.AppendLine("                    }");
+                builder.AppendLine("                }");
+                builder.AppendLine("                else");
+                builder.AppendLine("                {");
+                builder.AppendLine($"                    written = {setPropertyValueCall};");
+                builder.AppendLine("                }");
+                builder.AppendLine();
+                builder.AppendLine("                if (written)");
+                builder.AppendLine("                {");
+            }
+            else
+            {
+                builder.AppendLine($"                if (!cancel && {setPropertyValueCall})");
+                builder.AppendLine("                {");
+            }
 
             // OnXChanged: same conditional wrapping.
             if (property.HasChangedHook)

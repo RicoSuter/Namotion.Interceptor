@@ -116,6 +116,8 @@ public partial class Person
 
 Implemented hook bodies run inside a local-origin scope (`SubjectChangeContext.WithLocalOrigin()`): any property write a hook makes (a cascade) publishes with `Source = null`, so it flows to bound sources like any local write. The scope is emitted only for hooks that are actually implemented, so properties without hook bodies pay nothing.
 
+When an implemented `OnXChanging` hook transforms the incoming value (reassigns `ref newValue`), the property write itself also publishes as local origin: the setter compares the hook's output against the incoming value (`EqualityComparer<T>.Default`) and enters the local-origin scope for the write when they differ. The stored value was computed locally, so it flows back to a bound source instead of being suppressed as an echo of that source. Transforms must be projections (idempotent, like clamping or rounding) so the correction converges; reference-typed values must be reassigned, not mutated in place, for the transform to be detected. Properties without an implemented `OnXChanging` hook skip the comparison entirely.
+
 ### Derived Properties
 
 Properties marked with `[Derived]` are included in the metadata as calculated properties (can be read-only or writable):

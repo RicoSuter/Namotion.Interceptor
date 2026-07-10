@@ -52,6 +52,11 @@ public struct PropertyWriteContext<TProperty>
     /// <summary>
     /// Gets the new value to write (might be different than the value returned by calling the
     /// getter after the write, use <see cref="GetFinalValue"/> for that).
+    /// An interceptor that rewrites this value during a source-scoped write keeps the ambient
+    /// source on the published change; if the rewritten value should publish as locally computed,
+    /// the interceptor must enter <see cref="SubjectChangeContext.WithLocalOrigin"/> around its
+    /// call to next, which is effective only when it runs outside the change-publishing
+    /// interceptors (they capture the ambient source after their own next returns).
     /// </summary>
     public TProperty NewValue { get; set; }
 
