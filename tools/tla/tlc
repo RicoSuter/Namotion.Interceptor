@@ -21,4 +21,5 @@ else
   exit 1
 fi
 
-exec "$java_bin" -XX:+UseParallelGC -cp "$jar" tlc2.TLC "$@"
+cm="$cache/CommunityModules-deps.jar"
+exec "$java_bin" -XX:+UseParallelGC -cp "$jar:$cm" tlc2.TLC "$@"
