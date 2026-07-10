@@ -394,3 +394,7 @@ tools/tla/**/states/
 
 # TLC scratch output under formal models
 docs/formal/**/states/
+
+# Generated trace-check modules
+docs/formal/**/*Trace.tla
+docs/formal/**/*Trace.cfg
