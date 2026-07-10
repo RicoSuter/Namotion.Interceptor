@@ -1,0 +1,1 @@
+[{"seq":0,"state":"Disconnected","linkUp":true,"cover":{"n1":"Retrying","n2":"Retrying"},"buffering":false,"stalled":false},{"seq":1,"state":"SessionActive","linkUp":true,"cover":{"n1":"Subscribed","n2":"Subscribed"},"buffering":false,"stalled":false}]
