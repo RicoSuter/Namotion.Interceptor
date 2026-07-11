@@ -268,24 +268,29 @@ namespace Namotion.Interceptor;
 /// one write of one property; the matching write chain consumes it at
 /// <c>PropertyWriteContext</c> construction. Nested writes (hooks, INPC handlers, derived
 /// recalculations) never inherit it: the slot is either already consumed or targets a
-/// different property. The scope clears the slot unconditionally so a cancelled write
-/// cannot leak the stamp into a later write. Thread-static by design: arm and consume
-/// happen synchronously within one call frame, never across await.
+/// different property. The scope captures the previous frame and restores it on dispose
+/// (a zero-allocation stack through nested ref structs, like SubjectChangeContextScope),
+/// so a cancelled write cannot leak the stamp and a nested stamped write cannot destroy
+/// an outer stamp. Same-property re-entry from OnChanging is unsupported (the inner
+/// invocation consumes the stamp). Thread-static by design: arm and consume happen
+/// synchronously within one call frame, never across await. Internal: producers use
+/// intent-level APIs (SetValueFromSource, ApplySubjectUpdate, transaction replay).
 /// </summary>
-public static class PendingOrigin
+internal static class PendingOrigin
 {
     [ThreadStatic] private static bool _armed;
     [ThreadStatic] private static PropertyReference _target;
     [ThreadStatic] private static ChangeOrigin _origin;
     [ThreadStatic] private static object? _sentValue;
 
-    public static PendingOriginScope Arm(PropertyReference target, ChangeOrigin origin, object? sentValue)
+    internal static PendingOriginScope Arm(PropertyReference target, ChangeOrigin origin, object? sentValue)
     {
+        var scope = new PendingOriginScope(_armed, _target, _origin, _sentValue);
         _armed = true;
         _target = target;
         _origin = origin;
         _sentValue = sentValue;
-        return default;
+        return scope;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -295,7 +300,10 @@ public static class PendingOrigin
         {
             origin = _origin;
             sentValue = _sentValue;
-            Clear();
+            _armed = false;
+            _target = default;
+            _origin = default;
+            _sentValue = null;
             return true;
         }
 
@@ -304,22 +312,62 @@ public static class PendingOrigin
         return false;
     }
 
-    internal static void Clear()
+    internal static void Restore(bool armed, in PropertyReference target, ChangeOrigin origin, object? sentValue)
     {
-        _armed = false;
-        _target = default;
-        _origin = default;
-        _sentValue = null;
+        _armed = armed;
+        _target = target;
+        _origin = origin;
+        _sentValue = sentValue;
+    }
+}
+
+internal readonly ref struct PendingOriginScope
+{
+    private readonly bool _previousArmed;
+    private readonly PropertyReference _previousTarget;
+    private readonly ChangeOrigin _previousOrigin;
+    private readonly object? _previousSentValue;
+
+    internal PendingOriginScope(bool armed, PropertyReference target, ChangeOrigin origin, object? sentValue)
+    {
+        _previousArmed = armed;
+        _previousTarget = target;
+        _previousOrigin = origin;
+        _previousSentValue = sentValue;
     }
 
-    public readonly ref struct PendingOriginScope
-    {
-        public void Dispose() => Clear();
-    }
+    public void Dispose() => PendingOrigin.Restore(_previousArmed, in _previousTarget, _previousOrigin, _previousSentValue);
 }
 ```
 
-Note: `Arm` returns the nested `PendingOriginScope`; adjust the test using directives accordingly (`PendingOrigin.PendingOriginScope` resolves via `using`). If the nested type reads awkwardly, a top-level `PendingOriginScope` ref struct in the same file is equally acceptable; keep whichever compiles cleanly with the tests.
+`PendingOrigin` is internal; the test project reaches it via the existing `InternalsVisibleTo("Namotion.Interceptor.Tests")`. Add a fifth test for the restore semantics:
+
+```csharp
+[Fact]
+public void WhenNestedArmScopeIsDisposed_ThenOuterStampIsRestored()
+{
+    // Arrange
+    var outerProperty = CreateProperty("Name");
+    var innerProperty = CreateProperty("OtherName");
+    var outerSource = new object();
+
+    using (PendingOrigin.Arm(outerProperty, ChangeOrigin.FromSource(outerSource), "outer"))
+    {
+        using (PendingOrigin.Arm(innerProperty, ChangeOrigin.FromSource(new object()), "inner"))
+        {
+            PendingOrigin.TryConsume(innerProperty, out _, out _);
+        }
+
+        // Act: after the inner scope disposes, the outer stamp must be intact.
+        var consumed = PendingOrigin.TryConsume(outerProperty, out var origin, out var sentValue);
+
+        // Assert
+        Assert.True(consumed);
+        Assert.Same(outerSource, origin.Source);
+        Assert.Equal("outer", sentValue);
+    }
+}
+```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -330,7 +378,7 @@ Expected: 4 passed.
 
 ```bash
 git add src/Namotion.Interceptor/PendingOrigin.cs src/Namotion.Interceptor.Tests/PendingOriginTests.cs
-git commit -m "feat: add PendingOrigin one-shot stamp with target matching (#345)"
+git commit -m "feat: add internal PendingOrigin one-shot stamp with target matching and frame restore (#345)"
 ```
 
 ### Task 3: Origin on PropertyWriteContext, consumption and finalization
@@ -576,12 +624,36 @@ git commit -m "feat: make SubjectChangeContext timestamps-only, arm origin in Se
 
 - [ ] **Step 1: Swap the change struct**
 
-In `SubjectPropertyChange.cs`: replace `public object? Source { get; }` with `public ChangeOrigin Origin { get; }`, thread it through the private constructor and `Create` (parameter `ChangeOrigin origin` replacing `object? source`), and replace the `WithSource(object? source)` with-er with:
+In `SubjectPropertyChange.cs`: replace `public object? Source { get; }` with FLATTENED storage. The CLR does not fold a nested struct into container padding, so do not store a `ChangeOrigin` field; store the kind byte (folds into padding) and the source reference (reuses the old `Source` slot) separately and recompose:
+
+```csharp
+private readonly ChangeOriginKind _originKind;
+private readonly object? _originSource;
+
+public ChangeOrigin Origin => ChangeOrigin.FromParts(_originKind, _originSource);
+```
+
+Add `internal static ChangeOrigin FromParts(ChangeOriginKind kind, object? source)` to `ChangeOrigin` (internal, no validation; Tracking has `InternalsVisibleTo`). Thread `ChangeOrigin origin` through the private constructor and `Create` (replacing `object? source`, storing `origin.Kind` and `origin.Source`), and replace the `WithSource(object? source)` with-er with:
 
 ```csharp
 public SubjectPropertyChange WithOrigin(ChangeOrigin origin) =>
     new(Property, origin, ChangedTimestamp, ReceivedTimestamp, _oldValueStorage, _newValueStorage, _oldBoxedHolder, _newBoxedHolder);
 ```
+
+Add a size-regression test in the Tracking test project:
+
+```csharp
+[Fact]
+public void WhenMeasuringSubjectPropertyChange_ThenSizeDidNotGrowVersusSourceField()
+{
+    // Assert: master's struct size with the 8-byte Source reference. If this fails,
+    // the flattened layout regressed; investigate before accepting a larger struct.
+    Assert.True(Unsafe.SizeOf<SubjectPropertyChange>() <= 96,
+        $"SubjectPropertyChange grew to {Unsafe.SizeOf<SubjectPropertyChange>()} bytes");
+}
+```
+
+First measure the actual master size with a throwaway `Unsafe.SizeOf` print on master and put that number into the assertion instead of 96.
 
 - [ ] **Step 2: Publishers read the context**
 
@@ -653,14 +725,14 @@ git commit -m "feat: publish typed ChangeOrigin on SubjectPropertyChange, stamp 
 ### Task 6: ApplySubjectUpdate source parameter and WebSocket migration
 
 **Files:**
-- Modify: `src/Namotion.Interceptor.Connectors/Updates/SubjectUpdateExtensions.cs:18-24` (required `object? source` parameter after `subjectFactory`)
-- Modify: `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` and `SubjectItemsUpdateApplier.cs` (thread `source` to every property write site; each site currently wrapped in `WithChangedTimestamp` applies via `SetValue` or `RegisteredSubjectProperty`; when `source` is not null, apply through `SetValueFromSource(source, propertyUpdate.Timestamp, null, value)`; when null, keep the current path)
-- Modify: `src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectHandler.cs:200-207`, `src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs:296-299,540-543` (drop `WithSource` usings, pass source parameter; correct the lock comment at `WebSocketSubjectHandler.cs:200` to say the lock serializes update application, not that thread-static state requires it)
-- Modify: `src/Namotion.Interceptor.ConnectorTester/Engine/Verification/FailureDiagnostics.cs:175` (pass `source: null`)
+- Modify: `src/Namotion.Interceptor.Connectors/Updates/SubjectUpdateExtensions.cs:18-24` (required `ChangeOrigin origin` parameter after `subjectFactory`)
+- Modify: `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` and `SubjectItemsUpdateApplier.cs` (thread `origin` to every property write site; each site currently wrapped in `WithChangedTimestamp` applies via `SetValue` or `RegisteredSubjectProperty`; when `origin.Kind != ChangeOriginKind.Local`, apply through `SetValueFromSource(origin.Source!, propertyUpdate.Timestamp, null, value)`; for `Local`, keep the current path)
+- Modify: `src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectHandler.cs:200-207` (pass `ChangeOrigin.FromSource(connection)`), `src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs:296-299,540-543` (pass `ChangeOrigin.FromSource(this)` / `ChangeOrigin.FromSource(state.source)`); drop the `WithSource` usings; correct the lock comment at `WebSocketSubjectHandler.cs:200` to say the lock serializes update application, not that thread-static state requires it
+- Modify: `src/Namotion.Interceptor.ConnectorTester/Engine/Verification/FailureDiagnostics.cs:175` (pass `ChangeOrigin.Local`)
 - Test: `src/Namotion.Interceptor.Connectors.Tests` update-apply suites gain a source overload test
 
 **Interfaces:**
-- Produces: `ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update, ISubjectFactory? subjectFactory, object? source, Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)`.
+- Produces: `ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update, ISubjectFactory? subjectFactory, ChangeOrigin origin, Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)`.
 
 - [ ] **Step 1: Write the failing test** (in the existing update-extensions test class in `Namotion.Interceptor.Connectors.Tests/Updates`, following its Arrange idiom)
 
@@ -674,7 +746,7 @@ public void WhenUpdateIsAppliedWithSource_ThenChangeCarriesFromSourceOrigin()
     var source = new object();
 
     // Act
-    subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, source);
+    subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.FromSource(source));
 
     // Assert: the published change has Origin.Kind == FromSource and Origin.Source == source.
 }
@@ -686,7 +758,7 @@ Fill Arrange/Assert with the exact helpers used by neighboring tests in that fil
 
 - [ ] **Step 3: Implement the parameter and threading**
 
-Add the required `object? source` parameter, thread it through `SubjectUpdateApplier.ApplyUpdate` and `SubjectItemsUpdateApplier` down to the write sites, and route stamped writes through `SetValueFromSource`. Update the three WebSocket sites and the ConnectorTester site. Also update the code sample in the XML doc comment of `ApplySubjectUpdate` if present.
+Add the required `ChangeOrigin origin` parameter, thread it through `SubjectUpdateApplier.ApplyUpdate` and `SubjectItemsUpdateApplier` down to the write sites, and route stamped writes through `SetValueFromSource`. Update the three WebSocket sites and the ConnectorTester site. Also update the code sample in the XML doc comment of `ApplySubjectUpdate` if present.
 
 - [ ] **Step 4: Run tests**
 
@@ -697,7 +769,7 @@ Expected: all pass, including WebSocket echo-suppression integration tests (they
 
 ```bash
 git add -A src
-git commit -m "feat: require explicit source on ApplySubjectUpdate, migrate WebSocket applies (#345)"
+git commit -m "feat: require typed ChangeOrigin on ApplySubjectUpdate, migrate WebSocket applies (#345)"
 ```
 
 ### Task 7: Validator provenance and test-suite fallout
@@ -839,7 +911,7 @@ the target source itself, so a committed value is written to its source exactly 
 the commit.
 
 Origin is stamped per write at the apply call (`SetValueFromSource`,
-`ApplySubjectUpdate` with a source, transaction commit replay). Nothing inherits it:
+`ApplySubjectUpdate` with a `FromSource` origin, transaction commit replay). Nothing inherits it:
 hook cascades, `INotifyPropertyChanged` handler write-backs, derived property
 recalculations, and lifecycle handler writes are all `Local` and therefore flow to
 bound sources like any local write. When an `OnChanging` hook or a write interceptor
@@ -858,10 +930,10 @@ treat source values as authoritative while strictly validating local input.
 
 ```csharp
 // Apply update from an external source (echo prevention via typed origin)
-subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, source);
+subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.FromSource(source));
 
 // Apply update as a local mutation
-subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, source: null);
+subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 ```
 
 `docs/connectors-opcua-client.md` (~715): same replacement pattern using `SetValueFromSource`.
@@ -936,6 +1008,8 @@ public class SourceCorrectionTests
         // Assert: exactly one queued change with Origin.Kind == Correction,
         //         Origin.Source == source, old == new == 100.
         //         The model value is still 100 and no PropertyChanged was raised.
+        //         The correction's ChangedTimestamp is fresh (not the inbound scope time)
+        //         and equals the property's write-timestamp metadata after the call.
     }
 
     [Fact]
@@ -1011,11 +1085,20 @@ public class SourceCorrectionDetector : IWriteInterceptor
             context.Origin.Kind == ChangeOriginKind.FromSource &&
             !Equals(context.SentValue, context.CurrentValue))
         {
+            // A correction is a new local assertion: fresh local timestamp, stamped on the
+            // property's write-timestamp metadata AND published, so the source's echo
+            // (same value, same timestamp) is fully equality-suppressed and both sides
+            // agree on value and time. Deliberately NOT the inbound scope timestamp
+            // (would diverge model and source time) and NOT the old model timestamp
+            // (sources may reject it as stale).
+            var timestampTicks = SubjectChangeContext.CaptureTimestamp();
+            context.Property.SetWriteTimestamp(timestampTicks);
+
             var stored = context.CurrentValue;
             var correction = SubjectPropertyChange.Create(
                 context.Property,
                 ChangeOrigin.Correction(context.Origin.Source!),
-                context.WriteTimestampForPublishing,
+                new DateTimeOffset(timestampTicks, TimeSpan.Zero),
                 SubjectChangeContext.Current.ReceivedTimestamp,
                 stored,
                 stored);
@@ -1044,15 +1127,18 @@ git commit -m "feat: synthesize Correction changes for equality-suppressed diver
 
 - [ ] **Step 1: Write the failing tests**
 
-Two tests in the connectors test project, following the existing `ChangeQueueProcessor` test idiom: a `Correction(S)` change is delivered to S's processor and skipped by another source's processor; a `FromSource(S)` change keeps today's inverse routing.
+Three tests in the connectors test project, following the existing `ChangeQueueProcessor` test idiom:
+1. A `Correction(S)` change is delivered by a processor whose `_source` is S (owner writes it back).
+2. A `Correction(connection)` change is delivered by a processor whose `_source` is a DIFFERENT object (the WebSocket shape: origin identity is the connection, processor identity is the handler); this is the test that proves corrections are never dropped by identity mismatch.
+3. A `FromSource(S)` change keeps today's routing (skipped by S's processor, delivered by others).
 
 - [ ] **Step 2: Implement**
 
-Replace the skip at line 145:
+Replace the skip at line 145. Corrections are not echoes (no model change occurred), so they bypass the own-source skip entirely; property filters and connector topology determine actual recipients:
 
 ```csharp
-var isOwnSource = ReferenceEquals(change.Origin.Source, _source);
-if (change.Origin.Kind == ChangeOriginKind.Correction ? !isOwnSource : isOwnSource)
+if (change.Origin.Kind != ChangeOriginKind.Correction &&
+    ReferenceEquals(change.Origin.Source, _source))
 {
     continue;
 }
@@ -1060,7 +1146,7 @@ if (change.Origin.Kind == ChangeOriginKind.Correction ? !isOwnSource : isOwnSour
 
 - [ ] **Step 3: Run connectors tests, then the full unit suite.**
 
-Note: other queue subscribers (`PerformanceProfiler` in SamplesModel and ConnectorTester) also receive corrections; they only count changes, which is acceptable and needs no change.
+Note: other queue subscribers (`PerformanceProfiler` in SamplesModel and ConnectorTester) also receive corrections; they only count changes, which is acceptable and needs no change. `PropertyChangeQueue` subscriptions are public API: document in Task 13 that subscribers filter on `Kind` if they only want model mutations.
 
 - [ ] **Step 4: Commit**
 
@@ -1083,12 +1169,19 @@ Append to the origin section of `docs/connectors.md`:
 When an inbound value is projected by a hook to the value the model already stores (the
 model at 100 receiving 105 with a clamp to 100), the equality check suppresses the write
 and no ordinary change exists. The library then publishes a `Correction` change (old and
-new value both the stored value) that is delivered only to the diverged source, so the
-source converges to the model without any model mutation: no hooks, no
-`PropertyChanged`, no timestamp updates. Corrections never reach the change observable.
-Confirmed transaction writes never produce corrections. A correction is produced only
-when the source actively sends a diverging value; reasserting the model to a silently
-diverged source is a reconciliation concern (#342).
+new value both the stored value) so the diverged source converges to the model. A
+correction is a new local assertion: it carries a fresh local timestamp which is also
+stamped on the property's write-timestamp metadata, so the source's echo returns the
+same value and timestamp and is fully suppressed. No backing field is written and no
+hooks or `PropertyChanged` fire. Corrections bypass the own-source echo skip and flow
+through every change queue processor whose property filter matches: single-owner
+sources converge to owner-only delivery, WebSocket broadcasts the authoritative
+projection to all replicas, and re-writing an unchanged value to another bound source
+is idempotent. Corrections never reach the change observable; direct change queue
+subscribers do see them and should filter on `Origin.Kind` when only model mutations
+are wanted. Confirmed transaction writes never produce corrections. A correction is
+produced only when the source actively sends a diverging value; reasserting the model
+to a silently diverged source is a reconciliation concern (#342).
 ```
 
 - [ ] **Step 2: Accept PublicApi snapshot diffs** (must show only `Correction` additions).

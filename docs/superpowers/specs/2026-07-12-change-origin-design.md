@@ -19,7 +19,7 @@ The work lands as two release-safe PRs:
 
 Because a scope has dynamic extent, it covers everything downstream on the call stack, not just the one write it was armed for. Hooks, INPC handlers, and derived recalculations silently inherit a source stamp they never earned, and the outbound echo suppression (`ChangeQueueProcessor` skips changes whose source equals the target source) then wrongly suppresses their writes. PR #348 fixed the semantics by adding a counter-scope (`WithLocalOrigin`) at every escape point: generated hook bodies, INPC raises, derived recalculation, plus a documentation-enforced contract on every hand-written `IRaisePropertyChanged` implementation, plus generator machinery to detect implemented hooks, plus four documented holes the counter-scopes cannot reach. That approach is correct but accretive: every future callback type needs another anti-scope forever.
 
-The ambient design also forces a concurrency constraint: `WebSocketSubjectHandler` must hold a `lock` (not a `SemaphoreSlim`) across a whole update apply because thread-static state cannot survive async boundaries.
+The ambient design also leaves a misleading concurrency artifact: `WebSocketSubjectHandler` carries a comment claiming a `lock` (not a `SemaphoreSlim`) is required because of thread-static state. The claim is inaccurate (a scope opened synchronously after an await composes fine), but the confusion it documents is a cost of the ambient design; the per-write stamp removes the scope there entirely.
 
 ### Scenarios that are currently wrong or inconsistent (definition of done)
 
@@ -71,8 +71,8 @@ Design points:
 
 - `default(ChangeOrigin)` is truthfully `Local`, so nothing ever needs to set it for ordinary writes.
 - `Source` is non-null exactly when `Kind != Local`. The factories enforce this.
-- The enum is byte-backed deliberately: standalone the struct is pointer-aligned to 16 bytes either way, but inside `SubjectPropertyChange` the runtime's auto layout can fold a byte-sized kind into existing padding, where an int-backed enum could grow the struct. Do not widen the enum.
-- The shape is additive by design: a `TriggeredBy` field and further kinds (`Correction` in PR 2, `Presumed` if #342 question 4 is ever adopted) can be added without breaking consumers.
+- The enum is byte-backed deliberately. The CLR does not flatten nested structs into a container's padding, so `SubjectPropertyChange` does NOT store a `ChangeOrigin` field: it stores a flattened `_originKind` byte (which can fold into existing padding) plus the `_originSource` reference (occupying the slot the old `Source` field used), and exposes `Origin` as a computed property reconstructing the struct (internal constructor access via `InternalsVisibleTo`). A test asserts `Unsafe.SizeOf<SubjectPropertyChange>()` does not grow versus master. Do not widen the enum.
+- The shape is extensible by design: further kinds (`Correction` in PR 2, `Presumed` if #342 question 4 is ever adopted) are purely additive, and a `TriggeredBy` field can be added source-compatibly. A future `TriggeredBy` does change struct layout, size, and copying cost; that is an accepted layout-affecting change at that point, not reserved storage now.
 - `SubjectPropertyChange.Source` (`object?`) is replaced by `SubjectPropertyChange.Origin` (`ChangeOrigin`). Hard break, no compatibility shim. The struct's `WithSource` with-er becomes `WithOrigin`.
 
 ## The pending stamp mechanism
@@ -83,27 +83,28 @@ A thread-static slot in the core library holds the pending stamp:
 (PropertyReference target, ChangeOrigin origin, object? sentValue)
 ```
 
-Public arming API in core:
+Arming API in core, internal by design: a public global one-shot arming mechanism invites misuse, and every legitimate producer goes through intent-level APIs (`SetValueFromSource`, `ApplySubjectUpdate`, transaction replay). Tracking and the test projects already have `InternalsVisibleTo`.
 
 ```csharp
-public static class PendingOrigin
+internal static class PendingOrigin
 {
-    public static PendingOriginScope Arm(PropertyReference target, ChangeOrigin origin, object? sentValue);
-    // internal: TryConsume(PropertyReference property, out ChangeOrigin origin, out object? sentValue)
+    internal static PendingOriginScope Arm(PropertyReference target, ChangeOrigin origin, object? sentValue);
+    internal static bool TryConsume(in PropertyReference property, out ChangeOrigin origin, out object? sentValue);
 }
 ```
 
-`PendingOriginScope` is a ref struct whose `Dispose` clears the slot unconditionally.
+`PendingOriginScope` is a ref struct that captures the previous slot state on `Arm` and restores it on `Dispose`, forming a zero-allocation stack through nested ref structs (the same pattern as `SubjectChangeContextScope`). Restoring rather than clearing makes nested stamped writes correct: a changing hook that itself calls `SetValueFromSource` for another property arms an inner frame, and the outer stamp is back in place before the outer chain starts.
 
 Rules:
 
 - **Armed per write.** `SetValueFromSource(property, source, changedTimestamp, receivedTimestamp, value)` keeps its public signature. Internally it arms the slot with `(property, FromSource(source), value)`, enters the timestamp scope, invokes the setter, and disposes both scopes in `finally`. Batch applies arm once per property write in a loop, which is what all existing OPC UA and MQTT call sites already do.
 - **Consumed at chain entry, only on target match.** When `InterceptorExecutor` starts a write chain, it consumes the stamp into `PropertyWriteContext` if and only if the slot is armed and its target equals the chain's property (two reference comparisons). Otherwise the context gets `ChangeOrigin.Local` and the slot is left untouched.
-- **Cleared by the arming frame regardless.** A cancelled write (`OnXChanging` sets `cancel`) never reaches the chain; the `finally` prevents the stamp from leaking into a later write.
+- **Restored by the arming frame regardless.** A cancelled write (`OnXChanging` sets `cancel`) never reaches the chain; the scope's `Dispose` restores the previous frame in `finally`, so an unconsumed stamp neither leaks into a later write nor destroys an outer pending stamp.
+- **Same-property re-entry is unsupported.** A changing hook that writes its own property re-enters the whole setter and would consume the stamp on the inner invocation; target matching identifies the property, not the setter invocation. This is declared unsupported (it risks recursion regardless of this design) rather than solved with an invocation token.
 
 ### Why target matching is required
 
-On master the generated setter runs `OnXChanging` before `SetPropertyValue`, so the hook executes before the armed property's chain exists. Without target matching, a changing hook that writes another property Q would start Q's chain first, and Q would steal the stamp: Q publishes as `FromSource(S)` and gets echo-suppressed, then P publishes as `Local`. Both origins exactly inverted. With target matching, Q's chain sees a mismatch and is `Local`; P's chain matches and consumes. This is the only case that needs the check (`OnXChanged` and INPC cascades run after P's chain has consumed), but it is a real case, and the check also hardens re-entrancy generally.
+On master the generated setter runs `OnXChanging` before `SetPropertyValue`, so the hook executes before the armed property's chain exists. Without target matching, a changing hook that writes another property Q would start Q's chain first, and Q would steal the stamp: Q publishes as `FromSource(S)` and gets echo-suppressed, then P publishes as `Local`. Both origins exactly inverted. With target matching, Q's chain sees a mismatch and is `Local`; P's chain matches and consumes. This is the only case that needs the check (`OnXChanged` and INPC cascades run after P's chain has consumed), but it is a real case. Target matching identifies the property, not the setter invocation: same-property re-entry from `OnXChanging` is unsupported (see the stamp rules), and that is the boundary of what the check guarantees.
 
 ### Why nested writes are Local structurally
 
@@ -125,7 +126,7 @@ Thread-static state is retained but shrinks to a synchronous, single-write hando
 - **When the terminal write lands** (the same point `IsWritten` becomes true), the executor finalizes `Origin` in place with the survival check: if `Kind != Local` and the final value does not equal `SentValue`, `Origin` becomes `Local`. Equality uses `EqualityComparer<TProperty>.Default` on the generic path and `object.Equals` on the boxed path, matching the equality interceptor's semantics.
 - If the write never lands (`IsWritten == false`), `Origin` keeps the attempted value. PR 2's correction detection depends on this.
 
-There is no separate `EffectiveOrigin` property. A lazily-cached effective origin was considered and rejected: a mid-chain reader would freeze the survival check before later interceptors finish rewriting `NewValue`, caching a wrong answer. Finalizing in place at the `IsWritten` transition removes the ordering hazard.
+There is no separate `EffectiveOrigin` property. Two alternatives were considered and rejected. A lazily-cached effective origin fails because a mid-chain reader would freeze the survival check before later interceptors finish rewriting `NewValue`, caching a wrong answer. A pair of properties (`AttemptedOrigin` immutable plus `EffectiveOrigin` finalized) removes the changes-across-`next()` subtlety but introduces a which-one-do-you-read ambiguity and extra context storage; since every consumer class has a fixed read point (validators mid-chain, publishers post-write), the single property with a sharp doc comment stating the two phases was chosen deliberately. Finalizing in place at the `IsWritten` transition removes the ordering hazard.
 
 ### What the survival check solves
 
@@ -153,13 +154,13 @@ The skip in `ChangeQueueProcessor` stays a single reference comparison, now over
 | `Local` | delivered to every bound source |
 | `FromSource(S)` | skipped for S, delivered to all other bound sources |
 | `Confirmed(S)` | skipped for S (the commit already wrote it), delivered to all others |
-| `Correction(S)` (PR 2) | delivered only to S |
+| `Correction(S)` (PR 2) | bypasses the own-source skip: flows through every processor whose property filter matches; topology decides recipients |
 
-In PR 1 the kind is not consulted for the skip at all; the comparison `ReferenceEquals(change.Origin.Source, _source)` is behavior-identical to today. The kind exists for validators, observability, and PR 2.
+In PR 1 the kind is not consulted for the skip at all; the comparison `ReferenceEquals(change.Origin.Source, _source)` is behavior-identical to today. The kind exists for validators, observability, and PR 2. A `Correction` is not an echo of anything (no model change occurred), so it bypasses the own-source skip and is processed by every eligible processor; the identity in `Correction(S)` records which source diverged, it does not target delivery. This matters because origin identity and processor identity need not match: the WebSocket server stamps origins per connection while its processor identifies as the handler, so a "deliver only when the origin source equals the processor source" rule would silently drop every WebSocket correction. Single-owner sources (OPC UA, MQTT) converge to owner-only delivery via their property filters; WebSocket broadcasts the authoritative projection to all replicas, which is desirable; a redundant re-write of an unchanged value to another bound source is idempotent.
 
 ## Batch applies
 
-`ApplySubjectUpdate(update, factory)` gains a required `object? source` parameter. It is deliberately not optional: nearly all production callers apply inbound updates and must provide their source, and a forgotten optional argument would compile fine while silently breaking echo suppression (the update would be re-sent to its sender). A local apply states `source: null` explicitly, which documents the intent at the call site. This is a source-breaking change, acceptable at 0.0.x, and the compiler forces every call site to decide. The update appliers (`SubjectUpdateApplier`, `SubjectItemsUpdateApplier`) thread it down the tree walk and arm per property write. The three WebSocket apply sites replace `using (SubjectChangeContext.WithSource(...))` with the parameter. The thread-static lock constraint documented in `WebSocketSubjectHandler` disappears; the lock itself is kept (apply serialization may be desirable on its own) and only the comment is corrected, to keep the PR focused. `PathExtensions` already applies per property and only swaps the internals of its `SetValueFromSource` call.
+`ApplySubjectUpdate(update, factory)` gains a required `ChangeOrigin origin` parameter. It is deliberately required and deliberately typed: nearly all production callers apply inbound updates and must provide their source, a forgotten optional argument would compile fine while silently breaking echo suppression, and an untyped `object? source` would reintroduce the null-means-local convention the typed model removes. A connector passes `ChangeOrigin.FromSource(connection)`; a local apply states `ChangeOrigin.Local` explicitly, which documents the intent at the call site; `Confirmed` batch applies come for free. This is a source-breaking change, acceptable at 0.0.x, and the compiler forces every call site to decide. The update appliers (`SubjectUpdateApplier`, `SubjectItemsUpdateApplier`) thread it down the tree walk and arm per property write. The three WebSocket apply sites replace `using (SubjectChangeContext.WithSource(...))` with `ChangeOrigin.FromSource(connection)` (server) and `ChangeOrigin.FromSource(this)` (client). The misleading thread-static lock comment in `WebSocketSubjectHandler` is corrected (the lock stays; if it is still needed, it is for apply serialization, not thread-static storage), to keep the PR focused. `PathExtensions` already applies per property and only swaps the internals of its `SetValueFromSource` call.
 
 ## Validators (PR 1)
 
@@ -193,9 +194,11 @@ Adds `ChangeOriginKind.Correction` together with its producer and consumer, so n
 
 `Confirmed` writes never produce corrections: the commit protocol already guarantees the source holds the value.
 
-**Synthesis.** The queue interceptor creates a `SubjectPropertyChange` with `Origin = Correction(S)` and old value equal to new value equal to the stored value. No model write occurred, so nothing else fires: no `OnXChanged`, no INPC raise, no timestamp mutation.
+**Synthesis.** The detector creates a `SubjectPropertyChange` with `Origin = Correction(S)`, old value equal to new value equal to the stored value, and a fresh local timestamp (see Timestamps below). No model write occurred, so nothing else fires: no `OnXChanged`, no INPC raise, no backing-field write; only the property's write-timestamp metadata is updated to the correction's timestamp.
 
-**Delivery.** The synthesized change enters the outbound change queue only. The observable never sees corrections: a correction is not a model change, so app-level subscribers (UI, GraphQL) have nothing to react to; divergence observability is #342 tracker territory. `ChangeQueueProcessor` gets one branch: `Correction(S)` is delivered only to S, written like a normal outbound write. All other kinds keep the single-comparison skip.
+**Delivery.** The synthesized change enters the outbound change queue only. The observable never sees corrections: a correction is not a model change, so app-level subscribers (UI, GraphQL) have nothing to react to; divergence observability is #342 tracker territory. Note that `PropertyChangeQueue` subscriptions are public API, so any direct queue subscriber (the performance profilers do this today) will see `Correction` changes and must filter on `Kind` if it only wants model mutations; this is documented. `ChangeQueueProcessor` gets one branch: `Correction` bypasses the own-source skip and is written like a normal outbound write by every processor whose property filter matches (see the echo suppression section for why delivery is not targeted by source identity). All other kinds keep the single-comparison skip.
+
+**Timestamps.** A correction is a new local assertion event. The detector generates a fresh local timestamp, updates only the property's write-timestamp metadata (`SetWriteTimestamp`), and publishes the correction with that same timestamp. It does not write the backing field and fires no hooks or INPC. Publishing the source's inbound timestamp instead would diverge model and source timestamps for the same value, and publishing the model's old timestamp could be rejected as stale; with the fresh timestamp, the source's echo returns the stored value with the same timestamp and is suppressed by the equality check, leaving both participants agreeing on value and time. Connector-level tests cover this (MQTT serializes `ChangedTimestamp`; OPC UA writes it as `SourceTimestamp`).
 
 **Boundary, documented.** A correction is produced only when the source actively sends a diverging value. Reasserting the model to a silently diverged source (no inbound traffic) remains a reconciliation concern owned by #342.
 
@@ -213,8 +216,8 @@ Breaking public API (acceptable at 0.0.x, mostly internal consumers):
 - `SubjectPropertyChange.Source` becomes `Origin` (`ChangeOrigin`); `WithSource` with-er becomes `WithOrigin`.
 - `SubjectChangeContext.WithSource` and `WithState` removed; `WithTimestamps` added.
 - `IPropertyValidator.Validate` signature change to `PropertyValidationContext<TProperty>`.
-- `ApplySubjectUpdate` gains a required `object? source` parameter.
-- New core types: `ChangeOrigin`, `ChangeOriginKind`, `PendingOrigin`, `PendingOriginScope`; `PropertyWriteContext.Origin` added.
+- `ApplySubjectUpdate` gains a required `ChangeOrigin origin` parameter.
+- New public core types: `ChangeOrigin`, `ChangeOriginKind`; `PropertyWriteContext.Origin` added. `PendingOrigin` and its scope are internal.
 - Public API snapshot files (`VerifyChecksTests.PublicApi.verified.txt`) updated in affected test projects.
 
 Unchanged:
@@ -236,7 +239,7 @@ Documentation updates: `docs/connectors.md` (source semantics section rewritten 
 
 ## Performance
 
-- No new allocations anywhere: the pending stamp is thread-static fields, `ChangeOrigin` is a 16-byte struct, `SubjectPropertyChange` grows by at most the kind byte folded into padding.
+- No new allocations anywhere: the pending stamp is thread-static fields and `ChangeOrigin` is a small struct. `SubjectPropertyChange` stores the origin flattened (kind byte plus source reference, see the model section), targeting no size growth versus master; a test measures `Unsafe.SizeOf<SubjectPropertyChange>()` and the benchmark run validates the outcome rather than assuming it.
 - The hot local-write path swaps one thread-static access for another: chain entry gains one slot check; publish time loses the ambient source reads. Expected net effect within noise.
 - Stamped (inbound) writes gain one equality comparison (the survival check) on a network-bound path.
 - Gate: run the existing write-path benchmarks (`Namotion.Interceptor.Benchmarks`) before and after PR 1, per the repository benchmark conventions.
@@ -252,8 +255,9 @@ PR 1:
 PR 2:
 
 - The three-outcome correction matrix.
-- Correction delivered only to the diverged source; other bound sources receive nothing.
-- A correction fires no `OnXChanged`, no INPC raise, no timestamp mutation, and never reaches the observable.
+- Correction bypasses the own-source skip and reaches every processor whose property filter matches; a WebSocket-shaped test (origin identity differs from processor identity) proves corrections are not dropped.
+- A correction fires no `OnXChanged`, no INPC raise, no backing-field write, and never reaches the observable; it updates the property's write-timestamp metadata and publishes that same fresh timestamp, and the returning source echo is equality-suppressed.
+- Direct `PropertyChangeQueue` subscribers observe corrections and can filter on `Kind`.
 - `Confirmed` writes never produce corrections.
 
 ## Issue and PR bookkeeping
