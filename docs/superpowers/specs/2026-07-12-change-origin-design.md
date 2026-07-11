@@ -183,7 +183,7 @@ where `PropertyValidationContext<TProperty>` is a readonly struct carrying `Prop
 
 Adds `ChangeOriginKind.Correction` together with its producer and consumer, so no dead enum member ships.
 
-**Detection.** In the queue interceptor, after `next()` returns: a write that was armed `FromSource(S)`, has `IsWritten == false`, and whose `SentValue` differs from the stored value is the diverged case from the #365 comment. The three-outcome matrix:
+**Detection.** In a dedicated `SourceCorrectionDetector` write interceptor ordered before the equality check (`[RunsFirst]` plus `[RunsBefore(typeof(PropertyValueEqualityCheckHandler))]`): the equality handler runs first and suppresses unchanged writes by not calling `next`, so the queue interceptor never executes for them and cannot be the detection point. After the detector's `next()` returns: a write that was armed `FromSource(S)`, has `IsWritten == false`, and whose `SentValue` differs from the stored value is the diverged case from the #365 comment. The three-outcome matrix:
 
 | Case | Outcome |
 |---|---|
