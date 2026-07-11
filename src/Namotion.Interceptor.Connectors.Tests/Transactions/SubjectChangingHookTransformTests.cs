@@ -93,6 +93,30 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
     }
 
     [Fact]
+    public void WhenTransformedValueEqualsStoredValue_ThenNoCorrectionIsPublished()
+    {
+        // Arrange: the model already holds the projection of the incoming value.
+        var context = CreateContext();
+        var device = new ClampingDevice(context);
+        var sourceMock = CreateSucceedingSource();
+        device.Value = 100;
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act: the source sends 105; the clamp projects it to 100, which equals the stored value,
+        // so the equality check drops the write before anything is published.
+        new PropertyReference(device, nameof(ClampingDevice.Value))
+            .SetValueFromSource(sourceMock.Object, DateTimeOffset.UtcNow, null, 105);
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert: pins the documented boundary that a correction requires a stored-value change;
+        // the source keeps its out-of-range value until the next model change (see connectors.md).
+        Assert.Equal(100, device.Value);
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
+    }
+
+    [Fact]
     public async Task WhenInboundValueIsTransformed_ThenCorrectionIsDeliveredToBoundSource()
     {
         // Arrange
