@@ -159,7 +159,7 @@ In PR 1 the kind is not consulted for the skip at all; the comparison `Reference
 
 ## Batch applies
 
-`ApplySubjectUpdate(update, factory)` gains an optional `object? source = null` parameter (a binary-only break, acceptable at 0.0.x). The update appliers (`SubjectUpdateApplier`, `SubjectItemsUpdateApplier`) thread it down the tree walk and arm per property write. The three WebSocket apply sites replace `using (SubjectChangeContext.WithSource(...))` with the parameter. The thread-static lock constraint documented in `WebSocketSubjectHandler` disappears; the lock itself is kept (apply serialization may be desirable on its own) and only the comment is corrected, to keep the PR focused. `PathExtensions` already applies per property and only swaps the internals of its `SetValueFromSource` call.
+`ApplySubjectUpdate(update, factory)` gains a required `object? source` parameter. It is deliberately not optional: nearly all production callers apply inbound updates and must provide their source, and a forgotten optional argument would compile fine while silently breaking echo suppression (the update would be re-sent to its sender). A local apply states `source: null` explicitly, which documents the intent at the call site. This is a source-breaking change, acceptable at 0.0.x, and the compiler forces every call site to decide. The update appliers (`SubjectUpdateApplier`, `SubjectItemsUpdateApplier`) thread it down the tree walk and arm per property write. The three WebSocket apply sites replace `using (SubjectChangeContext.WithSource(...))` with the parameter. The thread-static lock constraint documented in `WebSocketSubjectHandler` disappears; the lock itself is kept (apply serialization may be desirable on its own) and only the comment is corrected, to keep the PR focused. `PathExtensions` already applies per property and only swaps the internals of its `SetValueFromSource` call.
 
 ## Validators (PR 1)
 
@@ -213,7 +213,7 @@ Breaking public API (acceptable at 0.0.x, mostly internal consumers):
 - `SubjectPropertyChange.Source` becomes `Origin` (`ChangeOrigin`); `WithSource` with-er becomes `WithOrigin`.
 - `SubjectChangeContext.WithSource` and `WithState` removed; `WithTimestamps` added.
 - `IPropertyValidator.Validate` signature change to `PropertyValidationContext<TProperty>`.
-- `ApplySubjectUpdate` gains a source parameter.
+- `ApplySubjectUpdate` gains a required `object? source` parameter.
 - New core types: `ChangeOrigin`, `ChangeOriginKind`, `PendingOrigin`, `PendingOriginScope`; `PropertyWriteContext.Origin` added.
 - Public API snapshot files (`VerifyChecksTests.PublicApi.verified.txt`) updated in affected test projects.
 
