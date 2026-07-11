@@ -105,7 +105,7 @@ Choose based on your consistency requirements: local-first for responsiveness, t
 
 #### Change notification source semantics
 
-The `Source` of a change notification identifies the system that confirmed the value: a change carries a source only when its stored value is exactly the value that source sent (inbound update) or confirmed (source transaction commit); everything else carries `null`. The outbound change queue skips changes whose source is the target source itself, so a committed value is written to its source exactly once, by the commit.
+The `Source` of a change notification identifies the system that confirmed the value. In the generated model paths described below, a change carries a source only when its stored value is exactly the value that source sent (inbound update) or confirmed (source transaction commit); locally computed consequences carry `null`. Other pipeline layers have the exceptions noted below. The outbound change queue skips changes whose source is the target source itself, so a committed value is written to its source exactly once, by the commit.
 
 Writes that happen as a consequence of a source-scoped apply are local origin: the local model computed them, so they publish with a `null` source and flow to bound sources like any local write.
 

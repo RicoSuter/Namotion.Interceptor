@@ -111,7 +111,63 @@ public class MetadataBaseRaiseTests
     }
 
     [Fact]
-    public void WhenGeneratedMetadataBaseImplementsRaiseExplicitly_ThenChildUsesInheritedHelperAndCompiles()
+    public void WhenMetadataBaseImplementsRaiseExplicitly_ThenChildEmitsProtectedForwarder()
+    {
+        // Arrange: a hand-written base exposes the raise only through the interface. The generated
+        // child needs a protected forwarding method for its setters and generated descendants.
+        const string baseSource = """
+            using System.ComponentModel;
+            using Namotion.Interceptor;
+
+            namespace MetadataTests;
+
+            public abstract class ExplicitMetadataBase : INotifyPropertyChanged, IRaisePropertyChanged
+            {
+                public event PropertyChangedEventHandler? PropertyChanged;
+
+                void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
+                {
+                    var handler = PropertyChanged;
+                    if (handler is null)
+                    {
+                        return;
+                    }
+
+                    using (SubjectChangeContext.WithLocalOrigin())
+                    {
+                        handler(this, new PropertyChangedEventArgs(propertyName));
+                    }
+                }
+            }
+            """;
+
+        const string childSource = """
+            using Namotion.Interceptor.Attributes;
+
+            namespace MetadataTests;
+
+            [InterceptorSubject]
+            public partial class Child : ExplicitMetadataBase
+            {
+                public partial string? ChildName { get; set; }
+            }
+            """;
+
+        // Act
+        var generatedChild = GenerateAndCompileChildAgainstMetadataBase(baseSource, childSource);
+
+        // Assert
+        Assert.Contains(
+            "        protected void RaisePropertyChanged(string propertyName) =>\n" +
+            "            ((IRaisePropertyChanged)this).RaisePropertyChanged(propertyName);",
+            generatedChild.Replace("\r\n", "\n"));
+        Assert.Contains(
+            "                    RaisePropertyChanged(nameof(ChildName));",
+            generatedChild);
+    }
+
+    [Fact]
+    public void WhenGeneratedMetadataBaseImplementsRaiseExplicitly_ThenChildUsesInheritedForwarderAndCompiles()
     {
         // Arrange: the generated base owns INPC manually and exposes only an explicit interface
         // method. The generator emits a protected forwarding method used by descendants.
