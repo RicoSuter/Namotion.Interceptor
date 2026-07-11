@@ -43,12 +43,8 @@ public class MetadataBaseRaiseTests
         var generatedChild = GenerateAndCompileChildAgainstMetadataBase(baseSource, childSource);
 
         // Assert
-        Assert.Contains(
-            "                    RaisePropertyChanged(nameof(ChildName));",
-            generatedChild);
-        Assert.DoesNotContain(
-            "        protected void RaisePropertyChanged(string propertyName) =>",
-            generatedChild);
+        Assert.Contains("RaisePropertyChanged(nameof(ChildName));", generatedChild);
+        Assert.DoesNotContain("protected void RaisePropertyChanged", generatedChild);
     }
 
     [Fact]
@@ -91,12 +87,8 @@ public class MetadataBaseRaiseTests
         var generatedChild = GenerateAndCompileChildAgainstMetadataBase(baseSource, childSource);
 
         // Assert
-        Assert.Contains(
-            "                    RaisePropertyChanged(nameof(ChildName));",
-            generatedChild);
-        Assert.DoesNotContain(
-            "        protected void RaisePropertyChanged(string propertyName) =>",
-            generatedChild);
+        Assert.Contains("RaisePropertyChanged(nameof(ChildName));", generatedChild);
+        Assert.DoesNotContain("protected void RaisePropertyChanged", generatedChild);
     }
 
     [Fact]
@@ -135,13 +127,58 @@ public class MetadataBaseRaiseTests
         var generatedChild = GenerateAndCompileChildAgainstMetadataBase(baseSource, childSource);
 
         // Assert
-        Assert.Contains(
-            "        protected void RaisePropertyChanged(string propertyName) =>\n" +
-            "            ((IRaisePropertyChanged)this).RaisePropertyChanged(propertyName);",
-            generatedChild.Replace("\r\n", "\n"));
-        Assert.Contains(
-            "                    RaisePropertyChanged(nameof(ChildName));",
-            generatedChild);
+        Assert.Contains("protected void RaisePropertyChanged(string propertyName)", generatedChild);
+        Assert.Contains("((IRaisePropertyChanged)this).RaisePropertyChanged(propertyName);", generatedChild);
+        Assert.Contains("RaisePropertyChanged(nameof(ChildName));", generatedChild);
+    }
+
+    [Fact]
+    public void WhenMetadataBaseHasOnlyNonInvocableRaiseOverloads_ThenChildEmitsProtectedForwarder()
+    {
+        // Arrange: the base exposes the raise only through the interface plus overloads the
+        // generated call shape cannot bind to (generic, ref parameter). Without the forwarder the
+        // child's RaisePropertyChanged(nameof(...)) call would not compile.
+        const string baseSource = """
+            using System.ComponentModel;
+            using Namotion.Interceptor;
+
+            namespace MetadataTests;
+
+            public abstract class OverloadedMetadataBase : INotifyPropertyChanged, IRaisePropertyChanged
+            {
+                public event PropertyChangedEventHandler? PropertyChanged;
+
+                protected void RaisePropertyChanged<T>(string propertyName)
+                {
+                }
+
+                protected void RaisePropertyChanged(ref string propertyName)
+                {
+                }
+
+                void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) =>
+                    SubjectChangeContext.RaisePropertyChanged(PropertyChanged, this, propertyName);
+            }
+            """;
+
+        const string childSource = """
+            using Namotion.Interceptor.Attributes;
+
+            namespace MetadataTests;
+
+            [InterceptorSubject]
+            public partial class Child : OverloadedMetadataBase
+            {
+                public partial string? ChildName { get; set; }
+            }
+            """;
+
+        // Act
+        var generatedChild = GenerateAndCompileChildAgainstMetadataBase(baseSource, childSource);
+
+        // Assert
+        Assert.Contains("((IRaisePropertyChanged)this).RaisePropertyChanged(propertyName);", generatedChild);
+        Assert.Contains("RaisePropertyChanged(nameof(ChildName));", generatedChild);
     }
 
     [Fact]
@@ -184,12 +221,8 @@ public class MetadataBaseRaiseTests
         var generatedChild = GenerateAndCompileChildAgainstMetadataBase(baseSource, childSource);
 
         // Assert
-        Assert.Contains(
-            "                    RaisePropertyChanged(nameof(ChildName));",
-            generatedChild);
-        Assert.DoesNotContain(
-            "        protected void RaisePropertyChanged(string propertyName) =>",
-            generatedChild);
+        Assert.Contains("RaisePropertyChanged(nameof(ChildName));", generatedChild);
+        Assert.DoesNotContain("protected void RaisePropertyChanged", generatedChild);
     }
 
     /// <summary>

@@ -99,17 +99,34 @@ internal static class SubjectMetadataExtractor
                 .OfType<IMethodSymbol>()
                 .Any(method =>
                     !method.IsStatic &&
+                    !method.IsGenericMethod &&
                     method.ReturnsVoid &&
                     method.Parameters.Length == 1 &&
+                    method.Parameters[0].RefKind == RefKind.None &&
                     method.Parameters[0].Type.SpecialType == SpecialType.System_String &&
-                    method.DeclaredAccessibility is Accessibility.Protected or
-                        Accessibility.ProtectedOrInternal or Accessibility.Public))
+                    IsAccessibleFromDerivedSubject(method, type)))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    // A raiser counts as callable when the generated setter of the subject can invoke it directly.
+    // Internal and private protected raisers qualify only with internals access to the declaring
+    // assembly (same assembly or InternalsVisibleTo); treating them as non-callable would emit a
+    // forwarder that hides the accessible base method (CS0108, a build break with warnings as errors).
+    private static bool IsAccessibleFromDerivedSubject(IMethodSymbol method, INamedTypeSymbol subjectType)
+    {
+        return method.DeclaredAccessibility switch
+        {
+            Accessibility.Public or Accessibility.Protected or Accessibility.ProtectedOrInternal => true,
+            Accessibility.Internal or Accessibility.ProtectedAndInternal =>
+                SymbolEqualityComparer.Default.Equals(method.ContainingAssembly, subjectType.ContainingAssembly) ||
+                method.ContainingAssembly.GivesAccessTo(subjectType.ContainingAssembly),
+            _ => false,
+        };
     }
 
     private static string GetNamespace(ClassDeclarationSyntax classDeclaration)

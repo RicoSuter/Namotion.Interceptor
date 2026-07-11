@@ -109,4 +109,44 @@ public class HookScopeGenerationTests
         // Assert
         Assert.Null(sourceSeenDuringRaise);
     }
+
+    [Fact]
+    public void WhenBaseImplementsRaiseExplicitlyOnly_ThenForwarderDeliversRaiseUnderLocalOriginScope()
+    {
+        // Arrange: ExplicitInpcSubject : ExplicitInpcBase, where the base has no callable raiser,
+        // so the generated setter raises through the emitted protected forwarder.
+        var subject = new ExplicitInpcSubject();
+        var source = new object();
+        object? sourceSeenDuringRaise = "sentinel";
+        subject.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
+
+        // Act
+        using (SubjectChangeContext.WithSource(source))
+        {
+            subject.Name = "value";
+        }
+
+        // Assert: the handler fired through the forwarder and observed a null source.
+        Assert.Null(sourceSeenDuringRaise);
+    }
+
+    [Fact]
+    public void WhenBaseRaiserIsPrivateProtected_ThenChildCallsItDirectlyUnderLocalOriginScope()
+    {
+        // Arrange: the same-assembly private protected raiser is callable from the generated
+        // child, so no forwarder is emitted (one would hide the base method and fail the build).
+        var subject = new PrivateProtectedRaiseSubject();
+        var source = new object();
+        object? sourceSeenDuringRaise = "sentinel";
+        subject.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
+
+        // Act
+        using (SubjectChangeContext.WithSource(source))
+        {
+            subject.Name = "value";
+        }
+
+        // Assert
+        Assert.Null(sourceSeenDuringRaise);
+    }
 }

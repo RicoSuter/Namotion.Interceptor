@@ -183,6 +183,13 @@ public readonly struct SubjectChangeContext
             return;
         }
 
+        RaisePropertyChangedWithLocalOrigin(handler, sender, propertyName);
+    }
+
+    // Separate method so the fast paths above stay free of exception handling and can be inlined
+    // (the JIT does not inline methods containing try/finally).
+    private static void RaisePropertyChangedWithLocalOrigin(PropertyChangedEventHandler handler, object sender, string propertyName)
+    {
         using (WithLocalOrigin())
         {
             handler(sender, PropertyChangedEventArgsCache.Get(propertyName));
