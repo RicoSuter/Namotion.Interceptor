@@ -51,7 +51,7 @@ internal static class SubjectMetadataExtractor
             HasInterceptorSubjectAttribute(sourceBase);
         var needsRaisePropertyChangedForwarder = baseClassHasInpc &&
             !sourceBaseWillExposeRaise &&
-            !HasCallableRaisePropertyChanged(typeSymbol);
+            !HasCallableRaisePropertyChanged(typeSymbol, semanticModel.Compilation);
 
         // Collect all partial class declarations
         var allClassDeclarations = typeSymbol.DeclaringSyntaxReferences
@@ -89,7 +89,12 @@ internal static class SubjectMetadataExtractor
             methods);
     }
 
-    private static bool HasCallableRaisePropertyChanged(INamedTypeSymbol type)
+    // A raiser counts as callable when the generated setter of the subject can invoke it with
+    // RaisePropertyChanged(nameof(X)): non-generic, void, one by-value string parameter, and
+    // accessible from inside the subject (Roslyn resolves protected, internal, private protected
+    // and InternalsVisibleTo). Treating an accessible raiser as non-callable would emit a
+    // forwarder that hides the base method (CS0108, a build break with warnings as errors).
+    private static bool HasCallableRaisePropertyChanged(INamedTypeSymbol type, Compilation compilation)
     {
         for (var current = type;
              current is not null && current.SpecialType != SpecialType.System_Object;
@@ -104,29 +109,13 @@ internal static class SubjectMetadataExtractor
                     method.Parameters.Length == 1 &&
                     method.Parameters[0].RefKind == RefKind.None &&
                     method.Parameters[0].Type.SpecialType == SpecialType.System_String &&
-                    IsAccessibleFromDerivedSubject(method, type)))
+                    compilation.IsSymbolAccessibleWithin(method, type)))
             {
                 return true;
             }
         }
 
         return false;
-    }
-
-    // A raiser counts as callable when the generated setter of the subject can invoke it directly.
-    // Internal and private protected raisers qualify only with internals access to the declaring
-    // assembly (same assembly or InternalsVisibleTo); treating them as non-callable would emit a
-    // forwarder that hides the accessible base method (CS0108, a build break with warnings as errors).
-    private static bool IsAccessibleFromDerivedSubject(IMethodSymbol method, INamedTypeSymbol subjectType)
-    {
-        return method.DeclaredAccessibility switch
-        {
-            Accessibility.Public or Accessibility.Protected or Accessibility.ProtectedOrInternal => true,
-            Accessibility.Internal or Accessibility.ProtectedAndInternal =>
-                SymbolEqualityComparer.Default.Equals(method.ContainingAssembly, subjectType.ContainingAssembly) ||
-                method.ContainingAssembly.GivesAccessTo(subjectType.ContainingAssembly),
-            _ => false,
-        };
     }
 
     private static string GetNamespace(ClassDeclarationSyntax classDeclaration)

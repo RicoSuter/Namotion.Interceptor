@@ -1,8 +1,6 @@
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Transactions;
-using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -126,61 +124,25 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
 
         new PropertyReference(device, nameof(ClampingDevice.Value)).SetSource(sourceMock.Object);
 
-        // A ChangeQueueProcessor whose source identity IS the bound source: it echo-drops changes
-        // already marked with that source and delivers everything else.
-        var delivered = new List<SubjectPropertyChange>();
-        var processor = new ChangeQueueProcessor(
-            source: sourceMock.Object,
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: (batch, _) =>
+        // Act: the source sends 105; the clamp stores 100 as local origin. The processor's source
+        // identity IS the bound source, so the correction is actually written back to the bound
+        // source, not echo-dropped.
+        var delivered = await DeliverThroughChangeQueueProcessorAsync(
+            context,
+            sourceMock.Object,
+            () =>
             {
-                lock (delivered)
-                {
-                    delivered.AddRange(batch.ToArray());
-                }
-                return ValueTask.CompletedTask;
+                new PropertyReference(device, nameof(ClampingDevice.Value))
+                    .SetValueFromSource(sourceMock.Object, DateTimeOffset.UtcNow, null, 105);
+                return Task.CompletedTask;
             },
-            bufferTime: TimeSpan.FromMilliseconds(8),
-            maxQueueDepth: null,
-            logger: NullLogger.Instance);
-
-        using var processorCts = new CancellationTokenSource();
-        var processTask = processor.ProcessAsync(processorCts.Token);
-
-        try
-        {
-            // Act: the source sends 105; the clamp stores 100 as local origin.
-            new PropertyReference(device, nameof(ClampingDevice.Value))
-                .SetValueFromSource(sourceMock.Object, DateTimeOffset.UtcNow, null, 105);
-
-            // The correction is actually written back to the bound source, not echo-dropped.
-            await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    lock (delivered)
-                    {
-                        return delivered.Any(c => c.Property.Name == nameof(ClampingDevice.Value));
-                    }
-                },
-                message: "Processor did not deliver the clamped correction.");
-        }
-        finally
-        {
-            // Await the consumer before disposing: Dispose tears down the subscription's signal,
-            // which a still-running TryDequeue may be about to wait on (ObjectDisposedException).
-            await processorCts.CancelAsync();
-            try { await processTask; } catch (OperationCanceledException) { }
-            processor.Dispose();
-        }
+            isAwaitedChange: c => c.Property.Name == nameof(ClampingDevice.Value),
+            timeoutMessage: "Processor did not deliver the clamped correction.");
 
         // Assert
         Assert.Equal(100, device.Value);
-        lock (delivered)
-        {
-            var correction = delivered.Single(c => c.Property.Name == nameof(ClampingDevice.Value));
-            Assert.Equal(100, correction.GetNewValue<int>());
-        }
+        var correction = delivered.Single(c => c.Property.Name == nameof(ClampingDevice.Value));
+        Assert.Equal(100, correction.GetNewValue<int>());
     }
 
     [Fact]

@@ -1,7 +1,9 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Connectors.Transactions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -42,6 +44,66 @@ public abstract class TransactionTestBase
         sentinel.LastName = "Sentinel";
         return DrainUntil(subscription, c =>
             ReferenceEquals(c.Property.Subject, sentinel) && c.Property.Name == nameof(Person.LastName));
+    }
+
+    /// <summary>
+    /// Runs a ChangeQueueProcessor with the given source identity around <paramref name="act"/>,
+    /// waits until a delivered change matches <paramref name="isAwaitedChange"/>, and returns
+    /// everything delivered. The processor echo-drops changes already marked with the source
+    /// identity, like a real connector.
+    /// </summary>
+    protected static async Task<List<SubjectPropertyChange>> DeliverThroughChangeQueueProcessorAsync(
+        IInterceptorSubjectContext context,
+        object source,
+        Func<Task> act,
+        Func<SubjectPropertyChange, bool> isAwaitedChange,
+        string timeoutMessage)
+    {
+        var delivered = new List<SubjectPropertyChange>();
+        var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (batch, _) =>
+            {
+                lock (delivered)
+                {
+                    delivered.AddRange(batch.ToArray());
+                }
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        using var processorCts = new CancellationTokenSource();
+        var processTask = processor.ProcessAsync(processorCts.Token);
+
+        try
+        {
+            await act();
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    lock (delivered)
+                    {
+                        return delivered.Any(isAwaitedChange);
+                    }
+                },
+                message: timeoutMessage);
+        }
+        finally
+        {
+            // Await the consumer before disposing: Dispose tears down the subscription's signal,
+            // which a still-running TryDequeue may be about to wait on (ObjectDisposedException).
+            await processorCts.CancelAsync();
+            try { await processTask; } catch (OperationCanceledException) { }
+            processor.Dispose();
+        }
+
+        // The processor has stopped; no concurrent writer remains.
+        return delivered;
     }
 
     protected static IInterceptorSubjectContext CreateContext()

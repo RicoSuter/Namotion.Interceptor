@@ -61,6 +61,17 @@ public readonly struct SubjectChangeContext
         [MethodImpl(MethodImplOptions.AggressiveInlining)] get => _current;
     }
 
+    /// <summary>
+    /// Indicates whether the ambient context carries an external origin: a write published now
+    /// would be stamped with the ambient source. Counterpart of <see cref="WithLocalOrigin"/>;
+    /// together they encode local origin as a null source in one place, so generated code reads
+    /// this property instead of testing <see cref="Source"/> directly.
+    /// </summary>
+    public static bool HasExternalOrigin
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] get => _current.Source is not null;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private SubjectChangeContext(long changedTimestamp, long receivedTimestamp, object? source)
     {

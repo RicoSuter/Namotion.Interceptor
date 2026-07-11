@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Namotion.Interceptor.Generator.Tests.Models;
 using Xunit;
 
@@ -39,59 +40,26 @@ public class HookScopeGenerationTests
     [Fact]
     public void WhenBaseManuallyImplementsRaisePropertyChanged_ThenRaiseRunsUnderLocalOriginScope()
     {
-        // Arrange
+        // The manual base's raiser owns the local-origin contract.
         var subject = new ManualInpcSubject();
-        var source = new object();
-        object? sourceSeenDuringRaise = "sentinel";
-        subject.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
-
-        // Act: write under an ambient source scope. The manual raiser owns the local-origin scope.
-        using (SubjectChangeContext.WithSource(source))
-        {
-            subject.Name = "value";
-        }
-
-        // Assert: the INPC subscriber, invoked by the manual base's raise, saw a null source.
-        Assert.Null(sourceSeenDuringRaise);
+        AssertHandlerSeesNullSourceWhenWrittenUnderSourceScope(subject, () => subject.Name = "value");
     }
 
     [Fact]
     public void WhenMultiLevelChainRootedAtManualBase_ThenRaiseRunsUnderLocalOriginScope()
     {
-        // Arrange: ManualInpcGrandchild : ManualInpcSubject : ManualInpcBase.
+        // ManualInpcGrandchild : ManualInpcSubject : ManualInpcBase; the raise is inherited.
         var subject = new ManualInpcGrandchild();
-        var source = new object();
-        object? sourceSeenDuringRaise = "sentinel";
-        subject.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
-
-        // Act
-        using (SubjectChangeContext.WithSource(source))
-        {
-            subject.GrandchildName = "value";
-        }
-
-        // Assert: the subscriber observed a null source through the inherited manual raise.
-        Assert.Null(sourceSeenDuringRaise);
+        AssertHandlerSeesNullSourceWhenWrittenUnderSourceScope(subject, () => subject.GrandchildName = "value");
     }
 
     [Fact]
     public void WhenBaseSubjectManuallyImplementsInpcItself_ThenChildRaiseRunsUnderLocalOriginScope()
     {
-        // Arrange: SelfInpcChild : SelfInpcSubject, where the parent is a generated subject that
-        // declares IRaisePropertyChanged manually in its own base list and owns the raise contract.
+        // SelfInpcChild : SelfInpcSubject, where the parent is a generated subject that declares
+        // IRaisePropertyChanged manually in its own base list and owns the raise contract.
         var subject = new SelfInpcChild();
-        var source = new object();
-        object? sourceSeenDuringRaise = "sentinel";
-        subject.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
-
-        // Act
-        using (SubjectChangeContext.WithSource(source))
-        {
-            subject.ChildName = "value";
-        }
-
-        // Assert
-        Assert.Null(sourceSeenDuringRaise);
+        AssertHandlerSeesNullSourceWhenWrittenUnderSourceScope(subject, () => subject.ChildName = "value");
     }
 
     [Fact]
@@ -113,37 +81,37 @@ public class HookScopeGenerationTests
     [Fact]
     public void WhenBaseImplementsRaiseExplicitlyOnly_ThenForwarderDeliversRaiseUnderLocalOriginScope()
     {
-        // Arrange: ExplicitInpcSubject : ExplicitInpcBase, where the base has no callable raiser,
-        // so the generated setter raises through the emitted protected forwarder.
+        // ExplicitInpcSubject : ExplicitInpcBase, where the base has no callable raiser, so the
+        // generated setter raises through the emitted protected forwarder.
         var subject = new ExplicitInpcSubject();
-        var source = new object();
-        object? sourceSeenDuringRaise = "sentinel";
-        subject.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
-
-        // Act
-        using (SubjectChangeContext.WithSource(source))
-        {
-            subject.Name = "value";
-        }
-
-        // Assert: the handler fired through the forwarder and observed a null source.
-        Assert.Null(sourceSeenDuringRaise);
+        AssertHandlerSeesNullSourceWhenWrittenUnderSourceScope(subject, () => subject.Name = "value");
     }
 
     [Fact]
     public void WhenBaseRaiserIsPrivateProtected_ThenChildCallsItDirectlyUnderLocalOriginScope()
     {
-        // Arrange: the same-assembly private protected raiser is callable from the generated
-        // child, so no forwarder is emitted (one would hide the base method and fail the build).
+        // The same-assembly private protected raiser is callable from the generated child, so no
+        // forwarder is emitted (one would hide the base method and fail the build).
         var subject = new PrivateProtectedRaiseSubject();
-        var source = new object();
+        AssertHandlerSeesNullSourceWhenWrittenUnderSourceScope(subject, () => subject.Name = "value");
+    }
+
+    /// <summary>
+    /// Writes through <paramref name="write"/> under an ambient source scope and asserts the
+    /// subject's PropertyChanged handler fired and observed a null source (the raise entered a
+    /// local-origin scope).
+    /// </summary>
+    private static void AssertHandlerSeesNullSourceWhenWrittenUnderSourceScope(
+        INotifyPropertyChanged subject, Action write)
+    {
+        // Arrange: seeded non-null so "handler saw null" is distinguishable from "handler never ran".
         object? sourceSeenDuringRaise = "sentinel";
         subject.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
 
         // Act
-        using (SubjectChangeContext.WithSource(source))
+        using (SubjectChangeContext.WithSource(new object()))
         {
-            subject.Name = "value";
+            write();
         }
 
         // Assert

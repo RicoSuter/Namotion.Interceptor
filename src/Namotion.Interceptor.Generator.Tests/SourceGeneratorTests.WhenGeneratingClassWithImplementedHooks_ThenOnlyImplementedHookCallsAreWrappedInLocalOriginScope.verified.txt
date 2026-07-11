@@ -111,7 +111,7 @@ namespace YourDefaultNamespace
                 }
 
                 bool written;
-                if (SubjectChangeContext.Current.Source is not null &&
+                if (SubjectChangeContext.HasExternalOrigin &&
                     !EqualityComparer<string>.Default.Equals(newValue, value))
                 {
                     using (SubjectChangeContext.WithLocalOrigin())
@@ -129,8 +129,8 @@ namespace YourDefaultNamespace
                     using (SubjectChangeContext.WithLocalOrigin())
                     {
                         OnHookedChanged(_Hooked);
+                        RaisePropertyChanged(nameof(Hooked));
                     }
-                    RaisePropertyChanged(nameof(Hooked));
                 }
             }
         }

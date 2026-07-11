@@ -1,9 +1,7 @@
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -313,65 +311,24 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
 
-        // The server-side processor uses a fresh, unique object as its source identity so the
+        // Act: the server-side processor uses a fresh, unique object as its source identity so the
         // echo filter (change.Source == _source) never matches the committed change's source.
-        var serverSource = new object();
-        var serverReceived = new List<SubjectPropertyChange>();
-
-        var processor = new ChangeQueueProcessor(
-            source: serverSource,
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: (changes, _) =>
+        var serverReceived = await DeliverThroughChangeQueueProcessorAsync(
+            context,
+            source: new object(),
+            act: async () =>
             {
-                lock (serverReceived)
-                {
-                    serverReceived.AddRange(changes.ToArray());
-                }
-                return ValueTask.CompletedTask;
-            },
-            bufferTime: TimeSpan.FromMilliseconds(8),
-            maxQueueDepth: null,
-            logger: NullLogger.Instance);
-
-        using var processorCts = new CancellationTokenSource();
-        var processTask = processor.ProcessAsync(processorCts.Token);
-
-        try
-        {
-            // Act
-            using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-            {
+                using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
                 person.FirstName = "John";
                 await transaction.CommitAsync(CancellationToken.None);
-            }
-
-            // Wait until the server-side processor has received the FirstName change.
-            await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    lock (serverReceived)
-                    {
-                        return serverReceived.Any(c => c.Property.Name == nameof(Person.FirstName));
-                    }
-                },
-                message: "Server-side processor did not receive the committed FirstName change.");
-        }
-        finally
-        {
-            // Follow the ChangeQueueProcessorTests lifecycle pattern: cancel, dispose, then await.
-            await processorCts.CancelAsync();
-            processor.Dispose();
-            try { await processTask; } catch (OperationCanceledException) { }
-        }
+            },
+            isAwaitedChange: c => c.Property.Name == nameof(Person.FirstName),
+            timeoutMessage: "Server-side processor did not receive the committed FirstName change.");
 
         // Assert: the server-side processor received the FirstName change with the confirming source
-        // stamped on it. Its own echo filter does not suppress it because serverSource != sourceMock.Object.
-        lock (serverReceived)
-        {
-            var change = serverReceived.First(c => c.Property.Name == nameof(Person.FirstName));
-            Assert.Same(sourceMock.Object, change.Source);
-        }
+        // stamped on it. Its own echo filter does not suppress it because its identity differs.
+        var change = serverReceived.First(c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Same(sourceMock.Object, change.Source);
     }
 
     [Fact]

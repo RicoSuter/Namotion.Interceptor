@@ -137,6 +137,7 @@ namespace Namotion.Interceptor
         public System.DateTimeOffset? ReceivedTimestamp { get; }
         public static Namotion.Interceptor.SubjectChangeContext Current { get; }
         public static System.Func<System.DateTimeOffset> GetTimestampFunction { get; set; }
+        public static bool HasExternalOrigin { get; }
         public static void RaisePropertyChanged(System.ComponentModel.PropertyChangedEventHandler? handler, object sender, string propertyName) { }
         public static Namotion.Interceptor.SubjectChangeContext.SubjectChangeContextScope WithChangedTimestamp(System.DateTimeOffset? changed) { }
         public static Namotion.Interceptor.SubjectChangeContext.SubjectChangeContextScope WithLocalOrigin() { }
