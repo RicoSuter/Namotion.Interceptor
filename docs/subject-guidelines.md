@@ -389,26 +389,15 @@ The event fires only when a property actually changes:
 
 ### Manual INPC Base Classes
 
-A generated subject can inherit `INotifyPropertyChanged` from a hand-written base. The base must also implement `IRaisePropertyChanged`, which gives generated setters and tracking components a standard way to raise its event. Manual implementations own the same local-origin contract as generated raisers: check for subscribers first, then invoke them under `SubjectChangeContext.WithLocalOrigin()` when an ambient source is present.
+A generated subject can inherit `INotifyPropertyChanged` from a hand-written base. The base must also implement `IRaisePropertyChanged`, which gives generated setters and tracking components a standard way to raise its event. Manual implementations own the same local-origin contract as generated raisers: check for subscribers first, then invoke them under `SubjectChangeContext.WithLocalOrigin()` when an ambient source is present. Forward to the `SubjectChangeContext.RaisePropertyChanged` helper to get the compliant behavior in one call:
 
 ```csharp
 public abstract class Person : INotifyPropertyChanged, IRaisePropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    protected void RaisePropertyChanged(string propertyName)
-    {
-        var handler = PropertyChanged;
-        if (handler is null)
-        {
-            return;
-        }
-
-        using (SubjectChangeContext.WithLocalOrigin())
-        {
-            handler(this, PropertyChangedEventArgsCache.Get(propertyName));
-        }
-    }
+    protected void RaisePropertyChanged(string propertyName) =>
+        SubjectChangeContext.RaisePropertyChanged(PropertyChanged, this, propertyName);
 
     void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) =>
         RaisePropertyChanged(propertyName);

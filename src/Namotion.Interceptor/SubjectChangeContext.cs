@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor;
@@ -159,6 +160,33 @@ public readonly struct SubjectChangeContext
         }
 
         return new SubjectChangeContextScope(previousState);
+    }
+
+    /// <summary>
+    /// Invokes PropertyChanged handlers under the local-origin contract of
+    /// <see cref="IRaisePropertyChanged"/>: subscribers are checked first (zero overhead when the
+    /// event is unused), then invoked under <see cref="WithLocalOrigin"/> when an ambient source
+    /// is set. Hand-written <see cref="IRaisePropertyChanged"/> implementations should forward to
+    /// this helper.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void RaisePropertyChanged(PropertyChangedEventHandler? handler, object sender, string propertyName)
+    {
+        if (handler is null)
+        {
+            return;
+        }
+
+        if (Current.Source is null)
+        {
+            handler(sender, PropertyChangedEventArgsCache.Get(propertyName));
+            return;
+        }
+
+        using (WithLocalOrigin())
+        {
+            handler(sender, PropertyChangedEventArgsCache.Get(propertyName));
+        }
     }
 
     /// <summary>Enters a scope that sets source, changed and received timestamps.</summary>

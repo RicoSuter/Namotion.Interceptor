@@ -67,19 +67,8 @@ public class MetadataBaseRaiseTests
             {
                 public event PropertyChangedEventHandler? PropertyChanged;
 
-                protected void RaisePropertyChanged(string propertyName)
-                {
-                    var handler = PropertyChanged;
-                    if (handler is null)
-                    {
-                        return;
-                    }
-
-                    using (SubjectChangeContext.WithLocalOrigin())
-                    {
-                        handler(this, new PropertyChangedEventArgs(propertyName));
-                    }
-                }
+                protected void RaisePropertyChanged(string propertyName) =>
+                    SubjectChangeContext.RaisePropertyChanged(PropertyChanged, this, propertyName);
 
                 void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) =>
                     RaisePropertyChanged(propertyName);
@@ -125,19 +114,8 @@ public class MetadataBaseRaiseTests
             {
                 public event PropertyChangedEventHandler? PropertyChanged;
 
-                void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
-                {
-                    var handler = PropertyChanged;
-                    if (handler is null)
-                    {
-                        return;
-                    }
-
-                    using (SubjectChangeContext.WithLocalOrigin())
-                    {
-                        handler(this, new PropertyChangedEventArgs(propertyName));
-                    }
-                }
+                void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) =>
+                    SubjectChangeContext.RaisePropertyChanged(PropertyChanged, this, propertyName);
             }
             """;
 
@@ -185,19 +163,8 @@ public class MetadataBaseRaiseTests
 
                 public event PropertyChangedEventHandler? PropertyChanged;
 
-                void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
-                {
-                    var handler = PropertyChanged;
-                    if (handler is null)
-                    {
-                        return;
-                    }
-
-                    using (SubjectChangeContext.WithLocalOrigin())
-                    {
-                        handler(this, new PropertyChangedEventArgs(propertyName));
-                    }
-                }
+                void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) =>
+                    SubjectChangeContext.RaisePropertyChanged(PropertyChanged, this, propertyName);
             }
             """;
 
