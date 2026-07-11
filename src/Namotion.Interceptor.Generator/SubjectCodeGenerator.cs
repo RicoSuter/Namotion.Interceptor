@@ -17,7 +17,7 @@ internal static class SubjectCodeGenerator
         EmitNamespaceOpening(builder, metadata.NamespaceName);
         EmitContainingTypeOpening(builder, metadata.ContainingTypes);
         EmitClassDeclaration(builder, metadata);
-        EmitNotifyPropertyChangedImplementation(builder, metadata.BaseClassHasInpc);
+        EmitNotifyPropertyChangedImplementation(builder, metadata);
         EmitInterceptorSubjectImplementation(builder);
         EmitDefaultProperties(builder, metadata);
         EmitConstructors(builder, metadata);
@@ -113,46 +113,51 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("    }");
     }
 
-    private static void EmitNotifyPropertyChangedImplementation(StringBuilder builder, bool baseClassHasInpc)
+    private static void EmitNotifyPropertyChangedImplementation(StringBuilder builder, SubjectMetadata metadata)
     {
-        if (baseClassHasInpc)
+        if (!metadata.BaseClassHasInpc)
         {
+            builder.Append("""
+                        public event PropertyChangedEventHandler? PropertyChanged;
+
+                        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                        protected void RaisePropertyChanged(string propertyName)
+                        {
+                            var handler = PropertyChanged;
+                            if (handler is null)
+                            {
+                                return;
+                            }
+
+                            if (SubjectChangeContext.Current.Source is null)
+                            {
+                                handler.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+                                return;
+                            }
+
+                            using (SubjectChangeContext.WithLocalOrigin())
+                            {
+                                handler.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+                            }
+                        }
+
+                        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
+
+
+                """);
             return;
         }
 
-        // The GeneratedCode marker lets the extractor recognize a wrapped (local-origin) raise on
-        // metadata-only base symbols, where generated and hand-written interface lists are
-        // indistinguishable. No marker means manual or pre-marker generator output; subclasses
-        // then wrap the raise at their call sites.
-        builder.Append("""
-                    public event PropertyChangedEventHandler? PropertyChanged;
-
-                    [System.CodeDom.Compiler.GeneratedCode("Namotion.Interceptor.Generator", "1.0.0")]
-                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    protected void RaisePropertyChanged(string propertyName)
-                    {
-                        var handler = PropertyChanged;
-                        if (handler is null)
-                        {
-                            return;
-                        }
-
-                        if (SubjectChangeContext.Current.Source is null)
-                        {
-                            handler.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
-                            return;
-                        }
-
-                        using (SubjectChangeContext.WithLocalOrigin())
-                        {
-                            handler.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
-                        }
-                    }
-
-                    void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
+        if (metadata.NeedsRaisePropertyChangedForwarder)
+        {
+            builder.Append("""
+                        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                        protected void RaisePropertyChanged(string propertyName) =>
+                            ((IRaisePropertyChanged)this).RaisePropertyChanged(propertyName);
 
 
-            """);
+                """);
+        }
     }
 
     private static void EmitInterceptorSubjectImplementation(StringBuilder builder)
@@ -315,104 +320,7 @@ internal static class SubjectCodeGenerator
         // Setter or Init
         if (property.HasSetter || property.HasInit)
         {
-            var accessorText = property.HasInit ? "init" : "set";
-            var setterModifiers = property.SetterAccessModifier is not null ? $"{property.SetterAccessModifier} " : "";
-
-            // Determine how to call RaisePropertyChanged:
-            // - [InterceptorSubject] base: direct call to inherited protected method (fastest)
-            // - Manual IRaisePropertyChanged base: interface cast (rare case)
-            // - Own implementation: direct call to own method (fastest)
-            var raisePropertyChangedCall = metadata.BaseClassHasInterceptorSubject
-                ? $"RaisePropertyChanged(nameof({property.Name}))"
-                : metadata.BaseClassHasInpc
-                    ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))"
-                    : $"RaisePropertyChanged(nameof({property.Name}))";
-
-            builder.AppendLine($"            {setterModifiers}{accessorText}");
-            builder.AppendLine("            {");
-            builder.AppendLine("                var newValue = value;");
-            builder.AppendLine("                var cancel = false;");
-
-            // OnXChanging: wrap in a local-origin scope only when the hook is actually implemented,
-            // so unimplemented hooks keep the bare (compiler-erased) call and pay nothing.
-            if (property.HasChangingHook)
-            {
-                builder.AppendLine("                using (SubjectChangeContext.WithLocalOrigin())");
-                builder.AppendLine("                {");
-                builder.AppendLine($"                    On{property.Name}Changing(ref newValue, ref cancel);");
-                builder.AppendLine("                }");
-            }
-            else
-            {
-                builder.AppendLine($"                On{property.Name}Changing(ref newValue, ref cancel);");
-            }
-
-            var setPropertyValueCall = $"SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v)";
-            if (property.HasChangingHook)
-            {
-                // A Changing hook may transform the incoming value (ref newValue). The stored value
-                // is then locally computed, not what the ambient source sent or confirmed, so the
-                // write publishes as local origin and flows back to bound sources.
-                builder.AppendLine("                if (cancel)");
-                builder.AppendLine("                {");
-                builder.AppendLine("                    return;");
-                builder.AppendLine("                }");
-                builder.AppendLine();
-                builder.AppendLine("                bool written;");
-                builder.AppendLine($"                if (!EqualityComparer<{property.FullTypeName}>.Default.Equals(newValue, value))");
-                builder.AppendLine("                {");
-                builder.AppendLine("                    using (SubjectChangeContext.WithLocalOrigin())");
-                builder.AppendLine("                    {");
-                builder.AppendLine($"                        written = {setPropertyValueCall};");
-                builder.AppendLine("                    }");
-                builder.AppendLine("                }");
-                builder.AppendLine("                else");
-                builder.AppendLine("                {");
-                builder.AppendLine($"                    written = {setPropertyValueCall};");
-                builder.AppendLine("                }");
-                builder.AppendLine();
-                builder.AppendLine("                if (written)");
-                builder.AppendLine("                {");
-            }
-            else
-            {
-                builder.AppendLine($"                if (!cancel && {setPropertyValueCall})");
-                builder.AppendLine("                {");
-            }
-
-            // OnXChanged: same conditional wrapping.
-            if (property.HasChangedHook)
-            {
-                builder.AppendLine("                    using (SubjectChangeContext.WithLocalOrigin())");
-                builder.AppendLine("                    {");
-                builder.AppendLine($"                        On{property.Name}Changed(_{property.Name});");
-                builder.AppendLine("                    }");
-            }
-            else
-            {
-                builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
-            }
-
-            // INPC raise. When a generated subject in the chain owns a wrapped RaisePropertyChanged,
-            // the call site stays bare (the inherited method already enters the scope). Only when the
-            // effective raise resolves to a hand-written IRaisePropertyChanged base (which we cannot
-            // modify) do we wrap here at the call site. This must consider the whole inheritance chain,
-            // not just the immediate base, so multi-level chains rooted at a manual base are covered.
-            var raisePropertyChangedIsManualBase = metadata.RaiseResolvesToManualBase;
-            if (raisePropertyChangedIsManualBase)
-            {
-                builder.AppendLine("                    using (SubjectChangeContext.WithLocalOrigin())");
-                builder.AppendLine("                    {");
-                builder.AppendLine($"                        {raisePropertyChangedCall};");
-                builder.AppendLine("                    }");
-            }
-            else
-            {
-                builder.AppendLine($"                    {raisePropertyChangedCall};");
-            }
-
-            builder.AppendLine("                }");
-            builder.AppendLine("            }");
+            EmitSetter(builder, property, metadata);
         }
 
         builder.AppendLine("        }");
@@ -426,6 +334,104 @@ internal static class SubjectCodeGenerator
             builder.AppendLine($"        partial void On{property.Name}Changed({property.FullTypeName} newValue);");
             builder.AppendLine();
         }
+    }
+
+    private static void EmitSetter(StringBuilder builder, PropertyMetadata property, SubjectMetadata metadata)
+    {
+        var accessorText = property.HasInit ? "init" : "set";
+        var setterModifiers = property.SetterAccessModifier is not null ? $"{property.SetterAccessModifier} " : "";
+
+        builder.AppendLine($"            {setterModifiers}{accessorText}");
+        builder.AppendLine("            {");
+        builder.AppendLine("                var newValue = value;");
+        builder.AppendLine("                var cancel = false;");
+
+        EmitChangingHookCall(builder, property);
+        EmitWriteOpeningWrittenBlock(builder, property, metadata);
+        EmitChangedHookCall(builder, property);
+        EmitRaiseCall(builder, property);
+
+        builder.AppendLine("                }");
+        builder.AppendLine("            }");
+    }
+
+    // OnXChanging: wrap in a local-origin scope only when the hook is actually implemented,
+    // so unimplemented hooks keep the bare (compiler-erased) call and pay nothing.
+    private static void EmitChangingHookCall(StringBuilder builder, PropertyMetadata property)
+    {
+        if (property.HasChangingHook)
+        {
+            builder.AppendLine("                using (SubjectChangeContext.WithLocalOrigin())");
+            builder.AppendLine("                {");
+            builder.AppendLine($"                    On{property.Name}Changing(ref newValue, ref cancel);");
+            builder.AppendLine("                }");
+        }
+        else
+        {
+            builder.AppendLine($"                On{property.Name}Changing(ref newValue, ref cancel);");
+        }
+    }
+
+    // Emits the SetPropertyValue call and leaves the "value was written" block open; EmitSetter
+    // closes it. For properties with an implemented Changing hook, a value the hook transformed
+    // during a source-scoped write is locally computed, not what the source sent or confirmed, so
+    // that write publishes as local origin and flows back to bound sources. Local writes skip the
+    // comparison entirely: their origin is already local.
+    private static void EmitWriteOpeningWrittenBlock(StringBuilder builder, PropertyMetadata property, SubjectMetadata metadata)
+    {
+        var setPropertyValueCall = $"SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v)";
+        if (property.HasChangingHook)
+        {
+            builder.AppendLine("                if (cancel)");
+            builder.AppendLine("                {");
+            builder.AppendLine("                    return;");
+            builder.AppendLine("                }");
+            builder.AppendLine();
+            builder.AppendLine("                bool written;");
+            builder.AppendLine("                if (SubjectChangeContext.Current.Source is not null &&");
+            builder.AppendLine($"                    !EqualityComparer<{property.FullTypeName}>.Default.Equals(newValue, value))");
+            builder.AppendLine("                {");
+            builder.AppendLine("                    using (SubjectChangeContext.WithLocalOrigin())");
+            builder.AppendLine("                    {");
+            builder.AppendLine($"                        written = {setPropertyValueCall};");
+            builder.AppendLine("                    }");
+            builder.AppendLine("                }");
+            builder.AppendLine("                else");
+            builder.AppendLine("                {");
+            builder.AppendLine($"                    written = {setPropertyValueCall};");
+            builder.AppendLine("                }");
+            builder.AppendLine();
+            builder.AppendLine("                if (written)");
+            builder.AppendLine("                {");
+        }
+        else
+        {
+            builder.AppendLine($"                if (!cancel && {setPropertyValueCall})");
+            builder.AppendLine("                {");
+        }
+    }
+
+    // OnXChanged: same conditional wrapping as OnXChanging.
+    private static void EmitChangedHookCall(StringBuilder builder, PropertyMetadata property)
+    {
+        if (property.HasChangedHook)
+        {
+            builder.AppendLine("                    using (SubjectChangeContext.WithLocalOrigin())");
+            builder.AppendLine("                    {");
+            builder.AppendLine($"                        On{property.Name}Changed(_{property.Name});");
+            builder.AppendLine("                    }");
+        }
+        else
+        {
+            builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
+        }
+    }
+
+    // INPC raise. Generated implementations keep the no-subscriber fast path; manual
+    // implementations are responsible for the same local-origin contract.
+    private static void EmitRaiseCall(StringBuilder builder, PropertyMetadata property)
+    {
+        builder.AppendLine($"                    RaisePropertyChanged(nameof({property.Name}));");
     }
 
     private static void EmitMethods(StringBuilder builder, SubjectMetadata metadata)

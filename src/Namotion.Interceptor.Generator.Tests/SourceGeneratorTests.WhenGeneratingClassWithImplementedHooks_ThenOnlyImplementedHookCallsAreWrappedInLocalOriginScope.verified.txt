@@ -25,7 +25,6 @@ namespace YourDefaultNamespace
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        [System.CodeDom.Compiler.GeneratedCode("Namotion.Interceptor.Generator", "1.0.0")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected void RaisePropertyChanged(string propertyName)
         {
@@ -129,7 +128,8 @@ namespace YourDefaultNamespace
                 }
 
                 bool written;
-                if (!EqualityComparer<string>.Default.Equals(newValue, value))
+                if (SubjectChangeContext.Current.Source is not null &&
+                    !EqualityComparer<string>.Default.Equals(newValue, value))
                 {
                     using (SubjectChangeContext.WithLocalOrigin())
                     {

@@ -114,6 +114,8 @@ Writes that happen as a consequence of a source-scoped apply are local origin: t
 - **Derived property recalculations** always publish with a `null` source (the local model computed the value, no source confirmed it) and are pushed to a bound source, whatever triggered the recalculation.
 - **`INotifyPropertyChanged` handler write-backs** publish with a `null` source as well. INPC handlers should react (UI refresh, logging, forwarding) rather than mutate the model; if they do mutate, those writes are local origin.
 
+This invariant is enforced at the model layer: generated hooks, derived recalculations, and INPC write-backs. Three things sit outside it. A write interceptor that rewrites `PropertyWriteContext.NewValue` during a source-scoped write keeps the ambient source on the published change; an interceptor whose rewritten value should publish as locally computed can enter `SubjectChangeContext.WithLocalOrigin` around its `next` call, which is effective only when the interceptor runs outside the change-publishing interceptors (they capture the ambient source after their own `next` returns). Mutating a reference-typed value in place (instead of reassigning it) is undetectable. And a custom equality that treats distinct instances as equivalent keeps the source stamp for the hook's instance. General enforcement in the write pipeline is a candidate for the typed change-origin model.
+
 Lifecycle attach/detach handlers are not wrapped in a local-origin scope: they run infrastructure logic and must not mutate model properties. A handler that writes anyway inherits the ambient scope, with all consequences.
 
 ### Write Retry Queue

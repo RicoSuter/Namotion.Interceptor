@@ -42,9 +42,16 @@ internal static class SubjectMetadataExtractor
                 .Select(t => semanticModel.GetTypeInfo(t.Type, cancellationToken).Type as INamedTypeSymbol)
                 .Any(t => t != null && ImplementsInterface(t, KnownTypes.IRaisePropertyChanged)) ?? false);
 
-        // Whether the RaisePropertyChanged this type calls resolves to a hand-written (unwrapped)
-        // base method rather than a generated, local-origin-wrapped one. See RaiseResolvesToManualBase.
-        var raiseResolvesToManualBase = RaiseResolvesToManualBase(typeSymbol, baseClassHasInpc);
+        // Every generated subject exposes a callable RaisePropertyChanged. A source-declared
+        // generated base receives it in this generator run; metadata and manual bases expose it
+        // through their symbols. If INPC is present only through an explicit interface method,
+        // emit a protected forwarder so generated descendants keep a direct call path.
+        var sourceBaseWillExposeRaise = typeSymbol.BaseType is { } sourceBase &&
+            sourceBase.DeclaringSyntaxReferences.Length > 0 &&
+            HasInterceptorSubjectAttribute(sourceBase);
+        var needsRaisePropertyChangedForwarder = baseClassHasInpc &&
+            !sourceBaseWillExposeRaise &&
+            !HasCallableRaisePropertyChanged(typeSymbol);
 
         // Collect all partial class declarations
         var allClassDeclarations = typeSymbol.DeclaringSyntaxReferences
@@ -53,7 +60,7 @@ internal static class SubjectMetadataExtractor
             .ToArray();
 
         // Collect properties from all partial declarations
-        var classProperties = CollectProperties(typeSymbol, semanticModel, cancellationToken);
+        var classProperties = CollectProperties(allClassDeclarations, semanticModel, cancellationToken);
 
         // Collect interface properties with default implementations
         var interfaceProperties = ExtractInterfaceDefaultProperties(typeSymbol, classProperties);
@@ -62,7 +69,7 @@ internal static class SubjectMetadataExtractor
         var properties = classProperties.Concat(interfaceProperties).ToList();
 
         // Collect methods from all partial declarations
-        var methods = CollectMethods(typeSymbol, semanticModel, cancellationToken);
+        var methods = CollectMethods(allClassDeclarations, semanticModel, cancellationToken);
 
         // Detect constructor state
         var (needsGeneratedParameterlessConstructor, hasOrWillHaveParameterlessConstructor) =
@@ -76,90 +83,33 @@ internal static class SubjectMetadataExtractor
             needsGeneratedParameterlessConstructor,
             hasOrWillHaveParameterlessConstructor,
             baseClassTypeName,
-            baseClassHasInterceptorSubject,
             baseClassHasInpc,
-            raiseResolvesToManualBase,
+            needsRaisePropertyChangedForwarder,
             properties,
             methods);
     }
 
-    /// <summary>
-    /// Determines whether the RaisePropertyChanged a generated subject will call resolves to a
-    /// hand-written (unwrapped) base method rather than a generated, local-origin-wrapped one.
-    /// True means the setter must wrap the raise call site in WithLocalOrigin itself, because no
-    /// generated subject in the inheritance chain owns a wrapped RaisePropertyChanged. This covers
-    /// multi-level chains rooted at a manual IRaisePropertyChanged base (the immediate base alone
-    /// is not enough to decide).
-    /// </summary>
-    private static bool RaiseResolvesToManualBase(INamedTypeSymbol typeSymbol, bool baseClassHasInpc)
+    private static bool HasCallableRaisePropertyChanged(INamedTypeSymbol type)
     {
-        // The type emits its own wrapped RaisePropertyChanged when it does not inherit INPC.
-        if (!baseClassHasInpc)
-        {
-            return false;
-        }
-
-        for (var current = typeSymbol.BaseType;
+        for (var current = type;
              current is not null && current.SpecialType != SpecialType.System_Object;
              current = current.BaseType)
         {
-            if (IsGeneratedSubject(current))
+            if (current.GetMembers("RaisePropertyChanged")
+                .OfType<IMethodSymbol>()
+                .Any(method =>
+                    !method.IsStatic &&
+                    method.ReturnsVoid &&
+                    method.Parameters.Length == 1 &&
+                    method.Parameters[0].Type.SpecialType == SpecialType.System_String &&
+                    method.DeclaredAccessibility is Accessibility.Protected or
+                        Accessibility.ProtectedOrInternal or Accessibility.Public))
             {
-                // A generated subject emits its own wrapped raise only when its own base lacks INPC.
-                var baseOfCurrent = current.BaseType;
-                var currentInheritsInpc = baseOfCurrent is not null &&
-                    (IsGeneratedSubject(baseOfCurrent) || ImplementsInterface(baseOfCurrent, KnownTypes.IRaisePropertyChanged));
-                if (!currentInheritsInpc)
-                {
-                    if (current.DeclaringSyntaxReferences.Length > 0)
-                    {
-                        // Source-declared: the generated interface list is invisible here, so
-                        // IRaisePropertyChanged in the symbol's own interface list is user-declared:
-                        // that subject saw inherited INPC at generation time and emitted no wrapped raise.
-                        if (current.Interfaces.Any(i => ImplementsInterface(i, KnownTypes.IRaisePropertyChanged)))
-                        {
-                            return true; // manual implementer: its raise is hand-written and unwrapped
-                        }
-                    }
-                    else if (!HasGeneratedRaiseMarker(current))
-                    {
-                        // Metadata-only: generated interfaces are visible, so the interface list cannot
-                        // distinguish generated from manual. The generated raise carries a GeneratedCode
-                        // marker; no marker means a hand-written raise or pre-marker generator output,
-                        // both unwrapped.
-                        return true;
-                    }
-
-                    return false; // generated owner found: descendants inherit a wrapped raise
-                }
-            }
-            else if (ImplementsInterface(current, KnownTypes.IRaisePropertyChanged))
-            {
-                return true; // a hand-written IRaisePropertyChanged base provides the unwrapped raise
+                return true;
             }
         }
 
-        return true;
-    }
-
-    private static bool IsGeneratedSubject(INamedTypeSymbol type)
-    {
-        return HasInterceptorSubjectAttribute(type) || ImplementsInterface(type, KnownTypes.IInterceptorSubject);
-    }
-
-    /// <summary>
-    /// Whether the type declares a RaisePropertyChanged carrying the GeneratedCode marker the
-    /// generator emits on its wrapped (local-origin) raise. Used for metadata-only symbols.
-    /// </summary>
-    private static bool HasGeneratedRaiseMarker(INamedTypeSymbol type)
-    {
-        return type.GetMembers("RaisePropertyChanged")
-            .OfType<IMethodSymbol>()
-            .Any(method => method.GetAttributes().Any(attribute =>
-                attribute.AttributeClass?.Name == "GeneratedCodeAttribute" &&
-                attribute.ConstructorArguments.Length == 2 &&
-                attribute.ConstructorArguments[0].Value is string tool &&
-                tool == "Namotion.Interceptor.Generator"));
+        return false;
     }
 
     private static string GetNamespace(ClassDeclarationSyntax classDeclaration)
@@ -189,7 +139,7 @@ internal static class SubjectMetadataExtractor
     }
 
     private static IReadOnlyList<PropertyMetadata> CollectProperties(
-        INamedTypeSymbol typeSymbol,
+        ClassDeclarationSyntax[] allClassDeclarations,
         SemanticModel semanticModel,
         CancellationToken cancellationToken)
     {
@@ -201,13 +151,8 @@ internal static class SubjectMetadataExtractor
         // scope around a compiler-erased call plus a per-write equality comparison in the setter;
         // a false negative would silently restore source inheritance for that hook.
         var implementedHookMethods = new HashSet<string>();
-        foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
+        foreach (var hookClassDecl in allClassDeclarations)
         {
-            if (syntaxReference.GetSyntax(cancellationToken) is not ClassDeclarationSyntax hookClassDecl)
-            {
-                continue;
-            }
-
             foreach (var method in hookClassDecl.Members.OfType<MethodDeclarationSyntax>())
             {
                 if (method.Body is not null || method.ExpressionBody is not null)
@@ -217,14 +162,8 @@ internal static class SubjectMetadataExtractor
             }
         }
 
-        foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
+        foreach (var classDecl in allClassDeclarations)
         {
-            var declaration = syntaxReference.GetSyntax(cancellationToken);
-            if (declaration is not ClassDeclarationSyntax classDecl)
-            {
-                continue;
-            }
-
             var declarationModel = semanticModel.Compilation.GetSemanticModel(classDecl.SyntaxTree);
 
             foreach (var property in classDecl.Members.OfType<PropertyDeclarationSyntax>())
@@ -276,20 +215,14 @@ internal static class SubjectMetadataExtractor
     }
 
     private static IReadOnlyList<MethodMetadata> CollectMethods(
-        INamedTypeSymbol typeSymbol,
+        ClassDeclarationSyntax[] allClassDeclarations,
         SemanticModel semanticModel,
         CancellationToken cancellationToken)
     {
         var methods = new List<MethodMetadata>();
 
-        foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
+        foreach (var classDecl in allClassDeclarations)
         {
-            var declaration = syntaxReference.GetSyntax(cancellationToken);
-            if (declaration is not ClassDeclarationSyntax classDecl)
-            {
-                continue;
-            }
-
             var declarationModel = semanticModel.Compilation.GetSemanticModel(classDecl.SyntaxTree);
 
             foreach (var method in classDecl.Members.OfType<MethodDeclarationSyntax>())

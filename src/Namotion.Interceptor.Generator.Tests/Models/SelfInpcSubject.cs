@@ -4,8 +4,7 @@ using Namotion.Interceptor.Attributes;
 namespace Namotion.Interceptor.Generator.Tests.Models;
 
 // A generated subject that declares INotifyPropertyChanged + IRaisePropertyChanged manually in its
-// own base list: generation sees inherited INPC and emits no wrapped RaisePropertyChanged, so
-// generated subclasses must wrap their raise call sites themselves.
+// own base list. Its manual raise owns the local-origin contract.
 [InterceptorSubject]
 public partial class SelfInpcSubject : INotifyPropertyChanged, IRaisePropertyChanged
 {
@@ -13,8 +12,19 @@ public partial class SelfInpcSubject : INotifyPropertyChanged, IRaisePropertyCha
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public void RaisePropertyChanged(string propertyName)
+    protected void RaisePropertyChanged(string propertyName)
     {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        var handler = PropertyChanged;
+        if (handler is null)
+        {
+            return;
+        }
+
+        using (SubjectChangeContext.WithLocalOrigin())
+        {
+            handler(this, new PropertyChangedEventArgs(propertyName));
+        }
     }
+
+    void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
 }

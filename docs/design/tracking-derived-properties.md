@@ -322,9 +322,8 @@ NotifyDerivedPropertyChanged(derivedProperty, data, sequence, newValue, oldValue
   if !ReferenceEquals(newValue, Volatile.Read(data.LastKnownValue)) → return  // overwritten
   WithLocalOrigin():                             // publishes as local origin
     SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate)
-    RaisePropertyChanged("FullName")             // INotifyPropertyChanged integration, inside the
-                                                 // scope so hand-written (unwrapped) raisers also
-                                                 // deliver local origin to INPC handlers
+    RaisePropertyChanged("FullName")             // INotifyPropertyChanged integration inside the
+                                                 // same derived-notification scope
 ```
 
 The getter is evaluated inside `EvaluateAndStabilize` **without holding `lock(data)`** (when `callerHoldsLock` is false). The lock is acquired only briefly for `UpdateDependencies`. If the getter throws (typically during concurrent state transitions), the exception is caught and `LastKnownValue` remains unchanged. The concurrent writer's `WriteProperty` cascade will re-trigger recalculation with consistent state.
@@ -341,7 +340,7 @@ The generation check inside `EvaluateAndStabilize` avoids re-evaluation when dep
 Key details of the change notification:
 - **Notifications outside lock but inside `IsRecalculating`**: `NotifyDerivedPropertyChanged` fires `SetPropertyValueWithInterception` and `RaisePropertyChanged` without holding `lock(data)` (preventing deadlock with `lock(_attachedSubjects)`), but while `IsRecalculating` is still true. This serializes notification delivery with recalculation — no concurrent recalculation (and thus no competing notification) can start during delivery. Two additional guards provide defense-in-depth: a `RecalculationSequence` check and a `ReferenceEquals` check on `LastKnownValue`. See the "Deadlock prevention" section for details.
 - **Timestamp inheritance**: The derived property receives the same timestamp as the write that triggered the recalculation, ensuring consistent timestamps within a mutation context. This also holds under an explicit-null scope (`WithChangedTimestamp(null)`): storage remains the never-written sentinel, but trigger and cascade dependents share a single captured publishing time so change events stay consistent.
-- **`WithLocalOrigin()`**: Wraps the notification and the INPC raise in a local-origin scope (`Source = null`, ambient timestamps preserved). The local model computed the value and no source confirmed it, so the change flows to bound sources like any local write (derived recalculations are never echo-suppressed). The raise is inside the scope because a hand-written `IRaisePropertyChanged` implementation does not clear the source itself; INPC handlers must observe local origin regardless of the raiser.
+- **`WithLocalOrigin()`**: Wraps the notification and the INPC raise in one local-origin scope (`Source = null`, ambient timestamps preserved). The local model computed the value and no source confirmed it, so the change flows to bound sources like any local write (derived recalculations are never echo-suppressed). `IRaisePropertyChanged` independently requires implementations to deliver handlers under local origin, preserving the same behavior when a raiser is called outside this handler.
 - **`NoOpWriteDelegate`**: Since derived properties have no backing field, the write delegate is a no-op (`static (_, _) => { }`). The call to `SetPropertyValueWithInterception` exists solely to fire the change notification through the interceptor chain (observable, queue, etc.) with the correct old and new values.
 - **`IRaisePropertyChanged`**: If the subject implements `IRaisePropertyChanged`, `RaisePropertyChanged` is called to support standard `INotifyPropertyChanged` data binding.
 

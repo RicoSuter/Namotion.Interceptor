@@ -379,7 +379,7 @@ person.FirstName = "Rico";  // Fires PropertyChanged event
 
 ### Performance
 
-The `PropertyChanged?.Invoke(...)` pattern ensures zero overhead when no handlers are subscribed - only a null check occurs. The `PropertyChangedEventArgs` is not allocated unless the event has subscribers.
+The generated raiser checks the event delegate first, so an unused `INotifyPropertyChanged` implementation costs only a null check. It does not read the ambient change source or enter a scope when no handlers are subscribed. `PropertyChangedEventArgs` instances are cached by property name.
 
 ### When PropertyChanged Fires
 
@@ -387,13 +387,49 @@ The event fires only when a property actually changes:
 - Not fired if `OnChanging` cancels the change
 - Not fired if an interceptor skips the write
 
+### Manual INPC Base Classes
+
+A generated subject can inherit `INotifyPropertyChanged` from a hand-written base. The base must also implement `IRaisePropertyChanged`, which gives generated setters and tracking components a standard way to raise its event. Manual implementations own the same local-origin contract as generated raisers: check for subscribers first, then invoke them under `SubjectChangeContext.WithLocalOrigin()` when an ambient source is present.
+
+```csharp
+public abstract class Person : INotifyPropertyChanged, IRaisePropertyChanged
+{
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected void RaisePropertyChanged(string propertyName)
+    {
+        var handler = PropertyChanged;
+        if (handler is null)
+        {
+            return;
+        }
+
+        using (SubjectChangeContext.WithLocalOrigin())
+        {
+            handler(this, PropertyChangedEventArgsCache.Get(propertyName));
+        }
+    }
+
+    void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) =>
+        RaisePropertyChanged(propertyName);
+}
+
+[InterceptorSubject]
+public partial class Teacher : Person
+{
+    public partial string Subject { get; set; }
+}
+```
+
+The protected method is optional. A base can implement `IRaisePropertyChanged.RaisePropertyChanged` explicitly with the same subscriber and local-origin behavior; when no callable protected method exists, the generator emits a protected forwarder in the generated child.
+
 ## Summary
 
 1. **Mark all stored properties `partial`** - Tracking everything is safer
 2. **Initialize in constructors** - No field initializers on partial properties
 3. **Replace collections, don't mutate** - `arr = newArray`, not `arr[0] = x`
 4. **Use `[Derived]`** for computed properties
-5. **Explicit interfaces don't work** - Use implicit implementation
+5. **Explicitly implemented intercepted properties don't work** - Use implicit property implementation; infrastructure interfaces such as `IRaisePropertyChanged` may be explicit
 6. **Abstract doesn't work** - Use `virtual` instead
 
 Most other C# patterns (nullable, required, init, virtual, override, data annotations) work naturally.

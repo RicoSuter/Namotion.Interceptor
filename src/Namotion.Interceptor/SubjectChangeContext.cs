@@ -142,10 +142,10 @@ public readonly struct SubjectChangeContext
     /// preserving the ambient changed and received timestamps. Used around framework-invoked
     /// consequence callbacks (generated property hooks, INotifyPropertyChanged raises, derived
     /// recalculations) so their writes flow to bound sources like any local write.
-    /// Forward-compatibility seam for the typed ChangeOrigin discriminator (#342): encodes local
-    /// origin as Source = null today; a future version sets Kind = Local without changing this
-    /// signature or any call site.
     /// </summary>
+    // Forward-compatibility seam for a typed change-origin discriminator: encodes local origin as
+    // Source = null today; a future version can set a Kind without changing this signature or any
+    // call site.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static SubjectChangeContextScope WithLocalOrigin()
     {

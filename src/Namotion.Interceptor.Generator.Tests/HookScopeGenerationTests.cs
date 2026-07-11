@@ -45,8 +45,7 @@ public class HookScopeGenerationTests
         object? sourceSeenDuringRaise = "sentinel";
         subject.PropertyChanged += (_, _) => sourceSeenDuringRaise = SubjectChangeContext.Current.Source;
 
-        // Act: write under an ambient source scope. The generated subclass setter wraps the
-        // interface-cast RaisePropertyChanged call site in a local-origin scope.
+        // Act: write under an ambient source scope. The manual raiser owns the local-origin scope.
         using (SubjectChangeContext.WithSource(source))
         {
             subject.Name = "value";
@@ -59,9 +58,7 @@ public class HookScopeGenerationTests
     [Fact]
     public void WhenMultiLevelChainRootedAtManualBase_ThenRaiseRunsUnderLocalOriginScope()
     {
-        // Arrange: ManualInpcGrandchild : ManualInpcSubject : ManualInpcBase. No generated subject
-        // in the chain owns a wrapped RaisePropertyChanged, so the grandchild setter must wrap the
-        // inherited (manual, unwrapped) raise at its own call site.
+        // Arrange: ManualInpcGrandchild : ManualInpcSubject : ManualInpcBase.
         var subject = new ManualInpcGrandchild();
         var source = new object();
         object? sourceSeenDuringRaise = "sentinel";
@@ -73,8 +70,7 @@ public class HookScopeGenerationTests
             subject.GrandchildName = "value";
         }
 
-        // Assert: a regression that only inspected the immediate base would leave this raise
-        // unwrapped and the subscriber would observe the source instead of null.
+        // Assert: the subscriber observed a null source through the inherited manual raise.
         Assert.Null(sourceSeenDuringRaise);
     }
 
@@ -82,8 +78,7 @@ public class HookScopeGenerationTests
     public void WhenBaseSubjectManuallyImplementsInpcItself_ThenChildRaiseRunsUnderLocalOriginScope()
     {
         // Arrange: SelfInpcChild : SelfInpcSubject, where the parent is a generated subject that
-        // declares IRaisePropertyChanged manually in its own base list. No generated level owns a
-        // wrapped raise, so the child setter must wrap the parent's manual raise at its call site.
+        // declares IRaisePropertyChanged manually in its own base list and owns the raise contract.
         var subject = new SelfInpcChild();
         var source = new object();
         object? sourceSeenDuringRaise = "sentinel";

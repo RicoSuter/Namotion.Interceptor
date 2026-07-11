@@ -8,8 +8,7 @@ public class DerivedPropertyLocalOriginTests
     [Fact]
     public void WhenDerivedRecalculationTriggeredUnderSourceScope_ThenManualInpcRaiseSeesLocalOrigin()
     {
-        // Arrange: the subject inherits a hand-written (unwrapped) IRaisePropertyChanged, so the
-        // local-origin scope must come from DerivedPropertyChangeHandler, not the raiser.
+        // Arrange: the subject inherits a hand-written IRaisePropertyChanged implementation.
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking();
@@ -31,8 +30,7 @@ public class DerivedPropertyLocalOriginTests
             person.FirstName = "John";
         }
 
-        // Assert: the INPC handler observed a null source; the raise ran inside the handler's
-        // local-origin scope even though the manual raiser does not clear the source itself.
+        // Assert: the INPC handler observed a null source throughout the derived notification.
         Assert.Null(sourceSeenDuringDerivedRaise);
     }
 }

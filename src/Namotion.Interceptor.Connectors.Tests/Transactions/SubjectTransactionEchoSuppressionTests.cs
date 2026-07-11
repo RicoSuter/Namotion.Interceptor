@@ -18,23 +18,6 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 /// </summary>
 public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 {
-    // Drains until the sentinel arrives (excluded from the result); throws TimeoutException after 10s.
-    private static List<SubjectPropertyChange> DrainUntil(
-        PropertyChangeQueueSubscription subscription, Func<SubjectPropertyChange, bool> isSentinel)
-    {
-        var changes = new List<SubjectPropertyChange>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (subscription.TryDequeue(out var change, timeout.Token))
-        {
-            if (isSentinel(change))
-            {
-                return changes;
-            }
-            changes.Add(change);
-        }
-        throw new TimeoutException("Sentinel notification was not received within 10 seconds.");
-    }
-
     private static List<SubjectPropertyChange> DrainUntilSentinelProperty(
         PropertyChangeQueueSubscription subscription, string sentinelPropertyName)
     {

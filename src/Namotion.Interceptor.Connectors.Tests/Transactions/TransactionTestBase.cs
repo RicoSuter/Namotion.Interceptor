@@ -1,4 +1,5 @@
 using Moq;
+using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.Tracking;
@@ -10,6 +11,39 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 
 public abstract class TransactionTestBase
 {
+    /// <summary>
+    /// Drains the subscription until the sentinel arrives (excluded from the result);
+    /// throws TimeoutException after 10 seconds.
+    /// </summary>
+    protected static List<SubjectPropertyChange> DrainUntil(
+        PropertyChangeQueueSubscription subscription, Func<SubjectPropertyChange, bool> isSentinel)
+    {
+        var changes = new List<SubjectPropertyChange>();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (subscription.TryDequeue(out var change, timeout.Token))
+        {
+            if (isSentinel(change))
+            {
+                return changes;
+            }
+            changes.Add(change);
+        }
+        throw new TimeoutException("Sentinel notification was not received within 10 seconds.");
+    }
+
+    /// <summary>
+    /// Writes a sentinel change on a fresh subject and drains the subscription up to it, returning
+    /// everything published before the sentinel.
+    /// </summary>
+    protected static List<SubjectPropertyChange> DrainWithSentinel(
+        IInterceptorSubjectContext context, PropertyChangeQueueSubscription subscription)
+    {
+        var sentinel = new Person(context);
+        sentinel.LastName = "Sentinel";
+        return DrainUntil(subscription, c =>
+            ReferenceEquals(c.Property.Subject, sentinel) && c.Property.Name == nameof(Person.LastName));
+    }
+
     protected static IInterceptorSubjectContext CreateContext()
     {
         return InterceptorSubjectContext

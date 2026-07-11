@@ -16,23 +16,6 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 /// </summary>
 public class SubjectCascadeLocalOriginTests : TransactionTestBase
 {
-    // Drains until the sentinel arrives (excluded from the result); throws TimeoutException after 10s.
-    private static List<SubjectPropertyChange> DrainUntil(
-        PropertyChangeQueueSubscription subscription, Func<SubjectPropertyChange, bool> isSentinel)
-    {
-        var changes = new List<SubjectPropertyChange>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (subscription.TryDequeue(out var change, timeout.Token))
-        {
-            if (isSentinel(change))
-            {
-                return changes;
-            }
-            changes.Add(change);
-        }
-        throw new TimeoutException("Sentinel notification was not received within 10 seconds.");
-    }
-
     [Fact]
     public async Task WhenInboundSourceValueTriggersCascade_ThenCascadeIsDeliveredToBoundSource()
     {
@@ -130,10 +113,7 @@ public class SubjectCascadeLocalOriginTests : TransactionTestBase
             person.FirstName = "John";
         }
 
-        var sentinel = new Person(context);
-        sentinel.LastName = "Sentinel";
-        var changes = DrainUntil(subscription, c =>
-            ReferenceEquals(c.Property.Subject, sentinel) && c.Property.Name == nameof(Person.LastName));
+        var changes = DrainWithSentinel(context, subscription);
 
         var personChanges = changes.Where(c => ReferenceEquals(c.Property.Subject, person)).ToList();
         var firstNameChanges = personChanges.Where(c => c.Property.Name == nameof(Person.FirstName)).ToList();

@@ -10,8 +10,7 @@ internal sealed record SubjectMetadata(
     bool NeedsGeneratedParameterlessConstructor,
     bool HasOrWillHaveParameterlessConstructor,
     string? BaseClassTypeName,
-    bool BaseClassHasInterceptorSubject,
     bool BaseClassHasInpc,
-    bool RaiseResolvesToManualBase,
+    bool NeedsRaisePropertyChangedForwarder,
     IReadOnlyList<PropertyMetadata> Properties,
     IReadOnlyList<MethodMetadata> Methods);

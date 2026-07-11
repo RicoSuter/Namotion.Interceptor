@@ -1,6 +1,8 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Transactions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -16,32 +18,6 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 /// </summary>
 public class SubjectChangingHookTransformTests : TransactionTestBase
 {
-    // Drains until the sentinel arrives (excluded from the result); throws TimeoutException after 10s.
-    private static List<SubjectPropertyChange> DrainUntil(
-        PropertyChangeQueueSubscription subscription, Func<SubjectPropertyChange, bool> isSentinel)
-    {
-        var changes = new List<SubjectPropertyChange>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (subscription.TryDequeue(out var change, timeout.Token))
-        {
-            if (isSentinel(change))
-            {
-                return changes;
-            }
-            changes.Add(change);
-        }
-        throw new TimeoutException("Sentinel notification was not received within 10 seconds.");
-    }
-
-    private static List<SubjectPropertyChange> DrainWithSentinel(
-        IInterceptorSubjectContext context, PropertyChangeQueueSubscription subscription)
-    {
-        var sentinel = new Person(context);
-        sentinel.LastName = "Sentinel";
-        return DrainUntil(subscription, c =>
-            ReferenceEquals(c.Property.Subject, sentinel) && c.Property.Name == nameof(Person.LastName));
-    }
-
     [Fact]
     public void WhenInboundValueIsTransformedByChangingHook_ThenWritePublishesLocalOrigin()
     {
@@ -114,6 +90,71 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
         // Assert: quiescence, no new Value notification (the correction loop terminates).
         Assert.Equal(100, device.Value);
         Assert.DoesNotContain(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
+    }
+
+    [Fact]
+    public async Task WhenInboundValueIsTransformed_ThenCorrectionIsDeliveredToBoundSource()
+    {
+        // Arrange
+        var context = CreateContext();
+        var device = new ClampingDevice(context);
+        var sourceMock = CreateSucceedingSource();
+
+        new PropertyReference(device, nameof(ClampingDevice.Value)).SetSource(sourceMock.Object);
+
+        // A ChangeQueueProcessor whose source identity IS the bound source: it echo-drops changes
+        // already marked with that source and delivers everything else.
+        var delivered = new List<SubjectPropertyChange>();
+        var processor = new ChangeQueueProcessor(
+            source: sourceMock.Object,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (batch, _) =>
+            {
+                lock (delivered)
+                {
+                    delivered.AddRange(batch.ToArray());
+                }
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        using var processorCts = new CancellationTokenSource();
+        var processTask = processor.ProcessAsync(processorCts.Token);
+
+        try
+        {
+            // Act: the source sends 105; the clamp stores 100 as local origin.
+            new PropertyReference(device, nameof(ClampingDevice.Value))
+                .SetValueFromSource(sourceMock.Object, DateTimeOffset.UtcNow, null, 105);
+
+            // The correction is actually written back to the bound source, not echo-dropped.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    lock (delivered)
+                    {
+                        return delivered.Any(c => c.Property.Name == nameof(ClampingDevice.Value));
+                    }
+                },
+                message: "Processor did not deliver the clamped correction.");
+        }
+        finally
+        {
+            await processorCts.CancelAsync();
+            processor.Dispose();
+            try { await processTask; } catch (OperationCanceledException) { }
+        }
+
+        // Assert
+        Assert.Equal(100, device.Value);
+        lock (delivered)
+        {
+            var correction = delivered.Single(c => c.Property.Name == nameof(ClampingDevice.Value));
+            Assert.Equal(100, correction.GetNewValue<int>());
+        }
     }
 
     [Fact]
