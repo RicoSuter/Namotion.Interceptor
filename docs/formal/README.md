@@ -43,6 +43,28 @@ Any model runs directly with the wrapper:
 ( cd docs/formal/<model-dir> && ../../../tools/tla/tlc <Module>.tla )
 ```
 
+## Trace validation (binding code to a model)
+
+Two steps: a run that emits an ND-JSON trace file (one behavior per line), then a
+check that validates each behavior against the model.
+
+```bash
+tools/tla/check-traces.sh <traces.ndjson> docs/formal/opcua-client/OpcUaClient.tla
+```
+
+The driver generates the trace-check module from the model's `VARIABLES`
+(`gen-trace-spec.sh`), so the model is the single source of truth and there is
+nothing to hand-sync. The generated module reads one behavior from the
+`TRACE_PATH` env var, forces the model variables to follow the recorded states,
+and requires each step to satisfy `Next`; a behavior that is not a legal behavior
+makes the `TraceConforms` (`<>Reached`) property fail, and the driver exits
+non-zero.
+
+Sample traces under `opcua-client/samples/` show conforming and non-conforming
+behaviors (a full transfer-fail reconnect that conforms; an orphaned item that is
+rejected). The emission side (a `[Conditional("MODELTRACE")]` C# helper and a
+test-side sink that produces these traces from the integration suite) is Phase 2b.
+
 ## Reading a counterexample
 
 On a violation TLC prints `Error: Invariant <name> is violated.` (or
