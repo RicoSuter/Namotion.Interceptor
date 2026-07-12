@@ -562,14 +562,20 @@ Core's `InternalsVisibleTo` covers Tracking, the tests, and the benchmark projec
 In `SubjectChangeContext.cs`: delete the `public readonly object? Source;` field, the `WithSource` method, and the `WithState` method. Update the private constructor to drop the source parameter. Add:
 
 ```csharp
-/// <summary>Enters a scope that sets the changed and received timestamps.</summary>
+/// <summary>
+/// Enters a scope that sets the changed timestamp and, when <paramref name="received"/> is
+/// non-null, the received timestamp. A null <paramref name="received"/> preserves the ambient
+/// received timestamp (exactly as <see cref="WithChangedTimestamp"/> does), rather than
+/// resetting it to the sentinel the way the deleted <c>WithState</c> did. This keeps the
+/// inbound apply path behavior-identical to master's <c>WithChangedTimestamp</c> wrapping.
+/// </summary>
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 public static SubjectChangeContextScope WithTimestamps(DateTimeOffset? changed, DateTimeOffset? received)
 {
     var previousState = _current;
     _current = new SubjectChangeContext(
         changed?.UtcTicks ?? NullTimestampSentinel,
-        received?.UtcTicks ?? UndefinedTimestampSentinel);
+        received?.UtcTicks ?? previousState._receivedTimestamp);
     return new SubjectChangeContextScope(previousState);
 }
 ```
@@ -578,7 +584,7 @@ Keep `WithChangedTimestamp`, `GetTimestampFunction`, `CaptureTimestamp`, `Receiv
 
 - [ ] **Step 2: Add SetValueFromOrigin and make SetValueFromSource forward to it**
 
-Add a public `SetValueFromOrigin` primitive that arms any origin kind and performs the write, then make `SetValueFromSource` a thin forwarder. Connectors cannot reach the internal `PendingOrigin.Arm`, so this public Tracking extension is the appliers' entry point (see Task 6):
+Add a public `SetValueFromOrigin` primitive that arms any origin kind and performs the write, then make `SetValueFromSource` a thin forwarder. Connectors cannot reach the internal `PendingOrigin.Arm`, so this public Tracking extension is the appliers' entry point (see Task 6). Contract: when `receivedTimestamp` is null, `SetValueFromOrigin` preserves the ambient received timestamp (via the `WithTimestamps` null fallback from Step 1) rather than overwriting it with the null sentinel; only a non-null `receivedTimestamp` replaces the ambient value. This is what keeps the applier path (which passes null received) behavior-identical to master's `WithChangedTimestamp` wrapping:
 
 ```csharp
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -750,7 +756,8 @@ git commit -m "feat: publish typed ChangeOrigin on SubjectPropertyChange, stamp 
 - Modify: `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` and `SubjectItemsUpdateApplier.cs` (thread `origin` to every property write site; each site currently wrapped in `WithChangedTimestamp` applies via `SetValue` or `RegisteredSubjectProperty`; when `origin.Kind != ChangeOriginKind.Local`, apply through `SetValueFromOrigin(origin, propertyUpdate.Timestamp, null, value)`, the public Tracking primitive from Task 4 that arms `FromSource` and `Confirmed` alike, since Connectors cannot reach the internal `PendingOrigin.Arm`; for `Local`, keep the current unarmed path, since `Local` is the default and needs no stamp). The five sites (`SubjectUpdateApplier.cs:84,131,139` and `SubjectItemsUpdateApplier.cs:124,209`) are each wrapped in `WithChangedTimestamp(propertyUpdate.Timestamp)` today; `propertyUpdate.Timestamp` MUST be passed as the `changedTimestamp` argument of `SetValueFromOrigin` at every site, or the inbound changed-timestamp is silently replaced with capture-time `UtcNow` and provenance is corrupted
 - Modify: `src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectHandler.cs:200-207` (pass `ChangeOrigin.FromSource(connection)`), `src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs:296-299,540-543` (pass `ChangeOrigin.FromSource(this)` / `ChangeOrigin.FromSource(state.source)`); drop the `WithSource` usings; correct the lock comment at `WebSocketSubjectHandler.cs:200` to say the lock serializes update application, not that thread-static state requires it
 - Modify: `src/Namotion.Interceptor.ConnectorTester/Engine/Verification/FailureDiagnostics.cs:175` (pass `ChangeOrigin.Local`)
-- Modify: `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs:85-87` (create the `ChangeQueueProcessor` subscription BEFORE `LoadInitialStateAndResumeAsync`, then start processing after the initial-state load, which includes connector-specific ownership claiming inside `StartListeningAsync` / `LoadInitialStateAsync`, and after retry reapply; ownership is not a discrete step in `ExecuteAsync` today, and the echo filter depends on it being established before processing starts; `PropertyChangeQueue` drops changes with no subscription, so hook-transformed write-backs produced during initial load are currently lost and the source stays diverged). Subscribing before the load buffers the entire initial snapshot, and a single unbounded FIFO queue (`PropertyChangeQueueSubscription._queue`) cannot both bound itself and never drop a local write-back, so the pre-processing window segregates by origin: changes whose origin has a source (`FromSource` and `Confirmed` echoes) go to a bounded, drop-oldest buffer (safe: they are echoes processing would skip for their own source anyway), while locally originated changes (`Origin.Kind == Local`, including the rare transform write-back) go to a small dedicated unbounded list that is never dropped (losing one leaves the source diverged). When processing starts the local list drains first, then the bounded buffer, whose initial `FromSource` changes are echo-dropped. This segregation does not exist today and needs a new mechanism; if it proves invasive it may be descoped into its own PR, since the rest of PR 1 does not depend on it. Tests: a transform write-back during initial load reaches the source; a queue-memory test that asserts the bound on the echo buffer for a large initial snapshot and that no local write-back is lost
+- Do NOT modify `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs` in this task. The subscription-before-load reorder and the segregated buffering it would require are DESCOPED from PR 1 into a follow-up (see the spec's "Source lifecycle ordering" section). The earlier drop-safety rationale was wrong: buffered `FromSource` changes are not universally safe to drop, because origin identity need not equal processor identity (the WebSocket server stamps origins per connection while its processor identifies as the handler), so a dropped inbound client update would never be broadcast to the other replicas. The reorder needs new buffering machinery and a correct delivery-based segregation that is out of scope here.
+- Modify: `docs/connectors.md` (document the known limitation): because `SubjectSourceBase` creates its `ChangeQueueProcessor` subscription only after `LoadInitialStateAndResumeAsync`, and `PropertyChangeQueue` drops changes with no subscription, a locally computed write-back produced during initial load (for example a hook transforming an inbound initial value) is lost and the source stays diverged until it next pushes that property. Note that a follow-up issue will design the reorder with correct buffering. No `SubjectSourceBase` change and no queue-buffering test in this task.
 - Test: `src/Namotion.Interceptor.Connectors.Tests` update-apply suites gain a source overload test and a timestamp-preservation test (an applied update's published change carries `propertyUpdate.Timestamp`, not capture-time `UtcNow`)
 
 **Interfaces:**
@@ -782,15 +789,19 @@ Fill Arrange/Assert with the exact helpers used by neighboring tests in that fil
 
 Add the required `ChangeOrigin origin` parameter, thread it through `SubjectUpdateApplier.ApplyUpdate` and `SubjectItemsUpdateApplier` down to the write sites, and route stamped (`FromSource`/`Confirmed`) writes through `SetValueFromOrigin`; keep the current unarmed path for `Local`. Update the three WebSocket sites and the ConnectorTester site. Also update the code sample in the XML doc comment of `ApplySubjectUpdate` if present.
 
-- [ ] **Step 4: Run tests**
+- [ ] **Step 4: Document the initial-load write-back limitation**
+
+Add a short note to `docs/connectors.md` (near the change-source semantics the docs task rewrites) stating the known limitation: because `SubjectSourceBase` creates its `ChangeQueueProcessor` subscription only after `LoadInitialStateAndResumeAsync`, and `PropertyChangeQueue` drops changes with no subscription, a locally computed write-back produced during initial load (for example a hook transforming an inbound initial value) is lost and the source stays diverged until it next pushes that property. Mention that a follow-up issue will design the subscription-before-load reorder with correct buffering. Do not modify `SubjectSourceBase` and do not add a queue-buffering test.
+
+- [ ] **Step 5: Run tests**
 
 Run: `dotnet test src/Namotion.Interceptor.Connectors.Tests && dotnet test src/Namotion.Interceptor.WebSocket.Tests`
 Expected: all pass, including WebSocket echo-suppression integration tests (they prove end-to-end equivalence of the new stamping).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add -A src
+git add -A src docs
 git commit -m "feat: require typed ChangeOrigin on ApplySubjectUpdate, migrate WebSocket applies (#345)"
 ```
 
@@ -1167,18 +1178,27 @@ public class SourceCorrectionDetector : IWriteInterceptor
         lock (context.Property.Subject.SyncRoot)
         {
             // Do the minimum under the lock: compare the raw write-timestamp against the
-            // value captured at chain entry. Every write updates the write-timestamp, so a
-            // moved timestamp means a newer write landed while we were deciding; that write
-            // is already flowing outbound, so drop the correction. No getter runs here.
+            // value captured at chain entry. A moved timestamp means a newer write landed
+            // while we were deciding; that write is already flowing outbound, so drop the
+            // correction. No getter runs here.
+            //
+            // This comparison is NECESSARY BUT NOT SUFFICIENT: write-timestamps have tick
+            // granularity and GetTimestampFunction is user-settable, so two writes can share
+            // a timestamp and an unchanged timestamp can hide a concurrent write. Safety rule:
+            // on any doubt, DROP. Dropping is always safe because the only failure mode of a
+            // dropped correction is a missing correction (the source stays diverged until its
+            // next inbound event), never a wrong model value. The concurrency test asserts
+            // drop-or-fresh, never stale.
             if (context.Property.TryGetWriteTimestamp() != writeTimestampAtEntry)
             {
                 return;
             }
 
-            // No competing write: the observable value read above is still current. A
-            // correction is a new local assertion: fresh local timestamp, stamped on the
-            // property's write-timestamp metadata AND published, so the source's echo (same
-            // value, same timestamp) is fully equality-suppressed afterward.
+            // Timestamp unchanged: treat the window as clear and build the correction from the
+            // observable value read above. A correction is a new local assertion: fresh local
+            // timestamp, stamped on the property's write-timestamp metadata AND published, so
+            // the source's echo (same value, same timestamp) is fully equality-suppressed
+            // afterward.
             var timestampTicks = SubjectChangeContext.CaptureTimestamp();
             context.Property.SetWriteTimestamp(timestampTicks);
 
@@ -1241,7 +1261,9 @@ Note: other queue subscribers (`PerformanceProfiler` in SamplesModel and Connect
 
 - [ ] **Step 4: Correction-aware retry reapplication**
 
-`ReapplyRetryQueue` in `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs:180` re-applies failed writes through the property setter. For a correction (old == new == current) the setter is a silent no-op: the equality check suppresses, no new queue event appears, and the drained retry entry is gone while the source stays diverged. Add kind-aware handling before the setter path:
+`ReapplyRetryQueue` in `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs:180` re-applies failed writes through the property setter. For a correction (old == new == current) the setter is a silent no-op: the equality check suppresses, no new queue event appears, and the drained retry entry is gone while the source stays diverged. Add kind-aware handling before the setter path.
+
+Note the asymmetry with detection (Task 11): the detector injects via Tracking's internal `PropertyChangeQueue.EnqueueCorrection`, but `SubjectSourceBase` lives in `Namotion.Interceptor.Connectors` and cannot reach that internal method. A still-valid retry therefore does NOT re-inject into the global Tracking queue; it re-inserts the correction into the `ChangeQueueProcessor`'s own local pending buffer (a Connectors-level path that hands the change straight to the write pump), bypassing the setter, hooks, and INPC entirely:
 
 ```csharp
 if (change.Origin.Kind == ChangeOriginKind.Correction)
@@ -1249,8 +1271,10 @@ if (change.Origin.Kind == ChangeOriginKind.Correction)
     var current = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
     if (Equals(current, change.GetNewValue<object?>()))
     {
-        // Still valid: re-enqueue directly, no setter, no hooks, no INPC.
-        EnqueueForWrite(change);
+        // Still valid: re-insert into the ChangeQueueProcessor's own local pending
+        // buffer (Connectors-level), NOT the global Tracking queue (unreachable from
+        // here). No setter, no hooks, no INPC.
+        EnqueueForProcessing(change);
     }
     // Model changed meanwhile: drop the stale correction; the newer model
     // change is already flowing outbound.
@@ -1258,7 +1282,7 @@ if (change.Origin.Kind == ChangeOriginKind.Correction)
 }
 ```
 
-Adapt `EnqueueForWrite` to whatever mechanism the method uses to hand changes to the write path (follow the surrounding code). Tests, in the connectors test project following the retry-queue test idiom: a failed correction enters the retry queue; on reconnect with the still-diverged value it is re-enqueued without invoking hooks or INPC and eventually reaches the source; if the model changed meanwhile, the stale correction is dropped.
+Adapt `EnqueueForProcessing` to whatever `ChangeQueueProcessor`-level mechanism hands changes to the write pump's local pending buffer (follow the surrounding code); it must be the Connectors-level path, not a call back into the Tracking queue. Tests, in the connectors test project following the retry-queue test idiom: a failed correction enters the retry queue; on reconnect with the still-diverged value it is re-enqueued without invoking hooks or INPC and eventually reaches the source; if the model changed meanwhile, the stale correction is dropped.
 
 - [ ] **Step 5: Run connectors tests, then commit both steps**
 
