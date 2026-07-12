@@ -158,7 +158,7 @@ git commit -m "feat: add ChangeOrigin and ChangeOriginKind core types (#345)"
 - Test: `src/Namotion.Interceptor.Tests/PendingOriginTests.cs`
 
 **Interfaces:**
-- Consumes: `ChangeOrigin` (Task 1), `PropertyReference` (existing, equality via its `Comparer`).
+- Consumes: `ChangeOrigin` (Task 1), `PropertyReference` (existing). Target matching MUST use `PropertyReference.Equals` (via its `Comparer`), which is subject reference equality plus an ordinal `Name` comparison (one reference compare plus one ordinal string compare), not a bare `ReferenceEquals` on the name: inbound applies carry non-interned property names deserialized from JSON, so a literal reference comparison on `Name` would never match and echo suppression would silently break.
 - Produces: `public static class PendingOrigin` with `public static PendingOriginScope Arm(PropertyReference target, ChangeOrigin origin, object? sentValue)` and `internal static bool TryConsume(in PropertyReference property, out ChangeOrigin origin, out object? sentValue)`; `public readonly ref struct PendingOriginScope : IDisposable` whose `Dispose` clears the slot unconditionally.
 
 - [ ] **Step 1: Write the failing tests**
@@ -545,13 +545,15 @@ git commit -m "feat: consume pending origin into PropertyWriteContext and finali
 
 **Files:**
 - Modify: `src/Namotion.Interceptor/SubjectChangeContext.cs` (remove `Source` field, `WithSource`, `WithState`; add `WithTimestamps`)
-- Modify: `src/Namotion.Interceptor.Tracking/Change/SubjectChangeContextExtensions.cs` (`SetValueFromSource` arms instead of scoping)
+- Modify: `src/Namotion.Interceptor.Tracking/Change/SubjectChangeContextExtensions.cs` (add public `SetValueFromOrigin` primitive that arms instead of scoping; `SetValueFromSource` forwards to it)
 - Modify: `src/Namotion.Interceptor.Tracking/Change/DerivedPropertyChangeHandler.cs:357` (delete the `WithSource(null)` using, keep its body)
 - Test: existing suites; update `src/Namotion.Interceptor.Tests/VerifyChecksTests.PublicApi.verified.txt`
 
 **Interfaces:**
-- Produces: `public static SubjectChangeContextScope WithTimestamps(DateTimeOffset? changed, DateTimeOffset? received)`; `SubjectChangeContext` no longer has `Source`.
+- Produces: `public static SubjectChangeContextScope WithTimestamps(DateTimeOffset? changed, DateTimeOffset? received)`; `SubjectChangeContext` no longer has `Source`. New public Tracking primitive `SubjectChangeContextExtensions.SetValueFromOrigin(this PropertyReference property, ChangeOrigin origin, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, object? value)` that arms any origin kind; `SetValueFromSource` forwards to it.
 - Consumes: `PendingOrigin.Arm` (Task 2).
+
+Core's `InternalsVisibleTo` covers Tracking, the tests, and the benchmark project, but NOT `Namotion.Interceptor.Connectors`, so the Connectors update appliers (Task 6) cannot call the internal `PendingOrigin.Arm`. `SetValueFromOrigin` is their public intent-level entry point: it performs the write itself, so the raw slot stays internal.
 
 - [ ] **Step 1: Remove source from the ambient context**
 
@@ -572,23 +574,30 @@ public static SubjectChangeContextScope WithTimestamps(DateTimeOffset? changed, 
 
 Keep `WithChangedTimestamp`, `GetTimestampFunction`, `CaptureTimestamp`, `ReceivedTimestamp`, `CurrentChangedTimestamp`, `ResolveChangedTimestamp`, and the scope struct unchanged (minus the source in the constructor).
 
-- [ ] **Step 2: Rewrite SetValueFromSource to arm**
+- [ ] **Step 2: Add SetValueFromOrigin and make SetValueFromSource forward to it**
 
-Replace the body of `SubjectChangeContextExtensions.SetValueFromSource`:
+Add a public `SetValueFromOrigin` primitive that arms any origin kind and performs the write, then make `SetValueFromSource` a thin forwarder. Connectors cannot reach the internal `PendingOrigin.Arm`, so this public Tracking extension is the appliers' entry point (see Task 6):
 
 ```csharp
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+public static void SetValueFromOrigin(
+    this PropertyReference property,
+    ChangeOrigin origin, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp,
+    object? value)
+{
+    using (SubjectChangeContext.WithTimestamps(changedTimestamp, receivedTimestamp))
+    using (PendingOrigin.Arm(property, origin, value))
+    {
+        property.Metadata.SetValue?.Invoke(property.Subject, value);
+    }
+}
+
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 public static void SetValueFromSource(
     this PropertyReference property,
     object source, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp,
-    object? valueFromSource)
-{
-    using (SubjectChangeContext.WithTimestamps(changedTimestamp, receivedTimestamp))
-    using (PendingOrigin.Arm(property, ChangeOrigin.FromSource(source), valueFromSource))
-    {
-        property.Metadata.SetValue?.Invoke(property.Subject, valueFromSource);
-    }
-}
+    object? valueFromSource) =>
+    property.SetValueFromOrigin(ChangeOrigin.FromSource(source), changedTimestamp, receivedTimestamp, valueFromSource);
 ```
 
 - [ ] **Step 3: Delete the derived anti-scope**
@@ -639,6 +648,16 @@ Add `internal static ChangeOrigin FromParts(ChangeOriginKind kind, object? sourc
 public SubjectPropertyChange WithOrigin(ChangeOrigin origin) =>
     new(Property, origin, ChangedTimestamp, ReceivedTimestamp, _oldValueStorage, _newValueStorage, _oldBoxedHolder, _newBoxedHolder);
 ```
+
+Also fix `MergeWithNewer`: it currently copies only `newerChange.Source` into the merged change, so under the flattened layout a deduplicated change silently loses its kind and reverts to `Local`. Copy the full flattened origin (both `newerChange._originKind` and `newerChange._originSource`, or `newerChange.Origin` through the private constructor):
+
+```csharp
+public SubjectPropertyChange MergeWithNewer(SubjectPropertyChange newerChange) =>
+    new(Property, newerChange.Origin, newerChange.ChangedTimestamp, newerChange.ReceivedTimestamp,
+        _oldValueStorage, newerChange._newValueStorage, _oldBoxedHolder, newerChange._newBoxedHolder);
+```
+
+Add a merge-origin test in the Tracking test project: merging a `FromSource(S)` change with a newer `FromSource(S)` change leaves the result `Origin.Kind == FromSource` and `Origin.Source == S` (both kind and source survive the merge).
 
 Add a size-regression test in the Tracking test project:
 
@@ -726,10 +745,10 @@ git commit -m "feat: publish typed ChangeOrigin on SubjectPropertyChange, stamp 
 
 **Files:**
 - Modify: `src/Namotion.Interceptor.Connectors/Updates/SubjectUpdateExtensions.cs:18-24` (required `ChangeOrigin origin` parameter after `subjectFactory`)
-- Modify: `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` and `SubjectItemsUpdateApplier.cs` (thread `origin` to every property write site; each site currently wrapped in `WithChangedTimestamp` applies via `SetValue` or `RegisteredSubjectProperty`; when `origin.Kind != ChangeOriginKind.Local`, apply through `SetValueFromSource(origin.Source!, propertyUpdate.Timestamp, null, value)`; for `Local`, keep the current path)
+- Modify: `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` and `SubjectItemsUpdateApplier.cs` (thread `origin` to every property write site; each site currently wrapped in `WithChangedTimestamp` applies via `SetValue` or `RegisteredSubjectProperty`; when `origin.Kind != ChangeOriginKind.Local`, apply through `SetValueFromOrigin(origin, propertyUpdate.Timestamp, null, value)`, the public Tracking primitive from Task 4 that arms `FromSource` and `Confirmed` alike, since Connectors cannot reach the internal `PendingOrigin.Arm`; for `Local`, keep the current unarmed path, since `Local` is the default and needs no stamp)
 - Modify: `src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectHandler.cs:200-207` (pass `ChangeOrigin.FromSource(connection)`), `src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs:296-299,540-543` (pass `ChangeOrigin.FromSource(this)` / `ChangeOrigin.FromSource(state.source)`); drop the `WithSource` usings; correct the lock comment at `WebSocketSubjectHandler.cs:200` to say the lock serializes update application, not that thread-static state requires it
 - Modify: `src/Namotion.Interceptor.ConnectorTester/Engine/Verification/FailureDiagnostics.cs:175` (pass `ChangeOrigin.Local`)
-- Modify: `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs:85-87` (create the `ChangeQueueProcessor` subscription BEFORE `LoadInitialStateAndResumeAsync`, start processing after ownership claim and retry reapply; `PropertyChangeQueue` drops changes with no subscription, so hook-transformed write-backs produced during initial load are currently lost and the source stays diverged; buffered initial `FromSource` changes are echo-dropped when processing starts; add a test that a transform write-back during initial load reaches the source, and a queue-memory test for a large initial snapshot)
+- Modify: `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs:85-87` (create the `ChangeQueueProcessor` subscription BEFORE `LoadInitialStateAndResumeAsync`, start processing after ownership claim and retry reapply; `PropertyChangeQueue` drops changes with no subscription, so hook-transformed write-backs produced during initial load are currently lost and the source stays diverged). Subscribing before the load buffers the entire initial snapshot, so the pre-processing window MUST use a bounded buffer with drop-oldest semantics for `FromSource` changes (safe: they are echoes that would be dropped for their own source anyway) while never dropping locally originated write-backs (losing one leaves the source diverged); buffered initial `FromSource` changes are echo-dropped when processing starts. Tests: a transform write-back during initial load reaches the source; a queue-memory test that asserts the bound holds (the buffer does not grow without limit) for a large initial snapshot, not merely observes usage
 - Test: `src/Namotion.Interceptor.Connectors.Tests` update-apply suites gain a source overload test
 
 **Interfaces:**
@@ -759,7 +778,7 @@ Fill Arrange/Assert with the exact helpers used by neighboring tests in that fil
 
 - [ ] **Step 3: Implement the parameter and threading**
 
-Add the required `ChangeOrigin origin` parameter, thread it through `SubjectUpdateApplier.ApplyUpdate` and `SubjectItemsUpdateApplier` down to the write sites, and route stamped writes through `SetValueFromSource`. Update the three WebSocket sites and the ConnectorTester site. Also update the code sample in the XML doc comment of `ApplySubjectUpdate` if present.
+Add the required `ChangeOrigin origin` parameter, thread it through `SubjectUpdateApplier.ApplyUpdate` and `SubjectItemsUpdateApplier` down to the write sites, and route stamped (`FromSource`/`Confirmed`) writes through `SetValueFromOrigin`; keep the current unarmed path for `Local`. Update the three WebSocket sites and the ConnectorTester site. Also update the code sample in the XML doc comment of `ApplySubjectUpdate` if present.
 
 - [ ] **Step 4: Run tests**
 
@@ -1058,8 +1077,9 @@ public class SourceCorrectionTests
         //          the detector's synthesis (use ManualResetEventSlim inside the hook).
         // Act: thread 1 applies 105 from the source (projects to 100, suppressed);
         //      thread 2 writes 90 locally while thread 1 is parked in the hook.
-        // Assert: no queued correction carries 100 after the 90 change; the correction
-        //         either carries the actual value read under the lock or is absent.
+        // Assert: drop-or-fresh, never stale. The correction is either absent (dropped
+        //         because the write-timestamp moved under the lock) or carries the fresh
+        //         post-write value (90); it never carries the stale 100.
     }
 }
 ```
@@ -1112,50 +1132,64 @@ public class SourceCorrectionDetector : IWriteInterceptor
 
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
+        // Capture the property's raw write-timestamp BEFORE the chain runs. A suppressed
+        // write never updates it (the equality check stops before the terminal write),
+        // so under the lock any movement means a real competing write landed.
+        var writeTimestampAtEntry = context.Property.TryGetWriteTimestamp();
+
         next(ref context);
 
-        if (!context.IsWritten &&
-            context.Origin.Kind == ChangeOriginKind.FromSource &&
-            EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) &&
-            !Equals(context.SentValue, context.NewValue))
+        if (context.IsWritten ||
+            context.Origin.Kind != ChangeOriginKind.FromSource ||
+            !EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) ||
+            Equals(context.SentValue, context.NewValue))
         {
-            // Proven equality suppression: IsWritten == false alone does not prove it
-            // (transaction capture also stops the chain), but the third clause shows the
-            // projection landed exactly on the stored value, which is the one case the
-            // [RunsFirst] equality handler suppresses before anything else can run.
-            //
-            // CurrentValue was captured outside the subject lock and may be stale under
-            // concurrency; re-read under the lock and verify divergence atomically so the
-            // correction linearizes against normal writes. Metadata.GetValue invokes the
-            // getter and may pass through read interceptors: the correction deliberately
-            // carries the current OBSERVABLE value (what any consumer or source reading
-            // the model sees), not a raw backing-field read. A correction
-            // is a new local assertion: fresh local timestamp, stamped on the property's
-            // write-timestamp metadata AND published, so the source's echo (same value,
-            // same timestamp) is fully equality-suppressed afterward.
-            SubjectPropertyChange correction;
-            lock (context.Property.Subject.SyncRoot)
+            return;
+        }
+
+        // Proven equality suppression: IsWritten == false alone does not prove it
+        // (transaction capture also stops the chain), but the equality-plus-sent-differs
+        // clauses show the projection landed exactly on the stored value, the one case
+        // the [RunsFirst] equality handler suppresses before anything else can run.
+        //
+        // Read the observable value OUTSIDE the subject lock. Metadata.GetValue invokes
+        // the getter, which may pass through read interceptors; running interceptor code
+        // under Subject.SyncRoot would invert the codebase's getters-outside-locks
+        // discipline (DerivedPropertyChangeHandler avoids exactly this against
+        // LifecycleInterceptor). The correction deliberately carries the current
+        // OBSERVABLE value (what any consumer or source reading the model sees), not a raw
+        // backing-field read.
+        var observedValue = context.Property.Metadata.GetValue?.Invoke(context.Property.Subject);
+
+        SubjectPropertyChange correction;
+        lock (context.Property.Subject.SyncRoot)
+        {
+            // Do the minimum under the lock: compare the raw write-timestamp against the
+            // value captured at chain entry. Every write updates the write-timestamp, so a
+            // moved timestamp means a newer write landed while we were deciding; that write
+            // is already flowing outbound, so drop the correction. No getter runs here.
+            if (context.Property.TryGetWriteTimestamp() != writeTimestampAtEntry)
             {
-                var actual = context.Property.Metadata.GetValue?.Invoke(context.Property.Subject);
-                if (Equals(context.SentValue, actual))
-                {
-                    return; // a concurrent write made the source agree; nothing to correct
-                }
-
-                var timestampTicks = SubjectChangeContext.CaptureTimestamp();
-                context.Property.SetWriteTimestamp(timestampTicks);
-
-                correction = SubjectPropertyChange.Create(
-                    context.Property,
-                    ChangeOrigin.Correction(context.Origin.Source!),
-                    new DateTimeOffset(timestampTicks, TimeSpan.Zero),
-                    SubjectChangeContext.Current.ReceivedTimestamp,
-                    actual,
-                    actual);
+                return;
             }
 
-            _queue.EnqueueCorrection(in correction);
+            // No competing write: the observable value read above is still current. A
+            // correction is a new local assertion: fresh local timestamp, stamped on the
+            // property's write-timestamp metadata AND published, so the source's echo (same
+            // value, same timestamp) is fully equality-suppressed afterward.
+            var timestampTicks = SubjectChangeContext.CaptureTimestamp();
+            context.Property.SetWriteTimestamp(timestampTicks);
+
+            correction = SubjectPropertyChange.Create(
+                context.Property,
+                ChangeOrigin.Correction(context.Origin.Source!),
+                new DateTimeOffset(timestampTicks, TimeSpan.Zero),
+                SubjectChangeContext.Current.ReceivedTimestamp,
+                observedValue,
+                observedValue);
         }
+
+        _queue.EnqueueCorrection(in correction);
     }
 }
 ```
@@ -1183,6 +1217,7 @@ Three tests in the connectors test project, following the existing `ChangeQueueP
 1. A `Correction(S)` change is delivered by a processor whose `_source` is S (owner writes it back).
 2. A `Correction(connection)` change is delivered by a processor whose `_source` is a DIFFERENT object (the WebSocket shape: origin identity is the connection, processor identity is the handler); this is the test that proves corrections are never dropped by identity mismatch.
 3. A `FromSource(S)` change keeps today's routing (skipped by S's processor, delivered by others).
+4. Dedup keeps kinds separate: within a flush batch for one property, a `Correction(S)` followed by a normal change resolves to the normal change (the correction is dropped); a normal change followed by a `Correction(S)` keeps the normal change (the correction never overwrites it); two normal changes still coalesce as today.
 
 - [ ] **Step 2: Implement**
 
@@ -1195,6 +1230,8 @@ if (change.Origin.Kind != ChangeOriginKind.Correction &&
     continue;
 }
 ```
+
+Also guard the flush-time dedup at `ChangeQueueProcessor.cs:254` (`MergeWithNewer`) so it never coalesces across kinds: a `Correction` and a normal change for the same property must not merge. A newer normal change supersedes a pending correction (drop the correction, the normal change already carries the authoritative value outbound); a correction never overwrites a queued normal change. Only same-kind changes coalesce.
 
 - [ ] **Step 3: Run connectors tests, then the full unit suite.**
 
@@ -1283,4 +1320,5 @@ PR body: the three-outcome matrix, delivery rule, docs pointer, `Closes #365`, a
 
 - Spec coverage: scenarios 1 to 8 all map to tasks (1-6 to Tasks 3-6/8, 7 to Task 7, 8 to Tasks 11-12). Docs per spec in Tasks 9 and 13. Bookkeeping in Tasks 10 and 13.
 - The spec's "detection in the queue interceptor" wording is corrected by Task 11's ordering constraint (detector before the equality check); the spec file gets a matching one-line amendment.
-- Type consistency: `ChangeOrigin.Correction(object)`, `PendingOrigin.Arm(PropertyReference, ChangeOrigin, object?)`, `PropertyValidationContext<TProperty>(PropertyReference, TProperty, ChangeOrigin)` used identically across tasks.
+- Type consistency: `ChangeOrigin.Correction(object)`, `PendingOrigin.Arm(PropertyReference, ChangeOrigin, object?)`, `SetValueFromOrigin(PropertyReference, ChangeOrigin, DateTimeOffset?, DateTimeOffset?, object?)`, `PropertyValidationContext<TProperty>(PropertyReference, TProperty, ChangeOrigin)` used identically across tasks.
+- Arming reach: Connectors cannot call the internal `PendingOrigin.Arm` (core's `InternalsVisibleTo` excludes Connectors), so the appliers arm through the public `SetValueFromOrigin` for `FromSource`/`Confirmed` and keep the unarmed path for `Local`.
