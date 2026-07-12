@@ -162,6 +162,10 @@ In PR 1 the kind is not consulted for the skip at all; the comparison `Reference
 
 `ApplySubjectUpdate(update, factory)` gains a required `ChangeOrigin origin` parameter. It is deliberately required and deliberately typed: nearly all production callers apply inbound updates and must provide their source, a forgotten optional argument would compile fine while silently breaking echo suppression, and an untyped `object? source` would reintroduce the null-means-local convention the typed model removes. A connector passes `ChangeOrigin.FromSource(connection)`; a local apply states `ChangeOrigin.Local` explicitly, which documents the intent at the call site; `Confirmed` batch applies come for free. This is a source-breaking change, acceptable at 0.0.x, and the compiler forces every call site to decide. The update appliers (`SubjectUpdateApplier`, `SubjectItemsUpdateApplier`) thread it down the tree walk and arm per property write. The three WebSocket apply sites replace `using (SubjectChangeContext.WithSource(...))` with `ChangeOrigin.FromSource(connection)` (server) and `ChangeOrigin.FromSource(this)` (client). The misleading thread-static lock comment in `WebSocketSubjectHandler` is corrected (the lock stays; if it is still needed, it is for apply serialization, not thread-static storage), to keep the PR focused. `PathExtensions` already applies per property and only swaps the internals of its `SetValueFromSource` call.
 
+## Source lifecycle ordering (PR 1)
+
+`SubjectSourceBase` currently creates its `ChangeQueueProcessor` subscription only after `LoadInitialStateAndResumeAsync`, and `PropertyChangeQueue` drops changes when no subscription exists. Any locally computed write-back produced during initial load (a hook transforming an inbound initial value, PR 1; an equality-suppressed correction, PR 2) is therefore silently discarded and the source stays diverged until it next pushes that property. The lifecycle changes to: create the processor subscription, start listening, load and replay initial state, claim ownership, reapply retries, then start processing the buffered queue. Ordinary initial `FromSource` changes buffered in that window are echo-dropped when processing starts; a test covers queue memory behavior for large initial snapshots.
+
 ## Validators (PR 1)
 
 `IPropertyValidator` changes from
@@ -184,7 +188,16 @@ where `PropertyValidationContext<TProperty>` is a readonly struct carrying `Prop
 
 Adds `ChangeOriginKind.Correction` together with its producer and consumer, so no dead enum member ships.
 
-**Detection.** In a dedicated `SourceCorrectionDetector` write interceptor ordered before the equality check (`[RunsFirst]` plus `[RunsBefore(typeof(PropertyValueEqualityCheckHandler))]`): the equality handler runs first and suppresses unchanged writes by not calling `next`, so the queue interceptor never executes for them and cannot be the detection point. After the detector's `next()` returns: a write that was armed `FromSource(S)`, has `IsWritten == false`, and whose `SentValue` differs from the stored value is the diverged case from the #365 comment. The three-outcome matrix:
+**Detection.** In a dedicated `SourceCorrectionDetector` write interceptor ordered before the equality check (`[RunsFirst]` plus `[RunsBefore(typeof(PropertyValueEqualityCheckHandler))]`): the equality handler runs first and suppresses unchanged writes by not calling `next`, so the queue interceptor never executes for them and cannot be the detection point. After the detector's `next()` returns, `IsWritten == false` alone does NOT prove equality suppression: any inner interceptor that returns without calling `next` leaves it false, notably transaction capture (`SubjectTransactionInterceptor` captures and stops the chain), and a naive condition would emit a spurious correction for the old model value while the new value sits captured in the transaction. The detector must prove the equality decision explicitly:
+
+```csharp
+context.Origin.Kind == ChangeOriginKind.FromSource
+&& !context.IsWritten
+&& EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) // projection landed on the stored value, so the equality check suppressed
+&& !Equals(context.SentValue, context.NewValue)                                       // and the source sent something else
+```
+
+The third clause also excludes the transaction case structurally: when the projected value equals the stored value, the `[RunsFirst]` equality handler suppresses before the transaction interceptor ever runs. This is the diverged case from the #365 comment. The three-outcome matrix:
 
 | Case | Outcome |
 |---|---|
@@ -194,11 +207,13 @@ Adds `ChangeOriginKind.Correction` together with its producer and consumer, so n
 
 `Confirmed` writes never produce corrections: the commit protocol already guarantees the source holds the value.
 
-**Synthesis.** The detector creates a `SubjectPropertyChange` with `Origin = Correction(S)`, old value equal to new value equal to the stored value, and a fresh local timestamp (see Timestamps below). No model write occurred, so nothing else fires: no `OnXChanged`, no INPC raise, no backing-field write; only the property's write-timestamp metadata is updated to the correction's timestamp.
+**Synthesis.** `context.CurrentValue` was captured before the chain and outside the subject lock, so a concurrent write can make it stale (thread 1 decides on 100, thread 2 writes and publishes 90, thread 1 enqueues a 100-correction after the 90 change, and dedup leaves the source diverged). On this cold path the detector therefore takes `context.Property.Subject.SyncRoot`, re-reads the actual value through the property metadata, and atomically verifies the sent value still differs from the actual value, captures the fresh timestamp, updates the property's write-timestamp metadata, and builds the correction from the actual value; the enqueue happens after releasing the lock. This linearizes corrections against normal writes. The correction is a `SubjectPropertyChange` with `Origin = Correction(S)`, old value equal to new value equal to the actual stored value, and the fresh timestamp (see Timestamps below). No model write occurs: no `OnXChanged`, no INPC raise, no backing-field write. A concurrency test pins the stale case (equality decision on 100, concurrent write to 90, correction must carry 90 or be superseded, never stale 100).
 
 **Delivery.** The synthesized change enters the outbound change queue only. The observable never sees corrections: a correction is not a model change, so app-level subscribers (UI, GraphQL) have nothing to react to; divergence observability is #342 tracker territory. Note that `PropertyChangeQueue` subscriptions are public API, so any direct queue subscriber (the performance profilers do this today) will see `Correction` changes and must filter on `Kind` if it only wants model mutations; this is documented. `ChangeQueueProcessor` gets one branch: `Correction` bypasses the own-source skip and is written like a normal outbound write by every processor whose property filter matches (see the echo suppression section for why delivery is not targeted by source identity). All other kinds keep the single-comparison skip.
 
 **Timestamps.** A correction is a new local assertion event. The detector generates a fresh local timestamp, updates only the property's write-timestamp metadata (`SetWriteTimestamp`), and publishes the correction with that same timestamp. It does not write the backing field and fires no hooks or INPC. Publishing the source's inbound timestamp instead would diverge model and source timestamps for the same value, and publishing the model's old timestamp could be rejected as stale; with the fresh timestamp, the source's echo returns the stored value with the same timestamp and is suppressed by the equality check, leaving both participants agreeing on value and time. Connector-level tests cover this (MQTT serializes `ChangedTimestamp`; OPC UA writes it as `SourceTimestamp`).
+
+**Retry reconciliation.** A failed correction write enters the `WriteRetryQueue`, but reapplying it through the property setter is a silent no-op: current equals old equals new, the equality check suppresses, no new queue event appears, and the drained retry entry is gone while the source stays diverged. `ReapplyRetryQueue` therefore handles corrections by kind: if the current model value still equals the correction value, re-enqueue the correction directly (no setter, no hooks, no INPC); if the model changed meanwhile, drop the stale correction, because the newer model change is already flowing outbound. Tests cover the full cycle: correction fails into the retry queue, reconnect, re-enqueue without model side effects, eventual delivery, and stale-drop when the model moved.
 
 **Boundary, documented.** A correction is produced only when the source actively sends a diverging value. Reasserting the model to a silently diverged source (no inbound traffic) remains a reconciliation concern owned by #342.
 
@@ -250,6 +265,7 @@ PR 1:
 
 - Port the behavioral tests from PR #348 as the semantic safety net: `SubjectCascadeLocalOriginTests`, `SubjectChangingHookTransformTests`, echo suppression tests, `DerivedPropertyLocalOriginTests`, and the manual-INPC-base semantics (outcomes only; the generator snapshot tests are dropped since PR 1 touches no generated code).
 - New mechanism tests: stamp consumed exactly once; target mismatch (changing-hook cascade writes another property); `finally` clears on cancelled writes; batch apply through `ApplySubjectUpdate` with source; no leakage across sequential applies; transaction capture sees `Local` while commit replay sees `Confirmed`; revert notifications keep original origins; validators receive the attempted origin at capture and replay.
+- Initial-load write-back: a hook-transformed inbound value applied during `LoadInitialStateAsync` reaches the source once processing starts (the subscription exists before the load); queue memory behavior for a large initial snapshot.
 - Public API snapshot updates.
 
 PR 2:
@@ -258,6 +274,9 @@ PR 2:
 - Correction bypasses the own-source skip and reaches every processor whose property filter matches; a WebSocket-shaped test (origin identity differs from processor identity) proves corrections are not dropped.
 - A correction fires no `OnXChanged`, no INPC raise, no backing-field write, and never reaches the observable; it updates the property's write-timestamp metadata and publishes that same fresh timestamp, and the returning source echo is equality-suppressed.
 - Direct `PropertyChangeQueue` subscribers observe corrections and can filter on `Kind`.
+- No spurious correction during transaction capture (inbound stamped write with an active transaction captures the value; no correction is emitted).
+- Concurrency: equality decision on a stale value with a concurrent write never publishes a stale correction.
+- Retry reconciliation: failed correction re-enqueued without model side effects when still valid, dropped when the model changed.
 - `Confirmed` writes never produce corrections.
 
 ## Issue and PR bookkeeping

@@ -729,6 +729,7 @@ git commit -m "feat: publish typed ChangeOrigin on SubjectPropertyChange, stamp 
 - Modify: `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` and `SubjectItemsUpdateApplier.cs` (thread `origin` to every property write site; each site currently wrapped in `WithChangedTimestamp` applies via `SetValue` or `RegisteredSubjectProperty`; when `origin.Kind != ChangeOriginKind.Local`, apply through `SetValueFromSource(origin.Source!, propertyUpdate.Timestamp, null, value)`; for `Local`, keep the current path)
 - Modify: `src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectHandler.cs:200-207` (pass `ChangeOrigin.FromSource(connection)`), `src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs:296-299,540-543` (pass `ChangeOrigin.FromSource(this)` / `ChangeOrigin.FromSource(state.source)`); drop the `WithSource` usings; correct the lock comment at `WebSocketSubjectHandler.cs:200` to say the lock serializes update application, not that thread-static state requires it
 - Modify: `src/Namotion.Interceptor.ConnectorTester/Engine/Verification/FailureDiagnostics.cs:175` (pass `ChangeOrigin.Local`)
+- Modify: `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs:85-87` (create the `ChangeQueueProcessor` subscription BEFORE `LoadInitialStateAndResumeAsync`, start processing after ownership claim and retry reapply; `PropertyChangeQueue` drops changes with no subscription, so hook-transformed write-backs produced during initial load are currently lost and the source stays diverged; buffered initial `FromSource` changes are echo-dropped when processing starts; add a test that a transform write-back during initial load reaches the source, and a queue-memory test for a large initial snapshot)
 - Test: `src/Namotion.Interceptor.Connectors.Tests` update-apply suites gain a source overload test
 
 **Interfaces:**
@@ -1028,6 +1029,28 @@ public class SourceCorrectionTests
         //      via PendingOrigin.Arm and invoke the setter with a value projecting to 100.
         // Assert: no correction (commit protocol already guarantees the source state).
     }
+
+    [Fact]
+    public void WhenInboundStampedWriteIsCapturedByTransaction_ThenNoCorrectionIsPublished()
+    {
+        // Arrange: model at 50, an active SubjectTransaction on the context.
+        // Act: SetValueFromSource(source, null, null, 80); the transaction interceptor
+        //      captures the value and stops the chain (IsWritten stays false).
+        // Assert: no correction in the queue; the value is pending in the transaction.
+        //         This pins that IsWritten == false alone never triggers synthesis.
+    }
+
+    [Fact]
+    public void WhenConcurrentWriteRacesTheSuppressedApply_ThenCorrectionIsNeverStale()
+    {
+        // Arrange: model at 100; a changing hook that clamps and, via an event/gate,
+        //          allows a second thread to write 90 between the equality decision and
+        //          the detector's synthesis (use ManualResetEventSlim inside the hook).
+        // Act: thread 1 applies 105 from the source (projects to 100, suppressed);
+        //      thread 2 writes 90 locally while thread 1 is parked in the hook.
+        // Assert: no queued correction carries 100 after the 90 change; the correction
+        //         either carries the actual value read under the lock or is absent.
+    }
 }
 ```
 
@@ -1083,25 +1106,41 @@ public class SourceCorrectionDetector : IWriteInterceptor
 
         if (!context.IsWritten &&
             context.Origin.Kind == ChangeOriginKind.FromSource &&
-            !Equals(context.SentValue, context.CurrentValue))
+            EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) &&
+            !Equals(context.SentValue, context.NewValue))
         {
-            // A correction is a new local assertion: fresh local timestamp, stamped on the
-            // property's write-timestamp metadata AND published, so the source's echo
-            // (same value, same timestamp) is fully equality-suppressed and both sides
-            // agree on value and time. Deliberately NOT the inbound scope timestamp
-            // (would diverge model and source time) and NOT the old model timestamp
-            // (sources may reject it as stale).
-            var timestampTicks = SubjectChangeContext.CaptureTimestamp();
-            context.Property.SetWriteTimestamp(timestampTicks);
+            // Proven equality suppression: IsWritten == false alone does not prove it
+            // (transaction capture also stops the chain), but the third clause shows the
+            // projection landed exactly on the stored value, which is the one case the
+            // [RunsFirst] equality handler suppresses before anything else can run.
+            //
+            // CurrentValue was captured outside the subject lock and may be stale under
+            // concurrency; re-read the actual value under the lock and verify divergence
+            // atomically so the correction linearizes against normal writes. A correction
+            // is a new local assertion: fresh local timestamp, stamped on the property's
+            // write-timestamp metadata AND published, so the source's echo (same value,
+            // same timestamp) is fully equality-suppressed afterward.
+            SubjectPropertyChange correction;
+            lock (context.Property.Subject.SyncRoot)
+            {
+                var actual = context.Property.Metadata.GetValue?.Invoke(context.Property.Subject);
+                if (Equals(context.SentValue, actual))
+                {
+                    return; // a concurrent write made the source agree; nothing to correct
+                }
 
-            var stored = context.CurrentValue;
-            var correction = SubjectPropertyChange.Create(
-                context.Property,
-                ChangeOrigin.Correction(context.Origin.Source!),
-                new DateTimeOffset(timestampTicks, TimeSpan.Zero),
-                SubjectChangeContext.Current.ReceivedTimestamp,
-                stored,
-                stored);
+                var timestampTicks = SubjectChangeContext.CaptureTimestamp();
+                context.Property.SetWriteTimestamp(timestampTicks);
+
+                correction = SubjectPropertyChange.Create(
+                    context.Property,
+                    ChangeOrigin.Correction(context.Origin.Source!),
+                    new DateTimeOffset(timestampTicks, TimeSpan.Zero),
+                    SubjectChangeContext.Current.ReceivedTimestamp,
+                    actual,
+                    actual);
+            }
+
             _queue.EnqueueCorrection(in correction);
         }
     }
@@ -1147,6 +1186,35 @@ if (change.Origin.Kind != ChangeOriginKind.Correction &&
 - [ ] **Step 3: Run connectors tests, then the full unit suite.**
 
 Note: other queue subscribers (`PerformanceProfiler` in SamplesModel and ConnectorTester) also receive corrections; they only count changes, which is acceptable and needs no change. `PropertyChangeQueue` subscriptions are public API: document in Task 13 that subscribers filter on `Kind` if they only want model mutations.
+
+- [ ] **Step 4: Correction-aware retry reapplication**
+
+`ReapplyRetryQueue` in `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs:180` re-applies failed writes through the property setter. For a correction (old == new == current) the setter is a silent no-op: the equality check suppresses, no new queue event appears, and the drained retry entry is gone while the source stays diverged. Add kind-aware handling before the setter path:
+
+```csharp
+if (change.Origin.Kind == ChangeOriginKind.Correction)
+{
+    var current = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
+    if (Equals(current, change.GetNewValue<object?>()))
+    {
+        // Still valid: re-enqueue directly, no setter, no hooks, no INPC.
+        EnqueueForWrite(change);
+    }
+    // Model changed meanwhile: drop the stale correction; the newer model
+    // change is already flowing outbound.
+    continue;
+}
+```
+
+Adapt `EnqueueForWrite` to whatever mechanism the method uses to hand changes to the write path (follow the surrounding code). Tests, in the connectors test project following the retry-queue test idiom: a failed correction enters the retry queue; on reconnect with the still-diverged value it is re-enqueued without invoking hooks or INPC and eventually reaches the source; if the model changed meanwhile, the stale correction is dropped.
+
+- [ ] **Step 5: Run connectors tests, then commit both steps**
+
+```bash
+dotnet test src/Namotion.Interceptor.Connectors.Tests
+git add -A src
+git commit -m "feat: correction-aware retry reapplication (#365)"
+```
 
 - [ ] **Step 4: Commit**
 
