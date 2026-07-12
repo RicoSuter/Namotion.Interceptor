@@ -1041,6 +1041,16 @@ public class SourceCorrectionTests
     }
 
     [Fact]
+    public void WhenReadInterceptorTransformsValue_ThenCorrectionCarriesObservableValue()
+    {
+        // Arrange: model at 100, a custom IReadInterceptor that returns a transformed
+        //          value from the getter (for example appends a suffix or offsets by 1).
+        // Act: SetValueFromSource(source, null, null, 105); hook clamps to 100; suppressed.
+        // Assert: the correction carries the read-interceptor-observed value, pinning
+        //         that corrections assert the observable value, not the backing field.
+    }
+
+    [Fact]
     public void WhenConcurrentWriteRacesTheSuppressedApply_ThenCorrectionIsNeverStale()
     {
         // Arrange: model at 100; a changing hook that clamps and, via an event/gate,
@@ -1115,8 +1125,11 @@ public class SourceCorrectionDetector : IWriteInterceptor
             // [RunsFirst] equality handler suppresses before anything else can run.
             //
             // CurrentValue was captured outside the subject lock and may be stale under
-            // concurrency; re-read the actual value under the lock and verify divergence
-            // atomically so the correction linearizes against normal writes. A correction
+            // concurrency; re-read under the lock and verify divergence atomically so the
+            // correction linearizes against normal writes. Metadata.GetValue invokes the
+            // getter and may pass through read interceptors: the correction deliberately
+            // carries the current OBSERVABLE value (what any consumer or source reading
+            // the model sees), not a raw backing-field read. A correction
             // is a new local assertion: fresh local timestamp, stamped on the property's
             // write-timestamp metadata AND published, so the source's echo (same value,
             // same timestamp) is fully equality-suppressed afterward.
