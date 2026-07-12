@@ -518,14 +518,18 @@ Add the finalization method to the struct:
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 internal void FinalizeOrigin()
 {
-    if (Origin.Kind != ChangeOriginKind.Local && !Equals(SentValue, NewValue))
+    // Typed comparison in the generic frame: NewValue is never boxed. SentValue arrives already
+    // boxed from the inbound apply; cast it down to TProperty for EqualityComparer.Default. On the
+    // non-generic path (TProperty == object) both operands are already boxed objects.
+    if (Origin.Kind != ChangeOriginKind.Local &&
+        !EqualityComparer<TProperty>.Default.Equals((TProperty)SentValue!, NewValue))
     {
         Origin = ChangeOrigin.Local;
     }
 }
 ```
 
-In `WriteInterceptorFactory.cs`, in BOTH terminal delegates, immediately after `context.IsWritten = true;` add:
+Finalization and the survival check live in the terminal write delegates of `WriteInterceptorFactory` (both the no-interceptor variant and the chain variant), NOT in `InterceptorExecutor`. In `WriteInterceptorFactory.cs`, in BOTH terminal delegates, immediately after `context.IsWritten = true;` (which already runs under `context.Property.Subject.SyncRoot`) add:
 
 ```csharp
 context.FinalizeOrigin();
@@ -758,8 +762,9 @@ git commit -m "feat: publish typed ChangeOrigin on SubjectPropertyChange, stamp 
 - Modify: `src/Namotion.Interceptor.ConnectorTester/Engine/Verification/FailureDiagnostics.cs:175` (pass `ChangeOrigin.Local`)
 - Modify: `src/Namotion.Interceptor.Tracking/InterceptorSubjectContextExtensions.cs:127` (extend `CreatePropertyChangeQueueSubscription`'s signature with an optional `Func<SubjectPropertyChange, bool>? filter = null` after the existing `scheduler` parameter, and thread it into `PropertyChangeQueue.Subscribe` and the per-subscription enqueue path) and `src/Namotion.Interceptor.Tracking/Change/PropertyChangeQueue.cs` / the `PropertyChangeQueueSubscription` (accept the optional filter and apply it at ENQUEUE time, so a change the filter rejects never enters that subscription's queue)
 - Modify: `src/Namotion.Interceptor.Connectors/ChangeQueueProcessor.cs` (pass an own-source filter predicate into `CreatePropertyChangeQueueSubscription` so the own-source skip `ReferenceEquals(change.Origin.Source, _source)` runs at enqueue time; the dequeue-time skip in `ProcessAsync` stays as a cheap defensive check)
-- Modify: `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs` (reorder `ExecuteAsync` around lines 76-101: construct the `ChangeQueueProcessor` and its subscription BEFORE `LoadInitialStateAndResumeAsync`, then start `ProcessAsync` after `ReapplyRetryQueue`). With the subscription live before the load and the enqueue filter dropping own-source echoes, the initial-load flood never grows the buffer, and any locally computed write-back produced during the load is captured and delivered once processing starts
-- Modify: `docs/connectors.md` (document the lifecycle ordering fix): `SubjectSourceBase` creates its `ChangeQueueProcessor` subscription before the initial load and applies the processor's own-source skip at enqueue time, so a locally computed write-back produced during initial load (for example a hook transforming an inbound initial value) is delivered to the source once processing starts, while the initial snapshot's own-source echoes are filtered at enqueue and never grow the buffer
+- Modify: `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs` (reorder `ExecuteAsync` around lines 76-101: construct the `ChangeQueueProcessor` and its subscription BEFORE `LoadInitialStateAndResumeAsync`, then start `ProcessAsync` after `ReapplyRetryQueue`). With the subscription live before the load, any locally computed write-back produced during the load is captured and delivered once processing starts. The enqueue filter keeps own-source snapshot echoes out of the buffer, but snapshot-triggered `Local` write-backs (derived recalcs, hook cascades) are NOT own-source and DO buffer during the load window, in volume proportional to the snapshot cascade fan-out; a bounded cap on the subscription buffer during the pre-processing window drops the oldest on overflow and logs a divergence warning naming `RequestResynchronization` / #342 as remediation (a dropped write-back leaves the source diverged until the next resync, never a wrong model value)
+- Modify: `src/Namotion.Interceptor.Tracking/Change/PropertyChangeQueueSubscription.cs` (add an optional bounded capacity used during the pre-processing window: on overflow drop the oldest queued change and log a divergence warning naming `RequestResynchronization` / #342; unbounded by default, matching current behavior)
+- Modify: `docs/connectors.md` (document the lifecycle ordering fix): `SubjectSourceBase` creates its `ChangeQueueProcessor` subscription before the initial load and applies the processor's own-source skip at enqueue time, so a locally computed write-back produced during initial load (for example a hook transforming an inbound initial value) is delivered to the source once processing starts; the initial snapshot's own-source echoes are filtered at enqueue and never buffer, while snapshot-triggered `Local` write-backs are bounded by the load-window cap (overflow drops the oldest and logs a divergence warning naming resync / #342)
 - Test: `src/Namotion.Interceptor.Connectors.Tests` update-apply suites gain a source overload test and a timestamp-preservation test (an applied update's published change carries `propertyUpdate.Timestamp`, not capture-time `UtcNow`)
 
 **Interfaces:**
@@ -798,13 +803,13 @@ Extend `CreatePropertyChangeQueueSubscription` (`InterceptorSubjectContextExtens
 
 - [ ] **Step 5: Reorder SubjectSourceBase lifecycle**
 
-Reorder `SubjectSourceBase.ExecuteAsync` (around lines 76-101): construct the `ChangeQueueProcessor` (and therefore its queue subscription) BEFORE `LoadInitialStateAndResumeAsync`, then call `ReapplyRetryQueue`, then start `ProcessAsync`. With the subscription live before the load, a locally computed write-back produced during initial load is captured and delivered once processing starts; because the enqueue filter drops own-source echoes, the initial snapshot flood never grows the buffer. Update `docs/connectors.md` (near the change-source semantics the docs task rewrites) to document this lifecycle ordering fix, not a limitation: the subscription exists before the initial load and own-source echoes are filtered at enqueue, so an initial-load write-back reaches the source once processing starts while the snapshot flood stays out of the buffer.
+Reorder `SubjectSourceBase.ExecuteAsync` (around lines 76-101): construct the `ChangeQueueProcessor` (and therefore its queue subscription) BEFORE `LoadInitialStateAndResumeAsync`, then call `ReapplyRetryQueue`, then start `ProcessAsync`. With the subscription live before the load, a locally computed write-back produced during initial load is captured and delivered once processing starts. The enqueue filter keeps own-source snapshot echoes out of the buffer, but snapshot-triggered `Local` write-backs (derived recalcs, hook cascades) are not own-source and DO buffer during the load window; bound the subscription buffer with a cap during the pre-processing window that drops the oldest on overflow and logs a divergence warning naming `RequestResynchronization` / #342. Update `docs/connectors.md` (near the change-source semantics the docs task rewrites) to document this lifecycle ordering fix: the subscription exists before the initial load and own-source echoes are filtered at enqueue, so an initial-load write-back reaches the source once processing starts, while snapshot-triggered `Local` write-backs are bounded by the load-window cap rather than growing without limit.
 
 - [ ] **Step 6: Lifecycle ordering tests**
 
 In `Namotion.Interceptor.Connectors.Tests`, following the existing `SubjectSourceBase` / `ChangeQueueProcessor` test idiom:
 - A hook-transformed inbound write-back applied during initial load is delivered to the source once `ProcessAsync` starts (with the subscription created before the load).
-- A large simulated initial snapshot (many `SetValueFromSource(this)` applies) leaves the subscription buffer empty: all own-source echoes are filtered at enqueue, so the bounded-memory property holds.
+- Memory bound under load: use a derived-heavy or hook-heavy model so applying the snapshot fires many `Local` write-backs (a model with no derived or hook write-backs leaves the buffer empty and proves nothing). A large simulated initial snapshot keeps the subscription buffer within the load-window cap; own-source echoes are filtered at enqueue and never buffer, while the `Local` write-backs are bounded by the cap, and overflow drops the oldest and logs a divergence warning.
 - Steady-state echo suppression is unchanged: an own-source change is still not written back to its source, and other-source and local changes still are.
 
 - [ ] **Step 7: Run tests**
@@ -1019,15 +1024,16 @@ PR body: summary of the mechanism swap referencing `docs/superpowers/specs/2026-
 **Files:**
 - Branch: `git checkout -b feature/change-origin-corrections feature/change-origin-design`
 - Modify: `src/Namotion.Interceptor/ChangeOrigin.cs` (add `Correction = 3` and factory)
-- Modify: `src/Namotion.Interceptor/PendingOrigin.cs` (add the internal `IsArmedFor` consumption-observation member)
-- Modify: `src/Namotion.Interceptor.Tracking/Change/SubjectChangeContextExtensions.cs` (correction detection inside `SetValueFromOrigin`, after the setter returns, for `FromSource` writes)
+- Modify: `src/Namotion.Interceptor/PendingOrigin.cs` (add the internal thread-static write-outcome slot: `SetOutcome` / `TryTakeOutcome`)
+- Modify: `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs` (after `ExecuteInterceptedWrite`, record the outcome when the context consumed a stamp, computing `valueUnchanged` in the generic `TProperty` frame)
+- Modify: `src/Namotion.Interceptor.Tracking/Change/SubjectChangeContextExtensions.cs` (correction detection inside `SetValueFromOrigin`, reading the outcome after the setter returns, for `FromSource` writes)
 - Modify: `src/Namotion.Interceptor.Tracking/Change/PropertyChangeQueue.cs` (internal `EnqueueCorrection`)
 - Test: `src/Namotion.Interceptor.Tracking.Tests/Change/SourceCorrectionTests.cs`
 
 **Interfaces:**
-- Produces: `ChangeOriginKind.Correction`, `ChangeOrigin.Correction(object source)`, `PendingOrigin.IsArmedFor(in PropertyReference)` (internal, non-destructive peek), `PropertyChangeQueue.EnqueueCorrection(in SubjectPropertyChange)` (internal); correction detection folded into the existing `SetValueFromOrigin` primitive (no new public surface, no new interceptor).
+- Produces: `ChangeOriginKind.Correction`, `ChangeOrigin.Correction(object source)`, `PendingOrigin.SetOutcome(bool isWritten, bool valueUnchanged, ChangeOrigin origin)` and `PendingOrigin.TryTakeOutcome(out bool isWritten, out bool valueUnchanged, out ChangeOrigin origin)` (internal, thread-static, `TryTakeOutcome` clears the slot), `PropertyChangeQueue.EnqueueCorrection(in SubjectPropertyChange)` (internal); correction detection folded into the existing `SetValueFromOrigin` primitive (no new public surface, no new interceptor). No non-destructive peek of the pending slot is added: the outcome record already distinguishes a cancelled write (no outcome) from a suppressed one.
 
-**Why detection lives in `SetValueFromOrigin` (not a write interceptor):** a dedicated interceptor was rejected because it would add an interceptor frame to every write and need `[RunsFirst]`/`[RunsBefore]` ordering guarantees against `PropertyValueEqualityCheckHandler`, whereas `SetValueFromOrigin` already brackets exactly the one stamped write in question and adds nothing to the write chain. The equality handler suppresses unchanged writes by not calling `next`, so the terminal write never lands and never updates the property's write-timestamp; `SetValueFromOrigin` reads that same write-timestamp before and after the setter to see whether a write landed, which is the detection signal that replaces the interceptor's `IsWritten` check.
+**Why detection lives in `SetValueFromOrigin` (not a write interceptor):** a dedicated interceptor was rejected because it would add an interceptor frame to every write and need `[RunsFirst]`/`[RunsBefore]` ordering guarantees against `PropertyValueEqualityCheckHandler`, whereas `SetValueFromOrigin` already brackets exactly the one stamped write in question and adds nothing to the write chain. Detection keys off a thread-static outcome record, not off timestamps or a transaction flag. When a `PropertyWriteContext` consumed a stamp, `InterceptorExecutor.SetPropertyValue` (which holds the context in its generic `TProperty` frame after `ExecuteInterceptedWrite` returns) records `(IsWritten, valueUnchanged, Origin)`, where `valueUnchanged = EqualityComparer<TProperty>.Default.Equals(CurrentValue, NewValue)` is the same typed comparison the equality handler used to suppress the write. `SetValueFromOrigin` reads and clears that record after the setter returns. This replaces the earlier guard-based design, whose timestamp signal broke under null-timestamp scopes, a frozen `GetTimestampFunction`, and same-tick writes, and whose transaction guard was a process-global counter that let unrelated concurrent transactions drop legitimate corrections.
 
 - [ ] **Step 1: Write the failing tests** (the three-outcome matrix from the spec)
 
@@ -1083,11 +1089,12 @@ public class SourceCorrectionTests
     {
         // Arrange: model at 50, an active SubjectTransaction on the context.
         // Act: SetValueFromSource(source, null, null, 80); the transaction interceptor
-        //      captures the value and stops the chain, so the write-timestamp never moves.
+        //      captures the value and stops the chain, so the terminal write never lands.
         // Assert: no correction in the queue; the value is pending in the transaction.
-        //         This pins guard clause 3 (SubjectTransaction.HasActiveTransaction
-        //         short-circuits before the observable-value comparison), so a
-        //         captured-but-unwritten value never triggers synthesis.
+        //         This pins the valueUnchanged self-exclusion: the equality handler runs
+        //         [RunsFirst], so a transaction only captures when the values differ, making
+        //         the outcome's valueUnchanged false, so a captured-but-unwritten value never
+        //         triggers synthesis. No process-global transaction flag is consulted.
     }
 
     [Fact]
@@ -1134,17 +1141,57 @@ public static ChangeOrigin Correction(object source) =>
 internal void EnqueueCorrection(in SubjectPropertyChange change) => Enqueue(in change);
 ```
 
-`PendingOrigin.cs`: add a non-destructive peek so `SetValueFromOrigin` can tell a consumed chain (the write ran) from a cancelled one (an `OnXChanging` cancel) before the scope disposes:
+`PendingOrigin.cs`: add a thread-static write-outcome slot. `InterceptorExecutor` records the outcome of a stamped write; `SetValueFromOrigin` reads and clears it after the setter returns. This replaces the removed non-destructive slot peek: a cancelled write records no outcome and self-excludes, and a transaction capture records `valueUnchanged == false`.
 
 ```csharp
-// Reports whether the slot is still armed for this property, i.e. the stamp SetValueFromOrigin
-// set has NOT been consumed by a write chain. Non-destructive, unlike TryConsume.
+[ThreadStatic] private static bool _hasOutcome;
+[ThreadStatic] private static bool _outcomeIsWritten;
+[ThreadStatic] private static bool _outcomeValueUnchanged;
+[ThreadStatic] private static ChangeOrigin _outcomeOrigin;
+
+internal static void SetOutcome(bool isWritten, bool valueUnchanged, ChangeOrigin origin)
+{
+    _hasOutcome = true;
+    _outcomeIsWritten = isWritten;
+    _outcomeValueUnchanged = valueUnchanged;
+    _outcomeOrigin = origin;
+}
+
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
-internal static bool IsArmedFor(in PropertyReference property) =>
-    _armed && _target.Equals(property);
+internal static bool TryTakeOutcome(out bool isWritten, out bool valueUnchanged, out ChangeOrigin origin)
+{
+    if (_hasOutcome)
+    {
+        isWritten = _outcomeIsWritten;
+        valueUnchanged = _outcomeValueUnchanged;
+        origin = _outcomeOrigin;
+        _hasOutcome = false;
+        _outcomeOrigin = default;
+        return true;
+    }
+
+    isWritten = false;
+    valueUnchanged = false;
+    origin = default;
+    return false;
+}
 ```
 
-`SubjectChangeContextExtensions.cs`: fold correction detection into `SetValueFromOrigin`. It already brackets the stamped setter invocation; capture the raw write-timestamp before the setter, and after the setter returns (while the pending scope is still open) run the four guards for `FromSource` writes. Add `using Namotion.Interceptor.Tracking.Transactions;` for `SubjectTransaction`:
+`InterceptorExecutor.cs`: after `ExecuteInterceptedWrite(ref context, writeValue)` in `SetPropertyValue<TProperty>` (both the public and internal cascade overloads; a shared helper avoids duplication), record the outcome only when the context consumed a stamp. `Origin.Kind != Local` after the chain means a stamp was consumed and the write is a correction candidate; a landed transform finalizes `Origin` to `Local` and is correctly skipped (a landed transform is not a correction). `valueUnchanged` is computed here, in the generic `TProperty` frame, as the same typed comparison the equality handler uses:
+
+```csharp
+if (context.Origin.Kind != ChangeOriginKind.Local)
+{
+    PendingOrigin.SetOutcome(
+        context.IsWritten,
+        EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue),
+        context.Origin);
+}
+```
+
+This is the one non-chain addition PR 2 makes to the write path: a single branch on `Origin.Kind` per write, taken only by stamped inbound writes; a local write records nothing. The derived-recalc cascade overload runs `Local` and so never records.
+
+`SubjectChangeContextExtensions.cs`: fold correction detection into `SetValueFromOrigin`. Read and clear the outcome after the setter returns, and synthesize only for `FromSource` writes whose outcome says the terminal never landed (`!isWritten`) and the equality handler suppressed the write (`valueUnchanged`). No `using Namotion.Interceptor.Tracking.Transactions;` is needed anymore; detection no longer consults `SubjectTransaction`:
 
 ```csharp
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1153,55 +1200,46 @@ public static void SetValueFromOrigin(
     ChangeOrigin origin, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp,
     object? value)
 {
-    // Correction detection applies only to FromSource writes. Capture the property's raw
-    // write-timestamp before the setter: a terminal write updates it, an equality-suppressed
-    // write never reaches it, so an unmoved timestamp after the setter is the suppression signal.
-    var detectCorrection = origin.Kind == ChangeOriginKind.FromSource;
-    var writeTimestampAtEntry = detectCorrection ? property.TryGetWriteTimestamp() : null;
+    var stamped = origin.Kind != ChangeOriginKind.Local;
+
+    // Baseline for the synthesis concurrency race ONLY (not detection): captured before the
+    // setter so a concurrent write during synthesis moves it and we drop on doubt.
+    var writeTimestampBaseline = stamped ? property.TryGetWriteTimestamp() : null;
 
     using (SubjectChangeContext.WithTimestamps(changedTimestamp, receivedTimestamp))
     using (PendingOrigin.Set(property, origin, value))
     {
         property.Metadata.SetValue?.Invoke(property.Subject, value);
+    }
 
-        // Decide while the pending scope is still open: Dispose restores the previous frame
-        // and erases the "still armed" signal IsArmedFor reads.
-        if (detectCorrection)
-        {
-            DetectAndEnqueueCorrection(property, origin.Source!, value, writeTimestampAtEntry);
-        }
+    if (!stamped)
+    {
+        return;
+    }
+
+    // Read and clear the outcome the write chain recorded for this stamped write. No outcome
+    // means the chain never ran (an OnXChanging hook cancelled the write): nothing to correct.
+    if (!PendingOrigin.TryTakeOutcome(out var isWritten, out var valueUnchanged, out _))
+    {
+        return;
+    }
+
+    // Correction candidate: FromSource, terminal never landed, equality-suppressed. A transaction
+    // capture has valueUnchanged == false (it only captures when values differ), so it self-excludes,
+    // and no process-global transaction flag is consulted. Timestamps play no role in this decision.
+    if (origin.Kind == ChangeOriginKind.FromSource && !isWritten && valueUnchanged)
+    {
+        DetectAndEnqueueCorrection(property, origin.Source!, value, writeTimestampBaseline);
     }
 }
 
 private static void DetectAndEnqueueCorrection(
-    PropertyReference property, object source, object? sentValue, DateTimeOffset? writeTimestampAtEntry)
+    PropertyReference property, object source, object? sentValue, DateTimeOffset? writeTimestampBaseline)
 {
-    // Guard 1: a terminal write landed and published through the change queue normally.
-    if (property.TryGetWriteTimestamp() != writeTimestampAtEntry)
-    {
-        return;
-    }
-
-    // Guard 2: the stamp is still armed for this property, so the chain never started
-    // (an OnXChanging hook cancelled the write). Nothing was suppressed; this matches the
-    // previous detector, which never fired on a cancelled write.
-    if (PendingOrigin.IsArmedFor(in property))
-    {
-        return;
-    }
-
-    // Guard 3: an active transaction captured the value as pending state; commit replay
-    // reconciles it. This replaces the old projection-equality clause as the transaction guard.
-    if (SubjectTransaction.HasActiveTransaction)
-    {
-        return;
-    }
-
-    // Guard 4: stamp consumed, timestamp unmoved, no transaction, so the equality check
-    // suppressed the write. Read the observable value OUTSIDE the subject lock (the getter may
-    // run read interceptors; running them under Subject.SyncRoot would invert the codebase's
-    // getters-outside-locks discipline, which DerivedPropertyChangeHandler avoids against
-    // LifecycleInterceptor). If it still equals the sent value there is no divergence
+    // The stamped write was equality-suppressed. Read the observable value OUTSIDE the subject
+    // lock (the getter may run read interceptors; running them under Subject.SyncRoot would invert
+    // the codebase's getters-outside-locks discipline, which DerivedPropertyChangeHandler avoids
+    // against LifecycleInterceptor). If it still equals the sent value there is no divergence
     // (pure echo) and no correction; the correction deliberately carries the OBSERVABLE value.
     var observedValue = property.Metadata.GetValue?.Invoke(property.Subject);
     if (Equals(sentValue, observedValue))
@@ -1220,13 +1258,13 @@ private static void DetectAndEnqueueCorrection(
     SubjectPropertyChange correction;
     lock (property.Subject.SyncRoot)
     {
-        // Concurrency: a newer write may have landed while we decided. Compare the raw
-        // write-timestamp against the entry value under the lock; a moved timestamp means that
+        // Concurrency drop-on-doubt: a newer write may have landed while we decided. Compare the
+        // raw write-timestamp against the baseline under the lock; a moved timestamp means that
         // write is already flowing outbound, so drop. NECESSARY BUT NOT SUFFICIENT (tick
         // granularity, user-settable GetTimestampFunction), so on any doubt DROP: the only
         // failure mode of a dropped correction is a missing one (the source stays diverged
         // until its next inbound event), never a wrong model value.
-        if (property.TryGetWriteTimestamp() != writeTimestampAtEntry)
+        if (property.TryGetWriteTimestamp() != writeTimestampBaseline)
         {
             return;
         }
@@ -1251,7 +1289,7 @@ private static void DetectAndEnqueueCorrection(
 }
 ```
 
-There is no registration step and no interceptor: detection is part of `SetValueFromOrigin`, which is already on every `FromSource` apply path (`SetValueFromSource` forwards to it, and the Task 6 appliers route stamped writes through it). A purely local application never calls it with a `FromSource` origin and pays zero PR 2 write-path cost, with nothing to gate. The Tracking-level `SourceCorrectionTests` therefore register no detector: they build a tracking context with a queue subscription and drive applies through `SetValueFromSource` / `SetValueFromOrigin`.
+There is no registration step and no interceptor: detection is part of `SetValueFromOrigin`, which is already on every `FromSource` apply path (`SetValueFromSource` forwards to it, and the Task 6 appliers route stamped writes through it). A purely local application never calls it with a `FromSource` origin, so it synthesizes nothing and pays only the single-branch outcome check in `InterceptorExecutor` on its writes, with nothing to gate. The Tracking-level `SourceCorrectionTests` therefore register no detector: they build a tracking context with a queue subscription and drive applies through `SetValueFromSource` / `SetValueFromOrigin`.
 
 - [ ] **Step 4: Run the tests, iterate until green, then run the full Tracking suite.**
 
@@ -1265,7 +1303,7 @@ git commit -m "feat: synthesize Correction changes for equality-suppressed diver
 ### Task 12: Correction delivery in ChangeQueueProcessor
 
 **Files:**
-- Modify: `src/Namotion.Interceptor.Connectors/ChangeQueueProcessor.cs:145` (kind-aware dequeue skip) and the enqueue filter passed into `CreatePropertyChangeQueueSubscription` (kind-aware: `Correction` always enqueued)
+- Modify: `src/Namotion.Interceptor.Connectors/ChangeQueueProcessor.cs:145` (kind-aware dequeue skip), the enqueue filter passed into `CreatePropertyChangeQueueSubscription` (kind-aware: `Correction` always enqueued), the flush-time dedup at `ChangeQueueProcessor.cs:254` (normal-beats-correction), and a new internal `TryEnqueue(in SubjectPropertyChange)` feeding the buffered `_changes` path (used by the retry reapplication in Step 4)
 - Test: `src/Namotion.Interceptor.Connectors.Tests` (delivery routing tests)
 
 - [ ] **Step 1: Write the failing tests**
@@ -1274,7 +1312,7 @@ Three tests in the connectors test project, following the existing `ChangeQueueP
 1. A `Correction(S)` change is delivered by a processor whose `_source` is S (owner writes it back).
 2. A `Correction(connection)` change is delivered by a processor whose `_source` is a DIFFERENT object (the WebSocket shape: origin identity is the connection, processor identity is the handler); this is the test that proves corrections are never dropped by identity mismatch.
 3. A `FromSource(S)` change keeps today's routing (skipped by S's processor, delivered by others).
-4. Dedup keeps kinds separate: within a flush batch for one property, a `Correction(S)` followed by a normal change resolves to the normal change (the correction is dropped); a normal change followed by a `Correction(S)` keeps the normal change (the correction never overwrites it); two normal changes still coalesce as today.
+4. Normal-beats-correction dedup: within a flush batch for one property, a `Correction(S)` followed by a normal change resolves to the normal change (the correction is dropped); a normal change followed by a `Correction(S)` keeps the normal change (the correction never replaces it); two normal changes still coalesce as today. Also cover the immediate path (`bufferTime <= 0`): no dedup runs, so both a correction and a normal change for one property may be written, which is acceptable because a correction write is idempotent.
 
 - [ ] **Step 2: Implement**
 
@@ -1290,7 +1328,7 @@ if (change.Origin.Kind != ChangeOriginKind.Correction &&
 
 Make the ENQUEUE-time filter from Task 6 kind-aware to match: `Correction` changes must always be enqueued (they bypass the own-source skip), so the predicate passed into `CreatePropertyChangeQueueSubscription` becomes `change => change.Origin.Kind == ChangeOriginKind.Correction || !ReferenceEquals(change.Origin.Source, _source)`. The enqueue filter and the dequeue skip stay in lockstep on the same rule, so a correction is never dropped at enqueue and the dequeue rule stays exactly as specified above.
 
-Also guard the flush-time dedup at `ChangeQueueProcessor.cs:254` (`MergeWithNewer`) so it never coalesces across kinds: a `Correction` and a normal change for the same property must not merge. A newer normal change supersedes a pending correction (drop the correction, the normal change already carries the authoritative value outbound); a correction never overwrites a queued normal change. Only same-kind changes coalesce.
+Also make the flush-time dedup at `ChangeQueueProcessor.cs:254` (`MergeWithNewer`) kind-aware. The flush dictionary keeps one entry per property; the rule is normal-beats-correction: a newer normal change replaces a pending correction for that property (drop the correction, the normal change already carries the authoritative value outbound), and a correction never replaces a queued normal change. There is no separate within-kind coalescing rule to add; the dictionary already holds one entry per property and the kind decides which survives. The immediate path (`bufferTime <= 0`) performs no dedup, so a correction and a normal change for one property may both be written there; this is acceptable because a correction write is idempotent (old equals new equals the stored value).
 
 - [ ] **Step 3: Run connectors tests, then the full unit suite.**
 
@@ -1300,7 +1338,7 @@ Note: other queue subscribers (`PerformanceProfiler` in SamplesModel and Connect
 
 `ReapplyRetryQueue` in `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs:180` re-applies failed writes through the property setter. For a correction (old == new == current) the setter is a silent no-op: the equality check suppresses, no new queue event appears, and the drained retry entry is gone while the source stays diverged. Add kind-aware handling before the setter path.
 
-Note the asymmetry with detection (Task 11): detection lives in Tracking's `SetValueFromOrigin` and injects via the internal `PropertyChangeQueue.EnqueueCorrection`, but `SubjectSourceBase` lives in `Namotion.Interceptor.Connectors` and cannot reach that internal method. A still-valid retry therefore does NOT re-inject into the global Tracking queue; it re-inserts the correction into the `ChangeQueueProcessor`'s own local pending buffer (a Connectors-level path that hands the change straight to the write pump), bypassing the setter, hooks, and INPC entirely:
+Note the asymmetry with detection (Task 11): detection lives in Tracking's `SetValueFromOrigin` and injects via the internal `PropertyChangeQueue.EnqueueCorrection`, but `SubjectSourceBase` lives in `Namotion.Interceptor.Connectors` and cannot reach that internal method. A still-valid retry therefore does NOT re-inject into the global Tracking queue; it re-injects through a new internal `ChangeQueueProcessor.TryEnqueue(in SubjectPropertyChange)` (both types are in `Namotion.Interceptor.Connectors`, so this is a same-assembly internal call, not a reach into Tracking). `TryEnqueue` feeds the processor's normal buffered path (the `_changes` queue drained by the flush timer), so the retried correction passes through the same flush-time dedup as any other change: a stale correction superseded by a newer normal change is dropped there. This bypasses the setter, hooks, and INPC entirely:
 
 ```csharp
 if (change.Origin.Kind == ChangeOriginKind.Correction)
@@ -1308,10 +1346,10 @@ if (change.Origin.Kind == ChangeOriginKind.Correction)
     var current = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
     if (Equals(current, change.GetNewValue<object?>()))
     {
-        // Still valid: re-insert into the ChangeQueueProcessor's own local pending
-        // buffer (Connectors-level), NOT the global Tracking queue (unreachable from
-        // here). No setter, no hooks, no INPC.
-        EnqueueForProcessing(change);
+        // Still valid: re-enqueue through the processor's internal buffered path
+        // (Connectors-level), NOT the global Tracking queue (unreachable from here).
+        // Passes through flush dedup; no setter, no hooks, no INPC.
+        _processor.TryEnqueue(in change);
     }
     // Model changed meanwhile: drop the stale correction; the newer model
     // change is already flowing outbound.
@@ -1319,7 +1357,7 @@ if (change.Origin.Kind == ChangeOriginKind.Correction)
 }
 ```
 
-Adapt `EnqueueForProcessing` to whatever `ChangeQueueProcessor`-level mechanism hands changes to the write pump's local pending buffer (follow the surrounding code); it must be the Connectors-level path, not a call back into the Tracking queue. Tests, in the connectors test project following the retry-queue test idiom: a failed correction enters the retry queue; on reconnect with the still-diverged value it is re-enqueued without invoking hooks or INPC and eventually reaches the source; if the model changed meanwhile, the stale correction is dropped.
+Add the internal `ChangeQueueProcessor.TryEnqueue(in SubjectPropertyChange)` that enqueues onto the processor's buffered `_changes` queue (the same path the dequeue loop uses for the buffered case, subject to the existing bounded-queue overflow), so retried corrections flow through the normal flush and dedup rather than a call back into the Tracking queue; reference it via whatever `ChangeQueueProcessor` handle `ReapplyRetryQueue` already holds. Tests, in the connectors test project following the retry-queue test idiom: a failed correction enters the retry queue; on reconnect with the still-diverged value it is re-enqueued without invoking hooks or INPC and eventually reaches the source; if the model changed meanwhile, the stale correction is dropped.
 
 - [ ] **Step 5: Run connectors tests, then commit both steps**
 
