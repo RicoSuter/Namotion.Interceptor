@@ -756,12 +756,15 @@ git commit -m "feat: publish typed ChangeOrigin on SubjectPropertyChange, stamp 
 - Modify: `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` and `SubjectItemsUpdateApplier.cs` (thread `origin` to every property write site; each site currently wrapped in `WithChangedTimestamp` applies via `SetValue` or `RegisteredSubjectProperty`; when `origin.Kind != ChangeOriginKind.Local`, apply through `SetValueFromOrigin(origin, propertyUpdate.Timestamp, null, value)`, the public Tracking primitive from Task 4 that arms `FromSource` and `Confirmed` alike, since Connectors cannot reach the internal `PendingOrigin.Arm`; for `Local`, keep the current unarmed path, since `Local` is the default and needs no stamp). The five sites (`SubjectUpdateApplier.cs:84,131,139` and `SubjectItemsUpdateApplier.cs:124,209`) are each wrapped in `WithChangedTimestamp(propertyUpdate.Timestamp)` today; `propertyUpdate.Timestamp` MUST be passed as the `changedTimestamp` argument of `SetValueFromOrigin` at every site, or the inbound changed-timestamp is silently replaced with capture-time `UtcNow` and provenance is corrupted
 - Modify: `src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectHandler.cs:200-207` (pass `ChangeOrigin.FromSource(connection)`), `src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs:296-299,540-543` (pass `ChangeOrigin.FromSource(this)` / `ChangeOrigin.FromSource(state.source)`); drop the `WithSource` usings; correct the lock comment at `WebSocketSubjectHandler.cs:200` to say the lock serializes update application, not that thread-static state requires it
 - Modify: `src/Namotion.Interceptor.ConnectorTester/Engine/Verification/FailureDiagnostics.cs:175` (pass `ChangeOrigin.Local`)
-- Do NOT modify `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs` in this task. The subscription-before-load reorder and the segregated buffering it would require are DESCOPED from PR 1 into a follow-up (see the spec's "Source lifecycle ordering" section). The earlier drop-safety rationale was wrong: buffered `FromSource` changes are not universally safe to drop, because origin identity need not equal processor identity (the WebSocket server stamps origins per connection while its processor identifies as the handler), so a dropped inbound client update would never be broadcast to the other replicas. The reorder needs new buffering machinery and a correct delivery-based segregation that is out of scope here.
-- Modify: `docs/connectors.md` (document the known limitation): because `SubjectSourceBase` creates its `ChangeQueueProcessor` subscription only after `LoadInitialStateAndResumeAsync`, and `PropertyChangeQueue` drops changes with no subscription, a locally computed write-back produced during initial load (for example a hook transforming an inbound initial value) is lost and the source stays diverged until it next pushes that property. Note that a follow-up issue will design the reorder with correct buffering. No `SubjectSourceBase` change and no queue-buffering test in this task.
+- Modify: `src/Namotion.Interceptor.Tracking/InterceptorSubjectContextExtensions.cs:127` (extend `CreatePropertyChangeQueueSubscription`'s signature with an optional `Func<SubjectPropertyChange, bool>? filter = null` after the existing `scheduler` parameter, and thread it into `PropertyChangeQueue.Subscribe` and the per-subscription enqueue path) and `src/Namotion.Interceptor.Tracking/Change/PropertyChangeQueue.cs` / the `PropertyChangeQueueSubscription` (accept the optional filter and apply it at ENQUEUE time, so a change the filter rejects never enters that subscription's queue)
+- Modify: `src/Namotion.Interceptor.Connectors/ChangeQueueProcessor.cs` (pass an own-source filter predicate into `CreatePropertyChangeQueueSubscription` so the own-source skip `ReferenceEquals(change.Origin.Source, _source)` runs at enqueue time; the dequeue-time skip in `ProcessAsync` stays as a cheap defensive check)
+- Modify: `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs` (reorder `ExecuteAsync` around lines 76-101: construct the `ChangeQueueProcessor` and its subscription BEFORE `LoadInitialStateAndResumeAsync`, then start `ProcessAsync` after `ReapplyRetryQueue`). With the subscription live before the load and the enqueue filter dropping own-source echoes, the initial-load flood never grows the buffer, and any locally computed write-back produced during the load is captured and delivered once processing starts
+- Modify: `docs/connectors.md` (document the lifecycle ordering fix): `SubjectSourceBase` creates its `ChangeQueueProcessor` subscription before the initial load and applies the processor's own-source skip at enqueue time, so a locally computed write-back produced during initial load (for example a hook transforming an inbound initial value) is delivered to the source once processing starts, while the initial snapshot's own-source echoes are filtered at enqueue and never grow the buffer
 - Test: `src/Namotion.Interceptor.Connectors.Tests` update-apply suites gain a source overload test and a timestamp-preservation test (an applied update's published change carries `propertyUpdate.Timestamp`, not capture-time `UtcNow`)
 
 **Interfaces:**
 - Produces: `ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update, ISubjectFactory? subjectFactory, ChangeOrigin origin, Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)`.
+- Produces: `CreatePropertyChangeQueueSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null, Func<SubjectPropertyChange, bool>? filter = null)`; the optional `filter` runs at enqueue time (a rejected change never enters that subscription's queue). `ChangeQueueProcessor` passes `change => !ReferenceEquals(change.Origin.Source, _source)` so own-source echoes are filtered at enqueue.
 
 - [ ] **Step 1: Write the failing test** (in the existing update-extensions test class in `Namotion.Interceptor.Connectors.Tests/Updates`, following its Arrange idiom)
 
@@ -789,16 +792,27 @@ Fill Arrange/Assert with the exact helpers used by neighboring tests in that fil
 
 Add the required `ChangeOrigin origin` parameter, thread it through `SubjectUpdateApplier.ApplyUpdate` and `SubjectItemsUpdateApplier` down to the write sites, and route stamped (`FromSource`/`Confirmed`) writes through `SetValueFromOrigin`; keep the current unarmed path for `Local`. Update the three WebSocket sites and the ConnectorTester site. Also update the code sample in the XML doc comment of `ApplySubjectUpdate` if present.
 
-- [ ] **Step 4: Document the initial-load write-back limitation**
+- [ ] **Step 4: Enqueue-time own-source filter**
 
-Add a short note to `docs/connectors.md` (near the change-source semantics the docs task rewrites) stating the known limitation: because `SubjectSourceBase` creates its `ChangeQueueProcessor` subscription only after `LoadInitialStateAndResumeAsync`, and `PropertyChangeQueue` drops changes with no subscription, a locally computed write-back produced during initial load (for example a hook transforming an inbound initial value) is lost and the source stays diverged until it next pushes that property. Mention that a follow-up issue will design the subscription-before-load reorder with correct buffering. Do not modify `SubjectSourceBase` and do not add a queue-buffering test.
+Extend `CreatePropertyChangeQueueSubscription` (`InterceptorSubjectContextExtensions.cs:127`) with an optional `Func<SubjectPropertyChange, bool>? filter = null` after `scheduler`, thread it into `PropertyChangeQueue.Subscribe` and the per-subscription enqueue path, and apply it at ENQUEUE time so a change the filter rejects never enters that subscription's queue. In `ChangeQueueProcessor`, pass `change => !ReferenceEquals(change.Origin.Source, _source)` into the subscription so own-source echoes are filtered at enqueue. Keep the dequeue-time skip in `ProcessAsync` (`ChangeQueueProcessor.cs:145`) as a cheap defensive check; the two use the same predicate, so delivery stays behavior-identical.
 
-- [ ] **Step 5: Run tests**
+- [ ] **Step 5: Reorder SubjectSourceBase lifecycle**
+
+Reorder `SubjectSourceBase.ExecuteAsync` (around lines 76-101): construct the `ChangeQueueProcessor` (and therefore its queue subscription) BEFORE `LoadInitialStateAndResumeAsync`, then call `ReapplyRetryQueue`, then start `ProcessAsync`. With the subscription live before the load, a locally computed write-back produced during initial load is captured and delivered once processing starts; because the enqueue filter drops own-source echoes, the initial snapshot flood never grows the buffer. Update `docs/connectors.md` (near the change-source semantics the docs task rewrites) to document this lifecycle ordering fix, not a limitation: the subscription exists before the initial load and own-source echoes are filtered at enqueue, so an initial-load write-back reaches the source once processing starts while the snapshot flood stays out of the buffer.
+
+- [ ] **Step 6: Lifecycle ordering tests**
+
+In `Namotion.Interceptor.Connectors.Tests`, following the existing `SubjectSourceBase` / `ChangeQueueProcessor` test idiom:
+- A hook-transformed inbound write-back applied during initial load is delivered to the source once `ProcessAsync` starts (with the subscription created before the load).
+- A large simulated initial snapshot (many `SetValueFromSource(this)` applies) leaves the subscription buffer empty: all own-source echoes are filtered at enqueue, so the bounded-memory property holds.
+- Steady-state echo suppression is unchanged: an own-source change is still not written back to its source, and other-source and local changes still are.
+
+- [ ] **Step 7: Run tests**
 
 Run: `dotnet test src/Namotion.Interceptor.Connectors.Tests && dotnet test src/Namotion.Interceptor.WebSocket.Tests`
 Expected: all pass, including WebSocket echo-suppression integration tests (they prove end-to-end equivalence of the new stamping).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add -A src docs
@@ -1230,7 +1244,7 @@ git commit -m "feat: synthesize Correction changes for equality-suppressed diver
 ### Task 12: Correction delivery in ChangeQueueProcessor
 
 **Files:**
-- Modify: `src/Namotion.Interceptor.Connectors/ChangeQueueProcessor.cs:145` (kind-aware skip)
+- Modify: `src/Namotion.Interceptor.Connectors/ChangeQueueProcessor.cs:145` (kind-aware dequeue skip) and the enqueue filter passed into `CreatePropertyChangeQueueSubscription` (kind-aware: `Correction` always enqueued)
 - Test: `src/Namotion.Interceptor.Connectors.Tests` (delivery routing tests)
 
 - [ ] **Step 1: Write the failing tests**
@@ -1252,6 +1266,8 @@ if (change.Origin.Kind != ChangeOriginKind.Correction &&
     continue;
 }
 ```
+
+Make the ENQUEUE-time filter from Task 6 kind-aware to match: `Correction` changes must always be enqueued (they bypass the own-source skip), so the predicate passed into `CreatePropertyChangeQueueSubscription` becomes `change => change.Origin.Kind == ChangeOriginKind.Correction || !ReferenceEquals(change.Origin.Source, _source)`. The enqueue filter and the dequeue skip stay in lockstep on the same rule, so a correction is never dropped at enqueue and the dequeue rule stays exactly as specified above.
 
 Also guard the flush-time dedup at `ChangeQueueProcessor.cs:254` (`MergeWithNewer`) so it never coalesces across kinds: a `Correction` and a normal change for the same property must not merge. A newer normal change supersedes a pending correction (drop the correction, the normal change already carries the authoritative value outbound); a correction never overwrites a queued normal change. Only same-kind changes coalesce.
 
