@@ -7,8 +7,22 @@ namespace Namotion.Interceptor;
 /// </summary>
 public enum ChangeOriginKind : byte
 {
+    /// <summary>
+    /// The value was computed locally: user writes, hook cascades, INPC handler write-backs,
+    /// and derived recalculations. Local changes flow to every bound source.
+    /// </summary>
     Local = 0,
+
+    /// <summary>
+    /// The stored value is exactly the value an external source sent in an inbound update.
+    /// The outbound queue skips the change for that source (echo suppression).
+    /// </summary>
     FromSource = 1,
+
+    /// <summary>
+    /// The stored value was acknowledged by the source through a transaction commit.
+    /// Skipped for the confirming source, delivered to all other bound sources.
+    /// </summary>
     Confirmed = 2,
 }
 
