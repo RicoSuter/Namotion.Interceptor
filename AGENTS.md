@@ -31,7 +31,7 @@ Only run integration tests when changing connector implementations (OPC UA, MQTT
 - `dotnet run --project src/Extensions/Namotion.Interceptor.SampleBlazor` - Run Blazor sample
 
 ### Performance Testing
-- `dotnet run --project src/Namotion.Interceptor.Benchmarks -c Release` - Run performance benchmarks
+- `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release` - Run performance benchmarks
 
 ## Architecture
 
