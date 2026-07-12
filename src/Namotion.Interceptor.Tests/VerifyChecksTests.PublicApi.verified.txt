@@ -40,6 +40,20 @@ namespace Namotion.Interceptor.Attributes
 }
 namespace Namotion.Interceptor
 {
+    public readonly struct ChangeOrigin
+    {
+        public Namotion.Interceptor.ChangeOriginKind Kind { get; }
+        public object? Source { get; }
+        public static Namotion.Interceptor.ChangeOrigin Local { get; }
+        public static Namotion.Interceptor.ChangeOrigin Confirmed(object source) { }
+        public static Namotion.Interceptor.ChangeOrigin FromSource(object source) { }
+    }
+    public enum ChangeOriginKind : byte
+    {
+        Local = 0,
+        FromSource = 1,
+        Confirmed = 2,
+    }
     public interface IInterceptorSubject
     {
         Namotion.Interceptor.IInterceptorSubjectContext Context { get; }
