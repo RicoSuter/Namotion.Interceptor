@@ -4,7 +4,7 @@
 
 **Goal:** Replace the ambient source scope with a one-shot per-write origin stamp and a typed `ChangeOrigin` discriminator, then add the `Correction` kind for equality-suppressed inbound values.
 
-**Architecture:** Origin is armed per write in a thread-static slot, consumed by the matching `PropertyWriteContext` at construction, finalized at the terminal write (survival check: stored value must equal sent value), and published on `SubjectPropertyChange.Origin`. Timestamps stay ambient. Spec: `docs/superpowers/specs/2026-07-12-change-origin-design.md`.
+**Architecture:** Origin is set per write in a thread-static slot, consumed by the matching `PropertyWriteContext` at construction, finalized at the terminal write (survival check: stored value must equal sent value), and published on `SubjectPropertyChange.Origin`. Timestamps stay ambient. Spec: `docs/superpowers/specs/2026-07-12-change-origin-design.md`.
 
 **Tech Stack:** .NET 9 / netstandard2.0 core, xUnit, Verify (public API snapshots), BenchmarkDotNet.
 
@@ -159,7 +159,7 @@ git commit -m "feat: add ChangeOrigin and ChangeOriginKind core types (#345)"
 
 **Interfaces:**
 - Consumes: `ChangeOrigin` (Task 1), `PropertyReference` (existing). Target matching MUST use `PropertyReference.Equals` (via its `Comparer`), which is subject reference equality plus an ordinal `Name` comparison (one reference compare plus one ordinal string compare), not a bare `ReferenceEquals` on the name: inbound applies carry non-interned property names deserialized from JSON, so a literal reference comparison on `Name` would never match and echo suppression would silently break.
-- Produces: `public static class PendingOrigin` with `public static PendingOriginScope Arm(PropertyReference target, ChangeOrigin origin, object? sentValue)` and `internal static bool TryConsume(in PropertyReference property, out ChangeOrigin origin, out object? sentValue)`; `public readonly ref struct PendingOriginScope : IDisposable` whose `Dispose` clears the slot unconditionally.
+- Produces: `public static class PendingOrigin` with `public static PendingOriginScope Set(PropertyReference target, ChangeOrigin origin, object? sentValue)` and `internal static bool TryConsume(in PropertyReference property, out ChangeOrigin origin, out object? sentValue)`; `public readonly ref struct PendingOriginScope : IDisposable` whose `Dispose` clears the slot unconditionally.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -177,14 +177,14 @@ public class PendingOriginTests
     }
 
     [Fact]
-    public void WhenArmedAndConsumedWithMatchingProperty_ThenOriginAndSentValueAreReturned()
+    public void WhenSetAndConsumedWithMatchingProperty_ThenOriginAndSentValueAreReturned()
     {
         // Arrange
         var property = CreateProperty();
         var source = new object();
 
         // Act & Assert
-        using (PendingOrigin.Arm(property, ChangeOrigin.FromSource(source), "sent"))
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(source), "sent"))
         {
             Assert.True(PendingOrigin.TryConsume(property, out var origin, out var sentValue));
             Assert.Equal(ChangeOriginKind.FromSource, origin.Kind);
@@ -198,7 +198,7 @@ public class PendingOriginTests
     {
         // Arrange
         var property = CreateProperty();
-        using (PendingOrigin.Arm(property, ChangeOrigin.FromSource(new object()), null))
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), null))
         {
             PendingOrigin.TryConsume(property, out _, out _);
 
@@ -212,13 +212,13 @@ public class PendingOriginTests
     }
 
     [Fact]
-    public void WhenTargetDoesNotMatch_ThenConsumeReturnsLocalAndSlotStaysArmed()
+    public void WhenTargetDoesNotMatch_ThenConsumeReturnsLocalAndSlotStaysSet()
     {
         // Arrange
         var armedProperty = CreateProperty("Name");
         var otherProperty = CreateProperty("OtherName");
 
-        using (PendingOrigin.Arm(armedProperty, ChangeOrigin.FromSource(new object()), null))
+        using (PendingOrigin.Set(armedProperty, ChangeOrigin.FromSource(new object()), null))
         {
             // Act
             var mismatch = PendingOrigin.TryConsume(otherProperty, out var mismatchOrigin, out _);
@@ -237,7 +237,7 @@ public class PendingOriginTests
     {
         // Arrange
         var property = CreateProperty();
-        using (PendingOrigin.Arm(property, ChangeOrigin.FromSource(new object()), null))
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), null))
         {
         }
 
@@ -264,7 +264,7 @@ using System.Runtime.CompilerServices;
 namespace Namotion.Interceptor;
 
 /// <summary>
-/// One-shot, per-write origin handoff. <see cref="Arm"/> stores a pending stamp for exactly
+/// One-shot, per-write origin handoff. <see cref="Set"/> stores a pending stamp for exactly
 /// one write of one property; the matching write chain consumes it at
 /// <c>PropertyWriteContext</c> construction. Nested writes (hooks, INPC handlers, derived
 /// recalculations) never inherit it: the slot is either already consumed or targets a
@@ -272,7 +272,7 @@ namespace Namotion.Interceptor;
 /// (a zero-allocation stack through nested ref structs, like SubjectChangeContextScope),
 /// so a cancelled write cannot leak the stamp and a nested stamped write cannot destroy
 /// an outer stamp. Same-property re-entry from OnChanging is unsupported (the inner
-/// invocation consumes the stamp). Thread-static by design: arm and consume happen
+/// invocation consumes the stamp). Thread-static by design: set and consume happen
 /// synchronously within one call frame, never across await. Internal: producers use
 /// intent-level APIs (SetValueFromSource, ApplySubjectUpdate, transaction replay).
 /// </summary>
@@ -283,7 +283,7 @@ internal static class PendingOrigin
     [ThreadStatic] private static ChangeOrigin _origin;
     [ThreadStatic] private static object? _sentValue;
 
-    internal static PendingOriginScope Arm(PropertyReference target, ChangeOrigin origin, object? sentValue)
+    internal static PendingOriginScope Set(PropertyReference target, ChangeOrigin origin, object? sentValue)
     {
         var scope = new PendingOriginScope(_armed, _target, _origin, _sentValue);
         _armed = true;
@@ -344,16 +344,16 @@ internal readonly ref struct PendingOriginScope
 
 ```csharp
 [Fact]
-public void WhenNestedArmScopeIsDisposed_ThenOuterStampIsRestored()
+public void WhenNestedSetScopeIsDisposed_ThenOuterStampIsRestored()
 {
     // Arrange
     var outerProperty = CreateProperty("Name");
     var innerProperty = CreateProperty("OtherName");
     var outerSource = new object();
 
-    using (PendingOrigin.Arm(outerProperty, ChangeOrigin.FromSource(outerSource), "outer"))
+    using (PendingOrigin.Set(outerProperty, ChangeOrigin.FromSource(outerSource), "outer"))
     {
-        using (PendingOrigin.Arm(innerProperty, ChangeOrigin.FromSource(new object()), "inner"))
+        using (PendingOrigin.Set(innerProperty, ChangeOrigin.FromSource(new object()), "inner"))
         {
             PendingOrigin.TryConsume(innerProperty, out _, out _);
         }
@@ -394,7 +394,7 @@ git commit -m "feat: add internal PendingOrigin one-shot stamp with target match
 
 - [ ] **Step 1: Write the failing tests**
 
-The test writes through a real subject with a source armed, observing `SubjectPropertyChange` is not available yet (Tracking changes come in Task 5), so observe via a probe write interceptor registered in the context:
+The test writes through a real subject with the pending origin set, observing `SubjectPropertyChange` is not available yet (Tracking changes come in Task 5), so observe via a probe write interceptor registered in the context:
 
 ```csharp
 namespace Namotion.Interceptor.Tests;
@@ -415,7 +415,7 @@ public class OriginWriteContextTests
     }
 
     [Fact]
-    public void WhenWriteIsArmedFromSource_ThenOriginIsFromSourceBeforeAndAfterWrite()
+    public void WhenWriteIsSetFromSource_ThenOriginIsFromSourceBeforeAndAfterWrite()
     {
         // Arrange
         var probe = new OriginProbe();
@@ -426,7 +426,7 @@ public class OriginWriteContextTests
         var source = new object();
 
         // Act
-        using (PendingOrigin.Arm(property, ChangeOrigin.FromSource(source), "sent"))
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(source), "sent"))
         {
             person.Name = "sent";
         }
@@ -439,8 +439,8 @@ public class OriginWriteContextTests
     [Fact]
     public void WhenStoredValueDiffersFromSentValue_ThenOriginIsFinalizedToLocal()
     {
-        // Arrange: arm with sentValue "sent" but write a different value, as a
-        // transforming hook or rewriting interceptor would.
+        // Arrange: set the pending origin with sentValue "sent" but write a different
+        // value, as a transforming hook or rewriting interceptor would.
         var probe = new OriginProbe();
         var context = InterceptorSubjectContext.Create();
         context.AddService(probe);
@@ -448,7 +448,7 @@ public class OriginWriteContextTests
         var property = new PropertyReference(person, "Name");
 
         // Act
-        using (PendingOrigin.Arm(property, ChangeOrigin.FromSource(new object()), "sent"))
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), "sent"))
         {
             person.Name = "transformed";
         }
@@ -459,7 +459,7 @@ public class OriginWriteContextTests
     }
 
     [Fact]
-    public void WhenWriteIsNotArmed_ThenOriginIsLocal()
+    public void WhenWriteHasNoPendingOrigin_ThenOriginIsLocal()
     {
         // Arrange
         var probe = new OriginProbe();
@@ -491,7 +491,7 @@ In `PropertyWriteContext<TProperty>` (`IWriteInterceptor.cs`), add:
 ```csharp
 /// <summary>
 /// The origin of this write. Before the terminal write executes this is the attempted
-/// origin (what the arming caller declared); when the terminal write lands (the same
+/// origin (what the caller declared when setting the pending origin); when the terminal write lands (the same
 /// point <see cref="IsWritten"/> becomes true) it is finalized: a stamped origin whose
 /// final value differs from the sent value becomes Local, because the stored value was
 /// computed locally rather than taken from the source.
@@ -510,7 +510,7 @@ Origin = origin;
 SentValue = sentValue;
 ```
 
-Consuming the pending stamp at construction is a side effect: any direct construction of `PropertyWriteContext<TProperty>` (tests, benchmarks, not only the interceptor chain) drains the armed stamp. Both constructors MUST carry a doc comment stating this, so a caller who news up a context by hand knows it consumes the pending origin.
+Consuming the pending stamp at construction is a side effect: any direct construction of `PropertyWriteContext<TProperty>` (tests, benchmarks, not only the interceptor chain) drains the pending stamp. Both constructors MUST carry a doc comment stating this, so a caller who news up a context by hand knows it consumes the pending origin.
 
 Add the finalization method to the struct:
 
@@ -543,19 +543,19 @@ git add -A src/Namotion.Interceptor src/Namotion.Interceptor.Tests
 git commit -m "feat: consume pending origin into PropertyWriteContext and finalize at terminal write (#345)"
 ```
 
-### Task 4: Timestamps-only SubjectChangeContext and arming SetValueFromSource
+### Task 4: Timestamps-only SubjectChangeContext and pending-origin SetValueFromSource
 
 **Files:**
 - Modify: `src/Namotion.Interceptor/SubjectChangeContext.cs` (remove `Source` field, `WithSource`, `WithState`; add `WithTimestamps`)
-- Modify: `src/Namotion.Interceptor.Tracking/Change/SubjectChangeContextExtensions.cs` (add public `SetValueFromOrigin` primitive that arms instead of scoping; `SetValueFromSource` forwards to it)
+- Modify: `src/Namotion.Interceptor.Tracking/Change/SubjectChangeContextExtensions.cs` (add public `SetValueFromOrigin` primitive that sets the pending origin instead of scoping; `SetValueFromSource` forwards to it)
 - Modify: `src/Namotion.Interceptor.Tracking/Change/DerivedPropertyChangeHandler.cs:357` (delete the `WithSource(null)` using, keep its body)
 - Test: existing suites; update `src/Namotion.Interceptor.Tests/VerifyChecksTests.PublicApi.verified.txt`
 
 **Interfaces:**
-- Produces: `public static SubjectChangeContextScope WithTimestamps(DateTimeOffset? changed, DateTimeOffset? received)`; `SubjectChangeContext` no longer has `Source`. New public Tracking primitive `SubjectChangeContextExtensions.SetValueFromOrigin(this PropertyReference property, ChangeOrigin origin, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, object? value)` that arms any origin kind; `SetValueFromSource` forwards to it.
-- Consumes: `PendingOrigin.Arm` (Task 2).
+- Produces: `public static SubjectChangeContextScope WithTimestamps(DateTimeOffset? changed, DateTimeOffset? received)`; `SubjectChangeContext` no longer has `Source`. New public Tracking primitive `SubjectChangeContextExtensions.SetValueFromOrigin(this PropertyReference property, ChangeOrigin origin, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, object? value)` that sets the pending origin for any origin kind; `SetValueFromSource` forwards to it.
+- Consumes: `PendingOrigin.Set` (Task 2).
 
-Core's `InternalsVisibleTo` covers Tracking, the tests, and the benchmark project, but NOT `Namotion.Interceptor.Connectors`, so the Connectors update appliers (Task 6) cannot call the internal `PendingOrigin.Arm`. `SetValueFromOrigin` is their public intent-level entry point: it performs the write itself, so the raw slot stays internal.
+Core's `InternalsVisibleTo` covers Tracking, the tests, and the benchmark project, but NOT `Namotion.Interceptor.Connectors`, so the Connectors update appliers (Task 6) cannot call the internal `PendingOrigin.Set`. `SetValueFromOrigin` is their public intent-level entry point: it performs the write itself, so the raw slot stays internal.
 
 - [ ] **Step 1: Remove source from the ambient context**
 
@@ -584,7 +584,7 @@ Keep `WithChangedTimestamp`, `GetTimestampFunction`, `CaptureTimestamp`, `Receiv
 
 - [ ] **Step 2: Add SetValueFromOrigin and make SetValueFromSource forward to it**
 
-Add a public `SetValueFromOrigin` primitive that arms any origin kind and performs the write, then make `SetValueFromSource` a thin forwarder. Connectors cannot reach the internal `PendingOrigin.Arm`, so this public Tracking extension is the appliers' entry point (see Task 6). Contract: when `receivedTimestamp` is null, `SetValueFromOrigin` preserves the ambient received timestamp (via the `WithTimestamps` null fallback from Step 1) rather than overwriting it with the null sentinel; only a non-null `receivedTimestamp` replaces the ambient value. This is what keeps the applier path (which passes null received) behavior-identical to master's `WithChangedTimestamp` wrapping:
+Add a public `SetValueFromOrigin` primitive that sets the pending origin for any origin kind and performs the write, then make `SetValueFromSource` a thin forwarder. Connectors cannot reach the internal `PendingOrigin.Set`, so this public Tracking extension is the appliers' entry point (see Task 6). Contract: when `receivedTimestamp` is null, `SetValueFromOrigin` preserves the ambient received timestamp (via the `WithTimestamps` null fallback from Step 1) rather than overwriting it with the null sentinel; only a non-null `receivedTimestamp` replaces the ambient value. This is what keeps the applier path (which passes null received) behavior-identical to master's `WithChangedTimestamp` wrapping:
 
 ```csharp
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -594,7 +594,7 @@ public static void SetValueFromOrigin(
     object? value)
 {
     using (SubjectChangeContext.WithTimestamps(changedTimestamp, receivedTimestamp))
-    using (PendingOrigin.Arm(property, origin, value))
+    using (PendingOrigin.Set(property, origin, value))
     {
         property.Metadata.SetValue?.Invoke(property.Subject, value);
     }
@@ -621,7 +621,7 @@ Expected: errors remain in Tracking (publishers, transactions) and downstream pr
 
 ```bash
 git add -A src/Namotion.Interceptor src/Namotion.Interceptor.Tracking
-git commit -m "feat: make SubjectChangeContext timestamps-only, arm origin in SetValueFromSource (#345)"
+git commit -m "feat: make SubjectChangeContext timestamps-only, set pending origin in SetValueFromSource (#345)"
 ```
 
 ### Task 5: SubjectPropertyChange.Origin, publishers, transactions, echo skip
@@ -717,13 +717,13 @@ In `SubjectPropertyChangeOperations.TryApplyLocalChange`, replace the `WithState
 
 ```csharp
 using (SubjectChangeContext.WithTimestamps(change.ChangedTimestamp, change.ReceivedTimestamp))
-using (PendingOrigin.Arm(change.Property, change.Origin, change.GetNewValue<object?>()))
+using (PendingOrigin.Set(change.Property, change.Origin, change.GetNewValue<object?>()))
 {
     metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
 }
 ```
 
-Arming with a `Local` origin is a no-op stamp (consume yields Local), so revert paths re-apply each change with its original provenance without branching.
+Setting a `Local` origin is a no-op stamp (consume yields Local), so revert paths re-apply each change with its original provenance without branching.
 
 - [ ] **Step 4: Echo skip and commit stamping**
 
@@ -753,7 +753,7 @@ git commit -m "feat: publish typed ChangeOrigin on SubjectPropertyChange, stamp 
 
 **Files:**
 - Modify: `src/Namotion.Interceptor.Connectors/Updates/SubjectUpdateExtensions.cs:18-24` (required `ChangeOrigin origin` parameter after `subjectFactory`)
-- Modify: `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` and `SubjectItemsUpdateApplier.cs` (thread `origin` to every property write site; each site currently wrapped in `WithChangedTimestamp` applies via `SetValue` or `RegisteredSubjectProperty`; when `origin.Kind != ChangeOriginKind.Local`, apply through `SetValueFromOrigin(origin, propertyUpdate.Timestamp, null, value)`, the public Tracking primitive from Task 4 that arms `FromSource` and `Confirmed` alike, since Connectors cannot reach the internal `PendingOrigin.Arm`; for `Local`, keep the current unarmed path, since `Local` is the default and needs no stamp). The five sites (`SubjectUpdateApplier.cs:84,131,139` and `SubjectItemsUpdateApplier.cs:124,209`) are each wrapped in `WithChangedTimestamp(propertyUpdate.Timestamp)` today; `propertyUpdate.Timestamp` MUST be passed as the `changedTimestamp` argument of `SetValueFromOrigin` at every site, or the inbound changed-timestamp is silently replaced with capture-time `UtcNow` and provenance is corrupted
+- Modify: `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` and `SubjectItemsUpdateApplier.cs` (thread `origin` to every property write site; each site currently wrapped in `WithChangedTimestamp` applies via `SetValue` or `RegisteredSubjectProperty`; when `origin.Kind != ChangeOriginKind.Local`, apply through `SetValueFromOrigin(origin, propertyUpdate.Timestamp, null, value)`, the public Tracking primitive from Task 4 that sets the pending origin for `FromSource` and `Confirmed` alike, since Connectors cannot reach the internal `PendingOrigin.Set`; for `Local`, keep the current unstamped path, since `Local` is the default and needs no stamp). The five sites (`SubjectUpdateApplier.cs:84,131,139` and `SubjectItemsUpdateApplier.cs:124,209`) are each wrapped in `WithChangedTimestamp(propertyUpdate.Timestamp)` today; `propertyUpdate.Timestamp` MUST be passed as the `changedTimestamp` argument of `SetValueFromOrigin` at every site, or the inbound changed-timestamp is silently replaced with capture-time `UtcNow` and provenance is corrupted
 - Modify: `src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectHandler.cs:200-207` (pass `ChangeOrigin.FromSource(connection)`), `src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs:296-299,540-543` (pass `ChangeOrigin.FromSource(this)` / `ChangeOrigin.FromSource(state.source)`); drop the `WithSource` usings; correct the lock comment at `WebSocketSubjectHandler.cs:200` to say the lock serializes update application, not that thread-static state requires it
 - Modify: `src/Namotion.Interceptor.ConnectorTester/Engine/Verification/FailureDiagnostics.cs:175` (pass `ChangeOrigin.Local`)
 - Modify: `src/Namotion.Interceptor.Tracking/InterceptorSubjectContextExtensions.cs:127` (extend `CreatePropertyChangeQueueSubscription`'s signature with an optional `Func<SubjectPropertyChange, bool>? filter = null` after the existing `scheduler` parameter, and thread it into `PropertyChangeQueue.Subscribe` and the per-subscription enqueue path) and `src/Namotion.Interceptor.Tracking/Change/PropertyChangeQueue.cs` / the `PropertyChangeQueueSubscription` (accept the optional filter and apply it at ENQUEUE time, so a change the filter rejects never enters that subscription's queue)
@@ -790,7 +790,7 @@ Fill Arrange/Assert with the exact helpers used by neighboring tests in that fil
 
 - [ ] **Step 3: Implement the parameter and threading**
 
-Add the required `ChangeOrigin origin` parameter, thread it through `SubjectUpdateApplier.ApplyUpdate` and `SubjectItemsUpdateApplier` down to the write sites, and route stamped (`FromSource`/`Confirmed`) writes through `SetValueFromOrigin`; keep the current unarmed path for `Local`. Update the three WebSocket sites and the ConnectorTester site. Also update the code sample in the XML doc comment of `ApplySubjectUpdate` if present.
+Add the required `ChangeOrigin origin` parameter, thread it through `SubjectUpdateApplier.ApplyUpdate` and `SubjectItemsUpdateApplier` down to the write sites, and route stamped (`FromSource`/`Confirmed`) writes through `SetValueFromOrigin`; keep the current unstamped path for `Local`. Update the three WebSocket sites and the ConnectorTester site. Also update the code sample in the XML doc comment of `ApplySubjectUpdate` if present.
 
 - [ ] **Step 4: Enqueue-time own-source filter**
 
@@ -1019,9 +1019,9 @@ PR body: summary of the mechanism swap referencing `docs/superpowers/specs/2026-
 **Files:**
 - Branch: `git checkout -b feature/change-origin-corrections feature/change-origin-design`
 - Modify: `src/Namotion.Interceptor/ChangeOrigin.cs` (add `Correction = 3` and factory)
-- Create: `src/Namotion.Interceptor.Tracking/Change/SourceCorrectionDetector.cs`
+- Create: `src/Namotion.Interceptor.Tracking/Change/SourceCorrectionDetector.cs` (the class stays in Tracking: it needs internal access to `PropertyChangeQueue.EnqueueCorrection`)
 - Modify: `src/Namotion.Interceptor.Tracking/Change/PropertyChangeQueue.cs` (internal `EnqueueCorrection`)
-- Modify: `src/Namotion.Interceptor.Tracking/InterceptorSubjectContextExtensions.cs` (register the detector with the queue registration)
+- Modify: `src/Namotion.Interceptor.Connectors/InterceptorSubjectContextExtensions.cs` (register the detector on the Connectors source-enabling configuration path, for example in `WithSourceTransactions` or whichever extension every connector setup already flows through, NOT the Tracking queue registration, so local-only contexts pay no write-path cost)
 - Test: `src/Namotion.Interceptor.Tracking.Tests/Change/SourceCorrectionTests.cs`
 
 **Interfaces:**
@@ -1071,8 +1071,8 @@ public class SourceCorrectionTests
     public void WhenConfirmedWriteIsSuppressed_ThenNoCorrectionIsPublished()
     {
         // Arrange: model at 100.
-        // Act: arm ChangeOrigin.Confirmed(source) for the property with sent value 105
-        //      via PendingOrigin.Arm and invoke the setter with a value projecting to 100.
+        // Act: set ChangeOrigin.Confirmed(source) for the property with sent value 105
+        //      via PendingOrigin.Set and invoke the setter with a value projecting to 100.
         // Assert: no correction (commit protocol already guarantees the source state).
     }
 
@@ -1108,10 +1108,22 @@ public class SourceCorrectionTests
         //         because the write-timestamp moved under the lock) or carries the fresh
         //         post-write value (90); it never carries the stale 100.
     }
+
+    [Fact]
+    public void WhenContextHasNoConnectorSetup_ThenNoDetectorIsRegisteredAndWriteChainIsUnchanged()
+    {
+        // Arrange: a context with tracking but no connector/source setup (the detector
+        //          registration lives on the Connectors source-enabling path, not here).
+        // Act: inspect the registered write interceptors and build the write chain for
+        //      a property.
+        // Assert: no SourceCorrectionDetector is registered, and the write chain length
+        //         equals the length before PR 2, proving a source-free application pays
+        //         zero PR 2 write-path cost.
+    }
 }
 ```
 
-Write the bodies fully against the tracking test idioms (queue subscription via `context.CreatePropertyChangeQueueSubscription()`).
+Write the bodies fully against the tracking test idioms (queue subscription via `context.CreatePropertyChangeQueueSubscription()`). The `WhenContextHasNoConnectorSetup_...` test is the only one that must NOT register the detector; the others register the `SourceCorrectionDetector` explicitly on their context, since auto-registration now lives on the Connectors path.
 
 - [ ] **Step 2: Run, expect failures/compile errors.**
 
@@ -1230,7 +1242,9 @@ public class SourceCorrectionDetector : IWriteInterceptor
 }
 ```
 
-Register it in the same extension that registers `PropertyChangeQueue` (follow how the queue itself is registered in `InterceptorSubjectContextExtensions.cs`, constructor-inject the queue instance). Note the equality-handler namespace for `[RunsBefore]` (`Namotion.Interceptor.Tracking.PropertyValueEqualityCheckHandler`).
+Register it on the Connectors source-enabling configuration path, NOT the Tracking queue registration: add the registration to `src/Namotion.Interceptor.Connectors/InterceptorSubjectContextExtensions.cs` (for example inside `WithSourceTransactions`, or whichever extension every connector setup already flows through). Pick the extension that every source setup passes through and verify the OPC UA, MQTT, and WebSocket setups all reach it; the detector must be present in every source-enabled context and only there. The detector class itself stays in `Namotion.Interceptor.Tracking` (it needs internal access to `PropertyChangeQueue.EnqueueCorrection`); only its registration moves to Connectors. Resolve the public `PropertyChangeQueue` from the context (`GetService<PropertyChangeQueue>()`) and constructor-inject it. The payoff is explicit: an application with no connector setup registers no detector and pays zero PR 2 write-path cost. Note the equality-handler namespace for `[RunsBefore]` (`Namotion.Interceptor.Tracking.PropertyValueEqualityCheckHandler`).
+
+Because the detector is now registered on the Connectors path rather than with the queue, the Tracking-level `SourceCorrectionTests` register the `SourceCorrectionDetector` explicitly on their test context (it is a public class in this assembly): only the auto-registration moved to Connectors, so a plain Tracking context no longer wires the detector on its own.
 
 - [ ] **Step 4: Run the tests, iterate until green, then run the full Tracking suite.**
 
@@ -1362,5 +1376,5 @@ PR body: the three-outcome matrix, delivery rule, docs pointer, `Closes #365`, a
 
 - Spec coverage: scenarios 1 to 8 all map to tasks (1-6 to Tasks 3-6/8, 7 to Task 7, 8 to Tasks 11-12). Docs per spec in Tasks 9 and 13. Bookkeeping in Tasks 10 and 13.
 - The spec's "detection in the queue interceptor" wording is corrected by Task 11's ordering constraint (detector before the equality check); the spec file gets a matching one-line amendment.
-- Type consistency: `ChangeOrigin.Correction(object)`, `PendingOrigin.Arm(PropertyReference, ChangeOrigin, object?)`, `SetValueFromOrigin(PropertyReference, ChangeOrigin, DateTimeOffset?, DateTimeOffset?, object?)`, `PropertyValidationContext<TProperty>(PropertyReference, TProperty, ChangeOrigin)` used identically across tasks.
-- Arming reach: Connectors cannot call the internal `PendingOrigin.Arm` (core's `InternalsVisibleTo` excludes Connectors), so the appliers arm through the public `SetValueFromOrigin` for `FromSource`/`Confirmed` and keep the unarmed path for `Local`.
+- Type consistency: `ChangeOrigin.Correction(object)`, `PendingOrigin.Set(PropertyReference, ChangeOrigin, object?)`, `SetValueFromOrigin(PropertyReference, ChangeOrigin, DateTimeOffset?, DateTimeOffset?, object?)`, `PropertyValidationContext<TProperty>(PropertyReference, TProperty, ChangeOrigin)` used identically across tasks.
+- Pending-origin reach: Connectors cannot call the internal `PendingOrigin.Set` (core's `InternalsVisibleTo` excludes Connectors), so the appliers set the pending origin through the public `SetValueFromOrigin` for `FromSource`/`Confirmed` and keep the unstamped path for `Local`.
