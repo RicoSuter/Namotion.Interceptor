@@ -1014,20 +1014,20 @@ PR body: summary of the mechanism swap referencing `docs/superpowers/specs/2026-
 
 # Phase 2 (PR 2): Correction kind
 
-### Task 11: Branch, Correction kind, detector
+### Task 11: Branch, Correction kind, detection in SetValueFromOrigin
 
 **Files:**
 - Branch: `git checkout -b feature/change-origin-corrections feature/change-origin-design`
 - Modify: `src/Namotion.Interceptor/ChangeOrigin.cs` (add `Correction = 3` and factory)
-- Create: `src/Namotion.Interceptor.Tracking/Change/SourceCorrectionDetector.cs` (the class stays in Tracking: it needs internal access to `PropertyChangeQueue.EnqueueCorrection`)
+- Modify: `src/Namotion.Interceptor/PendingOrigin.cs` (add the internal `IsArmedFor` consumption-observation member)
+- Modify: `src/Namotion.Interceptor.Tracking/Change/SubjectChangeContextExtensions.cs` (correction detection inside `SetValueFromOrigin`, after the setter returns, for `FromSource` writes)
 - Modify: `src/Namotion.Interceptor.Tracking/Change/PropertyChangeQueue.cs` (internal `EnqueueCorrection`)
-- Modify: `src/Namotion.Interceptor.Connectors/InterceptorSubjectContextExtensions.cs` (register the detector on the Connectors source-enabling configuration path, for example in `WithSourceTransactions` or whichever extension every connector setup already flows through, NOT the Tracking queue registration, so local-only contexts pay no write-path cost)
 - Test: `src/Namotion.Interceptor.Tracking.Tests/Change/SourceCorrectionTests.cs`
 
 **Interfaces:**
-- Produces: `ChangeOriginKind.Correction`, `ChangeOrigin.Correction(object source)`, `SourceCorrectionDetector : IWriteInterceptor` with `[RunsFirst]` and `[RunsBefore(typeof(PropertyValueEqualityCheckHandler))]`.
+- Produces: `ChangeOriginKind.Correction`, `ChangeOrigin.Correction(object source)`, `PendingOrigin.IsArmedFor(in PropertyReference)` (internal, non-destructive peek), `PropertyChangeQueue.EnqueueCorrection(in SubjectPropertyChange)` (internal); correction detection folded into the existing `SetValueFromOrigin` primitive (no new public surface, no new interceptor).
 
-**Ordering constraint (why this design):** `PropertyValueEqualityCheckHandler` is `[RunsFirst]` and suppresses unchanged writes by not calling `next`, so the queue interceptor never runs for them. Detection therefore lives in a dedicated interceptor ordered before the equality check.
+**Why detection lives in `SetValueFromOrigin` (not a write interceptor):** a dedicated interceptor was rejected because it would add an interceptor frame to every write and need `[RunsFirst]`/`[RunsBefore]` ordering guarantees against `PropertyValueEqualityCheckHandler`, whereas `SetValueFromOrigin` already brackets exactly the one stamped write in question and adds nothing to the write chain. The equality handler suppresses unchanged writes by not calling `next`, so the terminal write never lands and never updates the property's write-timestamp; `SetValueFromOrigin` reads that same write-timestamp before and after the setter to see whether a write landed, which is the detection signal that replaces the interceptor's `IsWritten` check.
 
 - [ ] **Step 1: Write the failing tests** (the three-outcome matrix from the spec)
 
@@ -1071,9 +1071,11 @@ public class SourceCorrectionTests
     public void WhenConfirmedWriteIsSuppressed_ThenNoCorrectionIsPublished()
     {
         // Arrange: model at 100.
-        // Act: set ChangeOrigin.Confirmed(source) for the property with sent value 105
-        //      via PendingOrigin.Set and invoke the setter with a value projecting to 100.
-        // Assert: no correction (commit protocol already guarantees the source state).
+        // Act: property.SetValueFromOrigin(ChangeOrigin.Confirmed(source), null, null, 105);
+        //      the hook projects to 100 and the equality check suppresses.
+        // Assert: no correction. Detection only runs for origin.Kind == FromSource, so a
+        //         Confirmed apply is never a correction candidate (the commit protocol
+        //         already guarantees the source state).
     }
 
     [Fact]
@@ -1081,9 +1083,11 @@ public class SourceCorrectionTests
     {
         // Arrange: model at 50, an active SubjectTransaction on the context.
         // Act: SetValueFromSource(source, null, null, 80); the transaction interceptor
-        //      captures the value and stops the chain (IsWritten stays false).
+        //      captures the value and stops the chain, so the write-timestamp never moves.
         // Assert: no correction in the queue; the value is pending in the transaction.
-        //         This pins that IsWritten == false alone never triggers synthesis.
+        //         This pins guard clause 3 (SubjectTransaction.HasActiveTransaction
+        //         short-circuits before the observable-value comparison), so a
+        //         captured-but-unwritten value never triggers synthesis.
     }
 
     [Fact]
@@ -1101,29 +1105,17 @@ public class SourceCorrectionTests
     {
         // Arrange: model at 100; a changing hook that clamps and, via an event/gate,
         //          allows a second thread to write 90 between the equality decision and
-        //          the detector's synthesis (use ManualResetEventSlim inside the hook).
+        //          SetValueFromOrigin's synthesis (use ManualResetEventSlim inside the hook).
         // Act: thread 1 applies 105 from the source (projects to 100, suppressed);
         //      thread 2 writes 90 locally while thread 1 is parked in the hook.
         // Assert: drop-or-fresh, never stale. The correction is either absent (dropped
         //         because the write-timestamp moved under the lock) or carries the fresh
         //         post-write value (90); it never carries the stale 100.
     }
-
-    [Fact]
-    public void WhenContextHasNoConnectorSetup_ThenNoDetectorIsRegisteredAndWriteChainIsUnchanged()
-    {
-        // Arrange: a context with tracking but no connector/source setup (the detector
-        //          registration lives on the Connectors source-enabling path, not here).
-        // Act: inspect the registered write interceptors and build the write chain for
-        //      a property.
-        // Assert: no SourceCorrectionDetector is registered, and the write chain length
-        //         equals the length before PR 2, proving a source-free application pays
-        //         zero PR 2 write-path cost.
-    }
 }
 ```
 
-Write the bodies fully against the tracking test idioms (queue subscription via `context.CreatePropertyChangeQueueSubscription()`). The `WhenContextHasNoConnectorSetup_...` test is the only one that must NOT register the detector; the others register the `SourceCorrectionDetector` explicitly on their context, since auto-registration now lives on the Connectors path.
+Write the bodies fully against the tracking test idioms (queue subscription via `context.CreatePropertyChangeQueueSubscription()`). No detector is registered anywhere: detection is folded into `SetValueFromOrigin`, so every test just builds a tracking context with a queue subscription and drives the apply through `SetValueFromSource` / `SetValueFromOrigin`.
 
 - [ ] **Step 2: Run, expect failures/compile errors.**
 
@@ -1142,109 +1134,124 @@ public static ChangeOrigin Correction(object source) =>
 internal void EnqueueCorrection(in SubjectPropertyChange change) => Enqueue(in change);
 ```
 
-`SourceCorrectionDetector.cs`:
+`PendingOrigin.cs`: add a non-destructive peek so `SetValueFromOrigin` can tell a consumed chain (the write ran) from a cancelled one (an `OnXChanging` cancel) before the scope disposes:
 
 ```csharp
-using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Interceptors;
+// Reports whether the slot is still armed for this property, i.e. the stamp SetValueFromOrigin
+// set has NOT been consumed by a write chain. Non-destructive, unlike TryConsume.
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+internal static bool IsArmedFor(in PropertyReference property) =>
+    _armed && _target.Equals(property);
+```
 
-namespace Namotion.Interceptor.Tracking.Change;
+`SubjectChangeContextExtensions.cs`: fold correction detection into `SetValueFromOrigin`. It already brackets the stamped setter invocation; capture the raw write-timestamp before the setter, and after the setter returns (while the pending scope is still open) run the four guards for `FromSource` writes. Add `using Namotion.Interceptor.Tracking.Transactions;` for `SubjectTransaction`:
 
-/// <summary>
-/// Detects the diverged-source case: an inbound value whose projection equals the already
-/// stored value is suppressed by the equality check, so no change publishes and the source
-/// keeps its out-of-range value. This interceptor runs outside the equality check and,
-/// when a FromSource write ends unwritten with a sent value that differs from the stored
-/// value, synthesizes a Correction change (old == new == stored value) into the outbound
-/// queue only. No model write occurred, so no hooks, INPC, or timestamps fire.
-/// </summary>
-[RunsFirst]
-[RunsBefore(typeof(PropertyValueEqualityCheckHandler))]
-public class SourceCorrectionDetector : IWriteInterceptor
+```csharp
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+public static void SetValueFromOrigin(
+    this PropertyReference property,
+    ChangeOrigin origin, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp,
+    object? value)
 {
-    private readonly PropertyChangeQueue _queue;
+    // Correction detection applies only to FromSource writes. Capture the property's raw
+    // write-timestamp before the setter: a terminal write updates it, an equality-suppressed
+    // write never reaches it, so an unmoved timestamp after the setter is the suppression signal.
+    var detectCorrection = origin.Kind == ChangeOriginKind.FromSource;
+    var writeTimestampAtEntry = detectCorrection ? property.TryGetWriteTimestamp() : null;
 
-    public SourceCorrectionDetector(PropertyChangeQueue queue)
+    using (SubjectChangeContext.WithTimestamps(changedTimestamp, receivedTimestamp))
+    using (PendingOrigin.Set(property, origin, value))
     {
-        _queue = queue;
+        property.Metadata.SetValue?.Invoke(property.Subject, value);
+
+        // Decide while the pending scope is still open: Dispose restores the previous frame
+        // and erases the "still armed" signal IsArmedFor reads.
+        if (detectCorrection)
+        {
+            DetectAndEnqueueCorrection(property, origin.Source!, value, writeTimestampAtEntry);
+        }
+    }
+}
+
+private static void DetectAndEnqueueCorrection(
+    PropertyReference property, object source, object? sentValue, DateTimeOffset? writeTimestampAtEntry)
+{
+    // Guard 1: a terminal write landed and published through the change queue normally.
+    if (property.TryGetWriteTimestamp() != writeTimestampAtEntry)
+    {
+        return;
     }
 
-    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    // Guard 2: the stamp is still armed for this property, so the chain never started
+    // (an OnXChanging hook cancelled the write). Nothing was suppressed; this matches the
+    // previous detector, which never fired on a cancelled write.
+    if (PendingOrigin.IsArmedFor(in property))
     {
-        // Capture the property's raw write-timestamp BEFORE the chain runs. A suppressed
-        // write never updates it (the equality check stops before the terminal write),
-        // so under the lock any movement means a real competing write landed.
-        var writeTimestampAtEntry = context.Property.TryGetWriteTimestamp();
+        return;
+    }
 
-        next(ref context);
+    // Guard 3: an active transaction captured the value as pending state; commit replay
+    // reconciles it. This replaces the old projection-equality clause as the transaction guard.
+    if (SubjectTransaction.HasActiveTransaction)
+    {
+        return;
+    }
 
-        if (context.IsWritten ||
-            context.Origin.Kind != ChangeOriginKind.FromSource ||
-            !EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) ||
-            Equals(context.SentValue, context.NewValue))
+    // Guard 4: stamp consumed, timestamp unmoved, no transaction, so the equality check
+    // suppressed the write. Read the observable value OUTSIDE the subject lock (the getter may
+    // run read interceptors; running them under Subject.SyncRoot would invert the codebase's
+    // getters-outside-locks discipline, which DerivedPropertyChangeHandler avoids against
+    // LifecycleInterceptor). If it still equals the sent value there is no divergence
+    // (pure echo) and no correction; the correction deliberately carries the OBSERVABLE value.
+    var observedValue = property.Metadata.GetValue?.Invoke(property.Subject);
+    if (Equals(sentValue, observedValue))
+    {
+        return;
+    }
+
+    // Resolve the queue from the subject's context (SetValueFromOrigin is static). No queue
+    // means no delivery target, so nothing to synthesize.
+    var queue = property.Subject.Context.TryGetService<PropertyChangeQueue>();
+    if (queue is null)
+    {
+        return;
+    }
+
+    SubjectPropertyChange correction;
+    lock (property.Subject.SyncRoot)
+    {
+        // Concurrency: a newer write may have landed while we decided. Compare the raw
+        // write-timestamp against the entry value under the lock; a moved timestamp means that
+        // write is already flowing outbound, so drop. NECESSARY BUT NOT SUFFICIENT (tick
+        // granularity, user-settable GetTimestampFunction), so on any doubt DROP: the only
+        // failure mode of a dropped correction is a missing one (the source stays diverged
+        // until its next inbound event), never a wrong model value.
+        if (property.TryGetWriteTimestamp() != writeTimestampAtEntry)
         {
             return;
         }
 
-        // Proven equality suppression: IsWritten == false alone does not prove it
-        // (transaction capture also stops the chain), but the equality-plus-sent-differs
-        // clauses show the projection landed exactly on the stored value, the one case
-        // the [RunsFirst] equality handler suppresses before anything else can run.
-        //
-        // Read the observable value OUTSIDE the subject lock. Metadata.GetValue invokes
-        // the getter, which may pass through read interceptors; running interceptor code
-        // under Subject.SyncRoot would invert the codebase's getters-outside-locks
-        // discipline (DerivedPropertyChangeHandler avoids exactly this against
-        // LifecycleInterceptor). The correction deliberately carries the current
-        // OBSERVABLE value (what any consumer or source reading the model sees), not a raw
-        // backing-field read.
-        var observedValue = context.Property.Metadata.GetValue?.Invoke(context.Property.Subject);
+        // Fresh local assertion: stamp a new write-timestamp on the metadata AND publish the
+        // correction with it, so the source's echo (same value, same timestamp) is fully
+        // equality-suppressed afterward.
+        var timestampTicks = SubjectChangeContext.CaptureTimestamp();
+        property.SetWriteTimestamp(timestampTicks);
 
-        SubjectPropertyChange correction;
-        lock (context.Property.Subject.SyncRoot)
-        {
-            // Do the minimum under the lock: compare the raw write-timestamp against the
-            // value captured at chain entry. A moved timestamp means a newer write landed
-            // while we were deciding; that write is already flowing outbound, so drop the
-            // correction. No getter runs here.
-            //
-            // This comparison is NECESSARY BUT NOT SUFFICIENT: write-timestamps have tick
-            // granularity and GetTimestampFunction is user-settable, so two writes can share
-            // a timestamp and an unchanged timestamp can hide a concurrent write. Safety rule:
-            // on any doubt, DROP. Dropping is always safe because the only failure mode of a
-            // dropped correction is a missing correction (the source stays diverged until its
-            // next inbound event), never a wrong model value. The concurrency test asserts
-            // drop-or-fresh, never stale.
-            if (context.Property.TryGetWriteTimestamp() != writeTimestampAtEntry)
-            {
-                return;
-            }
-
-            // Timestamp unchanged: treat the window as clear and build the correction from the
-            // observable value read above. A correction is a new local assertion: fresh local
-            // timestamp, stamped on the property's write-timestamp metadata AND published, so
-            // the source's echo (same value, same timestamp) is fully equality-suppressed
-            // afterward.
-            var timestampTicks = SubjectChangeContext.CaptureTimestamp();
-            context.Property.SetWriteTimestamp(timestampTicks);
-
-            correction = SubjectPropertyChange.Create(
-                context.Property,
-                ChangeOrigin.Correction(context.Origin.Source!),
-                new DateTimeOffset(timestampTicks, TimeSpan.Zero),
-                SubjectChangeContext.Current.ReceivedTimestamp,
-                observedValue,
-                observedValue);
-        }
-
-        _queue.EnqueueCorrection(in correction);
+        correction = SubjectPropertyChange.Create(
+            property,
+            ChangeOrigin.Correction(source),
+            new DateTimeOffset(timestampTicks, TimeSpan.Zero),
+            SubjectChangeContext.Current.ReceivedTimestamp,
+            observedValue,
+            observedValue);
     }
+
+    // Enqueue after releasing the lock; corrections never touch PropertyChangeObservable.
+    queue.EnqueueCorrection(in correction);
 }
 ```
 
-Register it on the Connectors source-enabling configuration path, NOT the Tracking queue registration: add the registration to `src/Namotion.Interceptor.Connectors/InterceptorSubjectContextExtensions.cs` (for example inside `WithSourceTransactions`, or whichever extension every connector setup already flows through). Pick the extension that every source setup passes through and verify the OPC UA, MQTT, and WebSocket setups all reach it; the detector must be present in every source-enabled context and only there. The detector class itself stays in `Namotion.Interceptor.Tracking` (it needs internal access to `PropertyChangeQueue.EnqueueCorrection`); only its registration moves to Connectors. Resolve the public `PropertyChangeQueue` from the context (`GetService<PropertyChangeQueue>()`) and constructor-inject it. The payoff is explicit: an application with no connector setup registers no detector and pays zero PR 2 write-path cost. Note the equality-handler namespace for `[RunsBefore]` (`Namotion.Interceptor.Tracking.PropertyValueEqualityCheckHandler`).
-
-Because the detector is now registered on the Connectors path rather than with the queue, the Tracking-level `SourceCorrectionTests` register the `SourceCorrectionDetector` explicitly on their test context (it is a public class in this assembly): only the auto-registration moved to Connectors, so a plain Tracking context no longer wires the detector on its own.
+There is no registration step and no interceptor: detection is part of `SetValueFromOrigin`, which is already on every `FromSource` apply path (`SetValueFromSource` forwards to it, and the Task 6 appliers route stamped writes through it). A purely local application never calls it with a `FromSource` origin and pays zero PR 2 write-path cost, with nothing to gate. The Tracking-level `SourceCorrectionTests` therefore register no detector: they build a tracking context with a queue subscription and drive applies through `SetValueFromSource` / `SetValueFromOrigin`.
 
 - [ ] **Step 4: Run the tests, iterate until green, then run the full Tracking suite.**
 
@@ -1293,7 +1300,7 @@ Note: other queue subscribers (`PerformanceProfiler` in SamplesModel and Connect
 
 `ReapplyRetryQueue` in `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs:180` re-applies failed writes through the property setter. For a correction (old == new == current) the setter is a silent no-op: the equality check suppresses, no new queue event appears, and the drained retry entry is gone while the source stays diverged. Add kind-aware handling before the setter path.
 
-Note the asymmetry with detection (Task 11): the detector injects via Tracking's internal `PropertyChangeQueue.EnqueueCorrection`, but `SubjectSourceBase` lives in `Namotion.Interceptor.Connectors` and cannot reach that internal method. A still-valid retry therefore does NOT re-inject into the global Tracking queue; it re-inserts the correction into the `ChangeQueueProcessor`'s own local pending buffer (a Connectors-level path that hands the change straight to the write pump), bypassing the setter, hooks, and INPC entirely:
+Note the asymmetry with detection (Task 11): detection lives in Tracking's `SetValueFromOrigin` and injects via the internal `PropertyChangeQueue.EnqueueCorrection`, but `SubjectSourceBase` lives in `Namotion.Interceptor.Connectors` and cannot reach that internal method. A still-valid retry therefore does NOT re-inject into the global Tracking queue; it re-inserts the correction into the `ChangeQueueProcessor`'s own local pending buffer (a Connectors-level path that hands the change straight to the write pump), bypassing the setter, hooks, and INPC entirely:
 
 ```csharp
 if (change.Origin.Kind == ChangeOriginKind.Correction)
@@ -1375,6 +1382,6 @@ PR body: the three-outcome matrix, delivery rule, docs pointer, `Closes #365`, a
 ## Self-review checklist (run after writing, before handoff)
 
 - Spec coverage: scenarios 1 to 8 all map to tasks (1-6 to Tasks 3-6/8, 7 to Task 7, 8 to Tasks 11-12). Docs per spec in Tasks 9 and 13. Bookkeeping in Tasks 10 and 13.
-- The spec's "detection in the queue interceptor" wording is corrected by Task 11's ordering constraint (detector before the equality check); the spec file gets a matching one-line amendment.
+- Correction detection lives in Tracking's `SetValueFromOrigin` (Task 11), not a write interceptor, so there is no `[RunsFirst]`/`[RunsBefore]` ordering constraint against the equality handler and no Connectors registration; the spec's PR 2 Detection section matches this.
 - Type consistency: `ChangeOrigin.Correction(object)`, `PendingOrigin.Set(PropertyReference, ChangeOrigin, object?)`, `SetValueFromOrigin(PropertyReference, ChangeOrigin, DateTimeOffset?, DateTimeOffset?, object?)`, `PropertyValidationContext<TProperty>(PropertyReference, TProperty, ChangeOrigin)` used identically across tasks.
 - Pending-origin reach: Connectors cannot call the internal `PendingOrigin.Set` (core's `InternalsVisibleTo` excludes Connectors), so the appliers set the pending origin through the public `SetValueFromOrigin` for `FromSource`/`Confirmed` and keep the unstamped path for `Local`.
