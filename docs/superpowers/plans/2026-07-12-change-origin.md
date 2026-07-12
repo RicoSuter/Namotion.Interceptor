@@ -1318,8 +1318,8 @@ git commit -m "feat: synthesize Correction changes for equality-suppressed diver
 ### Task 12: Correction delivery in ChangeQueueProcessor
 
 **Files:**
-- Modify: `src/Namotion.Interceptor.Connectors/ChangeQueueProcessor.cs:145` (kind-aware dequeue skip: `Correction` bypasses the own-source skip), the flush-time dedup at `ChangeQueueProcessor.cs:254` (normal-beats-correction, explicit kind branch), the immediate path (`bufferTime <= 0`) which drops `Correction` changes with a warning log instead of writing them (buffered-only correction delivery), and send-time revalidation in the correction write branch (re-read the property getter immediately before writing a `Correction` and drop it if the model value no longer equals the correction's value)
-- Modify: `src/Namotion.Interceptor.Connectors/WriteRetryQueue.cs` (`Enqueue` skips changes with `Origin.Kind == Correction`, with a debug log: a failed correction write is not retried)
+- Modify: `src/Namotion.Interceptor.Connectors/ChangeQueueProcessor.cs:145` (kind-aware dequeue skip: `Correction` bypasses the own-source skip), the flush-time dedup at `ChangeQueueProcessor.cs:254` (normal-beats-correction, explicit kind branch), the immediate path (`bufferTime <= 0`) which drops `Correction` changes with a warning log instead of writing them (buffered-only correction delivery), and per-correction send-time revalidation in the correction write branch: pre-write, re-read the property getter immediately before writing each `Correction` and drop it if the model value no longer equals the correction's value (cheap early drop, not the correctness guarantee); post-write, after each correction write returns re-read the model value and, if it no longer equals what was just written, write the current model value to the source as a follow-up correction in a bounded loop (small fixed attempt limit; on exhaustion drop with a warning naming `RequestResynchronization`/#342)
+- Modify: `src/Namotion.Interceptor.Connectors/WriteRetryQueue.cs` (skip `Origin.Kind == Correction` in the sole public enqueue entry point, the batch `Enqueue(ReadOnlyMemory<SubjectPropertyChange> changes)`, filtering each item in the span, with a debug log: a failed correction write is never retried, and no batch API can smuggle a correction into the queue)
 - Test: `src/Namotion.Interceptor.Connectors.Tests` (delivery routing tests, dedup tests, immediate-mode drop, and one retry test)
 
 - [ ] **Step 1: Write the failing tests**
@@ -1331,7 +1331,9 @@ Tests in the connectors test project, following the existing `ChangeQueueProcess
 4. Normal-beats-correction dedup: within a flush batch for one property, a `Correction(S)` followed by a normal change resolves to the normal change (the correction is dropped) and the normal change keeps its own old value as the diff baseline; a normal change followed by a `Correction(S)` keeps the normal change (the correction never replaces it); two normal changes still coalesce as today; two corrections for one property coalesce into one (same value by construction). The rule is normal-beats-correction regardless of queue order.
 5. Immediate-mode drop: a processor constructed with `bufferTime <= 0` never writes a `Correction` to its source and logs a warning, while a normal change on the same processor is still written. This pins the buffered-only delivery of corrections: the immediate path has no dedup, so a stale correction enqueued after a concurrent normal change could otherwise leave the source at a wrong value, which dropping-with-warning prevents.
 6. Retry: a failed correction write is not retried (`WriteRetryQueue.Enqueue` skips `Correction` kinds) and a later inbound event converges the source.
-7. Send-time revalidation: a stale correction that survived synthesis and dedup is dropped at send time. Enqueue a `Correction(S)` for a property, move the model to a different value with a normal write before the flush writes the correction, then assert the correction is never written to the source (the getter no longer equals the correction's value) while the normal change is.
+7. Send-time revalidation, pre-write drop: a stale correction that survived synthesis and dedup is dropped before its write. Enqueue a `Correction(S)` for a property, move the model to a different value with a normal write before the flush writes the correction, then assert the correction is never written to the source (the getter no longer equals the correction's value) while the normal change is. This exercises only the case where the model already moved BEFORE revalidation.
+8. Send-time revalidation, in-flight window: an inbound `FromSource(S)` apply lands between the pre-write revalidation and the completion of the correction write. Use a gate (`ManualResetEventSlim`) in a fake source's write path to hold the correction write open, apply the inbound value while it is held, then release; assert a follow-up write from the post-write recheck converges the source to the newer value and no stale value remains on the source. This is the test the pre-write-only drop (test 7) cannot cover, because the echo-suppressed inbound-from-S change never enters S's outbound queue.
+9. Send-time revalidation, bounded-loop exhaustion: continuous racing writes that keep moving the model during each post-write recheck exhaust the attempt limit, and the correction is dropped with a warning naming `RequestResynchronization`/#342; assert the warning is logged and the loop terminates.
 
 - [ ] **Step 2: Implement**
 
@@ -1349,16 +1351,47 @@ This dequeue-time skip is the only echo suppression (PR 1 is lifecycle-neutral, 
 
 Also make the flush-time dedup at `ChangeQueueProcessor.cs:254` (`MergeWithNewer`) kind-aware with an explicit kind branch. The flush dictionary keeps one entry per property; the rule is normal-beats-correction regardless of queue order: a normal change supersedes a pending correction for that property (drop the correction, the normal change already carries the authoritative value outbound), and a correction never replaces a queued normal change. When a normal change supersedes a correction, the normal change's own old value stays the diff baseline: a correction carries `old == new` and contributes nothing to a diff, so it must not overwrite the baseline the superseding normal change needs. Corrections coalesce only with corrections, which is safe because two corrections for one property carry the same value by construction. The immediate path (`bufferTime <= 0`) performs no dedup, so it cannot safely write corrections: a stale correction enqueued after a concurrent normal change could push the source to a wrong value. In immediate mode the processor drops every `Correction` with a warning log instead of writing it; the missing-correction failure mode is safe (the source stays diverged until its next inbound event) whereas a wrong write is not.
 
-Finally, add send-time revalidation to the correction write branch. Immediately before writing a `Correction` to the source, re-read the current model value through the property metadata getter and drop the correction if it no longer equals the correction's value. This is the load-bearing missing-never-wrong guarantee; the synthesis-time write-timestamp check is only a cheap early-out. The timestamp check has tick-granularity and frozen-clock blind spots, and within-flush dedup cannot stop a stale correction from winning across separate flushes: a correction synthesized in flush N, after a normal change already flushed in flush N-1, has no queued normal change in its own flush dictionary to lose to. Send-time revalidation closes this by ordering: a write landing before the re-read makes the model value differ and drops the correction; a write landing after is behind the correction in the same serialized outbound queue and overwrites the source immediately afterward, restoring convergence.
+Finally, add per-correction send-time revalidation to the correction write branch, both before and after each correction write. Each correction in a flushed batch is revalidated individually; the pre-write check is a cheap early drop and the post-write recheck is the correctness guarantee.
+
+Pre-write, immediately before writing a `Correction` to the source, re-read the current model value through the property metadata getter and drop the correction if it no longer equals the correction's value. This catches the common case where the model already moved before the write started (and the synthesis-time write-timestamp check stays as an even cheaper early-out), but it is NOT sufficient on its own. One interleaving defeats it: a `Correction(S, 100)` passes pre-write revalidation; before it reaches S, S sends 90; the model stores 90 as `FromSource(S)`; that inbound change is echo-suppressed for S's own processor (the own-source skip), so it never enters S's outbound queue; the accepted correction then overwrites S with a stale 100, leaving model 90 and source 100 permanently. The earlier ordering argument (the newer change follows the correction through the same serialized outbound queue) holds only for LOCAL racing writes, which enqueue a following normal change delivered to S; an inbound-from-S write is echo-suppressed for S and never follows.
+
+Post-write is therefore the correctness guarantee. After each correction write to S returns, re-read the current model value; if it no longer equals the value just written, the model changed during flight (the dangerous case is an inbound apply from S itself, since a local write in flight enqueues its own following normal change that reaches S), so write the current model value to S as a follow-up correction, in a bounded loop with a small fixed attempt limit; on exhaustion drop with a warning naming `RequestResynchronization`/#342 as the recovery path. Window analysis: an inbound from S arriving AFTER the post-write re-read means S already holds that value itself (it sent it), so the echo skip is then correct and no divergence exists; the recheck closes exactly the dangerous window (an inbound from S landing between the pre-write read and the completion of the correction write) and the source converges at quiescence. This needs no serialization between inbound applies and outbound writes, no per-property in-flight tracking, and no conditional source writes.
 
 ```csharp
-// In the correction write branch, immediately before writing the change to the source:
-var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
-if (!Equals(currentValue, change.GetNewValue<object?>()))
+// In the correction write branch, per correction. Pre-write revalidation (cheap early drop):
+var correctionValue = change.GetNewValue<object?>();
+if (!Equals(change.Property.Metadata.GetValue?.Invoke(change.Property.Subject), correctionValue))
 {
-    // The model moved between synthesis and send: the newer write is already flowing
-    // outbound, so drop the stale correction (missing-never-wrong).
+    // The model already moved before the write started; its newer change is flowing outbound
+    // on its own. Drop the stale correction.
     continue;
+}
+
+// Write the correction, then post-write revalidation in a bounded loop (the correctness guarantee):
+var attempt = 0;
+while (true)
+{
+    await WriteCorrectionToSourceAsync(change, correctionValue, cancellationToken).ConfigureAwait(false);
+
+    // Post-write re-read: if the model no longer equals what we just wrote, an inbound apply from
+    // this source landed during the write (a local write in flight would have enqueued its own
+    // following normal change), so re-assert the current model value as a follow-up correction.
+    var modelValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
+    if (Equals(modelValue, correctionValue))
+    {
+        break; // converged: source holds the current model value
+    }
+
+    if (++attempt >= MaxCorrectionRevalidationAttempts)
+    {
+        _logger.LogWarning(
+            "Correction for {Property} did not converge after {Attempts} attempts; dropping. " +
+            "The source recovers on its next inbound event or an explicit RequestResynchronization (#342).",
+            change.Property, attempt);
+        break;
+    }
+
+    correctionValue = modelValue; // follow-up correction to the newer model value
 }
 ```
 
@@ -1368,28 +1401,52 @@ Note: other queue subscribers (`PerformanceProfiler` in SamplesModel and Connect
 
 - [ ] **Step 4: Keep corrections out of the retry queue**
 
-A failed correction write must not be retried. Reapplying a correction through the property setter is a silent no-op (current equals old equals new, the equality check suppresses, no new queue event appears), and re-sending a stale correction raw could push the source to a value the model has since moved off of. Both hazards are removed by a single filter in `src/Namotion.Interceptor.Connectors/WriteRetryQueue.cs`: `Enqueue` skips changes with `Origin.Kind == Correction`, with a debug log.
+A failed correction write must not be retried. Reapplying a correction through the property setter is a silent no-op (current equals old equals new, the equality check suppresses, no new queue event appears), and re-sending a stale correction raw could push the source to a value the model has since moved off of. The filter must cover EVERY enqueue entry point of `src/Namotion.Interceptor.Connectors/WriteRetryQueue.cs`, so a correction can never enter retries through a batch API. Enumerate the entry points before filtering:
+
+- `Enqueue(ReadOnlyMemory<SubjectPropertyChange> changes)` (public, batch): the sole public way changes enter the queue. This is where the filter lives, applied per item in the span, so no batch call can smuggle a correction into `_pendingWrites`.
+- `RequeueChanges(ReadOnlySpan<SubjectPropertyChange> changes)` (private, front-insert on flush failure): only ever re-inserts items already dequeued from `_pendingWrites`, which were already filtered on the way in through `Enqueue`, so no correction can reach it. No second filter is needed here, but state the invariant so a future edit that starts requeueing externally-supplied changes revisits it.
+- `FlushAsync(...)` and `DrainForLocalReapply()`: neither adds new changes to the queue (one flushes, one drains), so neither needs a filter.
+
+There is no single-item `Enqueue` overload; filter each item inside the existing batch loop, with a debug log:
 
 ```csharp
-public void Enqueue(in SubjectPropertyChange change)
+public void Enqueue(ReadOnlyMemory<SubjectPropertyChange> changes)
 {
-    if (change.Origin.Kind == ChangeOriginKind.Correction)
+    if (_maxQueueSize is 0)
     {
-        // A failed correction write is not retried: the source converges on its next inbound
-        // event. Retrying would either no-op through the equality check or re-assert a value the
-        // model has since moved off of (a wrong write). Dropping keeps the only failure mode a
-        // missing correction, never a wrong one.
-        _logger.LogDebug("Dropping failed correction write from the retry queue for {Property}.", change.Property);
+        _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changes.Length);
         return;
     }
 
-    // ... existing enqueue path unchanged
+    int droppedCount;
+    lock (_lock)
+    {
+        var span = changes.Span;
+        for (var i = 0; i < span.Length; i++)
+        {
+            if (span[i].Origin.Kind == ChangeOriginKind.Correction)
+            {
+                // A failed correction write is not retried: the source converges on its next inbound
+                // event. Retrying would either no-op through the equality check or re-assert a value
+                // the model has since moved off of (a wrong write). Dropping keeps the only failure
+                // mode a missing correction, never a wrong one.
+                _logger.LogDebug("Dropping failed correction write from the retry queue for {Property}.", span[i].Property);
+                continue;
+            }
+
+            _pendingWrites.Add(span[i]);
+        }
+
+        // ... existing ring-buffer trim and count update unchanged
+    }
+
+    // ... existing drop-count warning unchanged
 }
 ```
 
-This drops a failed correction, and the source converges on its next inbound event, the same accepted outcome as every other correction-drop path (immediate mode, dedup supersession, drop-on-doubt, send-time revalidation). It replaces the earlier kind-aware re-checks in both the reconnect (`ReapplyRetryQueue`) and steady-state (`WriteRetryQueue.FlushAsync`) retry paths, neither of which this design adds. Once #355's origin-agnostic 3-way reconcile lands it handles corrections generically anyway (a correction has model equal to old equal to new, so its restore-and-send branch is a no-op), making this filter harmlessly redundant but still correct in any merge order.
+This drops a failed correction, and the source converges on its next inbound event, the same accepted outcome as every other correction-drop path (immediate mode, dedup supersession, drop-on-doubt, pre-write revalidation, and post-write bounded-loop exhaustion). It replaces the earlier kind-aware re-checks in both the reconnect (`ReapplyRetryQueue`) and steady-state (`WriteRetryQueue.FlushAsync`) retry paths, neither of which this design adds. Once #355's origin-agnostic 3-way reconcile lands it handles corrections generically anyway (a correction has model equal to old equal to new, so its restore-and-send branch is a no-op), making this filter harmlessly redundant but still correct in any merge order.
 
-Test, in the connectors test project following the retry-queue test idiom: a correction write fails, `WriteRetryQueue.Enqueue` skips it (nothing enters the queue and no hooks or INPC fire), and a later inbound event converges the source.
+Test, in the connectors test project following the retry-queue test idiom: a batch containing a correction and a normal change is enqueued, the correction is skipped while the normal change is retained (nothing correction-shaped enters the queue and no hooks or INPC fire), and a later inbound event converges the source.
 
 - [ ] **Step 5: Run connectors tests, then commit**
 
