@@ -197,12 +197,10 @@ public sealed class WebSocketSubjectHandler
             try
             {
                 var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
-                // Must use lock (not SemaphoreSlim) because SubjectChangeContext uses [ThreadStatic] storage.
+                // The lock serializes update application so concurrent client updates apply one at a time.
                 lock (_applyUpdateLock)
                 {
-                    // TODO: Inbound updates are applied without a source origin until the update applier
-                    // threads the origin per write; echo suppression for this connection is restored then.
-                    _subject.ApplySubjectUpdate(update, factory);
+                    _subject.ApplySubjectUpdate(update, factory, ChangeOrigin.FromSource(connection));
                 }
             }
             catch (Exception ex)

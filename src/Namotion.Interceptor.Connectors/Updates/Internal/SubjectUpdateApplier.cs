@@ -16,6 +16,7 @@ internal static class SubjectUpdateApplier
         IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory subjectFactory,
+        ChangeOrigin origin,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         if (string.IsNullOrEmpty(update.Root))
@@ -27,7 +28,7 @@ internal static class SubjectUpdateApplier
         var context = ContextPool.Rent();
         try
         {
-            context.Initialize(update.Subjects, subjectFactory, transformValueBeforeApply);
+            context.Initialize(update.Subjects, subjectFactory, origin, transformValueBeforeApply);
             context.TryMarkAsProcessed(update.Root);
             ApplyPropertyUpdates(subject, rootProperties, context);
         }
@@ -80,13 +81,12 @@ internal static class SubjectUpdateApplier
         switch (propertyUpdate.Kind)
         {
             case SubjectPropertyUpdateKind.Value:
+            {
                 context.TransformValueBeforeApply?.Invoke(registeredProperty, propertyUpdate);
-                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-                {
-                    var value = ConvertValue(propertyUpdate.Value, registeredProperty.Type);
-                    registeredProperty.SetValue(value);
-                }
+                var value = ConvertValue(propertyUpdate.Value, registeredProperty.Type);
+                context.SetPropertyValue(registeredProperty, propertyUpdate.Timestamp, value);
                 break;
+            }
 
             case SubjectPropertyUpdateKind.Object:
                 ApplyObjectUpdate(subject, registeredProperty, propertyUpdate, context);
@@ -128,18 +128,12 @@ internal static class SubjectUpdateApplier
                     ApplyPropertyUpdates(newItem, itemProperties, context);
                 }
 
-                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-                {
-                    property.SetValue(newItem);
-                }
+                context.SetPropertyValue(property, propertyUpdate.Timestamp, newItem);
             }
         }
         else
         {
-            using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-            {
-                property.SetValue(null);
-            }
+            context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
         }
     }
 

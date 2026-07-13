@@ -346,7 +346,7 @@ public class SubjectUpdateDictionaryTests
         };
 
         // Act
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Null(target.Lookup);

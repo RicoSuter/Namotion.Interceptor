@@ -121,10 +121,7 @@ internal static class SubjectItemsUpdateApplier
         if (structureChanged)
         {
             var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, workingItems);
-            using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-            {
-                property.SetValue(collection);
-            }
+            context.SetPropertyValue(property, propertyUpdate.Timestamp, collection);
         }
     }
 
@@ -206,10 +203,7 @@ internal static class SubjectItemsUpdateApplier
         if (structureChanged)
         {
             var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
-            using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-            {
-                property.SetValue(dictionary);
-            }
+            context.SetPropertyValue(property, propertyUpdate.Timestamp, dictionary);
         }
     }
 

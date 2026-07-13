@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
@@ -12,16 +13,42 @@ internal sealed class SubjectUpdateApplyContext
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
+    public ChangeOrigin Origin { get; private set; }
     public Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? TransformValueBeforeApply { get; private set; }
 
     public void Initialize(
         Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> subjects,
         ISubjectFactory subjectFactory,
+        ChangeOrigin origin,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply)
     {
         Subjects = subjects;
         SubjectFactory = subjectFactory;
+        Origin = origin;
         TransformValueBeforeApply = transformValueBeforeApply;
+    }
+
+    /// <summary>
+    /// Writes <paramref name="value"/> to <paramref name="property"/> under the update's origin. Local
+    /// origins keep the unarmed write path (Local is the default and needs no stamp); for
+    /// <see cref="ChangeOriginKind.FromSource"/> and <see cref="ChangeOriginKind.Confirmed"/> the write
+    /// goes through <see cref="SubjectChangeContextExtensions.SetValueFromOrigin"/> so the resulting
+    /// change carries the source and echo suppression works. In both cases <paramref name="changedTimestamp"/>
+    /// is applied as the changed timestamp so the inbound timestamp is never replaced with capture-time now.
+    /// </summary>
+    public void SetPropertyValue(RegisteredSubjectProperty property, DateTimeOffset? changedTimestamp, object? value)
+    {
+        if (Origin.Kind == ChangeOriginKind.Local)
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(changedTimestamp))
+            {
+                property.SetValue(value);
+            }
+        }
+        else
+        {
+            property.Reference.SetValueFromOrigin(Origin, changedTimestamp, null, value);
+        }
     }
 
     public bool TryMarkAsProcessed(string subjectId)
@@ -35,6 +62,7 @@ internal sealed class SubjectUpdateApplyContext
         _processedSubjectIds.Clear();
         Subjects = null!;
         SubjectFactory = null!;
+        Origin = default;
         TransformValueBeforeApply = null;
     }
 }

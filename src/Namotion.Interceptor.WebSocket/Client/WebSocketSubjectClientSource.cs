@@ -293,9 +293,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         return Task.FromResult<Action?>(() =>
         {
             var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
-            // TODO: Inbound updates are applied without a source origin until the update applier
-            // threads the origin per write; echo suppression for this source is restored then.
-            _subject.ApplySubjectUpdate(_initialState, factory);
+            _subject.ApplySubjectUpdate(_initialState, factory, ChangeOrigin.FromSource(this));
 
             // Claim ownership of all properties matching the path provider
             ClaimPropertyOwnership();
@@ -533,12 +531,10 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         if (propertyWriter is null) return;
 
         propertyWriter.Write(
-            (update, subject: _subject, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance),
+            (update, subject: _subject, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance, source: this),
             static state =>
             {
-                // TODO: Inbound updates are applied without a source origin until the update applier
-                // threads the origin per write; echo suppression for this source is restored then.
-                state.subject.ApplySubjectUpdate(state.update, state.factory);
+                state.subject.ApplySubjectUpdate(state.update, state.factory, ChangeOrigin.FromSource(state.source));
             });
     }
 

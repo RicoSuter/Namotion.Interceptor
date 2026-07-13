@@ -103,15 +103,13 @@ propertyFilter: propertyReference =>
 ### Server-Side (C#)
 
 ```csharp
-// Apply update from external source (e.g., WebSocket message from client)
-// The WithSource scope enables echo prevention in change tracking
-using (SubjectChangeContext.WithSource(source))
-{
-    subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
-}
+// Apply update from external source (e.g., WebSocket message from client).
+// A FromSource origin stamps the applied changes so echo suppression skips
+// that source's own outbound path.
+subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.FromSource(source));
 
-// Apply update without source tracking
-subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+// Apply update as a local change (no source tracking).
+subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 ```
 
 ## Property Update Kinds

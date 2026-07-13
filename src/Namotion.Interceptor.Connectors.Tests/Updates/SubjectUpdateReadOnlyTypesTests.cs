@@ -201,7 +201,7 @@ public class SubjectUpdateReadOnlyTypesTests
 
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
-        target.ApplySubjectUpdate(update, null);
+        target.ApplySubjectUpdate(update, null, ChangeOrigin.Local);
 
         // Assert: target.ReadOnlyLookup contains the expected entries.
         Assert.Equal(2, target.ReadOnlyLookup.Count);

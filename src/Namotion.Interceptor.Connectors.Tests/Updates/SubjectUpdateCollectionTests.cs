@@ -501,7 +501,7 @@ public class SubjectUpdateCollectionTests
         var target = new CycleTestNode(targetContext) { Name = "Root", Items = [targetA, targetB, targetC] };
 
         // Apply update
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert - target should have [C, B] (by name, since these are different instances)
         Assert.Equal(2, target.Items.Count);
@@ -543,7 +543,7 @@ public class SubjectUpdateCollectionTests
             ]
         };
 
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(3, target.Items.Count);
@@ -615,7 +615,7 @@ public class SubjectUpdateCollectionTests
         var target = new CycleTestNode(targetContext) { Name = "Root", Items = [new CycleTestNode { Name = "Child1" }] };
 
         // Act
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Null(target.Items);
