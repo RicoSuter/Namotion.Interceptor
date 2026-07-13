@@ -151,6 +151,78 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
     }
 
     [Fact]
+    public async Task WhenTransformedInboundValueIsCapturedUnderTransaction_ThenCapturedAndPublishedOriginIsLocal()
+    {
+        // Arrange
+        var context = CreateContext();
+        var device = new ClampingDevice(context);
+        var sourceMock = CreateSucceedingSource();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act: an inbound source value (105) is captured under an open transaction; the OnValueChanging
+        // hook clamps it to 100, so the stored value is locally computed, not the value the source sent.
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            new PropertyReference(device, nameof(ClampingDevice.Value))
+                .SetValueFromSource(sourceMock.Object, DateTimeOffset.UtcNow, null, 105);
+
+            // Assert (capture): the captured change already carries Local, because the clamp diverged the
+            // stored value (100) from the value the source sent (105). A retained FromSource would be
+            // echo-suppressed at replay and leave the source stuck at 105.
+            var pending = transaction.GetPendingChanges();
+            var capturedValue = pending.Single(c => c.Property.Name == nameof(ClampingDevice.Value));
+            Assert.Equal(100, capturedValue.GetNewValue<int>());
+            Assert.Equal(ChangeOriginKind.Local, capturedValue.Origin.Kind);
+            Assert.Null(capturedValue.Origin.Source);
+
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert (replay/publish): the commit replay publishes the correction with Local origin, so the
+        // outbound queue delivers it to any bound source instead of dropping it as an echo.
+        Assert.Equal(100, device.Value);
+        var valueChanges = changes.Where(c => c.Property.Name == nameof(ClampingDevice.Value)).ToList();
+        Assert.Single(valueChanges);
+        Assert.Equal(100, valueChanges[0].GetNewValue<int>());
+        Assert.Equal(ChangeOriginKind.Local, valueChanges[0].Origin.Kind);
+        Assert.Null(valueChanges[0].Origin.Source);
+    }
+
+    [Fact]
+    public async Task WhenTransformedInboundValueIsCapturedUnderTransaction_ThenCorrectionIsDeliveredNotEchoSuppressed()
+    {
+        // Arrange
+        var context = CreateContext();
+        var device = new ClampingDevice(context);
+        var sourceMock = CreateSucceedingSource();
+
+        // Act: capture the inbound 105 under a transaction and commit; the clamp stores 100 locally.
+        // The processor's source identity IS the inbound source, so a retained FromSource stamp would
+        // drop the correction as an echo and leave the source diverged.
+        var delivered = await DeliverThroughChangeQueueProcessorAsync(
+            context,
+            sourceMock.Object,
+            async () =>
+            {
+                using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+                new PropertyReference(device, nameof(ClampingDevice.Value))
+                    .SetValueFromSource(sourceMock.Object, DateTimeOffset.UtcNow, null, 105);
+                await transaction.CommitAsync(CancellationToken.None);
+            },
+            isAwaitedChange: c => c.Property.Name == nameof(ClampingDevice.Value),
+            timeoutMessage: "Processor did not deliver the clamped correction captured under the transaction.");
+
+        // Assert: the correction (100) reached the processor whose identity is the inbound source, i.e.
+        // it was delivered rather than echo-suppressed.
+        Assert.Equal(100, device.Value);
+        var correction = delivered.Single(c => c.Property.Name == nameof(ClampingDevice.Value));
+        Assert.Equal(100, correction.GetNewValue<int>());
+    }
+
+    [Fact]
     public async Task WhenTransactionValueIsTransformedByChangingHook_ThenTransformedValueIsCommittedWithSourceStamp()
     {
         // Arrange

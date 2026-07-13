@@ -202,12 +202,26 @@ public struct PropertyWriteContext<TProperty>
     /// Finalizes <see cref="Origin"/> at the terminal write (right after <see cref="IsWritten"/>
     /// becomes true). A stamped origin survives only when the stored value is exactly the value
     /// the source sent; otherwise the value was computed locally and the origin becomes Local.
+    ///
+    /// A derived property's stored value is recomputed by its getter (published via
+    /// <see cref="GetFinalValue"/>), never literally the value the source sent, so a stamped origin
+    /// never survives a derived write. It is demoted unconditionally without invoking the getter,
+    /// because the getter must not run here (this executes under the subject's SyncRoot).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void FinalizeOrigin()
     {
         if (_attempted.Origin.Kind == ChangeOriginKind.Local)
         {
+            return;
+        }
+
+        // A derived property's stored value is recomputed by its getter, never literally the value the
+        // source sent, so a stamped origin never survives a derived write. It is demoted without invoking
+        // the getter, because the getter must not run here (this executes under the subject's SyncRoot).
+        if (Property.Metadata.IsDerived)
+        {
+            _attempted = default;
             return;
         }
 
