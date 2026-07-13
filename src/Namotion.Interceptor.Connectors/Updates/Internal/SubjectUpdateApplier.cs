@@ -84,14 +84,21 @@ internal static class SubjectUpdateApplier
             {
                 if (context.TransformValueBeforeApply is not null)
                 {
-                    // Capture the converted value the source semantically sent BEFORE the transform
-                    // mutates it, so the origin's evidence stays what the source sent rather than the
-                    // locally corrected value. Otherwise the survival check compares the corrected value
-                    // against itself, the FromSource origin survives, and the outbound processor
-                    // echo-suppresses the correction, diverging the source from the applied value.
-                    var sentValue = ConvertValue(propertyUpdate.Value, registeredProperty.Type);
+                    // Convert once BEFORE the transform runs; this converted instance is the value the
+                    // source semantically sent and doubles as the origin's survival evidence. If the
+                    // transform does not replace propertyUpdate.Value (reference unchanged), reuse that
+                    // same instance as the written value too: converting a JSON value twice yields two
+                    // reference-distinct instances for reference types (int[], DTOs), which fail the
+                    // reference-equality survival check and wrongly demote a genuine unchanged source
+                    // write to Local, defeating echo suppression. Only re-convert when the transform
+                    // substituted a new value, so a locally corrected value differs from the evidence
+                    // and the origin correctly demotes to Local.
+                    var rawValue = propertyUpdate.Value;
+                    var sentValue = ConvertValue(rawValue, registeredProperty.Type);
                     context.TransformValueBeforeApply.Invoke(registeredProperty, propertyUpdate);
-                    var value = ConvertValue(propertyUpdate.Value, registeredProperty.Type);
+                    var value = ReferenceEquals(propertyUpdate.Value, rawValue)
+                        ? sentValue
+                        : ConvertValue(propertyUpdate.Value, registeredProperty.Type);
                     context.SetPropertyValue(registeredProperty, propertyUpdate.Timestamp, value, sentValue);
                 }
                 else

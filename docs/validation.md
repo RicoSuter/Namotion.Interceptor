@@ -92,17 +92,18 @@ public class NoSwearWordsValidator : IPropertyValidator
             return [];
         }
 
-        var results = new List<ValidationResult>();
+        List<ValidationResult>? results = null;
         foreach (var word in BadWords)
         {
             if (text.Contains(word, StringComparison.OrdinalIgnoreCase))
             {
+                results ??= [];
                 results.Add(new ValidationResult(
                     $"Property '{context.Property.Name}' contains prohibited word: {word}"));
             }
         }
 
-        return results;
+        return results ?? [];
     }
 }
 ```
