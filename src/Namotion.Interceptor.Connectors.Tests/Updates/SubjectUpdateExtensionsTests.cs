@@ -575,6 +575,57 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
+    public void WhenFromSourceApplyTransformLeavesReferenceTypeValueUnchanged_ThenChangeCarriesFromSourceOrigin()
+    {
+        // Arrange - a FromSource apply whose transform inspects but does NOT replace a reference-type
+        // value (int[]) must publish under the FromSource origin so echo suppression skips the source.
+        // The JsonElement must be converted once and reused as both the written value and the origin's
+        // survival evidence: converting twice produces two reference-distinct int[] instances that fail
+        // the reference-equality survival check and wrongly demote a genuine unchanged source write to
+        // Local, defeating echo suppression.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new ArrayNode(context) { Numbers = [] };
+        var source = new object();
+
+        var jsonElement = JsonDocument.Parse("[1,2,3]").RootElement;
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Numbers"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = jsonElement
+                    }
+                }
+            }
+        };
+
+        SubjectPropertyChange? capturedChange = null;
+        using var subscription = context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == "Numbers")
+            .Subscribe(c => capturedChange = c);
+
+        // Act - the transform reads the value but leaves propertyUpdate.Value unchanged
+        target.ApplySubjectUpdate(
+            update,
+            DefaultSubjectFactory.Instance,
+            ChangeOrigin.FromSource(source),
+            (property, propertyUpdate) => { _ = propertyUpdate.Value; });
+
+        // Assert
+        Assert.Equal([1, 2, 3], target.Numbers);
+        Assert.NotNull(capturedChange);
+        Assert.Equal(ChangeOriginKind.FromSource, capturedChange.Value.Origin.Kind);
+        Assert.Same(source, capturedChange.Value.Origin.Source);
+    }
+
+    [Fact]
     public async Task WhenApplyingNullItem_ThenItemIsSetToNull()
     {
         // Arrange
@@ -1079,6 +1130,12 @@ public partial class SubjectUpdateExtensionsTests
     public partial class NumericNode
     {
         public partial int Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class ArrayNode
+    {
+        public partial int[] Numbers { get; set; }
     }
 
     [InterceptorSubject]
