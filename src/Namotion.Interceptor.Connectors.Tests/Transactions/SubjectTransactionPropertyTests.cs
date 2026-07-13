@@ -444,10 +444,11 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     /// </summary>
     private class MotorSpeedValidator : IPropertyValidator
     {
-        public IEnumerable<ValidationResult> Validate<TProperty>(PropertyReference property, TProperty value)
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
         {
+            var property = context.Property;
             if (property.Metadata.Name == nameof(Motor.MotorSpeed) &&
-                value is int speed &&
+                context.Value is int speed &&
                 property.Subject is Motor motor)
             {
                 // Reading MaxAllowedSpeed goes through the interceptor chain,
@@ -455,10 +456,12 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
                 var maxAllowedSpeed = motor.MaxAllowedSpeed;
                 if (speed > maxAllowedSpeed)
                 {
-                    yield return new ValidationResult(
-                        $"MotorSpeed {speed} exceeds MaxAllowedSpeed {maxAllowedSpeed}.");
+                    return [new ValidationResult(
+                        $"MotorSpeed {speed} exceeds MaxAllowedSpeed {maxAllowedSpeed}.")];
                 }
             }
+
+            return [];
         }
     }
 }

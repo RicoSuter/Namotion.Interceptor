@@ -21,7 +21,8 @@ public class ValidationInterceptor : IWriteInterceptor
         List<ValidationResult>? additionalErrors = null;
         foreach (var validator in validators)
         {
-            foreach (var error in validator.Validate(context.Property, context.NewValue))
+            var validationContext = new PropertyValidationContext<TProperty>(context.Property, context.NewValue, context.Origin);
+            foreach (var error in validator.Validate(in validationContext))
             {
                 additionalErrors ??= [];
                 additionalErrors.Add(error);
