@@ -206,13 +206,22 @@ public struct PropertyWriteContext<TProperty>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void FinalizeOrigin()
     {
-        // Typed comparison in the generic frame: NewValue is never boxed. SentValue arrives already
-        // boxed from the inbound apply; cast it down to TProperty for EqualityComparer.Default. On the
-        // non-generic path (TProperty == object) both operands are already boxed objects.
-        if (_attempted.Origin.Kind != ChangeOriginKind.Local &&
-            !EqualityComparer<TProperty>.Default.Equals((TProperty)_attempted.SentValue!, NewValue))
+        if (_attempted.Origin.Kind == ChangeOriginKind.Local)
         {
-            _attempted = default;
+            return;
         }
+
+        // Typed comparison in the generic frame: NewValue is never boxed. SentValue arrives already
+        // boxed from the inbound apply; the 'is TProperty' pattern unboxes it without an unchecked cast
+        // that would throw on a value-type property when the sent value is null or a mismatched type.
+        // A null or type-mismatched sent value cannot have been faithfully stored, so it demotes to
+        // Local. On the non-generic path (TProperty == object) both operands are already boxed objects.
+        if (_attempted.SentValue is TProperty typedSentValue &&
+            EqualityComparer<TProperty>.Default.Equals(typedSentValue, NewValue))
+        {
+            return;
+        }
+
+        _attempted = default;
     }
 }

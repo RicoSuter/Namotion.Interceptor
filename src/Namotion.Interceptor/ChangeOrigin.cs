@@ -24,6 +24,14 @@ public enum ChangeOriginKind : byte
     /// Skipped for the confirming source, delivered to all other bound sources.
     /// </summary>
     Confirmed = 2,
+
+    /// <summary>
+    /// An outbound synchronization synthesized because a source silently dropped the model's value:
+    /// an inbound value the equality check suppressed while it still diverged from the stored value.
+    /// The source field records which source diverged. A correction carries equal old and new values,
+    /// is not a model change, and is delivered only through the change queue, never the observable.
+    /// </summary>
+    Correction = 3,
 }
 
 /// <summary>
@@ -56,4 +64,11 @@ public readonly struct ChangeOrigin
     /// </summary>
     public static ChangeOrigin Confirmed(object source) =>
         new(ChangeOriginKind.Confirmed, source ?? throw new ArgumentNullException(nameof(source)));
+
+    /// <summary>
+    /// A synthesized outbound synchronization for a value the given source silently dropped. Produced
+    /// only by correction detection; the source records which participant diverged.
+    /// </summary>
+    public static ChangeOrigin Correction(object source) =>
+        new(ChangeOriginKind.Correction, source ?? throw new ArgumentNullException(nameof(source)));
 }

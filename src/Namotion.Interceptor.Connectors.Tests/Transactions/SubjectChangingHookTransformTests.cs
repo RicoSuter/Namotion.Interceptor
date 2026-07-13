@@ -91,7 +91,7 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
     }
 
     [Fact]
-    public void WhenTransformedValueEqualsStoredValue_ThenNoCorrectionIsPublished()
+    public void WhenTransformedValueEqualsStoredValue_ThenCorrectionIsPublished()
     {
         // Arrange: the model already holds the projection of the incoming value.
         var context = CreateContext();
@@ -101,17 +101,22 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
 
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
-        // Act: the source sends 105; the clamp projects it to 100, which equals the stored value,
-        // so the equality check drops the write before anything is published.
+        // Act: the source sends 105; the clamp projects it to 100, which equals the stored value, so
+        // the equality check suppresses the write. The sent 105 was silently dropped, so a correction
+        // is synthesized to flow the authoritative model value back to the diverged source.
         new PropertyReference(device, nameof(ClampingDevice.Value))
             .SetValueFromSource(sourceMock.Object, DateTimeOffset.UtcNow, null, 105);
 
         var changes = DrainWithSentinel(context, subscription);
 
-        // Assert: pins the documented boundary that a correction requires a stored-value change;
-        // the source keeps its out-of-range value until the next model change (see connectors.md).
+        // Assert: a Correction carrying the source and old == new == 100 is published while the model
+        // is left unchanged; this resolves the diverged-source case (see connectors.md).
         Assert.Equal(100, device.Value);
-        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
+        var valueChanges = changes.Where(c => c.Property.Name == nameof(ClampingDevice.Value)).ToList();
+        Assert.Single(valueChanges);
+        Assert.Equal(ChangeOriginKind.Correction, valueChanges[0].Origin.Kind);
+        Assert.Same(sourceMock.Object, valueChanges[0].Origin.Source);
+        Assert.Equal(100, valueChanges[0].GetNewValue<int>());
     }
 
     [Fact]

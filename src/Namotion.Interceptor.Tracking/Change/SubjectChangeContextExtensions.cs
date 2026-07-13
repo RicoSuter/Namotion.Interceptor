@@ -22,11 +22,103 @@ public static class SubjectChangeContextExtensions
         ChangeOrigin origin, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp,
         object? value)
     {
+        // Clear-on-entry, unconditional and for every origin kind (including Confirmed): a commit
+        // replay records a Confirmed outcome via the equality handler but never consumes it through
+        // this primitive, so wipe any stale outcome before this setter runs. Without it a later
+        // cancelled FromSource write could misread a leaked outcome as its own.
+        PendingOrigin.ClearOutcome();
+
+        var stamped = origin.Kind != ChangeOriginKind.Local;
+
+        // Baseline for the synthesis concurrency race ONLY (not detection): captured before the
+        // setter so a concurrent write during synthesis moves it and we drop on doubt.
+        var writeTimestampBaseline = stamped ? property.TryGetWriteTimestamp() : null;
+
         using (SubjectChangeContext.WithTimestamps(changedTimestamp, receivedTimestamp))
         using (PendingOrigin.Set(property, origin, value))
         {
             property.Metadata.SetValue?.Invoke(property.Subject, value);
         }
+
+        if (!stamped)
+        {
+            return;
+        }
+
+        // Read and clear the outcome the equality handler recorded for this stamped write. No outcome
+        // means the chain never ran (an OnChanging hook cancelled the write, or the equality handler
+        // is not registered): nothing to correct.
+        if (!PendingOrigin.TryTakeOutcome(out var isWritten, out var valueUnchanged))
+        {
+            return;
+        }
+
+        // Correction candidate: FromSource, terminal never landed, equality-suppressed. A transaction
+        // capture has valueUnchanged == false (it only captures when values differ), so it self-excludes,
+        // and no process-global transaction flag is consulted. Timestamps play no role in this decision.
+        // The dependency on PropertyValueEqualityCheckHandler is structural, not checked: the outcome
+        // API is internal and that handler is its only producer, so valueUnchanged == true in hand
+        // proves the handler ran with its [RunsFirst] ordering, which is what makes the transaction
+        // self-exclusion hold.
+        if (origin.Kind == ChangeOriginKind.FromSource && !isWritten && valueUnchanged)
+        {
+            DetectAndEnqueueCorrection(property, origin.Source!, value, writeTimestampBaseline);
+        }
+    }
+
+    private static void DetectAndEnqueueCorrection(
+        PropertyReference property, object source, object? sentValue, DateTimeOffset? writeTimestampBaseline)
+    {
+        // The stamped write was equality-suppressed. Read the observable value OUTSIDE the subject
+        // lock (the getter may run read interceptors; running them under Subject.SyncRoot would invert
+        // the codebase's getters-outside-locks discipline). If it still equals the sent value there is
+        // no divergence (pure echo) and no correction; the correction deliberately carries the
+        // OBSERVABLE value.
+        var observedValue = property.Metadata.GetValue?.Invoke(property.Subject);
+        if (Equals(sentValue, observedValue))
+        {
+            return;
+        }
+
+        // Resolve the queue from the subject's context. No queue means no delivery target, so nothing
+        // to synthesize.
+        var queue = property.Subject.Context.TryGetService<PropertyChangeQueue>();
+        if (queue is null)
+        {
+            return;
+        }
+
+        SubjectPropertyChange correction;
+        lock (property.Subject.SyncRoot)
+        {
+            // Concurrency drop-on-doubt: a newer write may have landed while we decided. Compare the
+            // raw write-timestamp against the baseline under the lock; a moved timestamp means that
+            // write is already flowing outbound, so drop. NECESSARY BUT NOT SUFFICIENT (tick
+            // granularity, user-settable GetTimestampFunction), so on any doubt DROP: the only failure
+            // mode of a dropped correction is a missing one (the source stays diverged until its next
+            // inbound event), never a wrong model value.
+            if (property.TryGetWriteTimestamp() != writeTimestampBaseline)
+            {
+                return;
+            }
+
+            // Fresh local assertion: stamp a new write-timestamp on the metadata AND publish the
+            // correction with it, so the source's echo (same value, same timestamp) is fully
+            // equality-suppressed afterward.
+            var timestampTicks = SubjectChangeContext.CaptureTimestamp();
+            property.SetWriteTimestamp(timestampTicks);
+
+            correction = SubjectPropertyChange.Create(
+                property,
+                ChangeOrigin.Correction(source),
+                new DateTimeOffset(timestampTicks, TimeSpan.Zero),
+                SubjectChangeContext.Current.ReceivedTimestamp,
+                observedValue,
+                observedValue);
+        }
+
+        // Enqueue after releasing the lock; corrections never touch PropertyChangeObservable.
+        queue.EnqueueCorrection(in correction);
     }
 
     /// <summary>

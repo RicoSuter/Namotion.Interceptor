@@ -46,6 +46,7 @@ namespace Namotion.Interceptor
         public object? Source { get; }
         public static Namotion.Interceptor.ChangeOrigin Local { get; }
         public static Namotion.Interceptor.ChangeOrigin Confirmed(object source) { }
+        public static Namotion.Interceptor.ChangeOrigin Correction(object source) { }
         public static Namotion.Interceptor.ChangeOrigin FromSource(object source) { }
     }
     public enum ChangeOriginKind : byte
@@ -53,6 +54,7 @@ namespace Namotion.Interceptor
         Local = 0,
         FromSource = 1,
         Confirmed = 2,
+        Correction = 3,
     }
     public interface IInterceptorSubject
     {

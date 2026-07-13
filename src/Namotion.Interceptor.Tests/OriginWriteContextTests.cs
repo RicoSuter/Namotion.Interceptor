@@ -62,6 +62,51 @@ public class OriginWriteContextTests
     }
 
     [Fact]
+    public void WhenSentValueIsNullForValueTypeProperty_ThenOriginIsFinalizedToLocalWithoutThrowing()
+    {
+        // Arrange: a stamped write on a value-type property whose sent value is null (a malformed
+        // inbound value). The survival check must demote to Local via the typed-pattern unbox instead
+        // of throwing when it casts null down to the value type.
+        var probe = new OriginProbe();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(probe);
+        var car = new Car(context);
+        var property = new PropertyReference(car, "Speed");
+
+        // Act
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), sentValue: null))
+        {
+            car.Speed = 55;
+        }
+
+        // Assert: no throw; attempted origin visible mid-chain, demoted to Local after finalization.
+        Assert.Equal(ChangeOriginKind.FromSource, probe.KindBeforeWrite);
+        Assert.Equal(ChangeOriginKind.Local, probe.KindAfterWrite);
+    }
+
+    [Fact]
+    public void WhenSentValueTypeMismatchesValueTypeProperty_ThenOriginIsFinalizedToLocalWithoutThrowing()
+    {
+        // Arrange: the sent value is a boxed string but the property is an int, so the typed-pattern
+        // unbox fails and the origin demotes to Local rather than throwing an InvalidCastException.
+        var probe = new OriginProbe();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(probe);
+        var car = new Car(context);
+        var property = new PropertyReference(car, "Speed");
+
+        // Act
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), sentValue: "55"))
+        {
+            car.Speed = 55;
+        }
+
+        // Assert
+        Assert.Equal(ChangeOriginKind.FromSource, probe.KindBeforeWrite);
+        Assert.Equal(ChangeOriginKind.Local, probe.KindAfterWrite);
+    }
+
+    [Fact]
     public void WhenWriteHasNoPendingOrigin_ThenOriginIsLocal()
     {
         // Arrange
