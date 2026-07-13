@@ -82,9 +82,23 @@ internal static class SubjectUpdateApplier
         {
             case SubjectPropertyUpdateKind.Value:
             {
-                context.TransformValueBeforeApply?.Invoke(registeredProperty, propertyUpdate);
-                var value = ConvertValue(propertyUpdate.Value, registeredProperty.Type);
-                context.SetPropertyValue(registeredProperty, propertyUpdate.Timestamp, value);
+                if (context.TransformValueBeforeApply is not null)
+                {
+                    // Capture the converted value the source semantically sent BEFORE the transform
+                    // mutates it, so the origin's evidence stays what the source sent rather than the
+                    // locally corrected value. Otherwise the survival check compares the corrected value
+                    // against itself, the FromSource origin survives, and the outbound processor
+                    // echo-suppresses the correction, diverging the source from the applied value.
+                    var sentValue = ConvertValue(propertyUpdate.Value, registeredProperty.Type);
+                    context.TransformValueBeforeApply.Invoke(registeredProperty, propertyUpdate);
+                    var value = ConvertValue(propertyUpdate.Value, registeredProperty.Type);
+                    context.SetPropertyValue(registeredProperty, propertyUpdate.Timestamp, value, sentValue);
+                }
+                else
+                {
+                    var value = ConvertValue(propertyUpdate.Value, registeredProperty.Type);
+                    context.SetPropertyValue(registeredProperty, propertyUpdate.Timestamp, value);
+                }
                 break;
             }
 
