@@ -105,12 +105,11 @@ Choose based on your consistency requirements: local-first for responsiveness, t
 
 #### Change notification source semantics
 
-The `Source` of a change notification identifies the system that confirmed the value: inbound updates carry the source they came from, source-bound changes committed through a source transaction carry their owning source, and purely local writes carry `null`. The outbound change queue skips changes whose source is the target source itself, so a committed value is written to its source exactly once, by the commit.
+The `Origin` of a change notification is typed (`ChangeOrigin`): `FromSource` when an inbound update stored exactly the value the source sent, `Confirmed` when a source transaction commit stored the value the source acknowledged, and `Local` for everything else. A change carries a source only when its stored value is exactly the value that source sent or confirmed. The outbound change queue skips changes whose origin source is the target source itself, so a committed value is written to its source exactly once, by the commit.
 
-Writes that happen as a consequence of a source-scoped apply differ by kind:
+Origin is stamped per write at the apply call (`SetValueFromSource`, `ApplySubjectUpdate` with a `FromSource` origin, transaction commit replay). Nothing inherits it: hook cascades, `INotifyPropertyChanged` handler write-backs, derived property recalculations, and lifecycle handler writes are all `Local` and therefore flow to bound sources like any local write. When an `OnChanging` hook or a write interceptor changes the incoming value during a stamped write, the stored value no longer equals the sent value and the write publishes as `Local`, so corrections flow back to the source. Transforms must be projections (idempotent, like clamping); reference-typed values must be reassigned, not mutated in place, to be detected.
 
-- **Cascade writes** from `OnChanging`/`OnChanged` handlers inherit the source scope and are not pushed back to that source, for inbound updates and transactional commits alike. If a cascade-computed value must reach the source, write it explicitly or do not source-bind the cascade target.
-- **Derived property recalculations** always publish with a `null` source (the local model computed the value, no source confirmed it) and are therefore still pushed to a bound source, whatever triggered the recalculation.
+Provenance-aware validators receive the origin via `PropertyValidationContext` and can treat source values as authoritative while strictly validating local input.
 
 ### Write Retry Queue
 

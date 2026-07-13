@@ -492,17 +492,7 @@ This is primarily used internally by the derived property change detection syste
 - **Multiple Subscriptions**: Each subscription is independent with its own isolated queue. Different subscriptions can be consumed by different threads concurrently.
 - **Guarantees**: The implementation is deadlock-free, never loses updates, and ensures all enqueued items are processed before disposal completes.
 
-**Change Sources**: Use `SubjectChangeContext.WithSource()` to mark changes as coming from external sources:
-
-```csharp
-using (SubjectChangeContext.WithSource(mqttSource))
-{
-    subject.Temperature = newValue;
-    // change.Source will be mqttSource, not null
-}
-```
-
-For setting values from external sources with timestamps, use the `SetValueFromSource()` extension method:
+**Change Sources**: Use the `SetValueFromSource()` extension method to apply a value coming from an external source:
 
 ```csharp
 propertyReference.SetValueFromSource(
@@ -510,9 +500,10 @@ propertyReference.SetValueFromSource(
     changedTimestamp: DateTimeOffset.Now,
     receivedTimestamp: DateTimeOffset.Now,
     valueFromSource: newValue);
+// change.Origin is ChangeOrigin.FromSource(mqttSource)
 ```
 
-This prevents feedback loops where changes from external sources are written back to those same sources.
+Source marking is per write; a scope-based source no longer exists. This prevents feedback loops where changes from external sources are written back to those same sources.
 
 **Atomic Timestamps**: Use `SubjectChangeContext.WithChangedTimestamp()` when several property writes belong to one logical event and should publish with the same timestamp. Without the scope, each write reads `UtcNow` separately and consumers see distinct events microseconds apart. Pass `null` when the source has no timestamp.
 
