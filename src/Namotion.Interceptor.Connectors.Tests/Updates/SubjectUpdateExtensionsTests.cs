@@ -528,6 +528,53 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
+    public void WhenFromSourceApplyTransformChangesValue_ThenChangeCarriesLocalOrigin()
+    {
+        // Arrange - a FromSource apply whose transform corrects the inbound value must publish the
+        // corrected value under a Local origin. The pending origin's evidence has to stay the value
+        // the source semantically sent (pre-transform); otherwise the survival check compares the
+        // corrected value against itself, the FromSource origin survives, and the outbound processor
+        // echo-suppresses the correction back to the source, diverging the source from the applied value.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new NumericNode(context) { Value = 0 };
+        var source = new object();
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Value"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = 105
+                    }
+                }
+            }
+        };
+
+        SubjectPropertyChange? capturedChange = null;
+        using var subscription = context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == "Value")
+            .Subscribe(c => capturedChange = c);
+
+        // Act - the transform corrects 105 to 100 before the value is applied
+        target.ApplySubjectUpdate(
+            update,
+            DefaultSubjectFactory.Instance,
+            ChangeOrigin.FromSource(source),
+            (_, propertyUpdate) => propertyUpdate.Value = 100);
+
+        // Assert
+        Assert.Equal(100, target.Value);
+        Assert.NotNull(capturedChange);
+        Assert.Equal(ChangeOriginKind.Local, capturedChange.Value.Origin.Kind);
+    }
+
+    [Fact]
     public async Task WhenApplyingNullItem_ThenItemIsSetToNull()
     {
         // Arrange
@@ -1026,6 +1073,12 @@ public partial class SubjectUpdateExtensionsTests
         Assert.True(rootProps.ContainsKey("Children"));
         Assert.Equal(SubjectPropertyUpdateKind.Value, rootProps["Children"].Kind);
         Assert.Null(rootProps["Children"].Value);
+    }
+
+    [InterceptorSubject]
+    public partial class NumericNode
+    {
+        public partial int Value { get; set; }
     }
 
     [InterceptorSubject]

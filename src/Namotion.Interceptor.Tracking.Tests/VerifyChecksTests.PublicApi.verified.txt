@@ -49,6 +49,7 @@ namespace Namotion.Interceptor.Tracking.Change
     public static class SubjectChangeContextExtensions
     {
         public static void SetValueFromOrigin(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.ChangeOrigin origin, System.DateTimeOffset? changedTimestamp, System.DateTimeOffset? receivedTimestamp, object? value) { }
+        public static void SetValueFromOrigin(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.ChangeOrigin origin, System.DateTimeOffset? changedTimestamp, System.DateTimeOffset? receivedTimestamp, object? value, object? sentValue) { }
         public static void SetValueFromSource(this Namotion.Interceptor.PropertyReference property, object source, System.DateTimeOffset? changedTimestamp, System.DateTimeOffset? receivedTimestamp, object? valueFromSource) { }
     }
     public readonly struct SubjectPropertyChange : System.IEquatable<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>

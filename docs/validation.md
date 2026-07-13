@@ -122,7 +122,7 @@ Multiple validators can be registered and all will run. Errors from all validato
 
 ### Use Cases for Custom Validators
 
-- **Cross-property validation**: Access other properties via `property.Subject`
+- **Cross-property validation**: Access other properties via `context.Property.Subject`
 - **External validation**: Check against databases, APIs, or configuration
 - **Complex business rules**: Validation logic that doesn't fit in attributes
 - **Conditional validation**: Rules that depend on subject state

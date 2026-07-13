@@ -29,14 +29,25 @@ internal sealed class SubjectUpdateApplyContext
     }
 
     /// <summary>
+    /// Writes <paramref name="value"/> to <paramref name="property"/> under the update's origin, using
+    /// the written value as the origin's sent-value evidence. See the overload taking a separate
+    /// <c>sentValue</c> for the case where the applied value was locally transformed.
+    /// </summary>
+    public void SetPropertyValue(RegisteredSubjectProperty property, DateTimeOffset? changedTimestamp, object? value)
+        => SetPropertyValue(property, changedTimestamp, value, value);
+
+    /// <summary>
     /// Writes <paramref name="value"/> to <paramref name="property"/> under the update's origin. Local
     /// origins keep the unarmed write path (Local is the default and needs no stamp); for
     /// <see cref="ChangeOriginKind.FromSource"/> and <see cref="ChangeOriginKind.Confirmed"/> the write
-    /// goes through <see cref="SubjectChangeContextExtensions.SetValueFromOrigin"/> so the resulting
-    /// change carries the source and echo suppression works. In both cases <paramref name="changedTimestamp"/>
+    /// goes through <see cref="SubjectChangeContextExtensions.SetValueFromOrigin(PropertyReference, ChangeOrigin, DateTimeOffset?, DateTimeOffset?, object?, object?)"/> so the resulting
+    /// change carries the source and echo suppression works. <paramref name="sentValue"/> is the value
+    /// the source semantically sent, armed as the origin's survival evidence: when a transform corrects
+    /// the applied value it differs from <paramref name="value"/>, so the origin demotes to Local and the
+    /// correction is not echo-suppressed back to the source. In all cases <paramref name="changedTimestamp"/>
     /// is applied as the changed timestamp so the inbound timestamp is never replaced with capture-time now.
     /// </summary>
-    public void SetPropertyValue(RegisteredSubjectProperty property, DateTimeOffset? changedTimestamp, object? value)
+    public void SetPropertyValue(RegisteredSubjectProperty property, DateTimeOffset? changedTimestamp, object? value, object? sentValue)
     {
         if (Origin.Kind == ChangeOriginKind.Local)
         {
@@ -47,7 +58,7 @@ internal sealed class SubjectUpdateApplyContext
         }
         else
         {
-            property.Reference.SetValueFromOrigin(Origin, changedTimestamp, null, value);
+            property.Reference.SetValueFromOrigin(Origin, changedTimestamp, null, value, sentValue);
         }
     }
 
