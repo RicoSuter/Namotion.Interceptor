@@ -119,12 +119,23 @@ internal static class SubjectPropertyChangeOperations
         {
             var metadata = change.Property.Metadata;
             var newValue = change.GetNewValue<object?>();
-            // Setting a Local origin is a no-op stamp (consume yields Local), so revert paths
-            // re-apply each change with its original provenance without branching.
+            // Local origins arm no stamp: an absent stamp and a Local stamp both finalize to Local
+            // (FinalizeOrigin short-circuits on Local before reading the sent value), so skip
+            // PendingOrigin.Set on the Local replay/revert hot path. Non-Local origins (FromSource,
+            // Confirmed, Correction) still arm so echo suppression sees the source.
             using (SubjectChangeContext.WithTimestamps(change.ChangedTimestamp, change.ReceivedTimestamp))
-            using (PendingOrigin.Set(change.Property, change.Origin, newValue))
             {
-                metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                if (change.Origin.Kind == ChangeOriginKind.Local)
+                {
+                    metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                }
+                else
+                {
+                    using (PendingOrigin.Set(change.Property, change.Origin, newValue))
+                    {
+                        metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                    }
+                }
             }
             error = null;
             return true;
