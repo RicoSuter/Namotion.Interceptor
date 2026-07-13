@@ -16,6 +16,10 @@ public class ChangeQueueProcessor : IDisposable
     private const int FlushDedupedBufferMinSize = 256;
     private const int FlushDedupedBufferMaxSize = 1024;
 
+    // Bounded post-write revalidation attempts per correction. On exhaustion the correction is
+    // dropped and the source recovers on its next inbound event or an explicit resynchronization.
+    private const int MaxCorrectionRevalidationAttempts = 8;
+
     private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
@@ -45,6 +49,10 @@ public class ChangeQueueProcessor : IDisposable
 
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
+
+    // Corrections separated out of a flush batch; delivered individually with send-time revalidation.
+    private readonly List<SubjectPropertyChange> _flushCorrections = [];
+    private readonly SubjectPropertyChange[] _correctionBuffer = new SubjectPropertyChange[1];
 
     private readonly PropertyChangeQueueSubscription _subscription;
 
@@ -142,7 +150,11 @@ public class ChangeQueueProcessor : IDisposable
 
             while (_subscription.TryDequeue(out var change, linkedTokenSource.Token))
             {
-                if (ReferenceEquals(change.Origin.Source, _source))
+                // A correction is not an echo of anything (no model change occurred), so it bypasses
+                // the own-source skip entirely; property filters and connector topology decide the
+                // actual recipients. All other kinds keep the single-comparison echo suppression.
+                if (change.Origin.Kind != ChangeOriginKind.Correction &&
+                    ReferenceEquals(change.Origin.Source, _source))
                 {
                     continue;
                 }
@@ -154,6 +166,20 @@ public class ChangeQueueProcessor : IDisposable
 
                 if (periodicTimer is null)
                 {
+                    if (change.Origin.Kind == ChangeOriginKind.Correction)
+                    {
+                        // Buffered-only correction delivery: the immediate path has no dedup, so a
+                        // stale correction enqueued after a concurrent normal change could push the
+                        // source to a wrong value. Dropping keeps the only failure mode a missing
+                        // correction (the source recovers on its next inbound event), never a wrong one.
+                        _logger.LogWarning(
+                            "Dropping correction for {Property}: corrections are delivered only through the " +
+                            "buffered flush path, but this processor runs in immediate mode (bufferTime <= 0). " +
+                            "The source recovers on its next inbound event.",
+                            change.Property);
+                        continue;
+                    }
+
                     // Immediate path: send a single change without buffering (zero allocation)
                     _immediateBuffer[0] = change;
                     try
@@ -250,8 +276,28 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 else
                 {
-                    // Earlier occurrence: merge its old value into the kept (later) change
-                    _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(_flushDedupedBuffer[existingIndex]);
+                    // Earlier occurrence for a property already kept (as its later occurrence). The
+                    // kind branch enforces normal-beats-correction regardless of queue order: a normal
+                    // change carries the authoritative value outbound and keeps its own old value as
+                    // the diff baseline, while a correction (old == new) contributes nothing to a diff.
+                    var existing = _flushDedupedBuffer[existingIndex];
+                    var changeIsCorrection = change.Origin.Kind == ChangeOriginKind.Correction;
+                    var existingIsCorrection = existing.Origin.Kind == ChangeOriginKind.Correction;
+
+                    if (changeIsCorrection == existingIsCorrection)
+                    {
+                        // Same class: two normal changes coalesce (oldest old value, newest new value);
+                        // two corrections coalesce safely (same value by construction).
+                        _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(existing);
+                    }
+                    else if (existingIsCorrection)
+                    {
+                        // The earlier change is normal, the kept later change is a correction: the
+                        // normal change wins and keeps its own old value; drop the correction.
+                        _flushDedupedBuffer[existingIndex] = change;
+                    }
+                    // else: the earlier change is a correction and the kept later change is normal.
+                    // A correction never replaces a queued normal change, so keep the normal change.
                 }
             }
 
@@ -263,17 +309,45 @@ public class ChangeQueueProcessor : IDisposable
 
             if (_flushDedupedCount > 0)
             {
-                try
+                // Partition: normal changes are written as one batch; corrections are delivered one at
+                // a time with send-time revalidation. Dedup guarantees at most one change per property,
+                // so a correction and a normal change never coexist here for the same property.
+                _flushCorrections.Clear();
+                var normalCount = 0;
+                for (var i = 0; i < _flushDedupedCount; i++)
                 {
-                    await _writeHandler(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, _flushDedupedCount), cancellationToken).ConfigureAwait(false);
+                    var change = _flushDedupedBuffer[i];
+                    if (change.Origin.Kind == ChangeOriginKind.Correction)
+                    {
+                        _flushCorrections.Add(change);
+                    }
+                    else
+                    {
+                        // Compact normals to the front; normalCount <= i always, so no unread slot is
+                        // overwritten (each correction was already copied into _flushCorrections).
+                        _flushDedupedBuffer[normalCount++] = change;
+                    }
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+
+                if (normalCount > 0)
                 {
-                    throw;
+                    try
+                    {
+                        await _writeHandler(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, normalCount), cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to write changes.");
+                    }
                 }
-                catch (Exception ex)
+
+                for (var i = 0; i < _flushCorrections.Count; i++)
                 {
-                    _logger.LogError(ex, "Failed to write changes.");
+                    await WriteCorrectionWithRevalidationAsync(_flushCorrections[i], cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -282,6 +356,7 @@ public class ChangeQueueProcessor : IDisposable
             // Clear buffers to allow GC of SubjectPropertyChange objects
             _flushChanges.Clear();
             _flushPropertyIndices.Clear();
+            _flushCorrections.Clear();
 
             // Clear entire rented array before potential return to pool.
             // SubjectPropertyChange contains object references (Source, boxed values) that must be released.
@@ -302,6 +377,86 @@ public class ChangeQueueProcessor : IDisposable
             }
 
             Volatile.Write(ref _flushGate, 0);
+        }
+    }
+
+    /// <summary>
+    /// Writes a single correction to the source with per-correction send-time revalidation. Pre-write
+    /// revalidation is a cheap early drop; the post-write bounded loop is the correctness guarantee for
+    /// the echo-suppressed inbound-from-source in-flight window.
+    /// </summary>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
+    private async ValueTask WriteCorrectionWithRevalidationAsync(SubjectPropertyChange correction, CancellationToken cancellationToken)
+    {
+        var property = correction.Property;
+        var getValue = property.Metadata.GetValue;
+        if (getValue is null)
+        {
+            return;
+        }
+
+        var correctionValue = correction.GetNewValue<object?>();
+
+        // Pre-write revalidation (cheap early drop): the model may already have moved before the write
+        // started, in which case its newer change is flowing outbound on its own. Drop the stale
+        // correction. NOT the correctness guarantee: it cannot see an inbound-from-source apply that
+        // lands after this read but before the write completes (that apply is echo-suppressed for this
+        // source and never enters the outbound queue).
+        if (!Equals(getValue.Invoke(property.Subject), correctionValue))
+        {
+            return;
+        }
+
+        var attempt = 0;
+        while (true)
+        {
+            // On the first iteration correctionValue equals the correction's value, so write it as is;
+            // a follow-up re-asserts the current model value with the same metadata.
+            _correctionBuffer[0] = Equals(correctionValue, correction.GetNewValue<object?>())
+                ? correction
+                : SubjectPropertyChange.Create(
+                    property, correction.Origin, correction.ChangedTimestamp, correction.ReceivedTimestamp,
+                    correctionValue, correctionValue);
+
+            try
+            {
+                await _writeHandler(new ReadOnlyMemory<SubjectPropertyChange>(_correctionBuffer, 0, 1), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to write correction.");
+                return;
+            }
+            finally
+            {
+                _correctionBuffer[0] = default;
+            }
+
+            // Post-write revalidation (the correctness guarantee): if the model no longer equals what
+            // was just written, an inbound apply from this source landed during the write (a local
+            // write in flight would have enqueued its own following normal change), so re-assert the
+            // current model value as a follow-up correction. An inbound arriving AFTER this read means
+            // the source already holds that value, so the echo skip is then correct.
+            var modelValue = getValue.Invoke(property.Subject);
+            if (Equals(modelValue, correctionValue))
+            {
+                break; // converged: the source holds the current model value
+            }
+
+            if (++attempt >= MaxCorrectionRevalidationAttempts)
+            {
+                _logger.LogWarning(
+                    "Correction for {Property} did not converge after {Attempts} attempts; dropping. " +
+                    "The source recovers on its next inbound event or an explicit RequestResynchronization (#342).",
+                    property, attempt);
+                break;
+            }
+
+            correctionValue = modelValue; // follow-up correction to the newer model value
         }
     }
 

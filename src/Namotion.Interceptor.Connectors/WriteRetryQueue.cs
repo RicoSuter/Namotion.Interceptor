@@ -61,10 +61,21 @@ internal sealed class WriteRetryQueue : IDisposable
         int droppedCount;
         lock (_lock)
         {
-            // Add all new items
+            // Add all new items. This is the sole public enqueue entry point, so filtering corrections
+            // here guarantees no batch call can smuggle one into the retry queue: a failed correction
+            // write is never retried (reapplying it no-ops through the equality check, and re-sending it
+            // raw could push the source off the current model value), and it never occupies a
+            // ring-buffer slot that could evict a retryable write. RequeueChanges only re-inserts items
+            // already filtered on the way in through here, so it needs no second filter.
             var span = changes.Span;
             for (var i = 0; i < span.Length; i++)
             {
+                if (span[i].Origin.Kind == ChangeOriginKind.Correction)
+                {
+                    _logger.LogDebug("Dropping failed correction write from the retry queue for {Property}.", span[i].Property);
+                    continue;
+                }
+
                 _pendingWrites.Add(span[i]);
             }
 

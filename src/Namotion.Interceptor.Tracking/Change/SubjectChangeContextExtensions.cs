@@ -108,6 +108,9 @@ public static class SubjectChangeContextExtensions
             var timestampTicks = SubjectChangeContext.CaptureTimestamp();
             property.SetWriteTimestamp(timestampTicks);
 
+            // ReceivedTimestamp rides the ambient context, not the inbound apply: a correction is a
+            // local assertion (the model already holds this value), so it has no distinct receive
+            // event of its own. Only the fresh ChangedTimestamp above is authoritative for it.
             correction = SubjectPropertyChange.Create(
                 property,
                 ChangeOrigin.Correction(source),
