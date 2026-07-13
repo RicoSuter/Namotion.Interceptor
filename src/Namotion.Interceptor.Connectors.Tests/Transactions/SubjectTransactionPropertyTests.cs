@@ -102,14 +102,12 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 
-        using (SubjectChangeContext.WithState(mockSource, changedTime, receivedTime))
-        {
-            person.FirstName = "John";
-        }
+        new PropertyReference(person, nameof(Person.FirstName))
+            .SetValueFromSource(mockSource, changedTime, receivedTime, "John");
 
         // Assert
         var change = transaction.GetPendingChanges().First();
-        Assert.Same(mockSource, change.Source);
+        Assert.Same(mockSource, change.Origin.Source);
         Assert.Equal(changedTime, change.ChangedTimestamp);
         Assert.Equal(receivedTime, change.ReceivedTimestamp);
     }
@@ -131,17 +129,15 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         // Act
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
-            using (SubjectChangeContext.WithState(mockSource, changedTime, receivedTime))
-            {
-                person.FirstName = "John";
-            }
+            new PropertyReference(person, nameof(Person.FirstName))
+                .SetValueFromSource(mockSource, changedTime, receivedTime, "John");
 
             await transaction.CommitAsync(CancellationToken.None);
         }
 
         // Assert
         var change = notifications.Single(n => n.Property.Metadata.Name == nameof(Person.FirstName));
-        Assert.Same(mockSource, change.Source);
+        Assert.Same(mockSource, change.Origin.Source);
         Assert.Equal(changedTime, change.ChangedTimestamp);
         Assert.Equal(receivedTime, change.ReceivedTimestamp);
         Assert.Equal(changedTime, person.GetPropertyReference(nameof(Person.FirstName)).TryGetWriteTimestamp());

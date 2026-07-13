@@ -378,7 +378,7 @@ public class WriteRetryQueueTests
         var subjectMock = new Mock<IInterceptorSubject>();
         return SubjectPropertyChange.Create(
             new PropertyReference(subjectMock.Object, $"Property{id}"),
-            null,
+            ChangeOrigin.Local,
             DateTimeOffset.UtcNow,
             null,
             id,

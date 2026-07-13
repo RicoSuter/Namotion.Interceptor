@@ -196,7 +196,7 @@ public class PropertyChangeQueueTests
         // Assert
         Assert.True(subscription.TryDequeue(out var change, CancellationToken.None));
         Assert.Equal("FromSource", change.GetNewValue<string?>());
-        Assert.Same(source, change.Source);
+        Assert.Same(source, change.Origin.Source);
         Assert.Equal(changedTimestamp, change.ChangedTimestamp);
         Assert.Equal(receivedTimestamp, change.ReceivedTimestamp);
     }

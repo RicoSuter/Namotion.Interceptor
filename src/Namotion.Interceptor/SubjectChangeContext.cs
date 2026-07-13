@@ -7,8 +7,6 @@ public readonly struct SubjectChangeContext
     private readonly long _changedTimestamp;
     private readonly long _receivedTimestamp;
 
-    public readonly object? Source;
-    
     [ThreadStatic]
     private static SubjectChangeContext _current;
     
@@ -61,11 +59,10 @@ public readonly struct SubjectChangeContext
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private SubjectChangeContext(long changedTimestamp, long receivedTimestamp, object? source)
+    private SubjectChangeContext(long changedTimestamp, long receivedTimestamp)
     {
         _changedTimestamp = changedTimestamp;
         _receivedTimestamp = receivedTimestamp;
-        Source = source;
     }
 
     /// <summary>
@@ -120,32 +117,24 @@ public readonly struct SubjectChangeContext
         var previousState = _current;
         _current = new SubjectChangeContext(
             changed?.UtcTicks ?? NullTimestampSentinel,
-            previousState._receivedTimestamp,
-            previousState.Source);
+            previousState._receivedTimestamp);
         return new SubjectChangeContextScope(previousState);
     }
 
-    /// <summary>Enters a scope that sets only the mutation source.</summary>
+    /// <summary>
+    /// Enters a scope that sets the changed timestamp and, when <paramref name="received"/> is
+    /// non-null, the received timestamp. A null <paramref name="received"/> preserves the ambient
+    /// received timestamp (exactly as <see cref="WithChangedTimestamp"/> does), rather than
+    /// resetting it to the sentinel the way the deleted <c>WithState</c> did. This keeps the
+    /// inbound apply path behavior-identical to master's <c>WithChangedTimestamp</c> wrapping.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static SubjectChangeContextScope WithSource(object? source)
-    {
-        var previousState = _current;
-        _current = new SubjectChangeContext(
-            previousState._changedTimestamp,
-            previousState._receivedTimestamp,
-            source);
-        return new SubjectChangeContextScope(previousState);
-    }
-
-    /// <summary>Enters a scope that sets source, changed and received timestamps.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static SubjectChangeContextScope WithState(object? source, DateTimeOffset? changed, DateTimeOffset? received)
+    public static SubjectChangeContextScope WithTimestamps(DateTimeOffset? changed, DateTimeOffset? received)
     {
         var previousState = _current;
         _current = new SubjectChangeContext(
             changed?.UtcTicks ?? NullTimestampSentinel,
-            received?.UtcTicks ?? UndefinedTimestampSentinel,
-            source);
+            received?.UtcTicks ?? previousState._receivedTimestamp);
         return new SubjectChangeContextScope(previousState);
     }
 

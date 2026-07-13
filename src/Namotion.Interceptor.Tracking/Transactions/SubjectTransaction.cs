@@ -118,7 +118,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
     internal void CaptureChange<TProperty>(
         PropertyReference property,
-        object? source,
+        ChangeOrigin origin,
         DateTimeOffset changedTimestamp,
         DateTimeOffset? receivedTimestamp,
         TProperty currentValue,
@@ -131,7 +131,7 @@ public sealed class SubjectTransaction : IDisposable
             var isFirstWrite = !_pendingChanges.TryGetValue(property, out var existingChange);
             _pendingChanges[property] = SubjectPropertyChange.Create(
                 property,
-                source: source,
+                origin: origin,
                 changedTimestamp: changedTimestamp,
                 receivedTimestamp: receivedTimestamp,
                 isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),

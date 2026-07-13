@@ -737,10 +737,7 @@ public class SubjectSourceBaseTests
         {
             LoadInitialStateOverride = _ => Task.FromResult<Action?>(() =>
             {
-                using (SubjectChangeContext.WithSource(source!))
-                {
-                    subject.FirstName = "ServerValue";
-                }
+                subject.FirstName = "ServerValue";
             }),
             WriteChangesOverride = (_, _) => new ValueTask<WriteResult>(WriteResult.Success),
         };
@@ -801,10 +798,7 @@ public class SubjectSourceBaseTests
         {
             LoadInitialStateOverride = _ => Task.FromResult<Action?>(() =>
             {
-                using (SubjectChangeContext.WithSource(source!))
-                {
-                    initialStateAction(source!);
-                }
+                initialStateAction(source!);
             }),
             WriteChangesOverride = (changes, _) =>
             {
@@ -840,7 +834,7 @@ public class SubjectSourceBaseTests
 
         var change = SubjectPropertyChange.Create(
             new PropertyReference(subject, propertyName),
-            null,
+            ChangeOrigin.Local,
             DateTimeOffset.UtcNow,
             null,
             oldValue,

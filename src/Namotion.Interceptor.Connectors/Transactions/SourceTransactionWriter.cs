@@ -303,7 +303,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         for (var i = 0; i < count; i++)
         {
             var slot = indices[i];
-            snapshot[slot] = snapshot[slot].WithSource(source);
+            snapshot[slot] = snapshot[slot].WithOrigin(ChangeOrigin.Confirmed(source));
         }
     }
 
@@ -322,7 +322,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             if (!failed.Contains(changes[i].Property))
             {
                 var slot = indices[i];
-                snapshot[slot] = snapshot[slot].WithSource(source);
+                snapshot[slot] = snapshot[slot].WithOrigin(ChangeOrigin.Confirmed(source));
             }
         }
     }
@@ -391,7 +391,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     {
         foreach (var slot in indices)
         {
-            snapshot[slot] = snapshot[slot].WithSource(source);
+            snapshot[slot] = snapshot[slot].WithOrigin(ChangeOrigin.Confirmed(source));
         }
     }
 

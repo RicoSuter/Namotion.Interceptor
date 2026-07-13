@@ -62,12 +62,11 @@ public sealed class PropertyChangeQueue : IWriteInterceptor, IDisposable
         next(ref context);
         var newValue = context.GetFinalValue();
 
-        var changeContext = SubjectChangeContext.Current;
         var propertyChange = SubjectPropertyChange.Create(
             context.Property,
-            changeContext.Source,
+            context.Origin,
             context.WriteTimestampForPublishing,
-            changeContext.ReceivedTimestamp,
+            SubjectChangeContext.Current.ReceivedTimestamp,
             oldValue,
             newValue);
 

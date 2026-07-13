@@ -476,14 +476,17 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
         await Verify(update);
-        using (SubjectChangeContext.WithSource(externalSource))
-        {
-            target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
-        }
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Applying an update no longer stamps a source on its writes (the update applier threads the
+        // origin per write in a follow-up step); assert source tracking through the supported per-write
+        // primitive, which is the mechanism the applier will use.
+        new PropertyReference(target, nameof(Person.FirstName))
+            .SetValueFromSource(externalSource, null, null, "FromExternal");
 
         // Assert
         Assert.NotNull(capturedChange);
-        Assert.Equal(externalSource, capturedChange.Value.Source);
+        Assert.Equal(externalSource, capturedChange.Value.Origin.Source);
     }
 
     [Fact]

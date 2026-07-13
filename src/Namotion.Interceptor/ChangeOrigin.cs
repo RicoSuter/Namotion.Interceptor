@@ -50,6 +50,10 @@ public readonly struct ChangeOrigin
     public static ChangeOrigin FromSource(object source) =>
         new(ChangeOriginKind.FromSource, source ?? throw new ArgumentNullException(nameof(source)));
 
+    /// <summary>
+    /// Only transaction commit replay may stamp Confirmed; stamping it elsewhere claims an
+    /// acknowledgment the source never gave and breaks echo semantics.
+    /// </summary>
     public static ChangeOrigin Confirmed(object source) =>
         new(ChangeOriginKind.Confirmed, source ?? throw new ArgumentNullException(nameof(source)));
 }

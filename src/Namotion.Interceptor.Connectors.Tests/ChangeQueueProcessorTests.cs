@@ -344,7 +344,7 @@ public class ChangeQueueProcessorTests
 
         var change = SubjectPropertyChange.Create(
             property,
-            source,
+            source is null ? ChangeOrigin.Local : ChangeOrigin.FromSource(source),
             DateTimeOffset.UtcNow,
             null,
             oldValue,
