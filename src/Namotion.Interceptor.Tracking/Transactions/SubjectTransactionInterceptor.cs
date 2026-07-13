@@ -69,15 +69,11 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
                     $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");
             }
 
-            // The ambient context is read only for the received timestamp; the origin comes from
-            // this write's stamped context.Origin.
-            var currentContext = SubjectChangeContext.Current;
-
             transaction.CaptureChange(
                 context.Property,
                 context.Origin,
                 context.WriteTimestampForPublishing,
-                currentContext.ReceivedTimestamp,
+                SubjectChangeContext.Current.ReceivedTimestamp,
                 context.CurrentValue,
                 context.NewValue);
 

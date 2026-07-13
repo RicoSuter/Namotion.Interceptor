@@ -124,9 +124,7 @@ public readonly struct SubjectChangeContext
     /// <summary>
     /// Enters a scope that sets the changed timestamp and, when <paramref name="received"/> is
     /// non-null, the received timestamp. A null <paramref name="received"/> preserves the ambient
-    /// received timestamp (exactly as <see cref="WithChangedTimestamp"/> does), rather than
-    /// resetting it to the sentinel the way the deleted <c>WithState</c> did. This keeps the
-    /// inbound apply path behavior-identical to master's <c>WithChangedTimestamp</c> wrapping.
+    /// received timestamp, exactly as <see cref="WithChangedTimestamp"/> does.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static SubjectChangeContextScope WithTimestamps(DateTimeOffset? changed, DateTimeOffset? received)

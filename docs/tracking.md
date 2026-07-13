@@ -503,7 +503,7 @@ propertyReference.SetValueFromSource(
 // change.Origin is ChangeOrigin.FromSource(mqttSource)
 ```
 
-Source marking is per write; a scope-based source no longer exists. This prevents feedback loops where changes from external sources are written back to those same sources.
+Source marking is per write, not through an ambient scope. This prevents feedback loops where changes from external sources are written back to those same sources.
 
 **Atomic Timestamps**: Use `SubjectChangeContext.WithChangedTimestamp()` when several property writes belong to one logical event and should publish with the same timestamp. Without the scope, each write reads `UtcNow` separately and consumers see distinct events microseconds apart. Pass `null` when the source has no timestamp.
 

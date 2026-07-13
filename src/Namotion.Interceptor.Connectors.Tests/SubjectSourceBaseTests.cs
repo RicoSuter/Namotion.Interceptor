@@ -730,9 +730,8 @@ public class SubjectSourceBaseTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        TestSubjectSource? source = null;
         // writeRetryQueueSize: 0 disables the queue
-        source = new TestSubjectSource(subject, context, NullLogger.Instance,
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance,
             writeRetryQueueSize: 0)
         {
             LoadInitialStateOverride = _ => Task.FromResult<Action?>(() =>
