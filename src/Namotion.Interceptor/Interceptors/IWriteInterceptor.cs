@@ -62,16 +62,19 @@ public struct PropertyWriteContext<TProperty>
     public bool IsWritten { get; set; }
 
     /// <summary>
+    /// The attempted origin paired with the value the source sent (valid when the origin is
+    /// stamped). Finalized at the terminal write; see <see cref="Origin"/> and <see cref="FinalizeOrigin"/>.
+    /// </summary>
+    private AttemptedOrigin _attempted;
+
+    /// <summary>
     /// The origin of this write. Before the terminal write executes this is the attempted
     /// origin (what the caller declared when setting the pending origin); when the terminal write lands (the same
     /// point <see cref="IsWritten"/> becomes true) it is finalized: a stamped origin whose
     /// final value differs from the sent value becomes Local, because the stored value was
     /// computed locally rather than taken from the source.
     /// </summary>
-    public ChangeOrigin Origin { get; internal set; }
-
-    /// <summary>The value the source sent, valid when <see cref="Origin"/> is stamped.</summary>
-    internal object? SentValue { get; }
+    public ChangeOrigin Origin => _attempted.Origin;
 
     /// <summary>
     /// Constructs a write context and, as a side effect, consumes the thread-static pending
@@ -86,9 +89,7 @@ public struct PropertyWriteContext<TProperty>
         NewValue = newValue;
         IsWritten = false;
         _writeTimestamp = 0;
-        PendingOrigin.TryConsume(in property, out var origin, out var sentValue);
-        Origin = origin;
-        SentValue = sentValue;
+        PendingOrigin.TryConsume(in property, out _attempted);
     }
 
     /// <summary>
@@ -106,9 +107,7 @@ public struct PropertyWriteContext<TProperty>
         NewValue = newValue;
         IsWritten = false;
         _writeTimestamp = rawTimestamp;
-        PendingOrigin.TryConsume(in property, out var origin, out var sentValue);
-        Origin = origin;
-        SentValue = sentValue;
+        PendingOrigin.TryConsume(in property, out _attempted);
     }
 
     /// <summary>
@@ -210,10 +209,10 @@ public struct PropertyWriteContext<TProperty>
         // Typed comparison in the generic frame: NewValue is never boxed. SentValue arrives already
         // boxed from the inbound apply; cast it down to TProperty for EqualityComparer.Default. On the
         // non-generic path (TProperty == object) both operands are already boxed objects.
-        if (Origin.Kind != ChangeOriginKind.Local &&
-            !EqualityComparer<TProperty>.Default.Equals((TProperty)SentValue!, NewValue))
+        if (_attempted.Origin.Kind != ChangeOriginKind.Local &&
+            !EqualityComparer<TProperty>.Default.Equals((TProperty)_attempted.SentValue!, NewValue))
         {
-            Origin = ChangeOrigin.Local;
+            _attempted = default;
         }
     }
 }

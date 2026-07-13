@@ -3,7 +3,10 @@ using System.Runtime.CompilerServices;
 namespace Namotion.Interceptor;
 
 /// <summary>
-/// One-shot, per-write origin handoff. <see cref="Set"/> stores a pending stamp for exactly
+/// One-shot, per-write origin handoff. An origin moves through three stages: pending (set in the
+/// slot, waiting for its write), then attempted (consumed into the write context, carried
+/// unverified), then finalized (verified or demoted to Local at the terminal write).
+/// <see cref="Set"/> stores a pending stamp for exactly
 /// one write of one property; the matching write chain consumes it at
 /// <c>PropertyWriteContext</c> construction. Nested writes (hooks, INPC handlers, derived
 /// recalculations) never inherit it: the slot is either already consumed or targets a
@@ -24,10 +27,9 @@ internal static class PendingOrigin
     /// </summary>
     internal struct PendingFrame
     {
-        public bool Armed;
+        public bool HasValue;
         public PropertyReference Target;
-        public ChangeOrigin Origin;
-        public object? SentValue;
+        public AttemptedOrigin Attempted;
     }
 
     [ThreadStatic] private static PendingFrame _frame;
@@ -37,27 +39,24 @@ internal static class PendingOrigin
         var scope = new PendingOriginScope(_frame);
         _frame = new PendingFrame
         {
-            Armed = true,
+            HasValue = true,
             Target = target,
-            Origin = origin,
-            SentValue = sentValue
+            Attempted = new AttemptedOrigin(origin, sentValue)
         };
         return scope;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool TryConsume(in PropertyReference property, out ChangeOrigin origin, out object? sentValue)
+    internal static bool TryConsume(in PropertyReference property, out AttemptedOrigin attempted)
     {
-        if (_frame.Armed && _frame.Target.Equals(property))
+        if (_frame.HasValue && _frame.Target.Equals(property))
         {
-            origin = _frame.Origin;
-            sentValue = _frame.SentValue;
+            attempted = _frame.Attempted;
             _frame = default;
             return true;
         }
 
-        origin = ChangeOrigin.Local;
-        sentValue = null;
+        attempted = default;
         return false;
     }
 
