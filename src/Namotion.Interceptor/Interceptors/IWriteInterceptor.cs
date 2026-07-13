@@ -61,6 +61,27 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     public bool IsWritten { get; set; }
 
+    /// <summary>
+    /// The attempted origin paired with the value the source sent (valid when the origin is
+    /// stamped). Finalized at the terminal write; see <see cref="Origin"/> and <see cref="FinalizeOrigin"/>.
+    /// </summary>
+    private AttemptedOrigin _attempted;
+
+    /// <summary>
+    /// The origin of this write. Before the terminal write executes this is the attempted
+    /// origin (what the caller declared when setting the pending origin); when the terminal write lands (the same
+    /// point <see cref="IsWritten"/> becomes true) it is finalized: a stamped origin whose
+    /// final value differs from the sent value becomes Local, because the stored value was
+    /// computed locally rather than taken from the source.
+    /// </summary>
+    public ChangeOrigin Origin => _attempted.Origin;
+
+    /// <summary>
+    /// Constructs a write context and, as a side effect, consumes the thread-static pending
+    /// origin stamp for this property (see <see cref="PendingOrigin"/>). Any direct construction
+    /// (tests, benchmarks, not just the interceptor chain) drains the pending stamp for the
+    /// matching property; a caller newing up a context by hand takes on that consumption.
+    /// </summary>
     public PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Property = property;
@@ -68,6 +89,7 @@ public struct PropertyWriteContext<TProperty>
         NewValue = newValue;
         IsWritten = false;
         _writeTimestamp = 0;
+        PendingOrigin.TryConsume(in property, out _attempted);
     }
 
     /// <summary>
@@ -75,6 +97,8 @@ public struct PropertyWriteContext<TProperty>
     /// already-resolved raw timestamp, so the dependent's write does not need to lazy-resolve
     /// (and therefore does not need an active <c>WithChangedTimestamp</c> scope to share state
     /// with the trigger). Pass 0 to leave the cache uninitialized (the default lazy behavior).
+    /// Like the public constructor, this consumes the thread-static pending origin stamp for
+    /// this property (see <see cref="PendingOrigin"/>) as a side effect of construction.
     /// </summary>
     internal PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp)
     {
@@ -83,6 +107,7 @@ public struct PropertyWriteContext<TProperty>
         NewValue = newValue;
         IsWritten = false;
         _writeTimestamp = rawTimestamp;
+        PendingOrigin.TryConsume(in property, out _attempted);
     }
 
     /// <summary>
@@ -172,4 +197,33 @@ public struct PropertyWriteContext<TProperty>
     public TProperty GetFinalValue() => Property.Metadata.IsDerived ?
         (TProperty)Property.Metadata.GetValue?.Invoke(Property.Subject)! :
         NewValue;
+
+    /// <summary>
+    /// Finalizes <see cref="Origin"/> at the terminal write (right after <see cref="IsWritten"/>
+    /// becomes true). A stamped origin survives only when the stored value is exactly the value
+    /// the source sent; otherwise the value was computed locally and the origin becomes Local.
+    ///
+    /// A derived property's stored value is recomputed by its getter (published via
+    /// <see cref="GetFinalValue"/>), never literally the value the source sent, so a stamped origin
+    /// never survives a derived write. It is demoted unconditionally without invoking the getter,
+    /// because the getter must not run here (this executes under the subject's SyncRoot).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void FinalizeOrigin()
+    {
+        if (_attempted.Origin.Kind == ChangeOriginKind.Local)
+        {
+            return;
+        }
+
+        // Typed comparison in the generic frame: NewValue is never boxed. SentValue arrives already
+        // boxed from the inbound apply; cast it down to TProperty for EqualityComparer.Default. On the
+        // non-generic path (TProperty == object) both operands are already boxed objects. Derived
+        // properties short-circuit the comparison (and its cast): they always demote.
+        if (Property.Metadata.IsDerived ||
+            !EqualityComparer<TProperty>.Default.Equals((TProperty)_attempted.SentValue!, NewValue))
+        {
+            _attempted = default;
+        }
+    }
 }

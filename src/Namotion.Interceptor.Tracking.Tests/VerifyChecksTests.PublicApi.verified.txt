@@ -48,14 +48,16 @@ namespace Namotion.Interceptor.Tracking.Change
     }
     public static class SubjectChangeContextExtensions
     {
+        public static void SetValueFromOrigin(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.ChangeOrigin origin, System.DateTimeOffset? changedTimestamp, System.DateTimeOffset? receivedTimestamp, object? value) { }
+        public static void SetValueFromOrigin(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.ChangeOrigin origin, System.DateTimeOffset? changedTimestamp, System.DateTimeOffset? receivedTimestamp, object? value, object? sentValue) { }
         public static void SetValueFromSource(this Namotion.Interceptor.PropertyReference property, object source, System.DateTimeOffset? changedTimestamp, System.DateTimeOffset? receivedTimestamp, object? valueFromSource) { }
     }
     public readonly struct SubjectPropertyChange : System.IEquatable<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>
     {
         public System.DateTimeOffset ChangedTimestamp { get; }
+        public Namotion.Interceptor.ChangeOrigin Origin { get; }
         public Namotion.Interceptor.PropertyReference Property { get; }
         public System.DateTimeOffset? ReceivedTimestamp { get; }
-        public object? Source { get; }
         public bool Equals(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange other) { }
         public override bool Equals(object? obj) { }
         public override int GetHashCode() { }
@@ -64,8 +66,8 @@ namespace Namotion.Interceptor.Tracking.Change
         public Namotion.Interceptor.Tracking.Change.SubjectPropertyChange MergeWithNewer(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange newerChange) { }
         public bool TryGetNewValue<TValue>(out TValue value) { }
         public bool TryGetOldValue<TValue>(out TValue value) { }
-        public Namotion.Interceptor.Tracking.Change.SubjectPropertyChange WithSource(object? source) { }
-        public static Namotion.Interceptor.Tracking.Change.SubjectPropertyChange Create<TValue>(Namotion.Interceptor.PropertyReference property, object? source, System.DateTimeOffset changedTimestamp, System.DateTimeOffset? receivedTimestamp, TValue oldValue, TValue newValue) { }
+        public Namotion.Interceptor.Tracking.Change.SubjectPropertyChange WithOrigin(Namotion.Interceptor.ChangeOrigin origin) { }
+        public static Namotion.Interceptor.Tracking.Change.SubjectPropertyChange Create<TValue>(Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.ChangeOrigin origin, System.DateTimeOffset changedTimestamp, System.DateTimeOffset? receivedTimestamp, TValue oldValue, TValue newValue) { }
         public static bool operator !=(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange left, Namotion.Interceptor.Tracking.Change.SubjectPropertyChange right) { }
         public static bool operator ==(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange left, Namotion.Interceptor.Tracking.Change.SubjectPropertyChange right) { }
     }

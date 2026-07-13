@@ -118,9 +118,13 @@ internal static class SubjectPropertyChangeOperations
         try
         {
             var metadata = change.Property.Metadata;
-            using (SubjectChangeContext.WithState(change.Source, change.ChangedTimestamp, change.ReceivedTimestamp))
+            var newValue = change.GetNewValue<object?>();
+            // Setting a Local origin is a no-op stamp (consume yields Local), so revert paths
+            // re-apply each change with its original provenance without branching.
+            using (SubjectChangeContext.WithTimestamps(change.ChangedTimestamp, change.ReceivedTimestamp))
+            using (PendingOrigin.Set(change.Property, change.Origin, newValue))
             {
-                metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
+                metadata.SetValue?.Invoke(change.Property.Subject, newValue);
             }
             error = null;
             return true;
@@ -138,7 +142,7 @@ internal static class SubjectPropertyChangeOperations
     internal static SubjectPropertyChange ToRollbackChange(this SubjectPropertyChange change) =>
         SubjectPropertyChange.Create(
             change.Property,
-            source: change.Source,
+            origin: change.Origin,
             changedTimestamp: change.ChangedTimestamp,
             receivedTimestamp: change.ReceivedTimestamp,
             oldValue: change.GetNewValue<object?>(),

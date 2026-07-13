@@ -712,13 +712,14 @@ By default (`SubscriptionSequentialPublishing = false`), subscription callbacks 
 
 For most use cases (sensor values, status updates), this is acceptable since you typically want the latest value. If your application requires strict ordering guarantees, set `SubscriptionSequentialPublishing = true` to process all subscription messages sequentially at the cost of reduced throughput.
 
-To prevent feedback loops when external sources update properties, use `SubjectChangeContext.WithSource()` to mark the change source:
+To prevent feedback loops when external sources update properties, apply inbound values with the `SetValueFromSource()` extension method, which stamps the write with a `FromSource` origin (source marking is per write, not through an ambient scope):
 
 ```csharp
-using (SubjectChangeContext.WithSource(opcUaSource))
-{
-    subject.Temperature = newValue;
-}
+propertyReference.SetValueFromSource(
+    source: opcUaSource,
+    changedTimestamp: sourceTimestamp,
+    receivedTimestamp: DateTimeOffset.Now,
+    valueFromSource: newValue);
 ```
 
 ## Lifecycle

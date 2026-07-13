@@ -24,7 +24,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -41,7 +41,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -58,7 +58,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -74,7 +74,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -89,7 +89,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -104,7 +104,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -119,7 +119,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -134,7 +134,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -149,7 +149,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -164,7 +164,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -217,7 +217,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -234,7 +234,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -251,7 +251,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -268,7 +268,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -304,7 +304,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -325,7 +325,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -346,7 +346,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -366,7 +366,7 @@ public class SubjectPropertyChangeTests
         // Arrange
         var oldValue = new SmallCustomStruct { Value1 = 42, Value2 = 84 };
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, new SmallCustomStruct());
 
         // Act
@@ -385,7 +385,7 @@ public class SubjectPropertyChangeTests
         // Arrange
         var oldValue = new OversizedCustomStruct { Value1 = 1L, Value2 = 2L, Value3 = 3L };
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, new OversizedCustomStruct());
 
         // Act
@@ -414,7 +414,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -431,7 +431,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -448,7 +448,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -465,7 +465,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -480,7 +480,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, oldValue);
 
         // Assert
@@ -493,7 +493,7 @@ public class SubjectPropertyChangeTests
     {
         // Arrange
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             42, 100);
 
         // Act
@@ -510,7 +510,7 @@ public class SubjectPropertyChangeTests
         // Arrange
         var newValue = 42.5;
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             0.0, newValue);
 
         // Act
@@ -526,7 +526,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "old", "new");
 
         // Assert
@@ -541,11 +541,11 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source, _changedTimestamp, _receivedTimestamp,
+            _property, ChangeOrigin.FromSource(source), _changedTimestamp, _receivedTimestamp,
             "old", "new");
 
         // Assert
-        Assert.Same(source, change.Source);
+        Assert.Same(source, change.Origin.Source);
     }
 
     [Fact]
@@ -553,7 +553,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "old", "new");
 
         // Assert
@@ -566,7 +566,7 @@ public class SubjectPropertyChangeTests
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, receivedTimestamp: null,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, receivedTimestamp: null,
             "old", "new");
 
         // Assert
@@ -583,10 +583,10 @@ public class SubjectPropertyChangeTests
         var laterTimestamp = DateTimeOffset.UtcNow;
 
         var earlier = SubjectPropertyChange.Create(
-            _property, earlierSource, earlierTimestamp, earlierTimestamp,
+            _property, ChangeOrigin.FromSource(earlierSource), earlierTimestamp, earlierTimestamp,
             10, 20);
         var later = SubjectPropertyChange.Create(
-            _property, laterSource, laterTimestamp, laterTimestamp,
+            _property, ChangeOrigin.FromSource(laterSource), laterTimestamp, laterTimestamp,
             20, 30);
 
         // Act
@@ -595,7 +595,7 @@ public class SubjectPropertyChangeTests
         // Assert
         Assert.Equal(10, merged.GetOldValue<int>());
         Assert.Equal(30, merged.GetNewValue<int>());
-        Assert.Same(laterSource, merged.Source);
+        Assert.Same(laterSource, merged.Origin.Source);
         Assert.Equal(laterTimestamp, merged.ChangedTimestamp);
     }
 
@@ -604,10 +604,10 @@ public class SubjectPropertyChangeTests
     {
         // Arrange
         var earlier = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "original", "intermediate");
         var later = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "intermediate", "final");
 
         // Act
@@ -623,10 +623,10 @@ public class SubjectPropertyChangeTests
     {
         // Arrange
         var earlier = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             null, "intermediate");
         var later = SubjectPropertyChange.Create<string?>(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "intermediate", "final");
 
         // Act
@@ -646,10 +646,10 @@ public class SubjectPropertyChangeTests
         var newObj = new CustomClass { Id = 3, Name = "New" };
 
         var earlier = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldObj, midObj);
         var later = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             midObj, newObj);
 
         // Act
@@ -658,5 +658,37 @@ public class SubjectPropertyChangeTests
         // Assert
         Assert.Same(oldObj, merged.GetOldValue<CustomClass>());
         Assert.Same(newObj, merged.GetNewValue<CustomClass>());
+    }
+
+    [Fact]
+    public void MergeWithNewer_WithFromSourceOrigins_PreservesKindAndSource()
+    {
+        // Arrange
+        var source = new object();
+        var earlier = SubjectPropertyChange.Create(
+            _property, ChangeOrigin.FromSource(source), _changedTimestamp, _receivedTimestamp,
+            "old", "intermediate");
+        var later = SubjectPropertyChange.Create(
+            _property, ChangeOrigin.FromSource(source), _changedTimestamp, _receivedTimestamp,
+            "intermediate", "new");
+
+        // Act
+        var merged = earlier.MergeWithNewer(later);
+
+        // Assert - both the kind and the source survive the merge
+        Assert.Equal(ChangeOriginKind.FromSource, merged.Origin.Kind);
+        Assert.Same(source, merged.Origin.Source);
+    }
+
+    [Fact]
+    public void WhenMeasuringSubjectPropertyChange_ThenSizeStaysWithinOneAlignmentSlotOfMaster()
+    {
+        // The plain ChangeOrigin field may cost one alignment slot (8 bytes) versus master's
+        // object? Source. That growth is accepted. If the benchmark gate later shows it matters
+        // on the hot path, flatten the origin into a padding-folded kind byte plus the existing
+        // source reference slot; that is the known optimization, not applied preemptively.
+        // Master measured at 192 bytes; the accepted bound is master + one alignment slot.
+        var size = System.Runtime.CompilerServices.Unsafe.SizeOf<SubjectPropertyChange>();
+        Assert.True(size <= 200, $"SubjectPropertyChange grew to {size} bytes");
     }
 }

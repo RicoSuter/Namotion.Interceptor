@@ -730,17 +730,13 @@ public class SubjectSourceBaseTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        TestSubjectSource? source = null;
         // writeRetryQueueSize: 0 disables the queue
-        source = new TestSubjectSource(subject, context, NullLogger.Instance,
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance,
             writeRetryQueueSize: 0)
         {
             LoadInitialStateOverride = _ => Task.FromResult<Action?>(() =>
             {
-                using (SubjectChangeContext.WithSource(source!))
-                {
-                    subject.FirstName = "ServerValue";
-                }
+                subject.FirstName = "ServerValue";
             }),
             WriteChangesOverride = (_, _) => new ValueTask<WriteResult>(WriteResult.Success),
         };
@@ -801,10 +797,7 @@ public class SubjectSourceBaseTests
         {
             LoadInitialStateOverride = _ => Task.FromResult<Action?>(() =>
             {
-                using (SubjectChangeContext.WithSource(source!))
-                {
-                    initialStateAction(source!);
-                }
+                initialStateAction(source!);
             }),
             WriteChangesOverride = (changes, _) =>
             {
@@ -840,7 +833,7 @@ public class SubjectSourceBaseTests
 
         var change = SubjectPropertyChange.Create(
             new PropertyReference(subject, propertyName),
-            null,
+            ChangeOrigin.Local,
             DateTimeOffset.UtcNow,
             null,
             oldValue,

@@ -354,13 +354,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        using (SubjectChangeContext.WithSource(null))
-        {
-            // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
-            // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
-            // not need a WithChangedTimestamp scope active to share the time with the dependent).
-            derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
-        }
+        // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
+        // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
+        // not need a WithChangedTimestamp scope active to share the time with the dependent).
+        derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {

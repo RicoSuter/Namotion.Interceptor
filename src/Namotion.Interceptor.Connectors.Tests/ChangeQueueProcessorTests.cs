@@ -333,8 +333,7 @@ public class ChangeQueueProcessorTests
         ChangeQueueProcessor processor,
         PropertyReference property,
         string? oldValue,
-        string? newValue,
-        object? source = null)
+        string? newValue)
     {
         // Use reflection to access the private _changes queue
         var changesField = typeof(ChangeQueueProcessor)
@@ -344,7 +343,7 @@ public class ChangeQueueProcessorTests
 
         var change = SubjectPropertyChange.Create(
             property,
-            source,
+            ChangeOrigin.Local,
             DateTimeOffset.UtcNow,
             null,
             oldValue,

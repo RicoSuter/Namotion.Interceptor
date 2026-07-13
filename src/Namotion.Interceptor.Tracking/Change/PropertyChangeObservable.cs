@@ -27,15 +27,14 @@ public class PropertyChangeObservable : IObservable<SubjectPropertyChange>, IWri
 
         var newValue = context.GetFinalValue();
 
-        var changeContext = SubjectChangeContext.Current;
         var propertyChange = SubjectPropertyChange.Create(
             context.Property,
-            changeContext.Source,
+            context.Origin,
             context.WriteTimestampForPublishing,
-            changeContext.ReceivedTimestamp,
+            SubjectChangeContext.Current.ReceivedTimestamp,
             oldValue,
             newValue);
-        
+
         _syncSubject.OnNext(propertyChange);
     }
 

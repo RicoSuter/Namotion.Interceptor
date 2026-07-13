@@ -172,7 +172,7 @@ public sealed class FailureDiagnostics
                 }
 
                 var otherRoot = _participants[snapshots[i].Name];
-                otherRoot.ApplySubjectUpdate(completeUpdate, DefaultSubjectFactory.Instance);
+                otherRoot.ApplySubjectUpdate(completeUpdate, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
                 // Reference is paused and not mutated since snapshots[0] was taken; re-using
                 // that string avoids redundant work and a subtle correctness footgun if a
