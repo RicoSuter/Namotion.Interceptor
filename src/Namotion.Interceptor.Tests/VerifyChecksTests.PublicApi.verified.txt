@@ -228,6 +228,7 @@ namespace Namotion.Interceptor.Interceptors
         public TProperty CurrentValue { get; }
         public bool IsWritten { get; set; }
         public TProperty NewValue { get; set; }
+        public Namotion.Interceptor.ChangeOrigin Origin { get; }
         public Namotion.Interceptor.PropertyReference Property { get; }
         public System.DateTimeOffset? WriteTimestamp { get; }
         public TProperty GetFinalValue() { }
