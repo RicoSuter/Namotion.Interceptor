@@ -17,32 +17,42 @@ namespace Namotion.Interceptor;
 /// </summary>
 internal static class PendingOrigin
 {
-    [ThreadStatic] private static bool _armed;
-    [ThreadStatic] private static PropertyReference _target;
-    [ThreadStatic] private static ChangeOrigin _origin;
-    [ThreadStatic] private static object? _sentValue;
+    /// <summary>
+    /// The pending stamp held in a single thread-static slot so Set/TryConsume/Restore perform one
+    /// TLS lookup plus field offsets instead of four separate slot accesses, and each reset is a
+    /// single default assignment (so no reference can be left behind partially).
+    /// </summary>
+    internal struct PendingFrame
+    {
+        public bool Armed;
+        public PropertyReference Target;
+        public ChangeOrigin Origin;
+        public object? SentValue;
+    }
+
+    [ThreadStatic] private static PendingFrame _frame;
 
     internal static PendingOriginScope Set(PropertyReference target, ChangeOrigin origin, object? sentValue)
     {
-        var scope = new PendingOriginScope(_armed, _target, _origin, _sentValue);
-        _armed = true;
-        _target = target;
-        _origin = origin;
-        _sentValue = sentValue;
+        var scope = new PendingOriginScope(_frame);
+        _frame = new PendingFrame
+        {
+            Armed = true,
+            Target = target,
+            Origin = origin,
+            SentValue = sentValue
+        };
         return scope;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool TryConsume(in PropertyReference property, out ChangeOrigin origin, out object? sentValue)
     {
-        if (_armed && _target.Equals(property))
+        if (_frame.Armed && _frame.Target.Equals(property))
         {
-            origin = _origin;
-            sentValue = _sentValue;
-            _armed = false;
-            _target = default;
-            _origin = default;
-            _sentValue = null;
+            origin = _frame.Origin;
+            sentValue = _frame.SentValue;
+            _frame = default;
             return true;
         }
 
@@ -51,29 +61,20 @@ internal static class PendingOrigin
         return false;
     }
 
-    internal static void Restore(bool armed, in PropertyReference target, ChangeOrigin origin, object? sentValue)
+    internal static void Restore(in PendingFrame frame)
     {
-        _armed = armed;
-        _target = target;
-        _origin = origin;
-        _sentValue = sentValue;
+        _frame = frame;
     }
 }
 
 internal readonly ref struct PendingOriginScope
 {
-    private readonly bool _previousArmed;
-    private readonly PropertyReference _previousTarget;
-    private readonly ChangeOrigin _previousOrigin;
-    private readonly object? _previousSentValue;
+    private readonly PendingOrigin.PendingFrame _previousFrame;
 
-    internal PendingOriginScope(bool armed, PropertyReference target, ChangeOrigin origin, object? sentValue)
+    internal PendingOriginScope(in PendingOrigin.PendingFrame previousFrame)
     {
-        _previousArmed = armed;
-        _previousTarget = target;
-        _previousOrigin = origin;
-        _previousSentValue = sentValue;
+        _previousFrame = previousFrame;
     }
 
-    public void Dispose() => PendingOrigin.Restore(_previousArmed, in _previousTarget, _previousOrigin, _previousSentValue);
+    public void Dispose() => PendingOrigin.Restore(in _previousFrame);
 }
