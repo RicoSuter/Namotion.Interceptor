@@ -202,14 +202,25 @@ public struct PropertyWriteContext<TProperty>
     /// Finalizes <see cref="Origin"/> at the terminal write (right after <see cref="IsWritten"/>
     /// becomes true). A stamped origin survives only when the stored value is exactly the value
     /// the source sent; otherwise the value was computed locally and the origin becomes Local.
+    ///
+    /// A derived property's stored value is recomputed by its getter (published via
+    /// <see cref="GetFinalValue"/>), never literally the value the source sent, so a stamped origin
+    /// never survives a derived write. It is demoted unconditionally without invoking the getter,
+    /// because the getter must not run here (this executes under the subject's SyncRoot).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void FinalizeOrigin()
     {
+        if (_attempted.Origin.Kind == ChangeOriginKind.Local)
+        {
+            return;
+        }
+
         // Typed comparison in the generic frame: NewValue is never boxed. SentValue arrives already
         // boxed from the inbound apply; cast it down to TProperty for EqualityComparer.Default. On the
-        // non-generic path (TProperty == object) both operands are already boxed objects.
-        if (_attempted.Origin.Kind != ChangeOriginKind.Local &&
+        // non-generic path (TProperty == object) both operands are already boxed objects. Derived
+        // properties short-circuit the comparison (and its cast): they always demote.
+        if (Property.Metadata.IsDerived ||
             !EqualityComparer<TProperty>.Default.Equals((TProperty)_attempted.SentValue!, NewValue))
         {
             _attempted = default;
