@@ -50,6 +50,7 @@ public class SourceCorrectionTests
         device.Value = 100;
         var source = new object();
         var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+        var modelWriteTimestamp = property.TryGetWriteTimestamp();
 
         // An old inbound timestamp so "not the inbound scope time" is a real assertion.
         var inboundTimestamp = DateTimeOffset.UtcNow.AddHours(-1);
@@ -80,12 +81,94 @@ public class SourceCorrectionTests
         Assert.Equal(100, device.Value);
         Assert.DoesNotContain(nameof(ClampingDevice.Value), raisedProperties);
 
-        // The correction reuses the property's existing write-timestamp (the value's real last-change
-        // time from the arrange write), not the inbound scope time, and it does NOT advance the
-        // metadata: an unchanged value is not a new write, so the write-timestamp is left untouched.
+        // The correction carries a fresh assertion timestamp (a timestamp-ordering endpoint must
+        // never reject it as stale), not the inbound scope time, and it does NOT advance the
+        // metadata: an unchanged value is not a new write, so the property keeps the value's real
+        // last-change time from the arrange write.
         Assert.NotEqual(inboundTimestamp, correction.ChangedTimestamp);
-        Assert.True(correction.ChangedTimestamp <= beforeCall);
-        Assert.Equal(property.TryGetWriteTimestamp(), correction.ChangedTimestamp);
+        Assert.True(correction.ChangedTimestamp >= beforeCall);
+        Assert.Equal(modelWriteTimestamp, property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void WhenInboundTimestampIsAheadOfLocalClock_ThenCorrectionTimestampExceedsIt()
+    {
+        // Arrange: model at 100; the source's clock runs an hour ahead of ours.
+        var context = CreateContext();
+        var device = new ClampingDevice(context);
+        device.Value = 100;
+        var source = new object();
+        var aheadTimestamp = DateTimeOffset.UtcNow.AddHours(1);
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act: the source sends a diverging 105 stamped in our future; the clamp projects it onto
+        // the stored 100 and the write is suppressed.
+        new PropertyReference(device, nameof(ClampingDevice.Value))
+            .SetValueFromSource(source, aheadTimestamp, null, 105);
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert: the correction is stamped strictly after the inbound timestamp it corrects
+        // (Lamport lower bound), so a timestamp-ordering endpoint cannot reject it as older than
+        // the diverged value, even under source clock skew.
+        var correction = Assert.Single(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
+        Assert.Equal(ChangeOriginKind.Correction, correction.Origin.Kind);
+        Assert.True(correction.ChangedTimestamp > aheadTimestamp);
+    }
+
+    [Fact]
+    public void WhenInboundTimestampIsMaxValue_ThenSynthesisSaturatesInsteadOfThrowing()
+    {
+        // Arrange: model at 100; a hostile or broken source stamps its diverging value with
+        // DateTimeOffset.MaxValue. The Lamport bound has no representable successor, so synthesis
+        // must saturate at the ceiling rather than throw out of the inbound apply; delivery is the
+        // single logged decision point that drops the unadvanceable correction.
+        var context = CreateContext();
+        var device = new ClampingDevice(context);
+        device.Value = 100;
+        var source = new object();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act: must not throw.
+        new PropertyReference(device, nameof(ClampingDevice.Value))
+            .SetValueFromSource(source, DateTimeOffset.MaxValue, null, 105);
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert: the correction is synthesized, saturated at the ceiling.
+        var correction = Assert.Single(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
+        Assert.Equal(ChangeOriginKind.Correction, correction.Origin.Kind);
+        Assert.Equal(DateTimeOffset.MaxValue, correction.ChangedTimestamp);
+    }
+
+    [Fact]
+    public void WhenInboundTimestampCarriesOffsetAtClockCeiling_ThenSynthesisNormalizesInsteadOfThrowing()
+    {
+        // Arrange: an inbound stamp whose CLOCK time sits at DateTime.MaxValue but whose instant is
+        // an hour below the ceiling. DateTimeOffset arithmetic operates on the clock time while
+        // comparisons use the instant, so without UTC normalization the Lamport advancement would
+        // throw out of the inbound apply despite the instant being advanceable.
+        var context = CreateContext();
+        var device = new ClampingDevice(context);
+        device.Value = 100;
+        var source = new object();
+        var offsetCeilingTimestamp = new DateTimeOffset(DateTime.MaxValue, TimeSpan.FromHours(1));
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act: must not throw.
+        new PropertyReference(device, nameof(ClampingDevice.Value))
+            .SetValueFromSource(source, offsetCeilingTimestamp, null, 105);
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert: synthesized, UTC-normalized, strictly after the inbound instant.
+        var correction = Assert.Single(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
+        Assert.Equal(ChangeOriginKind.Correction, correction.Origin.Kind);
+        Assert.Equal(TimeSpan.Zero, correction.ChangedTimestamp.Offset);
+        Assert.True(correction.ChangedTimestamp > offsetCeilingTimestamp.ToUniversalTime());
     }
 
     [Fact]
@@ -196,6 +279,39 @@ public class SourceCorrectionTests
     }
 
     [Fact]
+    public void WhenSynthesisGetterThrows_ThenExceptionPropagatesAndNoCorrectionIsEnqueued()
+    {
+        // Arrange: a read interceptor that throws once armed. The synthesis-time observable read is
+        // the only chain read in this flow, so arming after the arrange write targets exactly it.
+        var thrower = new ArmedThrowingReadInterceptor(nameof(ClampingDevice.Value));
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithService(() => thrower)
+            .WithFullPropertyTracking();
+
+        var device = new ClampingDevice(context);
+        device.Value = 100;
+        var source = new object();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        thrower.Arm();
+
+        // Act & Assert: the throw propagates to the caller deliberately. Stamped setters are already
+        // a throwing API (validators throw through them), and a broken read path is a defect that
+        // must surface; swallowing it would leave an undiagnosable, silently diverged source.
+        Assert.Throws<InvalidOperationException>(() =>
+            new PropertyReference(device, nameof(ClampingDevice.Value))
+                .SetValueFromSource(source, null, null, 105));
+
+        thrower.Disarm();
+
+        // The suppressed write left the model intact and no correction was enqueued.
+        Assert.Equal(100, device.Value);
+        var changes = DrainWithSentinel(context, subscription);
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
+    }
+
+    [Fact]
     public async Task WhenConcurrentWriteRacesTheSuppressedApply_ThenCorrectionIsNeverStale()
     {
         // Arrange: model at 100, a gate read interceptor that parks the synthesis-time getter read
@@ -255,6 +371,29 @@ public class SourceCorrectionTests
         var sentinel = new ClampingDevice(context);
         sentinel.Value = 7;
         return ChangeQueueTestHelpers.DrainUntilSubject(subscription, sentinel);
+    }
+
+    /// <summary>Throws on chain reads of the named property while armed; unarmed reads pass through.</summary>
+    private sealed class ArmedThrowingReadInterceptor : IReadInterceptor
+    {
+        private readonly string _propertyName;
+        private volatile bool _armed;
+
+        public ArmedThrowingReadInterceptor(string propertyName) => _propertyName = propertyName;
+
+        public void Arm() => _armed = true;
+
+        public void Disarm() => _armed = false;
+
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
+        {
+            if (_armed && context.Property.Name == _propertyName)
+            {
+                throw new InvalidOperationException("Getter failure injected by test.");
+            }
+
+            return next(ref context);
+        }
     }
 
     /// <summary>Offsets reads of one int property so the observable value differs from the backing field.</summary>

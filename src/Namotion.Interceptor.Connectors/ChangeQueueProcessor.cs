@@ -54,6 +54,18 @@ public class ChangeQueueProcessor : IDisposable
     private readonly List<SubjectPropertyChange> _flushCorrections = [];
     private readonly SubjectPropertyChange[] _correctionBuffer = new SubjectPropertyChange[1];
 
+    // Processor-wide ratchet over correction attempt stamps, so monotonicity survives across
+    // separate corrections under a frozen or coarse clock (delivery never advances property
+    // metadata, so the stamp itself must carry the ordering). Accessed only from the single
+    // consumer path (the immediate-mode dequeue loop or the gated flush), never concurrently.
+    // Always UTC-normalized and strictly below the ceiling (see LastWritableCorrectionTimestamp).
+    private DateTimeOffset _lastCorrectionAttemptTimestamp = DateTimeOffset.MinValue;
+
+    // The largest bound a correction attempt may advance from: a bound at or above this value has
+    // no strictly-newer successor that is still below DateTimeOffset.MaxValue, and writing the
+    // ceiling itself would ratchet every later correction into the drop path.
+    private static readonly DateTimeOffset LastWritableCorrectionTimestamp = DateTimeOffset.MaxValue.AddTicks(-1);
+
     private readonly PropertyChangeQueueSubscription _subscription;
 
     /// <summary>
@@ -398,16 +410,67 @@ public class ChangeQueueProcessor : IDisposable
         }
 
         var attempt = 0;
+        // Seeded from the queued correction, which already carries the synthesis-time Lamport bound
+        // (strictly newer than the inbound timestamp it corrects), ratcheted by the processor-wide
+        // last attempt: correction delivery never advances property metadata, so without the ratchet
+        // two SEPARATE corrections synthesized from identically-stamped inbound events under a
+        // frozen or coarse clock would deliver identical stamps and the second could be rejected as
+        // stale. The ratchet is per processor, not per property (a dictionary would grow unboundedly
+        // with the subject graph); the cost is that skew on one property can inflate the stamps of
+        // later corrections for other properties, which is cosmetic: stamps stay bounded by observed
+        // timestamps plus ticks, and values are always send-time revalidated.
+        // UTC-normalized so ceiling checks and AddTicks operate on the instant (see the synthesis
+        // comment): a queued stamp with a non-zero offset and a clock time at DateTime.MaxValue
+        // would otherwise slip past the instant-based ceiling guard and throw on advancement.
+        var queuedTimestamp = correction.ChangedTimestamp.ToUniversalTime();
+        var previousAttemptTimestamp = queuedTimestamp > _lastCorrectionAttemptTimestamp
+            ? queuedTimestamp
+            : _lastCorrectionAttemptTimestamp;
         while (true)
         {
-            // Rebuild every write with the property's CURRENT write-timestamp. Value equality cannot
-            // identify the first attempt: the model may have moved away from and back to the original
-            // correction value before this write or across post-write revalidation attempts. Reusing
-            // the original correction in either ABA case would regress timestamp metadata serialized
-            // by connectors such as OPC UA and MQTT.
+            // Every write is stamped fresh at send time: connectors serialize ChangedTimestamp
+            // outbound (OPC UA source timestamps, MQTT payloads) and endpoints may order inbound
+            // writes by timestamp, so a correction must never be rejectable as stale. "Fresh" is
+            // Lamport-bounded, not just the local clock: each attempt must be strictly newer than
+            // the previous attempt (a frozen or coarse GetTimestampFunction would otherwise hand two
+            // attempts the same tick) and never older than the property's current write-timestamp.
+            // When the local clock lags that bound, advance one tick past it instead; on a normal
+            // clock the bound never wins and the stamp is plain "now".
+            // Clamped below the ceiling so a pathological clock function returning MaxValue cannot
+            // write the ceiling through the fresh-now branch and poison the ratchet.
+            var now = SubjectChangeContext.GetTimestampFunction().ToUniversalTime();
+            if (now > LastWritableCorrectionTimestamp)
+            {
+                now = LastWritableCorrectionTimestamp;
+            }
+
+            var lowerBound = previousAttemptTimestamp;
+            if (property.TryGetWriteTimestamp() is { } writeTimestamp && writeTimestamp > lowerBound)
+            {
+                lowerBound = writeTimestamp;
+            }
+
+            // A bound at or above MaxValue - 1 tick has no strictly-newer successor below the
+            // ceiling (a hostile or broken source clock propagated through the synthesis bound):
+            // advancing from the ceiling would throw before the write-handler catch and terminate
+            // the processing loop, and writing the ceiling itself would ratchet every later
+            // correction into this drop path. Dropping keeps the only failure mode a missing
+            // correction. All operands are UTC-normalized, so the instant comparison is exact.
+            if (lowerBound >= LastWritableCorrectionTimestamp)
+            {
+                _logger.LogWarning(
+                    "Correction for {Property} has no representable newer timestamp below the ceiling; dropping.",
+                    property);
+                return;
+            }
+
+            var attemptTimestamp = lowerBound >= now ? lowerBound.AddTicks(1) : now;
+            previousAttemptTimestamp = attemptTimestamp;
+            _lastCorrectionAttemptTimestamp = attemptTimestamp;
+
             _correctionBuffer[0] = SubjectPropertyChange.Create(
                 property, correction.Origin,
-                property.TryGetWriteTimestamp() ?? correction.ChangedTimestamp,
+                attemptTimestamp,
                 correction.ReceivedTimestamp,
                 correctionValue, correctionValue);
 

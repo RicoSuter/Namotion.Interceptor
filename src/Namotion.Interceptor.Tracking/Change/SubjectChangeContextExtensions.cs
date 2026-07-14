@@ -86,13 +86,21 @@ public static class SubjectChangeContextExtensions
         // still holds its diverging sent value.
         if (origin.Kind == ChangeOriginKind.FromSource && !isWritten && valueUnchanged)
         {
-            DetectAndEnqueueCorrection(property, origin.Source!, sentValue);
+            DetectAndEnqueueCorrection(property, origin.Source!, sentValue, changedTimestamp);
         }
     }
 
     private static void DetectAndEnqueueCorrection(
-        PropertyReference property, object source, object? sentValue)
+        PropertyReference property, object source, object? sentValue, DateTimeOffset? inboundChangedTimestamp)
     {
+        // Resolve the queue first: no queue means no delivery target, so nothing to synthesize and
+        // no reason to run the observable getter below at all.
+        var queue = property.Subject.Context.TryGetService<PropertyChangeQueue>();
+        if (queue is null)
+        {
+            return;
+        }
+
         // Baseline for the synthesis concurrency race, captured on this rare correction path rather
         // than on every inbound write. It only needs to guard the window between the observable read
         // below and the stamp under the lock: a concurrent real write moves the write-timestamp, and
@@ -104,17 +112,12 @@ public static class SubjectChangeContextExtensions
         // lock (the getter may run read interceptors; running them under Subject.SyncRoot would invert
         // the codebase's getters-outside-locks discipline). If it still equals the sent value there is
         // no divergence (pure echo) and no correction; the correction deliberately carries the
-        // OBSERVABLE value.
+        // OBSERVABLE value. A throwing getter or read interceptor propagates to the SetValueFromSource
+        // caller deliberately: stamped setters are already a throwing API (validators throw through
+        // them), and a broken read path is a defect that must surface, not doubt to drop on; a
+        // swallowed throw here would leave an undiagnosable, silently diverged source.
         var observedValue = property.Metadata.GetValue?.Invoke(property.Subject);
         if (Equals(sentValue, observedValue))
-        {
-            return;
-        }
-
-        // Resolve the queue from the subject's context. No queue means no delivery target, so nothing
-        // to synthesize.
-        var queue = property.Subject.Context.TryGetService<PropertyChangeQueue>();
-        if (queue is null)
         {
             return;
         }
@@ -134,15 +137,41 @@ public static class SubjectChangeContextExtensions
                 return;
             }
 
-            // Publish with the value's existing write-timestamp: the value genuinely last changed
-            // then, so that is its truthful ChangedTimestamp, and no connector rejects an outbound
-            // write by timestamp ordering. A correction is not a real write, so it does NOT stamp the
-            // metadata (a metadata bump would advance the write-timestamp for an unchanged value and
-            // mislead write-timestamp consumers, including OPC UA read-after-write). Echo suppression
-            // of the source's reply is value-based, so no fresh timestamp is needed for it. Fall back
-            // to a captured time only when the property was never written.
-            var changedTimestamp = currentWriteTimestamp
-                ?? new DateTimeOffset(SubjectChangeContext.CaptureTimestamp(), TimeSpan.Zero);
+            // Publish with a FRESH assertion timestamp: endpoints may order inbound writes by
+            // timestamp (the OPC UA read-after-write check does exactly this), so a correction
+            // stamped with the value's old last-change time could be rejected as stale and, with
+            // corrections never retried, leave the source permanently diverged. A correction is
+            // still not a real write, so it does NOT stamp the metadata (a metadata bump would
+            // advance the write-timestamp for an unchanged value and mislead write-timestamp
+            // consumers, including OPC UA read-after-write); the model keeps the value's truthful
+            // last-change time, and model and source may intentionally disagree on the timestamp of
+            // an identical value. Echo suppression of the source's reply is value-based.
+            //
+            // "Fresh" is Lamport-bounded, not just the local clock: the stamp must be strictly
+            // newer than the inbound timestamp it corrects (a source clock running ahead would
+            // otherwise keep every correction "stale" to an ordering endpoint) and never older than
+            // the value's own write-timestamp. When the local clock lags that bound, advance one
+            // tick past it instead. The fabrication is bounded by observed timestamps and never
+            // touches the model's metadata.
+            var now = new DateTimeOffset(SubjectChangeContext.CaptureTimestamp(), TimeSpan.Zero);
+            // Normalized to UTC: DateTimeOffset arithmetic operates on the CLOCK time while
+            // comparisons use the instant, so an offset-carrying stamp whose clock time sits at
+            // DateTime.MaxValue would pass every instant comparison and still make AddTicks throw.
+            // Normalization pins clock time to the instant, making the ceiling checks exact (and
+            // wire stamps uniformly UTC).
+            var lowerBound = inboundChangedTimestamp?.ToUniversalTime();
+            if (currentWriteTimestamp is { } writeTimestamp && (lowerBound is null || writeTimestamp > lowerBound))
+            {
+                lowerBound = writeTimestamp;
+            }
+
+            // Saturate at the ceiling instead of throwing: a hostile or broken source can stamp
+            // DateTimeOffset.MaxValue, and AddTicks would throw out of the inbound apply. Delivery
+            // detects the saturated stamp (no representable successor) and drops with a warning,
+            // the single logged decision point.
+            var changedTimestamp = lowerBound is { } bound && bound >= now
+                ? bound < DateTimeOffset.MaxValue ? bound.AddTicks(1) : DateTimeOffset.MaxValue
+                : now;
 
             // ReceivedTimestamp rides the ambient context, not the inbound apply: a correction is a
             // local assertion (the model already holds this value), so it has no distinct receive

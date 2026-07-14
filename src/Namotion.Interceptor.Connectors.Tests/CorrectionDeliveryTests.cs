@@ -121,7 +121,7 @@ public class CorrectionDeliveryTests
     }
 
     [Fact]
-    public async Task WhenCorrectionIsDelivered_ThenItCarriesThePropertyWriteTimestampNotTheInboundScope()
+    public async Task WhenCorrectionIsDelivered_ThenItCarriesAFreshAssertionTimestampWithoutAdvancingMetadata()
     {
         // Arrange
         var context = CreateContext();
@@ -129,7 +129,9 @@ public class CorrectionDeliveryTests
         var device = new ClampingDevice(context);
         device.Value = 100;
         var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+        var modelWriteTimestamp = property.TryGetWriteTimestamp();
         var inboundTimestamp = DateTimeOffset.UtcNow.AddHours(-1);
+        var beforeAct = DateTimeOffset.UtcNow;
 
         var (written, gate) = CreateCollector();
         using var processor = CreateProcessor(source, context, written, gate);
@@ -138,12 +140,14 @@ public class CorrectionDeliveryTests
         var delivered = await DriveAndCollectAsync(processor, context, written, gate,
             () => property.SetValueFromSource(source, inboundTimestamp, null, 105));
 
-        // Assert: the delivered correction carries the property's existing write-timestamp (the value's
-        // real last-change time), not the inbound scope timestamp, and does not advance the metadata.
+        // Assert: the delivered correction carries a fresh assertion timestamp (never rejectable as
+        // stale by a timestamp-ordering endpoint), not the inbound scope timestamp, while the
+        // property's write-timestamp metadata keeps the value's real last-change time.
         var correction = Assert.Single(delivered,
             c => ReferenceEquals(c.Property.Subject, device) && c.Origin.Kind == ChangeOriginKind.Correction);
         Assert.NotEqual(inboundTimestamp, correction.ChangedTimestamp);
-        Assert.Equal(property.TryGetWriteTimestamp(), correction.ChangedTimestamp);
+        Assert.True(correction.ChangedTimestamp >= beforeAct);
+        Assert.Equal(modelWriteTimestamp, property.TryGetWriteTimestamp());
     }
 
     [Fact]
@@ -478,7 +482,7 @@ public class CorrectionDeliveryTests
         var device = new ClampingDevice(context);
         device.Value = 100;
         var property = new PropertyReference(device, nameof(ClampingDevice.Value));
-        var initialWriteTimestamp = property.TryGetWriteTimestamp();
+        var beforeAct = DateTimeOffset.UtcNow;
 
         var sourceState = new ConcurrentDictionary<string, object?>();
         var deliveredCorrections = new ConcurrentQueue<SubjectPropertyChange>();
@@ -538,28 +542,24 @@ public class CorrectionDeliveryTests
         Assert.Equal(90, finalValue);
         Assert.True(correctionWrites >= 2, "A follow-up correction write should have converged the source.");
 
-        // Even the initial attempt is rebuilt with the current property timestamp. The model may
-        // have moved away from and back to 100 between synthesis and this pre-write value check, so
-        // value equality alone cannot prove that the synthesized timestamp is still current.
+        // Every attempt (including the first) is stamped fresh at send time, never with the queued
+        // correction's stale timestamp: connectors serialize ChangedTimestamp outbound, so a stale
+        // time could be rejected by a timestamp-ordering endpoint. Retries are monotone.
         var initial = deliveredCorrections.First();
         Assert.Equal(100, initial.GetNewValue<int>());
-        Assert.NotEqual(staleTimestamp, initial.ChangedTimestamp);
-        Assert.Equal(initialWriteTimestamp, initial.ChangedTimestamp);
+        Assert.True(initial.ChangedTimestamp >= beforeAct);
 
-        // The follow-up carries the newer value's real last-change time (the write-timestamp stamped
-        // by the model write to 90), not the original correction's stale timestamp: connectors
-        // serialize ChangedTimestamp outbound, so a stale time would regress source metadata.
         var followUp = deliveredCorrections.Last();
         Assert.Equal(90, followUp.GetNewValue<int>());
-        Assert.NotEqual(staleTimestamp, followUp.ChangedTimestamp);
-        Assert.Equal(property.TryGetWriteTimestamp(), followUp.ChangedTimestamp);
+        Assert.True(followUp.ChangedTimestamp >= initial.ChangedTimestamp);
     }
 
     [Fact]
-    public async Task WhenCorrectionValueCyclesBackDuringRevalidation_ThenLatestWriteTimestampIsDelivered()
+    public async Task WhenCorrectionValueCyclesBackDuringRevalidation_ThenFreshMonotoneTimestampsAreDelivered()
     {
         // Arrange: drive the bounded loop through 100 -> 90 -> 100. The final value equals the
-        // original correction again, but its timestamp belongs to a newer model write.
+        // original correction again; a stale reused stamp would be rejectable by a timestamp-ordering
+        // endpoint, so every attempt must carry a fresh send-time stamp.
         var context = CreateContext();
         var source = new object();
         var device = new ClampingDevice(context);
@@ -612,12 +612,203 @@ public class CorrectionDeliveryTests
         // Act
         await TriggerFlushAsync(processor);
 
-        // Assert: all three values were delivered with the corresponding model write's timestamp.
+        // Assert: all three values were delivered, each stamped fresh at send time, so every
+        // delivered timestamp is newer than every model write and the original correction stamp,
+        // and retries are monotone.
         Assert.Equal(3, deliveredCorrections.Count);
         Assert.Equal([100, 90, 100], deliveredCorrections.Select(change => change.GetNewValue<int>()));
-        Assert.Equal(
-            [initialTimestamp, intermediateTimestamp, finalTimestamp],
-            deliveredCorrections.Select(change => change.ChangedTimestamp));
+        Assert.All(deliveredCorrections, change => Assert.True(change.ChangedTimestamp > finalTimestamp));
+        Assert.True(deliveredCorrections[0].ChangedTimestamp <= deliveredCorrections[1].ChangedTimestamp);
+        Assert.True(deliveredCorrections[1].ChangedTimestamp <= deliveredCorrections[2].ChangedTimestamp);
+    }
+
+    [Fact]
+    public async Task WhenQueuedCorrectionTimestampIsAheadOfLocalClock_ThenAttemptsAdvanceStrictlyBeyondIt()
+    {
+        // Arrange: the queued correction is stamped an hour ahead of the local clock (a skewed
+        // source clock propagated through the synthesis-time Lamport bound). The write handler
+        // moves the model once, forcing exactly one follow-up attempt.
+        var context = CreateContext();
+        var source = new object();
+        var device = new ClampingDevice(context);
+        device.Value = 100;
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+        var aheadTimestamp = DateTimeOffset.UtcNow.AddHours(1);
+
+        var deliveredCorrections = new List<SubjectPropertyChange>();
+        var correctionWrites = 0;
+        using var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                var correction = Assert.Single(changes.ToArray());
+                deliveredCorrections.Add(correction);
+                if (++correctionWrites == 1)
+                {
+                    device.Value = 90;
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        InjectChange(processor, Correction(property, source, 100, aheadTimestamp));
+
+        // Act
+        await TriggerFlushAsync(processor);
+
+        // Assert: the local clock lags the queued stamp, so each attempt advances at least one tick
+        // past the Lamport bound instead of reusing a lagging "now"; attempts are strictly
+        // increasing, so a strict timestamp-ordering endpoint never rejects a follow-up.
+        Assert.Equal(2, deliveredCorrections.Count);
+        Assert.True(deliveredCorrections[0].ChangedTimestamp > aheadTimestamp);
+        Assert.True(deliveredCorrections[1].ChangedTimestamp > deliveredCorrections[0].ChangedTimestamp);
+    }
+
+    [Fact]
+    public async Task WhenTwoSeparateCorrectionsCarryTheSameAheadStamp_ThenSecondDeliveryAdvancesBeyondFirst()
+    {
+        // Arrange: two SEPARATE corrections (separate flushes) synthesized from identically-stamped
+        // inbound events under a lagging local clock. Delivery never advances property metadata, so
+        // only the processor-wide ratchet can keep the second delivery strictly newer than the
+        // first; without it both would carry the same stamp and a strict endpoint could reject the
+        // second as stale.
+        var context = CreateContext();
+        var source = new object();
+        var device = new ClampingDevice(context);
+        device.Value = 100;
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+        var aheadTimestamp = DateTimeOffset.UtcNow.AddHours(1);
+
+        var (written, gate) = CreateCollector();
+        using var processor = CreateBufferedProcessor(context, written, gate);
+
+        // Act: two sequential corrections with the same queued stamp, flushed separately.
+        InjectChange(processor, Correction(property, source, 100, aheadTimestamp));
+        await TriggerFlushAsync(processor);
+        InjectChange(processor, Correction(property, source, 100, aheadTimestamp));
+        await TriggerFlushAsync(processor);
+
+        // Assert
+        Assert.Equal(2, written.Count);
+        Assert.True(written[0].ChangedTimestamp > aheadTimestamp);
+        Assert.True(written[1].ChangedTimestamp > written[0].ChangedTimestamp);
+    }
+
+    [Fact]
+    public async Task WhenCorrectionTimestampBoundIsAtMaxValue_ThenCorrectionIsDroppedAndProcessingContinues()
+    {
+        // Arrange: a correction whose stamp is already DateTimeOffset.MaxValue (a hostile or broken
+        // source clock propagated through the synthesis saturation). There is no representable
+        // strictly-newer successor: advancing would throw before the write-handler catch and kill
+        // the flush loop, and writing the ceiling would poison the ratchet for every later
+        // correction. It must be dropped with a warning while the flush continues.
+        var context = CreateContext();
+        var source = new object();
+        var correctionDevice = new ClampingDevice(context);
+        correctionDevice.Value = 100;
+        var normalDevice = new ClampingDevice(context);
+        var correctionProperty = new PropertyReference(correctionDevice, nameof(ClampingDevice.Value));
+        var normalProperty = new PropertyReference(normalDevice, nameof(ClampingDevice.Value));
+
+        var logger = new CapturingLogger();
+        var (written, gate) = CreateCollector();
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) => Record(written, gate, changes),
+            bufferTime: TimeSpan.FromMinutes(10),
+            maxQueueDepth: null,
+            logger: logger);
+
+        // Act
+        InjectChange(processor, Correction(correctionProperty, source, 100, DateTimeOffset.MaxValue));
+        InjectChange(processor, Normal(normalProperty, oldValue: 0, newValue: 5));
+        await TriggerFlushAsync(processor);
+
+        // Assert: the correction is dropped with a warning, the normal change is still written, and
+        // a subsequent correction is unaffected (the ratchet was not poisoned by the ceiling).
+        Assert.DoesNotContain(written, c => ReferenceEquals(c.Property.Subject, correctionDevice));
+        Assert.Contains(written, c => ReferenceEquals(c.Property.Subject, normalDevice));
+        Assert.True(logger.HasWarningContaining("no representable newer timestamp"));
+
+        InjectChange(processor, Correction(correctionProperty, source, 100));
+        await TriggerFlushAsync(processor);
+
+        var followUp = Assert.Single(written, c => ReferenceEquals(c.Property.Subject, correctionDevice));
+        Assert.True(followUp.ChangedTimestamp < DateTimeOffset.MaxValue);
+    }
+
+    [Fact]
+    public async Task WhenCorrectionTimestampCarriesOffsetAtClockCeiling_ThenDeliveryNormalizesAndAdvances()
+    {
+        // Arrange: a stamp whose CLOCK time sits at DateTime.MaxValue but whose instant is an hour
+        // below the ceiling. Instant-based comparisons see it as advanceable, yet DateTimeOffset
+        // arithmetic operates on the clock time, so without UTC normalization AddTicks throws and
+        // kills the flush loop.
+        var context = CreateContext();
+        var source = new object();
+        var device = new ClampingDevice(context);
+        device.Value = 100;
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+        var offsetCeilingTimestamp = new DateTimeOffset(DateTime.MaxValue, TimeSpan.FromHours(1));
+
+        var (written, gate) = CreateCollector();
+        using var processor = CreateBufferedProcessor(context, written, gate);
+
+        // Act
+        InjectChange(processor, Correction(property, source, 100, offsetCeilingTimestamp));
+        await TriggerFlushAsync(processor);
+
+        // Assert: delivered (not thrown, not dropped), UTC-normalized, strictly after the instant.
+        var correction = Assert.Single(written);
+        Assert.Equal(TimeSpan.Zero, correction.ChangedTimestamp.Offset);
+        Assert.True(correction.ChangedTimestamp > offsetCeilingTimestamp.ToUniversalTime());
+        Assert.True(correction.ChangedTimestamp < DateTimeOffset.MaxValue);
+    }
+
+    [Fact]
+    public async Task WhenCorrectionBoundIsOneTickBelowCeiling_ThenCorrectionIsDroppedWithoutWritingTheCeiling()
+    {
+        // Arrange: a bound one tick below the ceiling. Advancing it would produce and write
+        // DateTimeOffset.MaxValue itself, ratcheting every later correction into the drop path;
+        // it must be dropped instead, leaving the ratchet clean.
+        var context = CreateContext();
+        var source = new object();
+        var device = new ClampingDevice(context);
+        device.Value = 100;
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+
+        var logger = new CapturingLogger();
+        var (written, gate) = CreateCollector();
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) => Record(written, gate, changes),
+            bufferTime: TimeSpan.FromMinutes(10),
+            maxQueueDepth: null,
+            logger: logger);
+
+        // Act
+        InjectChange(processor, Correction(property, source, 100, DateTimeOffset.MaxValue.AddTicks(-1)));
+        await TriggerFlushAsync(processor);
+
+        // Assert: dropped with the ceiling warning, nothing written.
+        Assert.Empty(written);
+        Assert.True(logger.HasWarningContaining("no representable newer timestamp"));
+
+        // A subsequent correction delivers with a normal now-ish stamp: the ratchet was not poisoned.
+        InjectChange(processor, Correction(property, source, 100));
+        await TriggerFlushAsync(processor);
+
+        var followUp = Assert.Single(written);
+        Assert.True(followUp.ChangedTimestamp < DateTimeOffset.UtcNow.AddDays(1));
     }
 
     // === Send-time revalidation, bounded-loop exhaustion ===
