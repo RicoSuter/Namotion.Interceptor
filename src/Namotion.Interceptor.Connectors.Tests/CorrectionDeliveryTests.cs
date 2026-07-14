@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Tests.Models;
@@ -140,9 +139,9 @@ public class CorrectionDeliveryTests
         var delivered = await DriveAndCollectAsync(processor, context, written, gate,
             () => property.SetValueFromSource(source, inboundTimestamp, null, 105));
 
-        // Assert: the delivered correction carries a fresh assertion timestamp (never rejectable as
-        // stale by a timestamp-ordering endpoint), not the inbound scope timestamp, while the
-        // property's write-timestamp metadata keeps the value's real last-change time.
+        // Assert: the delivered correction carries a local send-time assertion timestamp, not the
+        // inbound scope timestamp, while the property's write-timestamp metadata keeps the value's
+        // real last-change time.
         var correction = Assert.Single(delivered,
             c => ReferenceEquals(c.Property.Subject, device) && c.Origin.Kind == ChangeOriginKind.Correction);
         Assert.NotEqual(inboundTimestamp, correction.ChangedTimestamp);
@@ -255,6 +254,63 @@ public class CorrectionDeliveryTests
         var change = Assert.Single(written);
         Assert.Equal(ChangeOriginKind.Correction, change.Origin.Kind);
         Assert.Equal(100, change.GetNewValue<int>());
+    }
+
+    [Fact]
+    public async Task WhenFreshCorrectionSitsBehindStaleNormalInFlush_ThenBothAreDeliveredAndSourceConverges()
+    {
+        // Arrange: the reachable interleaving where dedup order lies about freshness. A local write
+        // to v1 queues a normal change; an inbound from the source then stores v2 (echo-suppressed,
+        // never queued); a suppressed diverging inbound synthesizes Correction(v2). The flush sees
+        // [N(v1), C(v2)] with the model at v2: dropping the correction would leave the source at v1
+        // until its next inbound event, so the displaced correction must instead be revalidated
+        // (model == v2 -> delivered after the normal batch) and the source converges.
+        var context = CreateContext();
+        var source = new object();
+        var device = new ClampingDevice(context);
+        device.Value = 90; // the live model already holds the corrected value v2 = 90
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+
+        var (written, gate) = CreateCollector();
+        using var processor = CreateBufferedProcessor(context, written, gate);
+
+        // Act: the stale normal (v1 = 50) queued before the fresh correction (v2 = 90).
+        InjectChange(processor, Normal(property, oldValue: 0, newValue: 50));
+        InjectChange(processor, Correction(property, source, 90));
+        await TriggerFlushAsync(processor);
+
+        // Assert: the normal batch goes first, then the revalidated correction converges the source.
+        Assert.Equal(2, written.Count);
+        Assert.Equal(ChangeOriginKind.Local, written[0].Origin.Kind);
+        Assert.Equal(50, written[0].GetNewValue<int>());
+        Assert.Equal(ChangeOriginKind.Correction, written[1].Origin.Kind);
+        Assert.Equal(90, written[1].GetNewValue<int>());
+    }
+
+    [Fact]
+    public async Task WhenStaleCorrectionPrecedesNormalInFlush_ThenRevalidationDropsIt()
+    {
+        // Arrange: the opposite order. The correction (100) was queued before a normal write moved
+        // the model to 50; routing the displaced correction through revalidation must not resurrect
+        // it (the model no longer holds 100), so only the normal change is delivered.
+        var context = CreateContext();
+        var source = new object();
+        var device = new ClampingDevice(context);
+        device.Value = 50;
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+
+        var (written, gate) = CreateCollector();
+        using var processor = CreateBufferedProcessor(context, written, gate);
+
+        // Act
+        InjectChange(processor, Correction(property, source, 100));
+        InjectChange(processor, Normal(property, oldValue: 100, newValue: 50));
+        await TriggerFlushAsync(processor);
+
+        // Assert
+        var change = Assert.Single(written);
+        Assert.Equal(ChangeOriginKind.Local, change.Origin.Kind);
+        Assert.Equal(50, change.GetNewValue<int>());
     }
 
     [Fact]
@@ -473,10 +529,13 @@ public class CorrectionDeliveryTests
     [Fact]
     public async Task WhenInboundApplyLandsDuringCorrectionWrite_ThenFollowUpWriteConvergesSource()
     {
-        // Arrange: model at 100, an injected Correction(source, 100). The fake source write is held
-        // open with a gate so an inbound apply (model -> 90) lands between the pre-write revalidation
-        // and the completion of the correction write. This is the echo-suppressed inbound-from-S
-        // window that pre-write revalidation alone cannot cover.
+        // Arrange (the PR 2 release-gate scenario): model at 100; a real inbound 105 is clamped
+        // onto the stored 100 and synthesizes a Correction(source). The fake source write is held
+        // open with a gate so an inbound FromSource(source) apply (model -> 90) lands between the
+        // pre-write revalidation and the completion of the correction write. That inbound change is
+        // echo-suppressed by this processor's own dequeue-time skip, so NO normal write can ever
+        // repair the source afterwards; only the post-write recheck's follow-up correction can.
+        // The live ProcessAsync path is used so the echo suppression actually runs.
         var context = CreateContext();
         var source = new object();
         var device = new ClampingDevice(context);
@@ -486,6 +545,7 @@ public class CorrectionDeliveryTests
 
         var sourceState = new ConcurrentDictionary<string, object?>();
         var deliveredCorrections = new ConcurrentQueue<SubjectPropertyChange>();
+        var deliveredDeviceNonCorrections = new ConcurrentQueue<SubjectPropertyChange>();
         var firstWriteStarted = new ManualResetEventSlim(false);
         var inboundApplied = new ManualResetEventSlim(false);
         var correctionWrites = 0;
@@ -510,56 +570,64 @@ public class CorrectionDeliveryTests
                             inboundApplied.Wait(TimeSpan.FromSeconds(10));
                         }
                     }
+                    else if (ReferenceEquals(change.Property.Subject, device))
+                    {
+                        deliveredDeviceNonCorrections.Enqueue(change);
+                    }
 
                     sourceState[change.Property.Name] = change.GetNewValue<object?>();
                 }
 
                 return ValueTask.CompletedTask;
             },
-            bufferTime: TimeSpan.FromMilliseconds(50),
+            bufferTime: TimeSpan.FromMilliseconds(20),
             maxQueueDepth: null,
             logger: NullLogger.Instance);
 
-        // The injected correction carries a deliberately stale timestamp so the follow-up's
-        // timestamp assertion below is a real distinction.
-        var staleTimestamp = DateTimeOffset.UtcNow.AddHours(-1);
-        InjectChange(processor, Correction(property, source, 100, staleTimestamp));
+        using var cts = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cts.Token);
 
-        // Act: flush on a background task; the first correction write blocks inside the write handler.
-        var flush = Task.Run(async () => await TriggerFlushAsync(processor));
-
+        // Act: the source sends 105; the clamp projects it onto the stored 100, the write is
+        // suppressed, and a Correction(source) is synthesized. The live processor dequeues it
+        // (corrections bypass the own-source skip) and blocks inside the held-open write.
+        property.SetValueFromSource(source, null, null, 105);
         firstWriteStarted.Wait(TimeSpan.FromSeconds(10));
 
-        // The inbound-from-source value lands while the correction write is held open.
-        device.Value = 90;
+        // The inbound-from-source value lands while the correction write is held open. It is stored
+        // as FromSource(source) and echo-suppressed on this processor's dequeue path.
+        property.SetValueFromSource(source, null, null, 90);
         inboundApplied.Set();
 
-        await flush.WaitAsync(TimeSpan.FromSeconds(10));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Equals(sourceState.GetValueOrDefault(nameof(ClampingDevice.Value)), 90),
+            timeout: TimeSpan.FromSeconds(10),
+            message: "The follow-up correction should have converged the source to 90.");
+
+        await cts.CancelAsync();
+        await processing;
 
         // Assert: the post-write recheck wrote a follow-up correction converging the source to 90,
-        // so no stale 100 remains on the source.
-        Assert.True(sourceState.TryGetValue(nameof(ClampingDevice.Value), out var finalValue));
-        Assert.Equal(90, finalValue);
+        // and the inbound FromSource(source) change was echo-suppressed, so no normal write backed
+        // the follow-up up: the correction loop alone repaired the source.
+        Assert.Equal(90, sourceState[nameof(ClampingDevice.Value)]);
         Assert.True(correctionWrites >= 2, "A follow-up correction write should have converged the source.");
+        Assert.Empty(deliveredDeviceNonCorrections);
 
-        // Every attempt (including the first) is stamped fresh at send time, never with the queued
-        // correction's stale timestamp: connectors serialize ChangedTimestamp outbound, so a stale
-        // time could be rejected by a timestamp-ordering endpoint. Retries are monotone.
-        var initial = deliveredCorrections.First();
-        Assert.Equal(100, initial.GetNewValue<int>());
-        Assert.True(initial.ChangedTimestamp >= beforeAct);
-
-        var followUp = deliveredCorrections.Last();
-        Assert.Equal(90, followUp.GetNewValue<int>());
-        Assert.True(followUp.ChangedTimestamp >= initial.ChangedTimestamp);
+        // Every attempt is stamped at send time: each delivered stamp is at or after the act, rather
+        // than inheriting a synthesis-time or model timestamp. No ordering between attempts is asserted
+        // (the contract makes no monotonic guarantee; the clock may return equal or decreasing values).
+        var corrections = deliveredCorrections.ToArray();
+        Assert.Equal(100, corrections.First().GetNewValue<int>());
+        Assert.Equal(90, corrections.Last().GetNewValue<int>());
+        Assert.All(corrections, correction => Assert.True(correction.ChangedTimestamp >= beforeAct));
     }
 
     [Fact]
-    public async Task WhenCorrectionValueCyclesBackDuringRevalidation_ThenFreshMonotoneTimestampsAreDelivered()
+    public async Task WhenCorrectionValueCyclesBackDuringRevalidation_ThenEveryAttemptIsStampedAtSendTime()
     {
         // Arrange: drive the bounded loop through 100 -> 90 -> 100. The final value equals the
-        // original correction again; a stale reused stamp would be rejectable by a timestamp-ordering
-        // endpoint, so every attempt must carry a fresh send-time stamp.
+        // original correction again; reusing the queued stamp would describe the last assertion by
+        // the time the first one was synthesized, so every attempt carries its own send-time stamp.
         var context = CreateContext();
         var source = new object();
         var device = new ClampingDevice(context);
@@ -612,203 +680,13 @@ public class CorrectionDeliveryTests
         // Act
         await TriggerFlushAsync(processor);
 
-        // Assert: all three values were delivered, each stamped fresh at send time, so every
-        // delivered timestamp is newer than every model write and the original correction stamp,
-        // and retries are monotone.
+        // Assert: all three values were delivered, each stamped at send time rather than reusing the
+        // stale queued stamp or a model timestamp, so every delivered timestamp is newer than every
+        // (past) model write and the original correction stamp. No ordering between attempts is
+        // asserted: the contract provides no monotonic guarantee.
         Assert.Equal(3, deliveredCorrections.Count);
         Assert.Equal([100, 90, 100], deliveredCorrections.Select(change => change.GetNewValue<int>()));
         Assert.All(deliveredCorrections, change => Assert.True(change.ChangedTimestamp > finalTimestamp));
-        Assert.True(deliveredCorrections[0].ChangedTimestamp <= deliveredCorrections[1].ChangedTimestamp);
-        Assert.True(deliveredCorrections[1].ChangedTimestamp <= deliveredCorrections[2].ChangedTimestamp);
-    }
-
-    [Fact]
-    public async Task WhenQueuedCorrectionTimestampIsAheadOfLocalClock_ThenAttemptsAdvanceStrictlyBeyondIt()
-    {
-        // Arrange: the queued correction is stamped an hour ahead of the local clock (a skewed
-        // source clock propagated through the synthesis-time Lamport bound). The write handler
-        // moves the model once, forcing exactly one follow-up attempt.
-        var context = CreateContext();
-        var source = new object();
-        var device = new ClampingDevice(context);
-        device.Value = 100;
-        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
-        var aheadTimestamp = DateTimeOffset.UtcNow.AddHours(1);
-
-        var deliveredCorrections = new List<SubjectPropertyChange>();
-        var correctionWrites = 0;
-        using var processor = new ChangeQueueProcessor(
-            source: source,
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: (changes, _) =>
-            {
-                var correction = Assert.Single(changes.ToArray());
-                deliveredCorrections.Add(correction);
-                if (++correctionWrites == 1)
-                {
-                    device.Value = 90;
-                }
-
-                return ValueTask.CompletedTask;
-            },
-            bufferTime: TimeSpan.FromMinutes(10),
-            maxQueueDepth: null,
-            logger: NullLogger.Instance);
-
-        InjectChange(processor, Correction(property, source, 100, aheadTimestamp));
-
-        // Act
-        await TriggerFlushAsync(processor);
-
-        // Assert: the local clock lags the queued stamp, so each attempt advances at least one tick
-        // past the Lamport bound instead of reusing a lagging "now"; attempts are strictly
-        // increasing, so a strict timestamp-ordering endpoint never rejects a follow-up.
-        Assert.Equal(2, deliveredCorrections.Count);
-        Assert.True(deliveredCorrections[0].ChangedTimestamp > aheadTimestamp);
-        Assert.True(deliveredCorrections[1].ChangedTimestamp > deliveredCorrections[0].ChangedTimestamp);
-    }
-
-    [Fact]
-    public async Task WhenTwoSeparateCorrectionsCarryTheSameAheadStamp_ThenSecondDeliveryAdvancesBeyondFirst()
-    {
-        // Arrange: two SEPARATE corrections (separate flushes) synthesized from identically-stamped
-        // inbound events under a lagging local clock. Delivery never advances property metadata, so
-        // only the processor-wide ratchet can keep the second delivery strictly newer than the
-        // first; without it both would carry the same stamp and a strict endpoint could reject the
-        // second as stale.
-        var context = CreateContext();
-        var source = new object();
-        var device = new ClampingDevice(context);
-        device.Value = 100;
-        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
-        var aheadTimestamp = DateTimeOffset.UtcNow.AddHours(1);
-
-        var (written, gate) = CreateCollector();
-        using var processor = CreateBufferedProcessor(context, written, gate);
-
-        // Act: two sequential corrections with the same queued stamp, flushed separately.
-        InjectChange(processor, Correction(property, source, 100, aheadTimestamp));
-        await TriggerFlushAsync(processor);
-        InjectChange(processor, Correction(property, source, 100, aheadTimestamp));
-        await TriggerFlushAsync(processor);
-
-        // Assert
-        Assert.Equal(2, written.Count);
-        Assert.True(written[0].ChangedTimestamp > aheadTimestamp);
-        Assert.True(written[1].ChangedTimestamp > written[0].ChangedTimestamp);
-    }
-
-    [Fact]
-    public async Task WhenCorrectionTimestampBoundIsAtMaxValue_ThenCorrectionIsDroppedAndProcessingContinues()
-    {
-        // Arrange: a correction whose stamp is already DateTimeOffset.MaxValue (a hostile or broken
-        // source clock propagated through the synthesis saturation). There is no representable
-        // strictly-newer successor: advancing would throw before the write-handler catch and kill
-        // the flush loop, and writing the ceiling would poison the ratchet for every later
-        // correction. It must be dropped with a warning while the flush continues.
-        var context = CreateContext();
-        var source = new object();
-        var correctionDevice = new ClampingDevice(context);
-        correctionDevice.Value = 100;
-        var normalDevice = new ClampingDevice(context);
-        var correctionProperty = new PropertyReference(correctionDevice, nameof(ClampingDevice.Value));
-        var normalProperty = new PropertyReference(normalDevice, nameof(ClampingDevice.Value));
-
-        var logger = new CapturingLogger();
-        var (written, gate) = CreateCollector();
-        using var processor = new ChangeQueueProcessor(
-            source: new object(),
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: (changes, _) => Record(written, gate, changes),
-            bufferTime: TimeSpan.FromMinutes(10),
-            maxQueueDepth: null,
-            logger: logger);
-
-        // Act
-        InjectChange(processor, Correction(correctionProperty, source, 100, DateTimeOffset.MaxValue));
-        InjectChange(processor, Normal(normalProperty, oldValue: 0, newValue: 5));
-        await TriggerFlushAsync(processor);
-
-        // Assert: the correction is dropped with a warning, the normal change is still written, and
-        // a subsequent correction is unaffected (the ratchet was not poisoned by the ceiling).
-        Assert.DoesNotContain(written, c => ReferenceEquals(c.Property.Subject, correctionDevice));
-        Assert.Contains(written, c => ReferenceEquals(c.Property.Subject, normalDevice));
-        Assert.True(logger.HasWarningContaining("no representable newer timestamp"));
-
-        InjectChange(processor, Correction(correctionProperty, source, 100));
-        await TriggerFlushAsync(processor);
-
-        var followUp = Assert.Single(written, c => ReferenceEquals(c.Property.Subject, correctionDevice));
-        Assert.True(followUp.ChangedTimestamp < DateTimeOffset.MaxValue);
-    }
-
-    [Fact]
-    public async Task WhenCorrectionTimestampCarriesOffsetAtClockCeiling_ThenDeliveryNormalizesAndAdvances()
-    {
-        // Arrange: a stamp whose CLOCK time sits at DateTime.MaxValue but whose instant is an hour
-        // below the ceiling. Instant-based comparisons see it as advanceable, yet DateTimeOffset
-        // arithmetic operates on the clock time, so without UTC normalization AddTicks throws and
-        // kills the flush loop.
-        var context = CreateContext();
-        var source = new object();
-        var device = new ClampingDevice(context);
-        device.Value = 100;
-        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
-        var offsetCeilingTimestamp = new DateTimeOffset(DateTime.MaxValue, TimeSpan.FromHours(1));
-
-        var (written, gate) = CreateCollector();
-        using var processor = CreateBufferedProcessor(context, written, gate);
-
-        // Act
-        InjectChange(processor, Correction(property, source, 100, offsetCeilingTimestamp));
-        await TriggerFlushAsync(processor);
-
-        // Assert: delivered (not thrown, not dropped), UTC-normalized, strictly after the instant.
-        var correction = Assert.Single(written);
-        Assert.Equal(TimeSpan.Zero, correction.ChangedTimestamp.Offset);
-        Assert.True(correction.ChangedTimestamp > offsetCeilingTimestamp.ToUniversalTime());
-        Assert.True(correction.ChangedTimestamp < DateTimeOffset.MaxValue);
-    }
-
-    [Fact]
-    public async Task WhenCorrectionBoundIsOneTickBelowCeiling_ThenCorrectionIsDroppedWithoutWritingTheCeiling()
-    {
-        // Arrange: a bound one tick below the ceiling. Advancing it would produce and write
-        // DateTimeOffset.MaxValue itself, ratcheting every later correction into the drop path;
-        // it must be dropped instead, leaving the ratchet clean.
-        var context = CreateContext();
-        var source = new object();
-        var device = new ClampingDevice(context);
-        device.Value = 100;
-        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
-
-        var logger = new CapturingLogger();
-        var (written, gate) = CreateCollector();
-        using var processor = new ChangeQueueProcessor(
-            source: new object(),
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: (changes, _) => Record(written, gate, changes),
-            bufferTime: TimeSpan.FromMinutes(10),
-            maxQueueDepth: null,
-            logger: logger);
-
-        // Act
-        InjectChange(processor, Correction(property, source, 100, DateTimeOffset.MaxValue.AddTicks(-1)));
-        await TriggerFlushAsync(processor);
-
-        // Assert: dropped with the ceiling warning, nothing written.
-        Assert.Empty(written);
-        Assert.True(logger.HasWarningContaining("no representable newer timestamp"));
-
-        // A subsequent correction delivers with a normal now-ish stamp: the ratchet was not poisoned.
-        InjectChange(processor, Correction(property, source, 100));
-        await TriggerFlushAsync(processor);
-
-        var followUp = Assert.Single(written);
-        Assert.True(followUp.ChangedTimestamp < DateTimeOffset.UtcNow.AddDays(1));
     }
 
     // === Send-time revalidation, bounded-loop exhaustion ===
@@ -966,21 +844,11 @@ public class CorrectionDeliveryTests
     private static SubjectPropertyChange Normal(PropertyReference property, int oldValue, int newValue) =>
         SubjectPropertyChange.Create(property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, oldValue, newValue);
 
-    private static void InjectChange(ChangeQueueProcessor processor, SubjectPropertyChange change)
-    {
-        var changesField = typeof(ChangeQueueProcessor)
-            .GetField("_changes", BindingFlags.NonPublic | BindingFlags.Instance);
-        var queue = (ConcurrentQueue<SubjectPropertyChange>)changesField!.GetValue(processor)!;
-        queue.Enqueue(change);
-    }
+    private static void InjectChange(ChangeQueueProcessor processor, SubjectPropertyChange change) =>
+        processor.EnqueueForTesting(change);
 
-    private static async Task TriggerFlushAsync(ChangeQueueProcessor processor)
-    {
-        var tryFlushMethod = typeof(ChangeQueueProcessor)
-            .GetMethod("TryFlushAsync", BindingFlags.NonPublic | BindingFlags.Instance);
-        var task = (ValueTask)tryFlushMethod!.Invoke(processor, [CancellationToken.None])!;
-        await task;
-    }
+    private static async Task TriggerFlushAsync(ChangeQueueProcessor processor) =>
+        await processor.TryFlushAsync(CancellationToken.None);
 
     private sealed class CapturingLogger : ILogger
     {

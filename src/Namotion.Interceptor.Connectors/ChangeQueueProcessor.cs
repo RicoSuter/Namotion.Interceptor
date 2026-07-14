@@ -32,6 +32,7 @@ public class ChangeQueueProcessor : IDisposable
     private long _dropCount;
     private int _flushGate; // 0 = free, 1 = flushing
     private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
+    private int _processingStarted; // 0 = never started, 1 = ProcessAsync called (single-consumer guard)
 
     /// <summary>
     /// Number of buffered changes dropped due to bounded-queue overflow.
@@ -53,18 +54,6 @@ public class ChangeQueueProcessor : IDisposable
     // Corrections separated out of a flush batch; delivered individually with send-time revalidation.
     private readonly List<SubjectPropertyChange> _flushCorrections = [];
     private readonly SubjectPropertyChange[] _correctionBuffer = new SubjectPropertyChange[1];
-
-    // Processor-wide ratchet over correction attempt stamps, so monotonicity survives across
-    // separate corrections under a frozen or coarse clock (delivery never advances property
-    // metadata, so the stamp itself must carry the ordering). Accessed only from the single
-    // consumer path (the immediate-mode dequeue loop or the gated flush), never concurrently.
-    // Always UTC-normalized and strictly below the ceiling (see LastWritableCorrectionTimestamp).
-    private DateTimeOffset _lastCorrectionAttemptTimestamp = DateTimeOffset.MinValue;
-
-    // The largest bound a correction attempt may advance from: a bound at or above this value has
-    // no strictly-newer successor that is still below DateTimeOffset.MaxValue, and writing the
-    // ceiling itself would ratchet every later correction into the drop path.
-    private static readonly DateTimeOffset LastWritableCorrectionTimestamp = DateTimeOffset.MaxValue.AddTicks(-1);
 
     private readonly PropertyChangeQueueSubscription _subscription;
 
@@ -122,6 +111,13 @@ public class ChangeQueueProcessor : IDisposable
     /// <returns>The task.</returns>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
+        // Single-consumer contract, enforced: the flush scratch buffers are unsynchronized because
+        // exactly one processing loop may ever run.
+        if (Interlocked.Exchange(ref _processingStarted, 1) == 1)
+        {
+            throw new InvalidOperationException("ProcessAsync may only be called once per ChangeQueueProcessor instance.");
+        }
+
         using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -229,6 +225,9 @@ public class ChangeQueueProcessor : IDisposable
     /// incrementing <see cref="DropCount"/> for each. Best-effort: a concurrent flush may drain the queue
     /// below the bound first, in which case fewer drops occur.
     /// </summary>
+    // Kind-blind eviction: a burst of corrections can evict queued normal changes, losing data
+    // toward the source until its next inbound event. Latent today (every in-repo caller passes a
+    // null maxQueueDepth); revisit with kind-aware eviction if the bound is ever wired up.
     private void DropOverflow(int maxQueueDepth)
     {
         while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
@@ -237,8 +236,18 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
+    /// <summary>
+    /// Test seam (see <c>InternalsVisibleTo</c>): enqueues a change straight into the flush buffer,
+    /// bypassing the subscription and its echo/property filtering, so delivery and deduplication can
+    /// be exercised with hand-crafted changes that the write pipeline cannot produce. Pair with
+    /// <see cref="TryFlushAsync"/> for a single deterministic flush.
+    /// </summary>
+    internal void EnqueueForTesting(in SubjectPropertyChange change) => _changes.Enqueue(change);
+
+    // Internal rather than private so tests can trigger one deterministic flush without reflection;
+    // production drives it from the ProcessAsync buffer timer.
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
-    private async ValueTask TryFlushAsync(CancellationToken cancellationToken)
+    internal async ValueTask TryFlushAsync(CancellationToken cancellationToken)
     {
         // Fast, allocation-free try-enter
         if (Interlocked.Exchange(ref _flushGate, 1) == 1)
@@ -262,6 +271,7 @@ public class ChangeQueueProcessor : IDisposable
 
             _flushPropertyIndices.Clear();
             _flushDedupedCount = 0;
+            _flushCorrections.Clear(); // dedup below may already route displaced corrections here
 
             // Pre-size to avoid resizes under bursts
             _flushPropertyIndices.EnsureCapacity(_flushChanges.Count);
@@ -285,20 +295,33 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 else
                 {
-                    // Earlier occurrence for a property already kept (as its later occurrence). An
-                    // earlier correction never contributes anything: it must not replace a queued
-                    // normal change (normal beats correction regardless of queue order), and merging
-                    // it into a later correction would graft its old value onto the newer one and
-                    // break the documented old == new correction invariant. An earlier normal change
-                    // replaces a kept correction outright (keeping its own old value as the diff
-                    // baseline, since a correction contributes nothing to a diff) and coalesces with
-                    // a kept normal change (oldest old value, newest new value).
+                    // Earlier occurrence for a property already kept (as its later occurrence).
+                    // Normal changes own the batch slot: two normals coalesce (oldest old value,
+                    // newest new value), and a normal displaces a kept correction from the slot. A
+                    // correction on either side of a normal is routed through send-time revalidation
+                    // instead of being dropped: dedup order says nothing about freshness (a fresh
+                    // correction can legitimately sit behind an older normal change in the queue,
+                    // because the inbound apply that made it fresh is echo-suppressed and never
+                    // queued), and revalidation against the live model is what actually decides
+                    // staleness. Only a correction displaced by another correction is dropped: they
+                    // coalesce, and the kept one re-asserts the same live model value.
+                    var existing = _flushDedupedBuffer[existingIndex];
+                    var existingIsCorrection = existing.Origin.Kind == ChangeOriginKind.Correction;
                     if (change.Origin.Kind != ChangeOriginKind.Correction)
                     {
-                        var existing = _flushDedupedBuffer[existingIndex];
-                        _flushDedupedBuffer[existingIndex] = existing.Origin.Kind == ChangeOriginKind.Correction
-                            ? change
-                            : change.MergeWithNewer(existing);
+                        if (existingIsCorrection)
+                        {
+                            _flushCorrections.Add(existing);
+                            _flushDedupedBuffer[existingIndex] = change;
+                        }
+                        else
+                        {
+                            _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(existing);
+                        }
+                    }
+                    else if (!existingIsCorrection)
+                    {
+                        _flushCorrections.Add(change);
                     }
                 }
             }
@@ -311,10 +334,10 @@ public class ChangeQueueProcessor : IDisposable
 
             if (_flushDedupedCount > 0)
             {
-                // Partition: normal changes are written as one batch; corrections are delivered one at
-                // a time with send-time revalidation. Dedup guarantees at most one change per property,
-                // so a correction and a normal change never coexist here for the same property.
-                _flushCorrections.Clear();
+                // Partition: normal changes are written as one batch; corrections are delivered one
+                // at a time with send-time revalidation (including corrections the dedup above
+                // displaced with a normal change for the same property; revalidation against the
+                // live model decides which of the two representations of that property is current).
                 var normalCount = 0;
                 for (var i = 0; i < _flushDedupedCount; i++)
                 {
@@ -384,8 +407,11 @@ public class ChangeQueueProcessor : IDisposable
 
     /// <summary>
     /// Writes a single correction to the source with per-correction send-time revalidation. Pre-write
-    /// revalidation is a cheap early drop; the post-write bounded loop is the correctness guarantee for
-    /// the echo-suppressed inbound-from-source in-flight window.
+    /// revalidation is a cheap early drop; the post-write bounded loop closes the in-flight window, where
+    /// an echo-suppressed inbound-from-source apply lands while the write is in flight and is therefore
+    /// still visible to the post-write read. An apply that lands after that read is beyond any send-time
+    /// check and stays the documented delayed-notification residue (#373); it is the same residue an
+    /// ordinary outbound write carries, not one corrections introduce.
     /// </summary>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
     private async ValueTask WriteCorrectionWithRevalidationAsync(SubjectPropertyChange correction, CancellationToken cancellationToken)
@@ -394,83 +420,29 @@ public class ChangeQueueProcessor : IDisposable
         var getValue = property.Metadata.GetValue;
         if (getValue is null)
         {
+            _logger.LogDebug("Correction for {Property} has no getter to revalidate against; dropping.", property);
             return;
         }
 
         var correctionValue = correction.GetNewValue<object?>();
 
-        // Pre-write revalidation (cheap early drop): the model may already have moved before the write
-        // started, in which case its newer change is flowing outbound on its own. Drop the stale
-        // correction. NOT the correctness guarantee: it cannot see an inbound-from-source apply that
-        // lands after this read but before the write completes (that apply is echo-suppressed for this
-        // source and never enters the outbound queue).
+        // Pre-write revalidation (cheap early drop): if the model already moved, its newer change is
+        // flowing outbound on its own; drop the stale correction. This read alone cannot see an
+        // in-flight apply that lands during the write; the post-write loop handles that.
         if (!TryReadModelValue(out var modelValue) || !Equals(modelValue, correctionValue))
         {
             return;
         }
 
         var attempt = 0;
-        // Seeded from the queued correction, which already carries the synthesis-time Lamport bound
-        // (strictly newer than the inbound timestamp it corrects), ratcheted by the processor-wide
-        // last attempt: correction delivery never advances property metadata, so without the ratchet
-        // two SEPARATE corrections synthesized from identically-stamped inbound events under a
-        // frozen or coarse clock would deliver identical stamps and the second could be rejected as
-        // stale. The ratchet is per processor, not per property (a dictionary would grow unboundedly
-        // with the subject graph); the cost is that skew on one property can inflate the stamps of
-        // later corrections for other properties, which is cosmetic: stamps stay bounded by observed
-        // timestamps plus ticks, and values are always send-time revalidated.
-        // UTC-normalized so ceiling checks and AddTicks operate on the instant (see the synthesis
-        // comment): a queued stamp with a non-zero offset and a clock time at DateTime.MaxValue
-        // would otherwise slip past the instant-based ceiling guard and throw on advancement.
-        var queuedTimestamp = correction.ChangedTimestamp.ToUniversalTime();
-        var previousAttemptTimestamp = queuedTimestamp > _lastCorrectionAttemptTimestamp
-            ? queuedTimestamp
-            : _lastCorrectionAttemptTimestamp;
         while (true)
         {
-            // Every write is stamped fresh at send time: connectors serialize ChangedTimestamp
-            // outbound (OPC UA source timestamps, MQTT payloads) and endpoints may order inbound
-            // writes by timestamp, so a correction must never be rejectable as stale. "Fresh" is
-            // Lamport-bounded, not just the local clock: each attempt must be strictly newer than
-            // the previous attempt (a frozen or coarse GetTimestampFunction would otherwise hand two
-            // attempts the same tick) and never older than the property's current write-timestamp.
-            // When the local clock lags that bound, advance one tick past it instead; on a normal
-            // clock the bound never wins and the stamp is plain "now".
-            // Clamped below the ceiling so a pathological clock function returning MaxValue cannot
-            // write the ceiling through the fresh-now branch and poison the ratchet.
-            var now = SubjectChangeContext.GetTimestampFunction().ToUniversalTime();
-            if (now > LastWritableCorrectionTimestamp)
-            {
-                now = LastWritableCorrectionTimestamp;
-            }
-
-            var lowerBound = previousAttemptTimestamp;
-            if (property.TryGetWriteTimestamp() is { } writeTimestamp && writeTimestamp > lowerBound)
-            {
-                lowerBound = writeTimestamp;
-            }
-
-            // A bound at or above MaxValue - 1 tick has no strictly-newer successor below the
-            // ceiling (a hostile or broken source clock propagated through the synthesis bound):
-            // advancing from the ceiling would throw before the write-handler catch and terminate
-            // the processing loop, and writing the ceiling itself would ratchet every later
-            // correction into this drop path. Dropping keeps the only failure mode a missing
-            // correction. All operands are UTC-normalized, so the instant comparison is exact.
-            if (lowerBound >= LastWritableCorrectionTimestamp)
-            {
-                _logger.LogWarning(
-                    "Correction for {Property} has no representable newer timestamp below the ceiling; dropping.",
-                    property);
-                return;
-            }
-
-            var attemptTimestamp = lowerBound >= now ? lowerBound.AddTicks(1) : now;
-            previousAttemptTimestamp = attemptTimestamp;
-            _lastCorrectionAttemptTimestamp = attemptTimestamp;
-
+            // Stamped fresh at send time (a queued correction may have waited for a flush interval, and
+            // connectors serialize ChangedTimestamp outbound). Plain local clock, no wire-ordering
+            // arithmetic; see the synthesis comment in SubjectChangeContextExtensions.
             _correctionBuffer[0] = SubjectPropertyChange.Create(
                 property, correction.Origin,
-                attemptTimestamp,
+                SubjectChangeContext.GetTimestampFunction(),
                 correction.ReceivedTimestamp,
                 correctionValue, correctionValue);
 
@@ -492,11 +464,11 @@ public class ChangeQueueProcessor : IDisposable
                 _correctionBuffer[0] = default;
             }
 
-            // Post-write revalidation (the correctness guarantee): if the model no longer equals what
-            // was just written, an inbound apply from this source landed during the write (a local
-            // write in flight would have enqueued its own following normal change), so re-assert the
-            // current model value as a follow-up correction. An inbound arriving AFTER this read means
-            // the source already holds that value, so the echo skip is then correct.
+            // Post-write revalidation: if the model no longer equals what was just written, an inbound
+            // apply from this source landed during the write (a local write in flight would have enqueued
+            // its own following normal change), so re-assert the current model value as a follow-up
+            // correction. Closes the in-flight window up to this read only; an apply landing after it is
+            // the delayed-notification residue (#373), no different from an ordinary outbound write.
             if (!TryReadModelValue(out modelValue))
             {
                 return;

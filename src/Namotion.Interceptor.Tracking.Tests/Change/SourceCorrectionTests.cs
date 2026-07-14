@@ -81,8 +81,8 @@ public class SourceCorrectionTests
         Assert.Equal(100, device.Value);
         Assert.DoesNotContain(nameof(ClampingDevice.Value), raisedProperties);
 
-        // The correction carries a fresh assertion timestamp (a timestamp-ordering endpoint must
-        // never reject it as stale), not the inbound scope time, and it does NOT advance the
+        // The correction carries a local assertion timestamp (when the assertion was made), not the
+        // inbound scope time and not the value's last-change time, and it does NOT advance the
         // metadata: an unchanged value is not a new write, so the property keeps the value's real
         // last-change time from the arrange write.
         Assert.NotEqual(inboundTimestamp, correction.ChangedTimestamp);
@@ -91,84 +91,188 @@ public class SourceCorrectionTests
     }
 
     [Fact]
-    public void WhenInboundTimestampIsAheadOfLocalClock_ThenCorrectionTimestampExceedsIt()
+    public void WhenInboundTimestampIsAheadOfLocalClock_ThenCorrectionKeepsTheLocalAssertionTimestamp()
     {
-        // Arrange: model at 100; the source's clock runs an hour ahead of ours.
+        // Arrange: model at 100; the source's clock runs an hour ahead of ours. The correction's stamp
+        // is the local assertion time, so a source clock running ahead must not drag it with it.
         var context = CreateContext();
         var device = new ClampingDevice(context);
         device.Value = 100;
         var source = new object();
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+        var modelWriteTimestamp = property.TryGetWriteTimestamp();
         var aheadTimestamp = DateTimeOffset.UtcNow.AddHours(1);
 
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
         // Act: the source sends a diverging 105 stamped in our future; the clamp projects it onto
         // the stored 100 and the write is suppressed.
-        new PropertyReference(device, nameof(ClampingDevice.Value))
-            .SetValueFromSource(source, aheadTimestamp, null, 105);
+        property.SetValueFromSource(source, aheadTimestamp, null, 105);
 
         var changes = DrainWithSentinel(context, subscription);
 
-        // Assert: the correction is stamped strictly after the inbound timestamp it corrects
-        // (Lamport lower bound), so a timestamp-ordering endpoint cannot reject it as older than
-        // the diverged value, even under source clock skew.
+        // Assert
         var correction = Assert.Single(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
         Assert.Equal(ChangeOriginKind.Correction, correction.Origin.Kind);
-        Assert.True(correction.ChangedTimestamp > aheadTimestamp);
+        Assert.True(correction.ChangedTimestamp < aheadTimestamp);
+        Assert.Equal(modelWriteTimestamp, property.TryGetWriteTimestamp());
     }
 
     [Fact]
-    public void WhenInboundTimestampIsMaxValue_ThenSynthesisSaturatesInsteadOfThrowing()
+    public void WhenSubjectAggregatesTwoTrackingContexts_ThenCorrectionReachesEveryQueue()
     {
-        // Arrange: model at 100; a hostile or broken source stamps its diverging value with
-        // DateTimeOffset.MaxValue. The Lamport bound has no representable successor, so synthesis
-        // must saturate at the ceiling rather than throw out of the inbound apply; delivery is the
-        // single logged decision point that drops the unadvanceable correction.
+        // Arrange: a subject attached to two full-tracking contexts. Ordinary writes already run
+        // both queue interceptors, so a correction must fan out to both queues the same way; a
+        // singular service lookup would throw on aggregation and neither queue could repair the
+        // diverged source.
+        var contextA = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var contextB = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+
+        var device = new ClampingDevice(contextA);
+        ((IInterceptorSubject)device).Context.AddFallbackContext(contextB);
+        device.Value = 100;
+        var source = new object();
+
+        using var subscriptionA = contextA.CreatePropertyChangeQueueSubscription();
+        using var subscriptionB = contextB.CreatePropertyChangeQueueSubscription();
+
+        // Act: an equality-suppressed diverging inbound apply must not throw and must synthesize
+        // the correction into both queues.
+        new PropertyReference(device, nameof(ClampingDevice.Value))
+            .SetValueFromSource(source, null, null, 105);
+
+        var changesA = DrainWithSentinel(contextA, subscriptionA);
+        var changesB = DrainWithSentinel(contextB, subscriptionB);
+
+        // Assert
+        Assert.Single(changesA,
+            c => ReferenceEquals(c.Property.Subject, device) && c.Origin.Kind == ChangeOriginKind.Correction);
+        Assert.Single(changesB,
+            c => ReferenceEquals(c.Property.Subject, device) && c.Origin.Kind == ChangeOriginKind.Correction);
+    }
+
+    [Fact]
+    public async Task WhenFlowOwnsActiveTransactionAndInboundEqualsCommittedValue_ThenNothingIsPublished()
+    {
+        // Arrange: backing field at 100, an active transaction on this flow holding a pending 70.
+        // The observable getter answers with the pending overlay on this flow, so synthesis must
+        // compare against COMMITTED state: the sent value equals it, making this a pure echo. Reading
+        // the overlay instead would misread the echo as divergence and assert the uncommitted 70 to
+        // the source, which a rollback never commits.
         var context = CreateContext();
         var device = new ClampingDevice(context);
         device.Value = 100;
         var source = new object();
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
 
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
-        // Act: must not throw.
-        new PropertyReference(device, nameof(ClampingDevice.Value))
-            .SetValueFromSource(source, DateTimeOffset.MaxValue, null, 105);
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            device.Value = 70; // captured as the transaction's pending overlay
+
+            // Act: an inbound value equal to the BACKING field is equality-suppressed before the
+            // transaction captures it.
+            property.SetValueFromSource(source, null, null, 100);
+
+            // Dispose without committing: the pending 70 is discarded.
+        }
 
         var changes = DrainWithSentinel(context, subscription);
 
-        // Assert: the correction is synthesized, saturated at the ceiling.
-        var correction = Assert.Single(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
-        Assert.Equal(ChangeOriginKind.Correction, correction.Origin.Kind);
-        Assert.Equal(DateTimeOffset.MaxValue, correction.ChangedTimestamp);
+        // Assert: pure echo, nothing published; no uncommitted value reaches the source.
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
+        Assert.Equal(100, device.Value);
     }
 
     [Fact]
-    public void WhenInboundTimestampCarriesOffsetAtClockCeiling_ThenSynthesisNormalizesInsteadOfThrowing()
+    public async Task WhenFlowOwnsActiveTransactionAndInboundDivergesFromCommittedValue_ThenCorrectionAssertsCommittedValue()
     {
-        // Arrange: an inbound stamp whose CLOCK time sits at DateTime.MaxValue but whose instant is
-        // an hour below the ceiling. DateTimeOffset arithmetic operates on the clock time while
-        // comparisons use the instant, so without UTC normalization the Lamport advancement would
-        // throw out of the inbound apply despite the instant being advanceable.
+        // Arrange: backing field at 100, an active transaction on this flow holding a pending 70. The
+        // source sends a diverging 105 that the hook clamps onto the committed 100, so the write is
+        // equality-suppressed and the source is left holding 105 while the committed model holds 100.
+        // The divergence is real and must still be corrected while a transaction is pending: the
+        // correction carries the committed 100, never the uncommitted overlay (70) and never the
+        // dropped sent value (105).
         var context = CreateContext();
         var device = new ClampingDevice(context);
         device.Value = 100;
         var source = new object();
-        var offsetCeilingTimestamp = new DateTimeOffset(DateTime.MaxValue, TimeSpan.FromHours(1));
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
 
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
-        // Act: must not throw.
-        new PropertyReference(device, nameof(ClampingDevice.Value))
-            .SetValueFromSource(source, offsetCeilingTimestamp, null, 105);
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            device.Value = 70; // captured as the transaction's pending overlay
+
+            // Act
+            property.SetValueFromSource(source, null, null, 105);
+
+            // Dispose without committing: the pending 70 is discarded and the model stays at 100,
+            // which is exactly the value the correction asserted.
+        }
 
         var changes = DrainWithSentinel(context, subscription);
 
-        // Assert: synthesized, UTC-normalized, strictly after the inbound instant.
-        var correction = Assert.Single(changes, c => c.Property.Name == nameof(ClampingDevice.Value));
-        Assert.Equal(ChangeOriginKind.Correction, correction.Origin.Kind);
-        Assert.Equal(TimeSpan.Zero, correction.ChangedTimestamp.Offset);
-        Assert.True(correction.ChangedTimestamp > offsetCeilingTimestamp.ToUniversalTime());
+        // Assert
+        var correction = Assert.Single(changes,
+            c => c.Property.Name == nameof(ClampingDevice.Value) && c.Origin.Kind == ChangeOriginKind.Correction);
+        Assert.Equal(100, correction.GetNewValue<int>());
+        Assert.Same(source, correction.Origin.Source);
+        Assert.Equal(100, device.Value);
+    }
+
+    [Fact]
+    public void WhenInboundEnumValueArrivesAsUnderlyingTypeAndIsEqual_ThenItIsAPureEcho()
+    {
+        // Arrange: OPC UA encodes enumerations as Int32, so inbound enum applies arrive as boxed
+        // integers. A numerically equal value is a pure echo: the type-strict boxed comparison
+        // would misread it as divergence and synthesize a correction on every such apply
+        // (self-sustaining with read-after-write), so divergence must mirror the setter's unbox.
+        var context = CreateContext();
+        var device = new ModeDevice(context);
+        device.Mode = DeviceMode.Running;
+        var source = new object();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act: the source sends the underlying integral value of the stored enum.
+        new PropertyReference(device, nameof(ModeDevice.Mode))
+            .SetValueFromSource(source, null, null, (int)DeviceMode.Running);
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert: nothing published (no change, no correction) and the model is unchanged.
+        Assert.DoesNotContain(changes, c => ReferenceEquals(c.Property.Subject, device));
+        Assert.Equal(DeviceMode.Running, device.Mode);
+    }
+
+    [Fact]
+    public void WhenInboundEnumValueArrivesAsUnderlyingTypeAndChanges_ThenOriginSurvivesAsFromSource()
+    {
+        // Arrange: a genuinely changed enum value sent as its boxed underlying integer stores
+        // faithfully through the setter's lenient unbox, so the origin must survive as FromSource
+        // and stay echo-suppressible; a type-strict survival check would demote it to Local and
+        // write every inbound enum change straight back to the server.
+        var context = CreateContext();
+        var device = new ModeDevice(context);
+        device.Mode = DeviceMode.Idle;
+        var source = new object();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        new PropertyReference(device, nameof(ModeDevice.Mode))
+            .SetValueFromSource(source, null, null, (int)DeviceMode.Fault);
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert
+        Assert.Equal(DeviceMode.Fault, device.Mode);
+        var change = Assert.Single(changes, c => ReferenceEquals(c.Property.Subject, device));
+        Assert.Equal(ChangeOriginKind.FromSource, change.Origin.Kind);
+        Assert.Same(source, change.Origin.Source);
     }
 
     [Fact]
@@ -232,8 +336,8 @@ public class SourceCorrectionTests
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             // Act: the inbound value is captured by the transaction and the chain stops, so the
-            // terminal write never lands. The equality handler ran [RunsFirst] and saw differing
-            // values (50 vs 80), so the outcome's valueUnchanged is false and no correction is synthesized.
+            // terminal write never lands. The captured value (80) differs from the stored 50, so this
+            // is not an equality-suppressed write and no correction is synthesized.
             property.SetValueFromSource(source, null, null, 80);
             pending = transaction.GetPendingChanges();
         }
@@ -347,8 +451,7 @@ public class SourceCorrectionTests
         var changes = DrainWithSentinel(context, subscription);
 
         // Assert: with distinct write-timestamps, synthesis drops rather than enqueueing the stale
-        // value. The timestamp check is advisory because timestamps can alias; the delivery path owns
-        // the drop-or-fresh guarantee through send-time model revalidation.
+        // value; no delivered correction carries the pre-race 100 (either dropped or carrying 90).
         var corrections = changes
             .Where(c => c.Property.Name == nameof(ClampingDevice.Value)
                         && c.Origin.Kind == ChangeOriginKind.Correction)

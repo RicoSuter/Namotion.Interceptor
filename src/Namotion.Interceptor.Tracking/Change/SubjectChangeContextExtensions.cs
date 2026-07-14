@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -38,7 +39,11 @@ public static class SubjectChangeContextExtensions
     /// <param name="changedTimestamp">The changed timestamp.</param>
     /// <param name="receivedTimestamp">The received timestamp, or null to preserve the ambient value.</param>
     /// <param name="value">The value to write.</param>
-    /// <param name="sentValue">The value the source semantically sent, used as the origin's survival evidence.</param>
+    /// <param name="sentValue">The value the source semantically sent, used as the origin's survival
+    /// evidence and, for suppressed writes, as the correction divergence evidence. Pass it converted
+    /// to the property's CLR type (an enum's underlying integral type is also accepted, mirroring the
+    /// setter's unbox); any other representation of an echoed value would read as divergence and
+    /// synthesize a correction on every echo.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void SetValueFromOrigin(
         this PropertyReference property,
@@ -73,51 +78,43 @@ public static class SubjectChangeContextExtensions
         }
 
         // Correction candidate: FromSource, terminal never landed, equality-suppressed. A transaction
-        // capture has valueUnchanged == false (it only captures when values differ), so it self-excludes,
-        // and no process-global transaction flag is consulted. Timestamps play no role in this decision.
-        // The dependency on PropertyValueEqualityCheckHandler is structural, not checked: the outcome
-        // API is internal and that handler is its only producer, so valueUnchanged == true in hand
-        // proves the handler ran with its [RunsFirst] ordering, which is what makes the transaction
-        // self-exclusion hold.
-        // Divergence is judged against sentValue (the value the source semantically sent), never the
-        // applied value: an ApplySubjectUpdate transform may have projected the sent value onto the
-        // stored value before this call, in which case the applied value trivially equals the
-        // observable value and would misread the suppressed write as a pure echo while the source
-        // still holds its diverging sent value.
+        // capture self-excludes because it only captures when values differ (valueUnchanged == false),
+        // so this decision consults no transaction state. The dependency on the equality handler is
+        // structural: its outcome API is internal and it is the only producer, so valueUnchanged == true
+        // proves it ran with its [RunsFirst] ordering. Divergence downstream is judged against sentValue,
+        // not the applied value: an ApplySubjectUpdate transform may have projected the sent value onto
+        // the stored one, which would misread a real divergence as a pure echo.
         if (origin.Kind == ChangeOriginKind.FromSource && !isWritten && valueUnchanged)
         {
-            DetectAndEnqueueCorrection(property, origin.Source!, sentValue, changedTimestamp);
+            DetectAndEnqueueCorrection(property, origin.Source!, sentValue);
         }
     }
 
     private static void DetectAndEnqueueCorrection(
-        PropertyReference property, object source, object? sentValue, DateTimeOffset? inboundChangedTimestamp)
+        PropertyReference property, object source, object? sentValue)
     {
-        // Resolve the queue first: no queue means no delivery target, so nothing to synthesize and
-        // no reason to run the observable getter below at all.
-        var queue = property.Subject.Context.TryGetService<PropertyChangeQueue>();
-        if (queue is null)
+        // Fan out to every queue: a subject can aggregate several tracking contexts (fallback
+        // contexts each register their own queue), and ordinary writes run every queue interceptor,
+        // so a correction must too. A singular TryGetService would throw on aggregation. No queue
+        // means no delivery target, so skip synthesis (and the getter below) entirely.
+        var queues = property.Subject.Context.GetServices<PropertyChangeQueue>();
+        if (queues.Length == 0)
         {
             return;
         }
 
-        // Baseline for the synthesis concurrency race, captured on this rare correction path rather
-        // than on every inbound write. It only needs to guard the window between the observable read
-        // below and the stamp under the lock: a concurrent real write moves the write-timestamp, and
-        // we drop on doubt. Captured before the getter so a write landing between here and the read is
-        // still detected.
+        // Concurrency baseline: a concurrent real write bumps the write-timestamp, which we detect
+        // under the lock below. Captured before the getter so a write racing the read is still seen.
         var writeTimestampBaseline = property.TryGetWriteTimestamp();
 
-        // The stamped write was equality-suppressed. Read the observable value OUTSIDE the subject
-        // lock (the getter may run read interceptors; running them under Subject.SyncRoot would invert
-        // the codebase's getters-outside-locks discipline). If it still equals the sent value there is
-        // no divergence (pure echo) and no correction; the correction deliberately carries the
-        // OBSERVABLE value. A throwing getter or read interceptor propagates to the SetValueFromSource
-        // caller deliberately: stamped setters are already a throwing API (validators throw through
-        // them), and a broken read path is a defect that must surface, not doubt to drop on; a
-        // swallowed throw here would leave an undiagnosable, silently diverged source.
-        var observedValue = property.Metadata.GetValue?.Invoke(property.Subject);
-        if (Equals(sentValue, observedValue))
+        // Read the committed value OUTSIDE the subject lock: the getter may run read interceptors, and
+        // running them under Subject.SyncRoot would invert the codebase's getters-outside-locks
+        // discipline. Equal to the sent value means pure echo, no divergence. A throwing getter
+        // propagates deliberately (stamped setters already throw through validators); swallowing it
+        // would leave an undiagnosable, silently diverged source. The correction carries this
+        // OBSERVABLE value, not the sent one.
+        var observedValue = ReadCommittedValue(property);
+        if (SentValueMatchesObserved(sentValue, observedValue))
         {
             return;
         }
@@ -125,68 +122,100 @@ public static class SubjectChangeContextExtensions
         SubjectPropertyChange correction;
         lock (property.Subject.SyncRoot)
         {
-            // Concurrency drop-on-doubt: a newer real write bumps the write-timestamp, so a moved
-            // timestamp means that write is already flowing outbound. Compare against the baseline
-            // under the lock. NECESSARY BUT NOT SUFFICIENT (tick granularity, user-settable
-            // GetTimestampFunction), so on any doubt DROP: the only failure mode of a dropped
-            // correction is a missing one (the source stays diverged until its next inbound event),
-            // never a wrong model value.
+            // Drop-on-doubt: a moved write-timestamp means a newer real write is already flowing
+            // outbound. The check is necessary but not sufficient (tick granularity, user-settable
+            // clock), so on any doubt DROP; the only cost of a dropped correction is a missing one
+            // (source stays diverged until its next inbound event), never a wrong model value.
             var currentWriteTimestamp = property.TryGetWriteTimestamp();
             if (currentWriteTimestamp != writeTimestampBaseline)
             {
                 return;
             }
 
-            // Publish with a FRESH assertion timestamp: endpoints may order inbound writes by
-            // timestamp (the OPC UA read-after-write check does exactly this), so a correction
-            // stamped with the value's old last-change time could be rejected as stale and, with
-            // corrections never retried, leave the source permanently diverged. A correction is
-            // still not a real write, so it does NOT stamp the metadata (a metadata bump would
-            // advance the write-timestamp for an unchanged value and mislead write-timestamp
-            // consumers, including OPC UA read-after-write); the model keeps the value's truthful
-            // last-change time, and model and source may intentionally disagree on the timestamp of
-            // an identical value. Echo suppression of the source's reply is value-based.
-            //
-            // "Fresh" is Lamport-bounded, not just the local clock: the stamp must be strictly
-            // newer than the inbound timestamp it corrects (a source clock running ahead would
-            // otherwise keep every correction "stale" to an ordering endpoint) and never older than
-            // the value's own write-timestamp. When the local clock lags that bound, advance one
-            // tick past it instead. The fabrication is bounded by observed timestamps and never
-            // touches the model's metadata.
-            var now = new DateTimeOffset(SubjectChangeContext.CaptureTimestamp(), TimeSpan.Zero);
-            // Normalized to UTC: DateTimeOffset arithmetic operates on the CLOCK time while
-            // comparisons use the instant, so an offset-carrying stamp whose clock time sits at
-            // DateTime.MaxValue would pass every instant comparison and still make AddTicks throw.
-            // Normalization pins clock time to the instant, making the ceiling checks exact (and
-            // wire stamps uniformly UTC).
-            var lowerBound = inboundChangedTimestamp?.ToUniversalTime();
-            if (currentWriteTimestamp is { } writeTimestamp && (lowerBound is null || writeTimestamp > lowerBound))
-            {
-                lowerBound = writeTimestamp;
-            }
-
-            // Saturate at the ceiling instead of throwing: a hostile or broken source can stamp
-            // DateTimeOffset.MaxValue, and AddTicks would throw out of the inbound apply. Delivery
-            // detects the saturated stamp (no representable successor) and drops with a warning,
-            // the single logged decision point.
-            var changedTimestamp = lowerBound is { } bound && bound >= now
-                ? bound < DateTimeOffset.MaxValue ? bound.AddTicks(1) : DateTimeOffset.MaxValue
-                : now;
-
-            // ReceivedTimestamp rides the ambient context, not the inbound apply: a correction is a
-            // local assertion (the model already holds this value), so it has no distinct receive
-            // event of its own.
+            // Local assertion timestamp (re-stamped again at send time): the correction asserts the
+            // model's value now, not the value's old last-change time. No wire-ordering arithmetic on
+            // top; no endpoint here rejects an older-stamped write, and an endpoint that does must be
+            // served by its own outbound writer (#373). The metadata write-timestamp is NOT advanced
+            // (an unchanged value is not a new write), so model and source may intentionally disagree
+            // on the timestamp of an identical value; echo suppression of the source's reply is
+            // value-based. ReceivedTimestamp rides the ambient context: a correction has no distinct
+            // receive event of its own.
             correction = SubjectPropertyChange.Create(
                 property,
                 ChangeOrigin.Correction(source),
-                changedTimestamp,
+                new DateTimeOffset(SubjectChangeContext.CaptureTimestamp(), TimeSpan.Zero),
                 SubjectChangeContext.Current.ReceivedTimestamp,
                 observedValue,
                 observedValue);
         }
 
-        // Enqueue after releasing the lock; corrections never touch PropertyChangeObservable.
-        queue.EnqueueCorrection(in correction);
+        foreach (var queue in queues)
+        {
+            queue.EnqueueCorrection(in correction);
+        }
+    }
+
+    /// <summary>
+    /// Reads the property's committed observable value, the only state a correction may assert to a
+    /// source. On a flow that owns an active transaction the read interceptor would answer with the
+    /// transaction's pending overlay (discarded on rollback), so the transaction is detached for the
+    /// read to see committed state, the same value the equality check compared against. Delivery
+    /// re-reads on the processor's flow, which never carries a transaction, so if the transaction
+    /// later commits over the corrected value that revalidation drops the correction. Detach and
+    /// restore are synchronous around a synchronous getter and confined to this flow.
+    /// </summary>
+    private static object? ReadCommittedValue(PropertyReference property)
+    {
+        var transaction = SubjectTransaction.HasActiveTransaction ? SubjectTransaction.Current : null;
+        if (transaction is null)
+        {
+            return property.Metadata.GetValue?.Invoke(property.Subject);
+        }
+
+        SubjectTransaction.SetCurrent(null);
+        try
+        {
+            return property.Metadata.GetValue?.Invoke(property.Subject);
+        }
+        finally
+        {
+            SubjectTransaction.SetCurrent(transaction);
+        }
+    }
+
+    /// <summary>
+    /// Divergence comparison mirroring the setter's own unbox semantics. The setter defines which
+    /// wire boxes can reach detection at all (a box it cannot unbox throws before anything happens),
+    /// and the only pair the CLR unboxes leniently is an enum and its underlying integral type
+    /// (OPC UA encodes enumerations as Int32, so inbound enum applies arrive as boxed integers).
+    /// A numerically equal underlying-typed sent value is therefore a pure echo, not a divergence;
+    /// every other type mismatch is unreachable through a successful setter invocation.
+    /// </summary>
+    private static bool SentValueMatchesObserved(object? sentValue, object? observedValue)
+    {
+        if (Equals(sentValue, observedValue))
+        {
+            return true;
+        }
+
+        if (sentValue is null || observedValue is null)
+        {
+            return false;
+        }
+
+        var observedType = observedValue.GetType();
+        if (observedType.IsEnum && sentValue.GetType() == observedType.GetEnumUnderlyingType())
+        {
+            return Equals(Enum.ToObject(observedType, sentValue), observedValue);
+        }
+
+        var sentType = sentValue.GetType();
+        if (sentType.IsEnum && observedType == sentType.GetEnumUnderlyingType())
+        {
+            return Equals(sentValue, Enum.ToObject(sentType, observedValue));
+        }
+
+        return false;
     }
 
     /// <summary>
