@@ -4,6 +4,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -676,26 +677,13 @@ public partial class SubjectUpdateExtensionsTests
 
     // Writes a sentinel change on a fresh subject and drains the queue subscription up to it
     // (excluded), returning everything published before the sentinel; corrections are visible only
-    // on the queue, never on the observable. Throws TimeoutException after 10 seconds.
+    // on the queue, never on the observable.
     private static List<SubjectPropertyChange> DrainQueueUntilSentinel(
         IInterceptorSubjectContext context, PropertyChangeQueueSubscription subscription)
     {
         var sentinel = new NumericNode(context);
         sentinel.Value = 7;
-
-        var changes = new List<SubjectPropertyChange>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (subscription.TryDequeue(out var change, timeout.Token))
-        {
-            if (ReferenceEquals(change.Property.Subject, sentinel))
-            {
-                return changes;
-            }
-
-            changes.Add(change);
-        }
-
-        throw new TimeoutException("Sentinel change was not received within 10 seconds.");
+        return ChangeQueueTestHelpers.DrainUntilSubject(subscription, sentinel);
     }
 
     [Fact]

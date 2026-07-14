@@ -173,7 +173,7 @@ public class CorrectionDeliveryTests
             timeout: TimeSpan.FromSeconds(10));
 
         // Assert: the queue saw the correction, the observable did not.
-        var queued = DrainQueue(queueSubscription, sentinel);
+        var queued = ChangeQueueTestHelpers.DrainUntilSubject(queueSubscription, sentinel);
         Assert.Contains(queued, c => ReferenceEquals(c.Property.Subject, device) && c.Origin.Kind == ChangeOriginKind.Correction);
         Assert.DoesNotContain(observed, c => ReferenceEquals(c.Property.Subject, device));
     }
@@ -744,23 +744,6 @@ public class CorrectionDeliveryTests
         {
             return written.Where(c => !ReferenceEquals(c.Property.Subject, sentinel)).ToList();
         }
-    }
-
-    private static List<SubjectPropertyChange> DrainQueue(PropertyChangeQueueSubscription subscription, IInterceptorSubject sentinel)
-    {
-        var changes = new List<SubjectPropertyChange>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (subscription.TryDequeue(out var change, timeout.Token))
-        {
-            if (ReferenceEquals(change.Property.Subject, sentinel))
-            {
-                return changes;
-            }
-
-            changes.Add(change);
-        }
-
-        throw new TimeoutException("Sentinel change was not received within 10 seconds.");
     }
 
     private static SubjectPropertyChange Correction(

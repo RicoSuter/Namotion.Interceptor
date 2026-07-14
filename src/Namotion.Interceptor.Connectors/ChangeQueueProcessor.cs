@@ -273,33 +273,21 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 else
                 {
-                    // Earlier occurrence for a property already kept (as its later occurrence). The
-                    // kind branch enforces normal-beats-correction regardless of queue order: a normal
-                    // change carries the authoritative value outbound and keeps its own old value as
-                    // the diff baseline, while a correction (old == new) contributes nothing to a diff.
-                    var existing = _flushDedupedBuffer[existingIndex];
-                    var changeIsCorrection = change.Origin.Kind == ChangeOriginKind.Correction;
-                    var existingIsCorrection = existing.Origin.Kind == ChangeOriginKind.Correction;
-
-                    if (changeIsCorrection && existingIsCorrection)
+                    // Earlier occurrence for a property already kept (as its later occurrence). An
+                    // earlier correction never contributes anything: it must not replace a queued
+                    // normal change (normal beats correction regardless of queue order), and merging
+                    // it into a later correction would graft its old value onto the newer one and
+                    // break the documented old == new correction invariant. An earlier normal change
+                    // replaces a kept correction outright (keeping its own old value as the diff
+                    // baseline, since a correction contributes nothing to a diff) and coalesces with
+                    // a kept normal change (oldest old value, newest new value).
+                    if (change.Origin.Kind != ChangeOriginKind.Correction)
                     {
-                        // Two corrections: keep the later one whole. Merging would graft the earlier
-                        // correction's old value onto the newer one and break the documented
-                        // old == new correction invariant when the model moved between syntheses.
+                        var existing = _flushDedupedBuffer[existingIndex];
+                        _flushDedupedBuffer[existingIndex] = existing.Origin.Kind == ChangeOriginKind.Correction
+                            ? change
+                            : change.MergeWithNewer(existing);
                     }
-                    else if (!changeIsCorrection && !existingIsCorrection)
-                    {
-                        // Two normal changes coalesce: oldest old value, newest new value.
-                        _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(existing);
-                    }
-                    else if (existingIsCorrection)
-                    {
-                        // The earlier change is normal, the kept later change is a correction: the
-                        // normal change wins and keeps its own old value; drop the correction.
-                        _flushDedupedBuffer[existingIndex] = change;
-                    }
-                    // else: the earlier change is a correction and the kept later change is normal.
-                    // A correction never replaces a queued normal change, so keep the normal change.
                 }
             }
 

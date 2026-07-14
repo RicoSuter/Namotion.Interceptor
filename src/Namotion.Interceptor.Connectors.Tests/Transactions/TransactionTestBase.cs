@@ -18,20 +18,8 @@ public abstract class TransactionTestBase
     /// throws TimeoutException after 10 seconds.
     /// </summary>
     protected static List<SubjectPropertyChange> DrainUntil(
-        PropertyChangeQueueSubscription subscription, Func<SubjectPropertyChange, bool> isSentinel)
-    {
-        var changes = new List<SubjectPropertyChange>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (subscription.TryDequeue(out var change, timeout.Token))
-        {
-            if (isSentinel(change))
-            {
-                return changes;
-            }
-            changes.Add(change);
-        }
-        throw new TimeoutException("Sentinel notification was not received within 10 seconds.");
-    }
+        PropertyChangeQueueSubscription subscription, Func<SubjectPropertyChange, bool> isSentinel) =>
+        ChangeQueueTestHelpers.DrainUntil(subscription, isSentinel);
 
     /// <summary>
     /// Writes a sentinel change on a fresh subject and drains the subscription up to it, returning
@@ -42,8 +30,7 @@ public abstract class TransactionTestBase
     {
         var sentinel = new Person(context);
         sentinel.LastName = "Sentinel";
-        return DrainUntil(subscription, c =>
-            ReferenceEquals(c.Property.Subject, sentinel) && c.Property.Name == nameof(Person.LastName));
+        return ChangeQueueTestHelpers.DrainUntilSubject(subscription, sentinel);
     }
 
     /// <summary>

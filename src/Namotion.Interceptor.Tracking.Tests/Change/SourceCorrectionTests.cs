@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -247,24 +248,13 @@ public class SourceCorrectionTests
             .WithFullPropertyTracking();
 
     // Writes a sentinel change on a fresh subject and drains the subscription up to it (excluded),
-    // returning everything published before the sentinel; throws TimeoutException after 10 seconds.
+    // returning everything published before the sentinel.
     private static List<SubjectPropertyChange> DrainWithSentinel(
         IInterceptorSubjectContext context, PropertyChangeQueueSubscription subscription)
     {
         var sentinel = new ClampingDevice(context);
         sentinel.Value = 7;
-
-        var changes = new List<SubjectPropertyChange>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (subscription.TryDequeue(out var change, timeout.Token))
-        {
-            if (ReferenceEquals(change.Property.Subject, sentinel))
-            {
-                return changes;
-            }
-            changes.Add(change);
-        }
-        throw new TimeoutException("Sentinel notification was not received within 10 seconds.");
+        return ChangeQueueTestHelpers.DrainUntilSubject(subscription, sentinel);
     }
 
     /// <summary>Offsets reads of one int property so the observable value differs from the backing field.</summary>
