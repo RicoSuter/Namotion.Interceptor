@@ -281,10 +281,15 @@ public class ChangeQueueProcessor : IDisposable
                     var changeIsCorrection = change.Origin.Kind == ChangeOriginKind.Correction;
                     var existingIsCorrection = existing.Origin.Kind == ChangeOriginKind.Correction;
 
-                    if (changeIsCorrection == existingIsCorrection)
+                    if (changeIsCorrection && existingIsCorrection)
                     {
-                        // Same class: two normal changes coalesce (oldest old value, newest new value);
-                        // two corrections coalesce safely (same value by construction).
+                        // Two corrections: keep the later one whole. Merging would graft the earlier
+                        // correction's old value onto the newer one and break the documented
+                        // old == new correction invariant when the model moved between syntheses.
+                    }
+                    else if (!changeIsCorrection && !existingIsCorrection)
+                    {
+                        // Two normal changes coalesce: oldest old value, newest new value.
                         _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(existing);
                     }
                     else if (existingIsCorrection)
@@ -399,7 +404,7 @@ public class ChangeQueueProcessor : IDisposable
         // correction. NOT the correctness guarantee: it cannot see an inbound-from-source apply that
         // lands after this read but before the write completes (that apply is echo-suppressed for this
         // source and never enters the outbound queue).
-        if (!Equals(getValue.Invoke(property.Subject), correctionValue))
+        if (!TryReadModelValue(out var modelValue) || !Equals(modelValue, correctionValue))
         {
             return;
         }
@@ -407,12 +412,17 @@ public class ChangeQueueProcessor : IDisposable
         var attempt = 0;
         while (true)
         {
-            // On the first iteration correctionValue equals the correction's value, so write it as is;
-            // a follow-up re-asserts the current model value with the same metadata.
+            // On the first iteration correctionValue equals the correction's value, so write it as is.
+            // A follow-up re-asserts the current model value, so it carries the property's CURRENT
+            // write-timestamp (the newer value's real last-change time): connectors serialize
+            // ChangedTimestamp outbound (OPC UA source timestamps, MQTT payloads), and reusing the
+            // original correction's time would regress the source's timestamp metadata.
             _correctionBuffer[0] = Equals(correctionValue, correction.GetNewValue<object?>())
                 ? correction
                 : SubjectPropertyChange.Create(
-                    property, correction.Origin, correction.ChangedTimestamp, correction.ReceivedTimestamp,
+                    property, correction.Origin,
+                    property.TryGetWriteTimestamp() ?? correction.ChangedTimestamp,
+                    correction.ReceivedTimestamp,
                     correctionValue, correctionValue);
 
             try
@@ -438,7 +448,11 @@ public class ChangeQueueProcessor : IDisposable
             // write in flight would have enqueued its own following normal change), so re-assert the
             // current model value as a follow-up correction. An inbound arriving AFTER this read means
             // the source already holds that value, so the echo skip is then correct.
-            var modelValue = getValue.Invoke(property.Subject);
+            if (!TryReadModelValue(out modelValue))
+            {
+                return;
+            }
+
             if (Equals(modelValue, correctionValue))
             {
                 break; // converged: the source holds the current model value
@@ -454,6 +468,25 @@ public class ChangeQueueProcessor : IDisposable
             }
 
             correctionValue = modelValue; // follow-up correction to the newer model value
+        }
+
+        // A user getter (or read interceptor) that throws must drop the correction, not escape:
+        // in immediate mode this method is awaited directly in the ProcessAsync dequeue loop, and
+        // an escaping exception would terminate the processor.
+        bool TryReadModelValue(out object? value)
+        {
+            try
+            {
+                value = getValue.Invoke(property.Subject);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Correction revalidation read for {Property} threw; dropping the correction.", property);
+                value = null;
+                return false;
+            }
         }
     }
 

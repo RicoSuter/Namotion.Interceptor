@@ -3,6 +3,7 @@ using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -252,6 +253,33 @@ public class CorrectionDeliveryTests
         Assert.Equal(100, change.GetNewValue<int>());
     }
 
+    [Fact]
+    public async Task WhenTwoCorrectionsCarryDifferentValues_ThenLaterCorrectionIsKeptWhole()
+    {
+        // Arrange: the model moved between two syntheses, so the queued corrections carry different
+        // values. Dedup must keep the later correction whole: merging would graft the earlier
+        // correction's old value onto the newer one and break the documented old == new invariant.
+        var context = CreateContext();
+        var source = new object();
+        var device = new ClampingDevice(context);
+        device.Value = 90; // the later correction (90) passes send-time revalidation
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+
+        var (written, gate) = CreateCollector();
+        using var processor = CreateBufferedProcessor(context, written, gate);
+
+        // Act
+        InjectChange(processor, Correction(property, source, 100));
+        InjectChange(processor, Correction(property, source, 90));
+        await TriggerFlushAsync(processor);
+
+        // Assert: one delivered correction with old == new == 90.
+        var change = Assert.Single(written);
+        Assert.Equal(ChangeOriginKind.Correction, change.Origin.Kind);
+        Assert.Equal(90, change.GetOldValue<int>());
+        Assert.Equal(90, change.GetNewValue<int>());
+    }
+
     // === Immediate-mode delivery (send-time revalidation, no dedup) ===
 
     [Fact]
@@ -305,6 +333,64 @@ public class CorrectionDeliveryTests
         Assert.False(logger.HasWarningContaining("Dropping correction"));
     }
 
+    [Fact]
+    public async Task WhenRevalidationGetterThrowsInImmediateMode_ThenCorrectionIsDroppedAndProcessorSurvives()
+    {
+        // Arrange: a read interceptor that throws for the correction device's property once armed. In
+        // immediate mode the revalidation runs directly in the dequeue loop, so an escaping getter
+        // exception would terminate the processor; it must instead drop the correction, log an error,
+        // and keep delivering subsequent changes.
+        var thrower = new ArmedThrowingReadInterceptor(nameof(ClampingDevice.Value));
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithService(() => thrower)
+            .WithFullPropertyTracking();
+
+        var source = new object();
+        var correctionDevice = new ClampingDevice(context);
+        correctionDevice.Value = 100;
+        var normalDevice = new ClampingDevice(context);
+
+        var logger = new CapturingLogger();
+        var (written, gate) = CreateCollector();
+        using var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) => Record(written, gate, changes),
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: logger);
+
+        // Produce the correction while the interceptor is unarmed (synthesis reads the getter), then
+        // arm it BEFORE the processor starts consuming, so the revalidation read is the one that throws.
+        new PropertyReference(correctionDevice, nameof(ClampingDevice.Value)).SetValueFromSource(source, null, null, 105);
+        thrower.Arm();
+
+        using var cts = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cts.Token);
+
+        // Act: a subsequent normal change must still be delivered by the surviving loop. The write
+        // targets a different subject, so the armed thrower never sees it.
+        normalDevice.Value = 42;
+
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+        {
+            lock (gate) return written.Any(c => ReferenceEquals(c.Property.Subject, normalDevice));
+        }, timeout: TimeSpan.FromSeconds(10));
+
+        await cts.CancelAsync();
+        await processing;
+
+        // Assert: the correction was dropped with an error log, the normal change was delivered.
+        lock (gate)
+        {
+            Assert.DoesNotContain(written, c => ReferenceEquals(c.Property.Subject, correctionDevice));
+            Assert.Contains(written, c => ReferenceEquals(c.Property.Subject, normalDevice));
+        }
+        Assert.True(logger.HasErrorContaining("dropping the correction"));
+    }
+
     // === Send-time revalidation, pre-write drop ===
 
     [Fact]
@@ -350,6 +436,7 @@ public class CorrectionDeliveryTests
         var property = new PropertyReference(device, nameof(ClampingDevice.Value));
 
         var sourceState = new ConcurrentDictionary<string, object?>();
+        var deliveredCorrections = new ConcurrentQueue<SubjectPropertyChange>();
         var firstWriteStarted = new ManualResetEventSlim(false);
         var inboundApplied = new ManualResetEventSlim(false);
         var correctionWrites = 0;
@@ -364,12 +451,15 @@ public class CorrectionDeliveryTests
                 for (var i = 0; i < span.Length; i++)
                 {
                     var change = span[i];
-                    if (change.Origin.Kind == ChangeOriginKind.Correction &&
-                        Interlocked.Increment(ref correctionWrites) == 1)
+                    if (change.Origin.Kind == ChangeOriginKind.Correction)
                     {
-                        // Hold the first correction write open until the inbound apply lands.
-                        firstWriteStarted.Set();
-                        inboundApplied.Wait(TimeSpan.FromSeconds(10));
+                        deliveredCorrections.Enqueue(change);
+                        if (Interlocked.Increment(ref correctionWrites) == 1)
+                        {
+                            // Hold the first correction write open until the inbound apply lands.
+                            firstWriteStarted.Set();
+                            inboundApplied.Wait(TimeSpan.FromSeconds(10));
+                        }
                     }
 
                     sourceState[change.Property.Name] = change.GetNewValue<object?>();
@@ -381,7 +471,10 @@ public class CorrectionDeliveryTests
             maxQueueDepth: null,
             logger: NullLogger.Instance);
 
-        InjectChange(processor, Correction(property, source, 100));
+        // The injected correction carries a deliberately stale timestamp so the follow-up's
+        // timestamp assertion below is a real distinction.
+        var staleTimestamp = DateTimeOffset.UtcNow.AddHours(-1);
+        InjectChange(processor, Correction(property, source, 100, staleTimestamp));
 
         // Act: flush on a background task; the first correction write blocks inside the write handler.
         var flush = Task.Run(async () => await TriggerFlushAsync(processor));
@@ -399,6 +492,14 @@ public class CorrectionDeliveryTests
         Assert.True(sourceState.TryGetValue(nameof(ClampingDevice.Value), out var finalValue));
         Assert.Equal(90, finalValue);
         Assert.True(correctionWrites >= 2, "A follow-up correction write should have converged the source.");
+
+        // The follow-up carries the newer value's real last-change time (the write-timestamp stamped
+        // by the model write to 90), not the original correction's stale timestamp: connectors
+        // serialize ChangedTimestamp outbound, so a stale time would regress source metadata.
+        var followUp = deliveredCorrections.Last();
+        Assert.Equal(90, followUp.GetNewValue<int>());
+        Assert.NotEqual(staleTimestamp, followUp.ChangedTimestamp);
+        Assert.Equal(property.TryGetWriteTimestamp(), followUp.ChangedTimestamp);
     }
 
     // === Send-time revalidation, bounded-loop exhaustion ===
@@ -544,8 +645,31 @@ public class CorrectionDeliveryTests
         throw new TimeoutException("Sentinel change was not received within 10 seconds.");
     }
 
-    private static SubjectPropertyChange Correction(PropertyReference property, object source, int value) =>
-        SubjectPropertyChange.Create(property, ChangeOrigin.Correction(source), DateTimeOffset.UtcNow, null, value, value);
+    private static SubjectPropertyChange Correction(
+        PropertyReference property, object source, int value, DateTimeOffset? changedTimestamp = null) =>
+        SubjectPropertyChange.Create(
+            property, ChangeOrigin.Correction(source), changedTimestamp ?? DateTimeOffset.UtcNow, null, value, value);
+
+    /// <summary>Throws on chain reads of the named property once armed; unarmed reads pass through.</summary>
+    private sealed class ArmedThrowingReadInterceptor : IReadInterceptor
+    {
+        private readonly string _propertyName;
+        private volatile bool _armed;
+
+        public ArmedThrowingReadInterceptor(string propertyName) => _propertyName = propertyName;
+
+        public void Arm() => _armed = true;
+
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
+        {
+            if (_armed && context.Property.Name == _propertyName)
+            {
+                throw new InvalidOperationException("Getter failure injected by test.");
+            }
+
+            return next(ref context);
+        }
+    }
 
     private static SubjectPropertyChange Normal(PropertyReference property, int oldValue, int newValue) =>
         SubjectPropertyChange.Create(property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, oldValue, newValue);
@@ -585,12 +709,16 @@ public class CorrectionDeliveryTests
             }
         }
 
-        public bool HasWarningContaining(string substring)
+        public bool HasWarningContaining(string substring) => HasEntryContaining(LogLevel.Warning, substring);
+
+        public bool HasErrorContaining(string substring) => HasEntryContaining(LogLevel.Error, substring);
+
+        private bool HasEntryContaining(LogLevel level, string substring)
         {
             lock (_gate)
             {
                 return _entries.Any(e =>
-                    e.Level == LogLevel.Warning &&
+                    e.Level == level &&
                     e.Message.Contains(substring, StringComparison.OrdinalIgnoreCase));
             }
         }

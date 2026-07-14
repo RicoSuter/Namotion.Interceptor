@@ -79,9 +79,14 @@ public static class SubjectChangeContextExtensions
         // API is internal and that handler is its only producer, so valueUnchanged == true in hand
         // proves the handler ran with its [RunsFirst] ordering, which is what makes the transaction
         // self-exclusion hold.
+        // Divergence is judged against sentValue (the value the source semantically sent), never the
+        // applied value: an ApplySubjectUpdate transform may have projected the sent value onto the
+        // stored value before this call, in which case the applied value trivially equals the
+        // observable value and would misread the suppressed write as a pure echo while the source
+        // still holds its diverging sent value.
         if (origin.Kind == ChangeOriginKind.FromSource && !isWritten && valueUnchanged)
         {
-            DetectAndEnqueueCorrection(property, origin.Source!, value);
+            DetectAndEnqueueCorrection(property, origin.Source!, sentValue);
         }
     }
 

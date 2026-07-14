@@ -626,6 +626,79 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
+    public void WhenFromSourceApplyTransformProjectsOntoStoredValue_ThenCorrectionIsPublished()
+    {
+        // Arrange - the model already stores 100; the source sends 105 and the transform corrects it
+        // to the stored 100, so the equality check suppresses the write. Divergence must be judged
+        // against the pre-transform sent value (105), not the applied value (100): the applied value
+        // trivially equals the observable value, and comparing it would misread the suppressed write
+        // as a pure echo while the source still holds 105. A Correction(source) must be synthesized.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new NumericNode(context) { Value = 100 };
+        var source = new object();
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Value"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = 105
+                    }
+                }
+            }
+        };
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act - the transform projects the sent 105 onto the stored 100
+        target.ApplySubjectUpdate(
+            update,
+            DefaultSubjectFactory.Instance,
+            ChangeOrigin.FromSource(source),
+            (_, propertyUpdate) => propertyUpdate.Value = 100);
+
+        var changes = DrainQueueUntilSentinel(context, subscription);
+
+        // Assert - the model is unchanged and a correction (old == new == 100) carries the source
+        Assert.Equal(100, target.Value);
+        var targetChanges = changes.Where(c => ReferenceEquals(c.Property.Subject, target)).ToList();
+        var correction = Assert.Single(targetChanges);
+        Assert.Equal(ChangeOriginKind.Correction, correction.Origin.Kind);
+        Assert.Same(source, correction.Origin.Source);
+        Assert.Equal(100, correction.GetOldValue<int>());
+        Assert.Equal(100, correction.GetNewValue<int>());
+    }
+
+    // Writes a sentinel change on a fresh subject and drains the queue subscription up to it
+    // (excluded), returning everything published before the sentinel; corrections are visible only
+    // on the queue, never on the observable. Throws TimeoutException after 10 seconds.
+    private static List<SubjectPropertyChange> DrainQueueUntilSentinel(
+        IInterceptorSubjectContext context, PropertyChangeQueueSubscription subscription)
+    {
+        var sentinel = new NumericNode(context);
+        sentinel.Value = 7;
+
+        var changes = new List<SubjectPropertyChange>();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (subscription.TryDequeue(out var change, timeout.Token))
+        {
+            if (ReferenceEquals(change.Property.Subject, sentinel))
+            {
+                return changes;
+            }
+
+            changes.Add(change);
+        }
+
+        throw new TimeoutException("Sentinel change was not received within 10 seconds.");
+    }
+
+    [Fact]
     public async Task WhenApplyingNullItem_ThenItemIsSetToNull()
     {
         // Arrange

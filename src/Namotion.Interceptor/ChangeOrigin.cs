@@ -35,10 +35,12 @@ public enum ChangeOriginKind : byte
 }
 
 /// <summary>
-/// Typed provenance of a property change. A change carries a source only when its stored
-/// value is exactly the value that source sent (<see cref="ChangeOriginKind.FromSource"/>)
-/// or confirmed (<see cref="ChangeOriginKind.Confirmed"/>). Everything else is
-/// <see cref="ChangeOriginKind.Local"/>. The default value is Local.
+/// Typed provenance of a property change. A change carries a source when its stored value is
+/// exactly the value that source sent (<see cref="ChangeOriginKind.FromSource"/>) or confirmed
+/// (<see cref="ChangeOriginKind.Confirmed"/>), or when the change is a synthesized
+/// <see cref="ChangeOriginKind.Correction"/>, whose source records the participant that diverged
+/// from the stored value. Every other change is <see cref="ChangeOriginKind.Local"/>.
+/// The default value is Local.
 /// </summary>
 public readonly struct ChangeOrigin
 {
