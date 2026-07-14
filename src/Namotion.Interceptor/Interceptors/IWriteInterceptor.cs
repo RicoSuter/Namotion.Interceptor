@@ -225,17 +225,22 @@ public struct PropertyWriteContext<TProperty>
             return;
         }
 
-        // Typed comparison in the generic frame: NewValue is never boxed. SentValue arrives already
-        // boxed from the inbound apply; the 'is TProperty' pattern unboxes it without an unchecked cast
-        // that would throw on a value-type property when the sent value is null or a mismatched type.
-        // A null or type-mismatched sent value cannot have been faithfully stored, so it demotes to
-        // Local. On the non-generic path (TProperty == object) both operands are already boxed objects.
-        if (_attempted.SentValue is TProperty typedSentValue &&
-            EqualityComparer<TProperty>.Default.Equals(typedSentValue, NewValue))
-        {
-            return;
-        }
+        // Survive only when the sent value was faithfully stored. Typed comparison in the generic
+        // frame keeps NewValue unboxed. SentValue arrives already boxed from the inbound apply; the
+        // 'is TProperty' pattern unboxes it without an unchecked cast that would throw on a value-type
+        // property when the sent value is a mismatched type. A null sent value survives only against a
+        // null stored value: 'null is TProperty' is always false in C#, so it must be handled
+        // explicitly, otherwise a legitimately stored null (a source clearing a nullable property)
+        // would wrongly demote to Local and defeat echo suppression. A type-mismatched sent value
+        // cannot have been faithfully stored, so it demotes. On the non-generic path
+        // (TProperty == object) both operands are already boxed objects.
+        var survives = _attempted.SentValue is TProperty typedSentValue
+            ? EqualityComparer<TProperty>.Default.Equals(typedSentValue, NewValue)
+            : _attempted.SentValue is null && NewValue is null;
 
-        _attempted = default;
+        if (!survives)
+        {
+            _attempted = default;
+        }
     }
 }

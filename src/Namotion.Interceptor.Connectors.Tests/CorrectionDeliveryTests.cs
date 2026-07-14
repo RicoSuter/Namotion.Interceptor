@@ -12,8 +12,8 @@ namespace Namotion.Interceptor.Connectors.Tests;
 /// <summary>
 /// Pins PR 2 correction delivery in <see cref="ChangeQueueProcessor"/>: corrections bypass the
 /// own-source dequeue skip, normal changes beat corrections in flush dedup regardless of order,
-/// immediate mode drops corrections, and buffered corrections are revalidated before and after each
-/// write (with a bounded post-write follow-up loop).
+/// both immediate and buffered modes deliver corrections through send-time revalidation, and each
+/// correction is revalidated before and after the write (with a bounded post-write follow-up loop).
 /// </summary>
 public class CorrectionDeliveryTests
 {
@@ -120,7 +120,7 @@ public class CorrectionDeliveryTests
     }
 
     [Fact]
-    public async Task WhenCorrectionIsDelivered_ThenItCarriesTheFreshWriteTimestampMetadata()
+    public async Task WhenCorrectionIsDelivered_ThenItCarriesThePropertyWriteTimestampNotTheInboundScope()
     {
         // Arrange
         var context = CreateContext();
@@ -137,8 +137,8 @@ public class CorrectionDeliveryTests
         var delivered = await DriveAndCollectAsync(processor, context, written, gate,
             () => property.SetValueFromSource(source, inboundTimestamp, null, 105));
 
-        // Assert: the delivered correction carries the fresh local timestamp synthesis stamped on the
-        // property's write-timestamp metadata, not the inbound scope timestamp.
+        // Assert: the delivered correction carries the property's existing write-timestamp (the value's
+        // real last-change time), not the inbound scope timestamp, and does not advance the metadata.
         var correction = Assert.Single(delivered,
             c => ReferenceEquals(c.Property.Subject, device) && c.Origin.Kind == ChangeOriginKind.Correction);
         Assert.NotEqual(inboundTimestamp, correction.ChangedTimestamp);
@@ -252,14 +252,15 @@ public class CorrectionDeliveryTests
         Assert.Equal(100, change.GetNewValue<int>());
     }
 
-    // === Immediate-mode drop (buffered-only correction delivery) ===
+    // === Immediate-mode delivery (send-time revalidation, no dedup) ===
 
     [Fact]
-    public async Task WhenImmediateMode_ThenCorrectionIsDroppedWithWarningButNormalIsWritten()
+    public async Task WhenImmediateMode_ThenCorrectionIsDeliveredViaRevalidation()
     {
-        // Arrange: an immediate-mode processor (bufferTime <= 0) has no dedup, so a stale correction
-        // could push the source to a wrong value. Corrections are dropped with a warning; a normal
-        // change on the same processor is still written.
+        // Arrange: an immediate-mode processor (bufferTime <= 0). Dedup is absent here, but dedup was
+        // never the safety mechanism for corrections: send-time revalidation is, and it works in
+        // immediate mode too. The correction (model still holds 100) is revalidated and delivered; a
+        // normal change on the same processor is also written.
         var context = CreateContext();
         var source = new object();
         var correctionDevice = new ClampingDevice(context);
@@ -292,13 +293,16 @@ public class CorrectionDeliveryTests
         await cts.CancelAsync();
         await processing;
 
-        // Assert: the normal change was written, the correction was not, and a warning was logged.
+        // Assert: both the normal change and the revalidated correction were written, no drop warning.
         lock (gate)
         {
             Assert.Contains(written, c => ReferenceEquals(c.Property.Subject, normalDevice));
-            Assert.DoesNotContain(written, c => ReferenceEquals(c.Property.Subject, correctionDevice));
+            var correction = Assert.Single(written,
+                c => ReferenceEquals(c.Property.Subject, correctionDevice)
+                     && c.Origin.Kind == ChangeOriginKind.Correction);
+            Assert.Equal(100, correction.GetNewValue<int>());
         }
-        Assert.True(logger.HasWarningContaining("correction"));
+        Assert.False(logger.HasWarningContaining("Dropping correction"));
     }
 
     // === Send-time revalidation, pre-write drop ===

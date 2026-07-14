@@ -1,6 +1,14 @@
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tests;
+
+/// <summary>Dedicated model with a reference-typed property for the null-survival origin test.</summary>
+[InterceptorSubject]
+public partial class OriginProbeSubject
+{
+    public partial string? Name { get; set; }
+}
 
 public class OriginWriteContextTests
 {
@@ -104,6 +112,30 @@ public class OriginWriteContextTests
         // Assert
         Assert.Equal(ChangeOriginKind.FromSource, probe.KindBeforeWrite);
         Assert.Equal(ChangeOriginKind.Local, probe.KindAfterWrite);
+    }
+
+    [Fact]
+    public void WhenSentValueIsNullForReferenceTypeProperty_ThenOriginSurvivesAsFromSource()
+    {
+        // Arrange: a source clears a reference-typed property to null (old value non-null, so the write
+        // proceeds and stores null faithfully). `null is TProperty` is always false in C#, so the
+        // survival check must special-case null-matches-null to keep the origin FromSource; otherwise
+        // the null would wrongly demote to Local and be echoed back to the source.
+        var probe = new OriginProbe();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(probe);
+        var subject = new OriginProbeSubject(context) { Name = "initial" };
+        var property = new PropertyReference(subject, "Name");
+
+        // Act
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), sentValue: null))
+        {
+            subject.Name = null;
+        }
+
+        // Assert: null was faithfully stored, so the origin survives as FromSource (not demoted).
+        Assert.Equal(ChangeOriginKind.FromSource, probe.KindBeforeWrite);
+        Assert.Equal(ChangeOriginKind.FromSource, probe.KindAfterWrite);
     }
 
     [Fact]

@@ -79,10 +79,11 @@ public class SourceCorrectionTests
         Assert.Equal(100, device.Value);
         Assert.DoesNotContain(nameof(ClampingDevice.Value), raisedProperties);
 
-        // The correction carries a fresh local timestamp (not the inbound scope time) and it equals
-        // the property's write-timestamp metadata stamped by synthesis.
-        Assert.True(correction.ChangedTimestamp >= beforeCall);
+        // The correction reuses the property's existing write-timestamp (the value's real last-change
+        // time from the arrange write), not the inbound scope time, and it does NOT advance the
+        // metadata: an unchanged value is not a new write, so the write-timestamp is left untouched.
         Assert.NotEqual(inboundTimestamp, correction.ChangedTimestamp);
+        Assert.True(correction.ChangedTimestamp <= beforeCall);
         Assert.Equal(property.TryGetWriteTimestamp(), correction.ChangedTimestamp);
     }
 

@@ -53,10 +53,6 @@ public static class SubjectChangeContextExtensions
 
         var stamped = origin.Kind != ChangeOriginKind.Local;
 
-        // Baseline for the synthesis concurrency race ONLY (not detection): captured before the
-        // setter so a concurrent write during synthesis moves it and we drop on doubt.
-        var writeTimestampBaseline = stamped ? property.TryGetWriteTimestamp() : null;
-
         using (SubjectChangeContext.WithTimestamps(changedTimestamp, receivedTimestamp))
         using (PendingOrigin.Set(property, origin, sentValue))
         {
@@ -85,13 +81,20 @@ public static class SubjectChangeContextExtensions
         // self-exclusion hold.
         if (origin.Kind == ChangeOriginKind.FromSource && !isWritten && valueUnchanged)
         {
-            DetectAndEnqueueCorrection(property, origin.Source!, value, writeTimestampBaseline);
+            DetectAndEnqueueCorrection(property, origin.Source!, value);
         }
     }
 
     private static void DetectAndEnqueueCorrection(
-        PropertyReference property, object source, object? sentValue, DateTimeOffset? writeTimestampBaseline)
+        PropertyReference property, object source, object? sentValue)
     {
+        // Baseline for the synthesis concurrency race, captured on this rare correction path rather
+        // than on every inbound write. It only needs to guard the window between the observable read
+        // below and the stamp under the lock: a concurrent real write moves the write-timestamp, and
+        // we drop on doubt. Captured before the getter so a write landing between here and the read is
+        // still detected.
+        var writeTimestampBaseline = property.TryGetWriteTimestamp();
+
         // The stamped write was equality-suppressed. Read the observable value OUTSIDE the subject
         // lock (the getter may run read interceptors; running them under Subject.SyncRoot would invert
         // the codebase's getters-outside-locks discipline). If it still equals the sent value there is
@@ -114,30 +117,35 @@ public static class SubjectChangeContextExtensions
         SubjectPropertyChange correction;
         lock (property.Subject.SyncRoot)
         {
-            // Concurrency drop-on-doubt: a newer write may have landed while we decided. Compare the
-            // raw write-timestamp against the baseline under the lock; a moved timestamp means that
-            // write is already flowing outbound, so drop. NECESSARY BUT NOT SUFFICIENT (tick
-            // granularity, user-settable GetTimestampFunction), so on any doubt DROP: the only failure
-            // mode of a dropped correction is a missing one (the source stays diverged until its next
-            // inbound event), never a wrong model value.
-            if (property.TryGetWriteTimestamp() != writeTimestampBaseline)
+            // Concurrency drop-on-doubt: a newer real write bumps the write-timestamp, so a moved
+            // timestamp means that write is already flowing outbound. Compare against the baseline
+            // under the lock. NECESSARY BUT NOT SUFFICIENT (tick granularity, user-settable
+            // GetTimestampFunction), so on any doubt DROP: the only failure mode of a dropped
+            // correction is a missing one (the source stays diverged until its next inbound event),
+            // never a wrong model value.
+            var currentWriteTimestamp = property.TryGetWriteTimestamp();
+            if (currentWriteTimestamp != writeTimestampBaseline)
             {
                 return;
             }
 
-            // Fresh local assertion: stamp a new write-timestamp on the metadata AND publish the
-            // correction with it, so the source's echo (same value, same timestamp) is fully
-            // equality-suppressed afterward.
-            var timestampTicks = SubjectChangeContext.CaptureTimestamp();
-            property.SetWriteTimestamp(timestampTicks);
+            // Publish with the value's existing write-timestamp: the value genuinely last changed
+            // then, so that is its truthful ChangedTimestamp, and no connector rejects an outbound
+            // write by timestamp ordering. A correction is not a real write, so it does NOT stamp the
+            // metadata (a metadata bump would advance the write-timestamp for an unchanged value and
+            // mislead write-timestamp consumers, including OPC UA read-after-write). Echo suppression
+            // of the source's reply is value-based, so no fresh timestamp is needed for it. Fall back
+            // to a captured time only when the property was never written.
+            var changedTimestamp = currentWriteTimestamp
+                ?? new DateTimeOffset(SubjectChangeContext.CaptureTimestamp(), TimeSpan.Zero);
 
             // ReceivedTimestamp rides the ambient context, not the inbound apply: a correction is a
             // local assertion (the model already holds this value), so it has no distinct receive
-            // event of its own. Only the fresh ChangedTimestamp above is authoritative for it.
+            // event of its own.
             correction = SubjectPropertyChange.Create(
                 property,
                 ChangeOrigin.Correction(source),
-                new DateTimeOffset(timestampTicks, TimeSpan.Zero),
+                changedTimestamp,
                 SubjectChangeContext.Current.ReceivedTimestamp,
                 observedValue,
                 observedValue);

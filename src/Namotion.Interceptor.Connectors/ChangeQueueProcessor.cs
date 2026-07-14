@@ -168,15 +168,12 @@ public class ChangeQueueProcessor : IDisposable
                 {
                     if (change.Origin.Kind == ChangeOriginKind.Correction)
                     {
-                        // Buffered-only correction delivery: the immediate path has no dedup, so a
-                        // stale correction enqueued after a concurrent normal change could push the
-                        // source to a wrong value. Dropping keeps the only failure mode a missing
-                        // correction (the source recovers on its next inbound event), never a wrong one.
-                        _logger.LogWarning(
-                            "Dropping correction for {Property}: corrections are delivered only through the " +
-                            "buffered flush path, but this processor runs in immediate mode (bufferTime <= 0). " +
-                            "The source recovers on its next inbound event.",
-                            change.Property);
+                        // Immediate mode has no dedup, but dedup was never the safety mechanism for
+                        // corrections: send-time revalidation is. WriteCorrectionWithRevalidationAsync
+                        // re-reads the live model before writing (the model is updated at the terminal
+                        // write before the change is enqueued), so a stale correction racing a normal
+                        // change is dropped here just as it would be in a buffered flush.
+                        await WriteCorrectionWithRevalidationAsync(change, linkedTokenSource.Token).ConfigureAwait(false);
                         continue;
                     }
 
