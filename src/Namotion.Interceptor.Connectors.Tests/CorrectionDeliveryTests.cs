@@ -280,6 +280,50 @@ public class CorrectionDeliveryTests
         Assert.Equal(90, change.GetNewValue<int>());
     }
 
+    [Fact]
+    public async Task WhenBufferedFlushMixesCorrectionsAndNormals_ThenNormalBatchIsWrittenBeforeIndividualCorrections()
+    {
+        // Arrange: the correction is queued before two normal changes for other properties. Buffered
+        // delivery preserves the normal write as one batch and sends corrections individually after it.
+        var context = CreateContext();
+        var source = new object();
+        var correctionDevice = new ClampingDevice(context);
+        correctionDevice.Value = 100;
+        var firstNormalDevice = new ClampingDevice(context);
+        var secondNormalDevice = new ClampingDevice(context);
+        var batches = new List<SubjectPropertyChange[]>();
+
+        using var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                batches.Add(changes.ToArray());
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        // Act
+        InjectChange(processor, Correction(
+            new PropertyReference(correctionDevice, nameof(ClampingDevice.Value)), source, 100));
+        InjectChange(processor, Normal(
+            new PropertyReference(firstNormalDevice, nameof(ClampingDevice.Value)), oldValue: 0, newValue: 1));
+        InjectChange(processor, Normal(
+            new PropertyReference(secondNormalDevice, nameof(ClampingDevice.Value)), oldValue: 0, newValue: 2));
+        await TriggerFlushAsync(processor);
+
+        // Assert
+        Assert.Equal(2, batches.Count);
+        Assert.Equal(2, batches[0].Length);
+        Assert.All(batches[0], change => Assert.Equal(ChangeOriginKind.Local, change.Origin.Kind));
+        var correction = Assert.Single(batches[1]);
+        Assert.Equal(ChangeOriginKind.Correction, correction.Origin.Kind);
+        Assert.Same(correctionDevice, correction.Property.Subject);
+    }
+
     // === Immediate-mode delivery (send-time revalidation, no dedup) ===
 
     [Fact]
@@ -434,6 +478,7 @@ public class CorrectionDeliveryTests
         var device = new ClampingDevice(context);
         device.Value = 100;
         var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+        var initialWriteTimestamp = property.TryGetWriteTimestamp();
 
         var sourceState = new ConcurrentDictionary<string, object?>();
         var deliveredCorrections = new ConcurrentQueue<SubjectPropertyChange>();
@@ -493,6 +538,14 @@ public class CorrectionDeliveryTests
         Assert.Equal(90, finalValue);
         Assert.True(correctionWrites >= 2, "A follow-up correction write should have converged the source.");
 
+        // Even the initial attempt is rebuilt with the current property timestamp. The model may
+        // have moved away from and back to 100 between synthesis and this pre-write value check, so
+        // value equality alone cannot prove that the synthesized timestamp is still current.
+        var initial = deliveredCorrections.First();
+        Assert.Equal(100, initial.GetNewValue<int>());
+        Assert.NotEqual(staleTimestamp, initial.ChangedTimestamp);
+        Assert.Equal(initialWriteTimestamp, initial.ChangedTimestamp);
+
         // The follow-up carries the newer value's real last-change time (the write-timestamp stamped
         // by the model write to 90), not the original correction's stale timestamp: connectors
         // serialize ChangedTimestamp outbound, so a stale time would regress source metadata.
@@ -500,6 +553,71 @@ public class CorrectionDeliveryTests
         Assert.Equal(90, followUp.GetNewValue<int>());
         Assert.NotEqual(staleTimestamp, followUp.ChangedTimestamp);
         Assert.Equal(property.TryGetWriteTimestamp(), followUp.ChangedTimestamp);
+    }
+
+    [Fact]
+    public async Task WhenCorrectionValueCyclesBackDuringRevalidation_ThenLatestWriteTimestampIsDelivered()
+    {
+        // Arrange: drive the bounded loop through 100 -> 90 -> 100. The final value equals the
+        // original correction again, but its timestamp belongs to a newer model write.
+        var context = CreateContext();
+        var source = new object();
+        var device = new ClampingDevice(context);
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+        var initialTimestamp = DateTimeOffset.UtcNow.AddMinutes(-3);
+        var intermediateTimestamp = initialTimestamp.AddMinutes(1);
+        var finalTimestamp = initialTimestamp.AddMinutes(2);
+        var staleCorrectionTimestamp = initialTimestamp.AddMinutes(-1);
+
+        using (SubjectChangeContext.WithChangedTimestamp(initialTimestamp))
+        {
+            device.Value = 100;
+        }
+
+        var deliveredCorrections = new List<SubjectPropertyChange>();
+        var correctionWrites = 0;
+        using var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                var correction = Assert.Single(changes.ToArray());
+                deliveredCorrections.Add(correction);
+
+                switch (++correctionWrites)
+                {
+                    case 1:
+                        using (SubjectChangeContext.WithChangedTimestamp(intermediateTimestamp))
+                        {
+                            device.Value = 90;
+                        }
+                        break;
+                    case 2:
+                        using (SubjectChangeContext.WithChangedTimestamp(finalTimestamp))
+                        {
+                            device.Value = 100;
+                        }
+                        break;
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        InjectChange(processor, Correction(property, source, 100, staleCorrectionTimestamp));
+
+        // Act
+        await TriggerFlushAsync(processor);
+
+        // Assert: all three values were delivered with the corresponding model write's timestamp.
+        Assert.Equal(3, deliveredCorrections.Count);
+        Assert.Equal([100, 90, 100], deliveredCorrections.Select(change => change.GetNewValue<int>()));
+        Assert.Equal(
+            [initialTimestamp, intermediateTimestamp, finalTimestamp],
+            deliveredCorrections.Select(change => change.ChangedTimestamp));
     }
 
     // === Send-time revalidation, bounded-loop exhaustion ===

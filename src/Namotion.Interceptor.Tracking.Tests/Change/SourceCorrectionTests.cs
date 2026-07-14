@@ -229,8 +229,9 @@ public class SourceCorrectionTests
 
         var changes = DrainWithSentinel(context, subscription);
 
-        // Assert: drop-or-fresh, never stale. Any synthesized correction carries the fresh value (90),
-        // never the stale 100; most runs drop it because the write-timestamp moved under the lock.
+        // Assert: with distinct write-timestamps, synthesis drops rather than enqueueing the stale
+        // value. The timestamp check is advisory because timestamps can alias; the delivery path owns
+        // the drop-or-fresh guarantee through send-time model revalidation.
         var corrections = changes
             .Where(c => c.Property.Name == nameof(ClampingDevice.Value)
                         && c.Origin.Kind == ChangeOriginKind.Correction)

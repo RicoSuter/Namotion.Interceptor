@@ -412,18 +412,16 @@ public class ChangeQueueProcessor : IDisposable
         var attempt = 0;
         while (true)
         {
-            // On the first iteration correctionValue equals the correction's value, so write it as is.
-            // A follow-up re-asserts the current model value, so it carries the property's CURRENT
-            // write-timestamp (the newer value's real last-change time): connectors serialize
-            // ChangedTimestamp outbound (OPC UA source timestamps, MQTT payloads), and reusing the
-            // original correction's time would regress the source's timestamp metadata.
-            _correctionBuffer[0] = Equals(correctionValue, correction.GetNewValue<object?>())
-                ? correction
-                : SubjectPropertyChange.Create(
-                    property, correction.Origin,
-                    property.TryGetWriteTimestamp() ?? correction.ChangedTimestamp,
-                    correction.ReceivedTimestamp,
-                    correctionValue, correctionValue);
+            // Rebuild every write with the property's CURRENT write-timestamp. Value equality cannot
+            // identify the first attempt: the model may have moved away from and back to the original
+            // correction value before this write or across post-write revalidation attempts. Reusing
+            // the original correction in either ABA case would regress timestamp metadata serialized
+            // by connectors such as OPC UA and MQTT.
+            _correctionBuffer[0] = SubjectPropertyChange.Create(
+                property, correction.Origin,
+                property.TryGetWriteTimestamp() ?? correction.ChangedTimestamp,
+                correction.ReceivedTimestamp,
+                correctionValue, correctionValue);
 
             try
             {
