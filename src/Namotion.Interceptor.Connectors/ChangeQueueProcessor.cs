@@ -161,7 +161,7 @@ public class ChangeQueueProcessor : IDisposable
                 // A correction is not an echo of anything (no model change occurred), so it bypasses
                 // the own-source skip entirely; property filters and connector topology decide the
                 // actual recipients. All other kinds keep the single-comparison echo suppression.
-                if (!change.Origin.IsCorrection &&
+                if (change.Origin.Kind != ChangeOriginKind.Correction &&
                     ReferenceEquals(change.Origin.Source, _source))
                 {
                     continue;
@@ -174,7 +174,7 @@ public class ChangeQueueProcessor : IDisposable
 
                 if (periodicTimer is null)
                 {
-                    if (change.Origin.IsCorrection)
+                    if (change.Origin.Kind == ChangeOriginKind.Correction)
                     {
                         // Immediate mode has no dedup, but dedup was never the safety mechanism for
                         // corrections: send-time revalidation is. WriteCorrectionWithRevalidationAsync
@@ -295,7 +295,7 @@ public class ChangeQueueProcessor : IDisposable
                 {
                     _flushPropertyIndices[change.Property] = _flushDedupedCount;
                     _flushDedupedBuffer[_flushDedupedCount++] = change;
-                    bufferHasCorrection |= change.Origin.IsCorrection;
+                    bufferHasCorrection |= change.Origin.Kind == ChangeOriginKind.Correction;
                 }
                 else
                 {
@@ -310,8 +310,8 @@ public class ChangeQueueProcessor : IDisposable
                     // staleness. Only a correction displaced by another correction is dropped: they
                     // coalesce, and the kept one re-asserts the same live model value.
                     var existing = _flushDedupedBuffer[existingIndex];
-                    var existingIsCorrection = existing.Origin.IsCorrection;
-                    if (!change.Origin.IsCorrection)
+                    var existingIsCorrection = existing.Origin.Kind == ChangeOriginKind.Correction;
+                    if (change.Origin.Kind != ChangeOriginKind.Correction)
                     {
                         if (existingIsCorrection)
                         {
@@ -350,7 +350,7 @@ public class ChangeQueueProcessor : IDisposable
                     for (var i = 0; i < _flushDedupedCount; i++)
                     {
                         var change = _flushDedupedBuffer[i];
-                        if (change.Origin.IsCorrection)
+                        if (change.Origin.Kind == ChangeOriginKind.Correction)
                         {
                             _flushCorrections.Add(change);
                         }

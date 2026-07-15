@@ -125,7 +125,7 @@ internal static class SubjectPropertyChangeOperations
             // Confirmed, Correction) still arm so echo suppression sees the source.
             using (SubjectChangeContext.WithTimestamps(change.ChangedTimestamp, change.ReceivedTimestamp))
             {
-                if (change.Origin.IsLocal)
+                if (change.Origin.Kind == ChangeOriginKind.Local)
                 {
                     metadata.SetValue?.Invoke(change.Property.Subject, newValue);
                 }

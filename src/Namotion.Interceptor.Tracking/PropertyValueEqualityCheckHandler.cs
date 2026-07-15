@@ -15,7 +15,7 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
     {
         // Only stamped (inbound) writes record an outcome for correction detection; a local write
         // records nothing and pays a single predictable branch.
-        var stamped = !context.Origin.IsLocal;
+        var stamped = context.Origin.Kind != ChangeOriginKind.Local;
 
         if (EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue))
         {

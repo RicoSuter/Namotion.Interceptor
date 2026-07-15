@@ -56,7 +56,7 @@ public static class SubjectChangeContextExtensions
         // cancelled FromSource write could misread a leaked outcome as its own.
         PendingOrigin.ClearOutcome();
 
-        var stamped = !origin.IsLocal;
+        var stamped = origin.Kind != ChangeOriginKind.Local;
 
         using (SubjectChangeContext.WithTimestamps(changedTimestamp, receivedTimestamp))
         using (PendingOrigin.Set(property, origin, sentValue))

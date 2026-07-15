@@ -70,7 +70,7 @@ internal sealed class WriteRetryQueue : IDisposable
             var span = changes.Span;
             for (var i = 0; i < span.Length; i++)
             {
-                if (span[i].Origin.IsCorrection)
+                if (span[i].Origin.Kind == ChangeOriginKind.Correction)
                 {
                     _logger.LogDebug("Dropping failed correction write from the retry queue for {Property}.", span[i].Property);
                     continue;
