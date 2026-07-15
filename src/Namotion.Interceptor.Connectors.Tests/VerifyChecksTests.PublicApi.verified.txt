@@ -8,12 +8,28 @@ namespace Namotion.Interceptor.Connectors
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         public static Namotion.Interceptor.Connectors.BackgroundTaskLifetime Start(System.Threading.CancellationToken parentToken, Microsoft.Extensions.Logging.ILogger logger, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task> executeAsyncFunc, System.Func<System.Threading.Tasks.ValueTask>? disposeAsyncFunc = null) { }
     }
+    public readonly struct ChangeQueueOverflow : System.IEquatable<Namotion.Interceptor.Connectors.ChangeQueueOverflow>
+    {
+        public ChangeQueueOverflow(int DroppedChangeCount, Namotion.Interceptor.Connectors.OverflowBehavior OverflowBehavior, int MaxQueueSize) { }
+        public int DroppedChangeCount { get; init; }
+        public int MaxQueueSize { get; init; }
+        public Namotion.Interceptor.Connectors.OverflowBehavior OverflowBehavior { get; init; }
+    }
     public class ChangeQueueProcessor : System.IDisposable
     {
-        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, System.TimeSpan? bufferTime, int? maxQueueDepth, Microsoft.Extensions.Logging.ILogger logger) { }
-        public long DropCount { get; }
+        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, Namotion.Interceptor.Connectors.ChangeQueueProcessorConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
+        public long DroppedChangeCount { get; }
         public void Dispose() { }
         public System.Threading.Tasks.Task ProcessAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class ChangeQueueProcessorConfiguration
+    {
+        public ChangeQueueProcessorConfiguration() { }
+        public System.TimeSpan BufferTime { get; set; }
+        public int? MaxQueueSize { get; set; }
+        public Namotion.Interceptor.Connectors.OverflowBehavior OverflowBehavior { get; set; }
+        public System.Action<Namotion.Interceptor.Connectors.ChangeQueueOverflow>? OverflowHandler { get; set; }
+        public void Validate() { }
     }
     public class DefaultSubjectFactory : Namotion.Interceptor.Connectors.ISubjectFactory
     {
@@ -53,6 +69,12 @@ namespace Namotion.Interceptor.Connectors
     {
         public static Namotion.Interceptor.IInterceptorSubjectContext WithSourceTransactions(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
     }
+    public enum OverflowBehavior
+    {
+        Unbounded = 0,
+        DropOldest = 1,
+        DropNewest = 2,
+    }
     public static class RegisteredSubjectPropertyExtensions
     {
         public static void SetValueFromSource(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object source, System.DateTimeOffset? changedTimestamp, System.DateTimeOffset? receivedTimestamp, object? value) { }
@@ -89,6 +111,7 @@ namespace Namotion.Interceptor.Connectors
         public int PendingWriteCount { get; }
         public abstract Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
         public virtual int WriteBatchSize { get; }
+        protected virtual Namotion.Interceptor.Connectors.ChangeQueueProcessorConfiguration CreateChangeQueueConfiguration() { }
         public override void Dispose() { }
         protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);

@@ -208,7 +208,11 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                     using var changeQueueProcessor = new ChangeQueueProcessor(
                         source: this, _context,
                         propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
-                        _configuration.BufferTime, maxQueueDepth: null, logger: _logger);
+                        new ChangeQueueProcessorConfiguration
+                        {
+                            BufferTime = _configuration.BufferTime ?? TimeSpan.FromMilliseconds(8),
+                        },
+                        logger: _logger);
 
                     await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
                     await application.StartAsync(server).ConfigureAwait(false);
