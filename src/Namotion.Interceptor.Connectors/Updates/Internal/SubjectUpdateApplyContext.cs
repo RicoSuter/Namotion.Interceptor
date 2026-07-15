@@ -49,7 +49,7 @@ internal sealed class SubjectUpdateApplyContext
     /// </summary>
     public void SetPropertyValue(RegisteredSubjectProperty property, DateTimeOffset? changedTimestamp, object? value, object? sentValue)
     {
-        if (Origin.Kind == ChangeOriginKind.Local)
+        if (Origin.IsLocal)
         {
             using (SubjectChangeContext.WithChangedTimestamp(changedTimestamp))
             {

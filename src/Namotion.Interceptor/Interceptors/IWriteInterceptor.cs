@@ -206,7 +206,7 @@ public struct PropertyWriteContext<TProperty>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void FinalizeOrigin()
     {
-        if (_attempted.Origin.Kind == ChangeOriginKind.Local)
+        if (_attempted.Origin.IsLocal)
         {
             return;
         }
@@ -241,13 +241,25 @@ public struct PropertyWriteContext<TProperty>
     /// Fallback comparison mirroring the setter's own unbox: the is-pattern is type-strict, but the CLR
     /// unboxes an enum and its underlying integral type interchangeably, like the generated setter's cast
     /// (OPC UA delivers enums as boxed integers, so such a write stores faithfully and must keep its
-    /// origin). The catch arm is unreachable for chain writes (a box the setter would reject never
+    /// origin). A boxed underlying integer is first coerced to the enum so a nullable enum survives too:
+    /// (DeviceMode)boxedInt unboxes leniently but (DeviceMode?)boxedInt throws, so without the coercion a
+    /// faithfully-stored nullable enum would demote to Local and defeat echo suppression. This unbox
+    /// equality is kept in sync with PropertyValueEquality (correction detection, in the Tracking
+    /// assembly this one cannot reference); the two diverge only on a genuinely incompatible box, which
+    /// this method catches and demotes (safe for survival) while detection lets it throw (surfacing a
+    /// defect). The catch arm is unreachable for chain writes (a box the setter would reject never
     /// produced a successful write) and only guards hand-constructed sent values. Kept out of the inlined
     /// finalize path: an exception handler would make FinalizeOrigin uninlinable for every write.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static bool SentValueEqualsAfterUnbox(object sentValue, TProperty newValue)
     {
+        var targetType = Nullable.GetUnderlyingType(typeof(TProperty)) ?? typeof(TProperty);
+        if (targetType.IsEnum && sentValue.GetType() == Enum.GetUnderlyingType(targetType))
+        {
+            sentValue = Enum.ToObject(targetType, sentValue);
+        }
+
         try
         {
             return EqualityComparer<TProperty>.Default.Equals((TProperty)sentValue, newValue);

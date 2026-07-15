@@ -18,4 +18,6 @@ public enum DeviceMode
 public partial class ModeDevice
 {
     public partial DeviceMode Mode { get; set; }
+
+    public partial DeviceMode? OptionalMode { get; set; }
 }

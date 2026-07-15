@@ -56,7 +56,7 @@ public static class SubjectChangeContextExtensions
         // cancelled FromSource write could misread a leaked outcome as its own.
         PendingOrigin.ClearOutcome();
 
-        var stamped = origin.Kind != ChangeOriginKind.Local;
+        var stamped = !origin.IsLocal;
 
         using (SubjectChangeContext.WithTimestamps(changedTimestamp, receivedTimestamp))
         using (PendingOrigin.Set(property, origin, sentValue))
@@ -72,7 +72,7 @@ public static class SubjectChangeContextExtensions
         // Read and clear the outcome the equality handler recorded for this stamped write. No outcome
         // means the chain never ran (an OnChanging hook cancelled the write, or the equality handler
         // is not registered): nothing to correct.
-        if (!PendingOrigin.TryTakeOutcome(out var isWritten, out var valueUnchanged))
+        if (!PendingOrigin.TryTakeOutcome(out var valueUnchanged))
         {
             return;
         }
@@ -84,7 +84,7 @@ public static class SubjectChangeContextExtensions
         // proves it ran with its [RunsFirst] ordering. Divergence downstream is judged against sentValue,
         // not the applied value: an ApplySubjectUpdate transform may have projected the sent value onto
         // the stored one, which would misread a real divergence as a pure echo.
-        if (origin.Kind == ChangeOriginKind.FromSource && !isWritten && valueUnchanged)
+        if (origin.Kind == ChangeOriginKind.FromSource && valueUnchanged)
         {
             DetectAndEnqueueCorrection(property, origin.Source!, sentValue);
         }
@@ -103,6 +103,15 @@ public static class SubjectChangeContextExtensions
             return;
         }
 
+        // A correction asserts the property's observable value; without a getter there is none to
+        // assert, so skip synthesis. Reading a null getter as a null value would fabricate a
+        // Correction(null) for a set-only property (a direct queue subscriber could transmit it).
+        var getValue = property.Metadata.GetValue;
+        if (getValue is null)
+        {
+            return;
+        }
+
         // Concurrency baseline: a concurrent real write bumps the write-timestamp, which we detect
         // under the lock below. Captured before the getter so a write racing the read is still seen.
         var writeTimestampBaseline = property.TryGetWriteTimestamp();
@@ -112,9 +121,11 @@ public static class SubjectChangeContextExtensions
         // discipline. Equal to the sent value means pure echo, no divergence. A throwing getter
         // propagates deliberately (stamped setters already throw through validators); swallowing it
         // would leave an undiagnosable, silently diverged source. The correction carries this
-        // OBSERVABLE value, not the sent one.
-        var observedValue = ReadCommittedValue(property);
-        if (SentValueMatchesObserved(sentValue, observedValue))
+        // OBSERVABLE value, not the sent one. Equality uses the property type's own semantics (the
+        // same the equality handler used to suppress the write), so an IEquatable echo is not misread
+        // as divergence.
+        var observedValue = ReadCommittedValue(property.Subject, getValue);
+        if (PropertyValueEquality.Equals(property.Metadata.Type, sentValue, observedValue))
         {
             return;
         }
@@ -156,66 +167,33 @@ public static class SubjectChangeContextExtensions
     }
 
     /// <summary>
-    /// Reads the property's committed observable value, the only state a correction may assert to a
+    /// Reads a property's committed observable value, the only state a correction may assert to a
     /// source. On a flow that owns an active transaction the read interceptor would answer with the
     /// transaction's pending overlay (discarded on rollback), so the transaction is detached for the
-    /// read to see committed state, the same value the equality check compared against. Delivery
-    /// re-reads on the processor's flow, which never carries a transaction, so if the transaction
-    /// later commits over the corrected value that revalidation drops the correction. Detach and
-    /// restore are synchronous around a synchronous getter and confined to this flow.
+    /// read to see committed state, the same value the equality check compared against. The processor's
+    /// delivery revalidation reads through here too: its loop normally carries no transaction, but if
+    /// one ever flows in (an <c>AsyncLocal</c> captured when <c>ProcessAsync</c> was started) the
+    /// detach keeps revalidation on committed state, so it never drops a valid correction against a
+    /// pending overlay nor sends an uncommitted value. Detach and restore are synchronous around a
+    /// synchronous getter and confined to this flow.
     /// </summary>
-    private static object? ReadCommittedValue(PropertyReference property)
+    internal static object? ReadCommittedValue(IInterceptorSubject subject, Func<IInterceptorSubject, object?> getValue)
     {
         var transaction = SubjectTransaction.HasActiveTransaction ? SubjectTransaction.Current : null;
         if (transaction is null)
         {
-            return property.Metadata.GetValue?.Invoke(property.Subject);
+            return getValue(subject);
         }
 
         SubjectTransaction.SetCurrent(null);
         try
         {
-            return property.Metadata.GetValue?.Invoke(property.Subject);
+            return getValue(subject);
         }
         finally
         {
             SubjectTransaction.SetCurrent(transaction);
         }
-    }
-
-    /// <summary>
-    /// Divergence comparison mirroring the setter's own unbox semantics. The setter defines which
-    /// wire boxes can reach detection at all (a box it cannot unbox throws before anything happens),
-    /// and the only pair the CLR unboxes leniently is an enum and its underlying integral type
-    /// (OPC UA encodes enumerations as Int32, so inbound enum applies arrive as boxed integers).
-    /// A numerically equal underlying-typed sent value is therefore a pure echo, not a divergence;
-    /// every other type mismatch is unreachable through a successful setter invocation.
-    /// </summary>
-    private static bool SentValueMatchesObserved(object? sentValue, object? observedValue)
-    {
-        if (Equals(sentValue, observedValue))
-        {
-            return true;
-        }
-
-        if (sentValue is null || observedValue is null)
-        {
-            return false;
-        }
-
-        var observedType = observedValue.GetType();
-        if (observedType.IsEnum && sentValue.GetType() == observedType.GetEnumUnderlyingType())
-        {
-            return Equals(Enum.ToObject(observedType, sentValue), observedValue);
-        }
-
-        var sentType = sentValue.GetType();
-        if (sentType.IsEnum && observedType == sentType.GetEnumUnderlyingType())
-        {
-            return Equals(sentValue, Enum.ToObject(sentType, observedValue));
-        }
-
-        return false;
     }
 
     /// <summary>

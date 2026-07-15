@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Namotion.Interceptor;
 
 /// <summary>
@@ -48,6 +50,20 @@ public readonly struct ChangeOrigin
 
     /// <summary>Non-null exactly when <see cref="Kind"/> is not Local.</summary>
     public object? Source { get; }
+
+    /// <summary>True when this origin carries no source stamp (<see cref="ChangeOriginKind.Local"/>).</summary>
+    public bool IsLocal
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Kind == ChangeOriginKind.Local;
+    }
+
+    /// <summary>True when this origin is a synthesized <see cref="ChangeOriginKind.Correction"/>.</summary>
+    public bool IsCorrection
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Kind == ChangeOriginKind.Correction;
+    }
 
     private ChangeOrigin(ChangeOriginKind kind, object? source)
     {

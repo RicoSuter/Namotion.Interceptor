@@ -6,6 +6,7 @@ using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
@@ -522,6 +523,40 @@ public class CorrectionDeliveryTests
         // Assert: the stale correction is dropped (getter returns 90 != 100), the normal change is written.
         Assert.DoesNotContain(written, c => ReferenceEquals(c.Property.Subject, staleDevice));
         Assert.Contains(written, c => ReferenceEquals(c.Property.Subject, normalDevice));
+    }
+
+    [Fact]
+    public async Task WhenDeliveryRevalidatesUnderActiveTransaction_ThenItReadsCommittedStateNotThePendingOverlay()
+    {
+        // Arrange: committed model 100 and a queued Correction(100). A correction asserts committed
+        // state; the processing loop normally carries no transaction, but here the flush runs on a flow
+        // that owns one holding a pending overlay of 70. If revalidation read the overlay it would see
+        // 70 != 100 and drop a valid correction, so the read must detach the transaction and see the
+        // committed 100 (symmetric with synthesis).
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithTransactions()
+            .WithFullPropertyTracking();
+        var source = new object();
+        var device = new ClampingDevice(context);
+        device.Value = 100;
+        var property = new PropertyReference(device, nameof(ClampingDevice.Value));
+
+        var (written, gate) = CreateCollector();
+        using var processor = CreateBufferedProcessor(context, written, gate);
+        InjectChange(processor, Correction(property, source, 100));
+
+        // Act: flush on a flow that owns an active transaction holding a pending 70.
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            device.Value = 70; // captured as the transaction's pending overlay
+            await TriggerFlushAsync(processor);
+        }
+
+        // Assert: the correction was delivered (revalidation compared committed 100, not overlay 70).
+        var change = Assert.Single(written);
+        Assert.Equal(ChangeOriginKind.Correction, change.Origin.Kind);
+        Assert.Equal(100, change.GetNewValue<int>());
     }
 
     // === Send-time revalidation, in-flight window (post-write follow-up) ===

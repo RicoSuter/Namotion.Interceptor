@@ -15,7 +15,7 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
     {
         // Only stamped (inbound) writes record an outcome for correction detection; a local write
         // records nothing and pays a single predictable branch.
-        var stamped = context.Origin.Kind != ChangeOriginKind.Local;
+        var stamped = !context.Origin.IsLocal;
 
         if (EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue))
         {
@@ -23,7 +23,7 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
             // write is the correction candidate; valueUnchanged is this typed comparison itself.
             if (stamped)
             {
-                PendingOrigin.SetOutcome(isWritten: false, valueUnchanged: true);
+                PendingOrigin.SetOutcome(valueUnchanged: true);
             }
 
             return;
@@ -33,7 +33,7 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
 
         if (stamped)
         {
-            PendingOrigin.SetOutcome(context.IsWritten, valueUnchanged: false);
+            PendingOrigin.SetOutcome(valueUnchanged: false);
         }
     }
 }

@@ -42,6 +42,8 @@ namespace Namotion.Interceptor
 {
     public readonly struct ChangeOrigin
     {
+        public bool IsCorrection { get; }
+        public bool IsLocal { get; }
         public Namotion.Interceptor.ChangeOriginKind Kind { get; }
         public object? Source { get; }
         public static Namotion.Interceptor.ChangeOrigin Local { get; }

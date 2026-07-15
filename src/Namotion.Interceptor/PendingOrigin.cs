@@ -72,13 +72,11 @@ internal static class PendingOrigin
     // producer, which makes the correction kind's dependency on that handler structural: an outcome
     // in hand proves the handler ran.
     [ThreadStatic] private static bool _hasOutcome;
-    [ThreadStatic] private static bool _outcomeIsWritten;
     [ThreadStatic] private static bool _outcomeValueUnchanged;
 
-    internal static void SetOutcome(bool isWritten, bool valueUnchanged)
+    internal static void SetOutcome(bool valueUnchanged)
     {
         _hasOutcome = true;
-        _outcomeIsWritten = isWritten;
         _outcomeValueUnchanged = valueUnchanged;
     }
 
@@ -95,17 +93,15 @@ internal static class PendingOrigin
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool TryTakeOutcome(out bool isWritten, out bool valueUnchanged)
+    internal static bool TryTakeOutcome(out bool valueUnchanged)
     {
         if (_hasOutcome)
         {
-            isWritten = _outcomeIsWritten;
             valueUnchanged = _outcomeValueUnchanged;
             _hasOutcome = false;
             return true;
         }
 
-        isWritten = false;
         valueUnchanged = false;
         return false;
     }

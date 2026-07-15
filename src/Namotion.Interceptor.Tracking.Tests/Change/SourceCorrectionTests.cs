@@ -276,6 +276,114 @@ public class SourceCorrectionTests
     }
 
     [Fact]
+    public void WhenInboundNullableEnumEchoesAsUnderlyingType_ThenItIsAPureEchoWithoutThrowing()
+    {
+        // Arrange: a nullable enum property (DeviceMode?). The six-arg apply writes the enum value but
+        // keeps the boxed underlying integer as sentValue (the OPC UA wire shape). Divergence equality
+        // must unwrap Nullable<T> before the enum/underlying unbox: casting a boxed int to DeviceMode?
+        // throws, while casting to DeviceMode uses the CLR's enum leniency.
+        var context = CreateContext();
+        var device = new ModeDevice(context);
+        device.OptionalMode = DeviceMode.Running;
+        var source = new object();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act: value is the boxed enum (stores faithfully, so the write is equality-suppressed);
+        // sentValue is the boxed underlying integer. Must not throw.
+        new PropertyReference(device, nameof(ModeDevice.OptionalMode))
+            .SetValueFromOrigin(ChangeOrigin.FromSource(source), null, null,
+                value: DeviceMode.Running, sentValue: (int)DeviceMode.Running);
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert: pure echo, nothing published.
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(ModeDevice.OptionalMode));
+        Assert.Equal(DeviceMode.Running, device.OptionalMode);
+    }
+
+    [Fact]
+    public void WhenInboundNullableEnumChangesAsUnderlyingType_ThenOriginSurvivesAsFromSource()
+    {
+        // Arrange: a nullable enum property (DeviceMode?) whose value genuinely changes, sent as the
+        // boxed underlying integer. The origin survival check in the core write interceptor shares the
+        // detection unbox equality: it must unwrap Nullable<T> before the enum/underlying cast, else
+        // (DeviceMode?)boxedInt throws, the value demotes to Local, and every inbound nullable enum
+        // change echoes straight back to the server.
+        var context = CreateContext();
+        var device = new ModeDevice(context);
+        device.OptionalMode = DeviceMode.Idle;
+        var source = new object();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act: value is the boxed enum (stores faithfully); sentValue is the boxed underlying integer.
+        new PropertyReference(device, nameof(ModeDevice.OptionalMode))
+            .SetValueFromOrigin(ChangeOrigin.FromSource(source), null, null,
+                value: DeviceMode.Fault, sentValue: (int)DeviceMode.Fault);
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert
+        Assert.Equal(DeviceMode.Fault, device.OptionalMode);
+        var change = Assert.Single(changes, c => c.Property.Name == nameof(ModeDevice.OptionalMode));
+        Assert.Equal(ChangeOriginKind.FromSource, change.Origin.Kind);
+        Assert.Same(source, change.Origin.Source);
+    }
+
+
+    [Fact]
+    public void WhenInboundEchoesAnIEquatableEqualInstance_ThenItIsAPureEchoNotACorrection()
+    {
+        // Arrange: SensorReading implements IEquatable<T> but not object.Equals, so the property type's
+        // default equality (via IEquatable, what the equality handler uses to suppress the write)
+        // disagrees with a boxed object.Equals (reference equality) for two distinct equal-content
+        // instances. Detection must use the property type's equality; a boxed comparison would misread
+        // the echo as divergence and synthesize a correction on every equal-content inbound (a
+        // self-sustaining loop).
+        var context = CreateContext();
+        var device = new ReadingDevice(context);
+        device.Reading = new SensorReading(5); // committed instance A
+        var source = new object();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act: the source echoes an equal-content but distinct instance B; the equality handler
+        // suppresses the write (IEquatable-equal).
+        new PropertyReference(device, nameof(ReadingDevice.Reading))
+            .SetValueFromSource(source, null, null, new SensorReading(5));
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert: pure echo, nothing published (no change, no correction).
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(ReadingDevice.Reading));
+    }
+
+    [Fact]
+    public void WhenSuppressedInboundHasNoGetter_ThenNoCorrectionIsFabricated()
+    {
+        // Arrange: a set-only property has no getter (Metadata.GetValue is null). An inbound value
+        // equal to the backing field is equality-suppressed and reaches detection, but a correction
+        // asserts the observable value and there is none, so synthesis must be skipped. Reading the
+        // absent getter as a null value would fabricate a Correction(null) that a direct queue
+        // subscriber could transmit.
+        var context = CreateContext();
+        var device = new SetOnlyDevice(context);
+        var source = new object();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act: the backing field defaults to 0; an inbound 0 is equality-suppressed.
+        new PropertyReference(device, nameof(SetOnlyDevice.Value))
+            .SetValueFromSource(source, null, null, 0);
+
+        var changes = DrainWithSentinel(context, subscription);
+
+        // Assert: no correction was fabricated.
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(SetOnlyDevice.Value));
+    }
+
+    [Fact]
     public void WhenSentValueEqualsStoredValue_ThenNothingIsPublished()
     {
         // Arrange: model at 100.

@@ -161,7 +161,7 @@ public class ChangeQueueProcessor : IDisposable
                 // A correction is not an echo of anything (no model change occurred), so it bypasses
                 // the own-source skip entirely; property filters and connector topology decide the
                 // actual recipients. All other kinds keep the single-comparison echo suppression.
-                if (change.Origin.Kind != ChangeOriginKind.Correction &&
+                if (!change.Origin.IsCorrection &&
                     ReferenceEquals(change.Origin.Source, _source))
                 {
                     continue;
@@ -174,7 +174,7 @@ public class ChangeQueueProcessor : IDisposable
 
                 if (periodicTimer is null)
                 {
-                    if (change.Origin.Kind == ChangeOriginKind.Correction)
+                    if (change.Origin.IsCorrection)
                     {
                         // Immediate mode has no dedup, but dedup was never the safety mechanism for
                         // corrections: send-time revalidation is. WriteCorrectionWithRevalidationAsync
@@ -285,6 +285,9 @@ public class ChangeQueueProcessor : IDisposable
 
             // Deduplicate by Property: keep oldest old value, use newest new value.
             // Backward iteration finds last occurrences first, preserving last-occurrence order.
+            // Track whether any correction survives into the deduped buffer so the all-normal flush
+            // (the overwhelmingly common case) can skip the correction-partition rescan below.
+            var bufferHasCorrection = false;
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
             {
                 var change = _flushChanges[i];
@@ -292,6 +295,7 @@ public class ChangeQueueProcessor : IDisposable
                 {
                     _flushPropertyIndices[change.Property] = _flushDedupedCount;
                     _flushDedupedBuffer[_flushDedupedCount++] = change;
+                    bufferHasCorrection |= change.Origin.IsCorrection;
                 }
                 else
                 {
@@ -306,8 +310,8 @@ public class ChangeQueueProcessor : IDisposable
                     // staleness. Only a correction displaced by another correction is dropped: they
                     // coalesce, and the kept one re-asserts the same live model value.
                     var existing = _flushDedupedBuffer[existingIndex];
-                    var existingIsCorrection = existing.Origin.Kind == ChangeOriginKind.Correction;
-                    if (change.Origin.Kind != ChangeOriginKind.Correction)
+                    var existingIsCorrection = existing.Origin.IsCorrection;
+                    if (!change.Origin.IsCorrection)
                     {
                         if (existingIsCorrection)
                         {
@@ -338,19 +342,24 @@ public class ChangeQueueProcessor : IDisposable
                 // at a time with send-time revalidation (including corrections the dedup above
                 // displaced with a normal change for the same property; revalidation against the
                 // live model decides which of the two representations of that property is current).
-                var normalCount = 0;
-                for (var i = 0; i < _flushDedupedCount; i++)
+                // The all-normal flush needs no partition, so it writes the deduped buffer as-is.
+                var normalCount = _flushDedupedCount;
+                if (bufferHasCorrection)
                 {
-                    var change = _flushDedupedBuffer[i];
-                    if (change.Origin.Kind == ChangeOriginKind.Correction)
+                    normalCount = 0;
+                    for (var i = 0; i < _flushDedupedCount; i++)
                     {
-                        _flushCorrections.Add(change);
-                    }
-                    else
-                    {
-                        // Compact normals to the front; normalCount <= i always, so no unread slot is
-                        // overwritten (each correction was already copied into _flushCorrections).
-                        _flushDedupedBuffer[normalCount++] = change;
+                        var change = _flushDedupedBuffer[i];
+                        if (change.Origin.IsCorrection)
+                        {
+                            _flushCorrections.Add(change);
+                        }
+                        else
+                        {
+                            // Compact normals to the front; normalCount <= i always, so no unread slot
+                            // is overwritten (each correction was already copied into _flushCorrections).
+                            _flushDedupedBuffer[normalCount++] = change;
+                        }
                     }
                 }
 
@@ -424,12 +433,15 @@ public class ChangeQueueProcessor : IDisposable
             return;
         }
 
+        var propertyType = property.Metadata.Type;
         var correctionValue = correction.GetNewValue<object?>();
 
         // Pre-write revalidation (cheap early drop): if the model already moved, its newer change is
         // flowing outbound on its own; drop the stale correction. This read alone cannot see an
-        // in-flight apply that lands during the write; the post-write loop handles that.
-        if (!TryReadModelValue(out var modelValue) || !Equals(modelValue, correctionValue))
+        // in-flight apply that lands during the write; the post-write loop handles that. Equality uses
+        // the property type's own semantics (matching detection and the equality handler), so an
+        // IEquatable getter returning a fresh equivalent instance is not misread as a move.
+        if (!TryReadModelValue(out var modelValue) || !PropertyValueEquality.Equals(propertyType, modelValue, correctionValue))
         {
             return;
         }
@@ -474,7 +486,7 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            if (Equals(modelValue, correctionValue))
+            if (PropertyValueEquality.Equals(propertyType, modelValue, correctionValue))
             {
                 break; // converged: the source holds the current model value
             }
@@ -493,12 +505,15 @@ public class ChangeQueueProcessor : IDisposable
 
         // A user getter (or read interceptor) that throws must drop the correction, not escape:
         // in immediate mode this method is awaited directly in the ProcessAsync dequeue loop, and
-        // an escaping exception would terminate the processor.
+        // an escaping exception would terminate the processor. Read committed state: the processing
+        // loop normally carries no transaction, but if one flowed in via the AsyncLocal captured when
+        // ProcessAsync was started, ReadCommittedValue detaches it so revalidation compares against
+        // committed state, not a pending overlay (matching synthesis).
         bool TryReadModelValue(out object? value)
         {
             try
             {
-                value = getValue.Invoke(property.Subject);
+                value = SubjectChangeContextExtensions.ReadCommittedValue(property.Subject, getValue);
                 return true;
             }
             catch (Exception ex)
