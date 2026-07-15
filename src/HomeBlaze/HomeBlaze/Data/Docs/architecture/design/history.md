@@ -8,7 +8,7 @@ status: Planned
 
 ## Overview
 
-The time-series store records property changes over time, enabling historical queries, trend analysis, and AI-driven insights. It is implemented as a plugin using the standard abstractions + implementation pattern.
+The time-series store records property changes over time, enabling historical queries, trend analysis, and AI-driven insights. It is implemented as a plugin using the standard abstractions + implementation pattern. History is originated data on the reflection plane: once recorded it is its own source of truth and cannot be recovered from the device, so its durability model is store-and-forward (see below and the [Architecture Overview](../overview.md)).
 
 ## Architecture
 
@@ -46,11 +46,11 @@ Multiple sinks can run simultaneously (e.g., local SQLite for edge analytics + c
 
 Configurable at the plugin level. In HomeBlaze, `[State]` marks runtime properties (sensor readings, device status) as distinct from `[Configuration]` properties (persisted settings). The history plugin naturally targets `[State]` properties by default — these are the values that change over time and are worth tracking. An industrial plugin might apply a more selective filter (e.g., only numeric values, or only properties explicitly marked with a custom `[Historize]` attribute).
 
-### Central UNS Has Complete History
+### Central History Is Best-Effort, Not Complete
 
-Since the central UNS receives all property changes from all satellites via WebSocket, it naturally accumulates a full history of the entire graph. No explicit history sync needed — it is a side effect of the topology.
+The central instance records history for changes it receives over WebSocket, so during connected periods it accumulates history for the whole topology. It is not automatically complete: a satellite that is disconnected is invisible to central (no changes flow), and sink backpressure can drop changes under load. Central history therefore has gaps for every offline window and every overload burst.
 
-Each satellite can also install the history plugin independently for local history (useful for offline operation or edge analytics).
+Completeness on the reflection plane requires **store-and-forward at the edge**: each satellite buffers its own history durably while central is unreachable, and backfills the gap to central on reconnect. This makes the satellite, not the transient WebSocket stream, the source of truth for its own history. Each satellite installs the history plugin for this local buffer (also useful for offline operation and edge analytics).
 
 ### Querying History
 
@@ -90,7 +90,7 @@ For event and command history, see `get_event_history` and `get_command_history`
 | Sink architecture | Each sink is a standalone `BackgroundService` with its own `ChangeQueueProcessor` | No central orchestrator. Same pattern as connectors. Sinks are fully independent |
 | Query abstraction | `IHistoryStore` interface in abstractions package | Multiple storage backends without coupling. MCP `get_property_history` tool queries available stores |
 | Recording scope | Configurable at plugin level | Different domains have different needs |
-| History locality | Local per instance, central accumulates naturally | No explicit history sync protocol needed |
+| History locality | Local per instance; satellites store-and-forward to central | Satellite is the source of truth for its own history and backfills central after a disconnect. Central alone is best-effort |
 | Retention | Configurable per instance | Edge nodes may keep days, central may keep years |
 
 ## Open Questions
@@ -99,19 +99,24 @@ For event and command history, see `get_event_history` and `get_command_history`
 - Downsampling strategy for long-term storage
 - History export/import for backup and migration
 - `IHistoryStore` query interface design (sync vs async, streaming for large ranges, aggregation push-down to sink)
+- Edge store-and-forward buffer: durable local format, size bound, and backfill protocol to central on reconnect
+- Gap-marker representation in query results (how a consumer sees "data was dropped here")
 
 ## Implementation Notes
 
-### Backpressure and Overload
+### Backpressure, Overload, and Loss
 
-Since each sink has its own `ChangeQueueProcessor`, backpressure is handled per-sink with the same bounded queue semantics as connectors. When a sink's queue overflows (sink is slower than the change rate), the oldest unprocessed entries are dropped.
+Each sink has its own `ChangeQueueProcessor`, so backpressure is handled per-sink with bounded-queue semantics, the same as connectors. The change pipeline (the reflection-plane hot path) must never block for a slow sink: property writes, connector sync, and UI updates cannot stall because history is behind. The central UNS sees all changes from all satellites and therefore has the highest aggregate change rate, so it is the most exposed to overload.
 
-This is especially relevant for the central UNS, which sees all changes from all satellites and therefore has the highest aggregate change rate.
+Because the pipeline cannot block, a sink that falls behind must absorb or account for the overflow rather than silently dropping it. History is originated data: once lost it cannot be recovered from the device. The required behavior:
+
+- **Spill to a durable local buffer** rather than dropping. A bounded in-memory queue drains into local durable storage (the edge store-and-forward buffer) when the sink or its backend is slow or unreachable.
+- **Mark gaps when data is genuinely lost.** If the durable buffer itself is exhausted (sustained overload beyond local capacity), the sink records an explicit gap marker for the affected range, so a later query can distinguish "no change" from "data was dropped". A query result must never silently present a gap as continuity.
+- **Expose queue depth, buffer size, and drop/gap counts as metrics** so operators can detect and address overload (for example by increasing sink throughput, reducing property filter scope, or adding retention limits).
 
 | Alternative | Why not |
 |-------------|---------|
 | Unbounded in-memory buffering | OOM risk under sustained load, especially on central UNS |
-| Backpressure the change pipeline | Would block the hot path — property writes, connector sync, and UI updates would stall because a history sink is slow |
+| Backpressure the change pipeline | Would block the hot path: property writes, connector sync, and UI updates would stall because a history sink is slow |
+| Silently drop oldest on overflow | Loses originated data that cannot be recovered, and hides the loss from queries. Replaced by spill-to-durable-buffer plus explicit gap markers |
 | Central orchestrator dispatching to sinks | Adds a single point of failure and coupling between sinks. If the orchestrator is slow, all sinks suffer |
-
-Queue depth and drop count should be exposed as metrics so operators can detect and address overload (e.g., by increasing sink throughput, reducing property filter scope, or adding retention limits).
