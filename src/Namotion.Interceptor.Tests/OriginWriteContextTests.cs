@@ -3,11 +3,20 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tests;
 
-/// <summary>Dedicated model with a reference-typed property for the null-survival origin test.</summary>
+public enum ProbeMode
+{
+    Idle = 0,
+    Running = 1,
+    Fault = 2
+}
+
+/// <summary>Dedicated model with a reference-typed and a nullable-enum property for the survival tests.</summary>
 [InterceptorSubject]
 public partial class OriginProbeSubject
 {
     public partial string? Name { get; set; }
+
+    public partial ProbeMode? Mode { get; set; }
 }
 
 public class OriginWriteContextTests
@@ -134,6 +143,31 @@ public class OriginWriteContextTests
         }
 
         // Assert: null was faithfully stored, so the origin survives as FromSource (not demoted).
+        Assert.Equal(ChangeOriginKind.FromSource, probe.KindBeforeWrite);
+        Assert.Equal(ChangeOriginKind.FromSource, probe.KindAfterWrite);
+    }
+
+    [Fact]
+    public void WhenSentValueIsNullableEnumUnderlyingInteger_ThenOriginSurvivesAsFromSource()
+    {
+        // Arrange: a source delivers a nullable enum as its boxed underlying integer (the OPC UA wire
+        // shape). The write stores the enum faithfully, so the origin must survive as FromSource. Casting
+        // the boxed integer to the nullable enum throws, so the survival check must unwrap Nullable<T> and
+        // coerce the underlying integer to the enum before comparing; otherwise the value demotes to Local
+        // and is echoed straight back to the source.
+        var probe = new OriginProbe();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(probe);
+        var subject = new OriginProbeSubject(context);
+        var property = new PropertyReference(subject, "Mode");
+
+        // Act: sentValue is the boxed underlying integer while the stored value is the enum.
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), sentValue: (int)ProbeMode.Fault))
+        {
+            subject.Mode = ProbeMode.Fault;
+        }
+
+        // Assert
         Assert.Equal(ChangeOriginKind.FromSource, probe.KindBeforeWrite);
         Assert.Equal(ChangeOriginKind.FromSource, probe.KindAfterWrite);
     }
