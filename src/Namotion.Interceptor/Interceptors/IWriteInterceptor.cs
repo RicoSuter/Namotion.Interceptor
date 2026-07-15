@@ -200,13 +200,8 @@ public struct PropertyWriteContext<TProperty>
 
     /// <summary>
     /// Finalizes <see cref="Origin"/> at the terminal write (right after <see cref="IsWritten"/>
-    /// becomes true). A stamped origin survives only when the stored value is exactly the value
-    /// the source sent; otherwise the value was computed locally and the origin becomes Local.
-    ///
-    /// A derived property's stored value is recomputed by its getter (published via
-    /// <see cref="GetFinalValue"/>), never literally the value the source sent, so a stamped origin
-    /// never survives a derived write. It is demoted unconditionally without invoking the getter,
-    /// because the getter must not run here (this executes under the subject's SyncRoot).
+    /// becomes true). A stamped origin survives only when the stored value is exactly the value the
+    /// source sent; otherwise the value was computed locally and the origin becomes Local.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void FinalizeOrigin()
@@ -216,14 +211,61 @@ public struct PropertyWriteContext<TProperty>
             return;
         }
 
-        // Typed comparison in the generic frame: NewValue is never boxed. SentValue arrives already
-        // boxed from the inbound apply; cast it down to TProperty for EqualityComparer.Default. On the
-        // non-generic path (TProperty == object) both operands are already boxed objects. Derived
-        // properties short-circuit the comparison (and its cast): they always demote.
-        if (Property.Metadata.IsDerived ||
-            !EqualityComparer<TProperty>.Default.Equals((TProperty)_attempted.SentValue!, NewValue))
+        // A derived property's stored value is recomputed by its getter, never literally the sent value,
+        // so a stamped origin never survives. Demoted without invoking the getter, which must not run
+        // here (this executes under the subject's SyncRoot).
+        if (Property.Metadata.IsDerived)
         {
             _attempted = default;
+            return;
+        }
+
+        // Survive only when the sent value was faithfully stored. The 'is TProperty' pattern unboxes
+        // SentValue for the exact type against the unboxed NewValue. A null sent value must be handled
+        // explicitly ('null is TProperty' is always false), else a legitimately stored null would demote
+        // to Local and defeat echo suppression. A box the pattern rejects falls back to the setter's own
+        // unbox (see SentValueEqualsAfterUnbox); a box the setter would reject demotes.
+        var survives = _attempted.SentValue is TProperty typedSentValue
+            ? EqualityComparer<TProperty>.Default.Equals(typedSentValue, NewValue)
+            : _attempted.SentValue is null
+                ? NewValue is null
+                : SentValueEqualsAfterUnbox(_attempted.SentValue, NewValue);
+
+        if (!survives)
+        {
+            _attempted = default;
+        }
+    }
+
+    /// <summary>
+    /// Fallback comparison mirroring the setter's own unbox: the is-pattern is type-strict, but the CLR
+    /// unboxes an enum and its underlying integral type interchangeably, like the generated setter's cast
+    /// (OPC UA delivers enums as boxed integers, so such a write stores faithfully and must keep its
+    /// origin). A boxed underlying integer is first coerced to the enum so a nullable enum survives too:
+    /// (DeviceMode)boxedInt unboxes leniently but (DeviceMode?)boxedInt throws, so without the coercion a
+    /// faithfully-stored nullable enum would demote to Local and defeat echo suppression. On a genuinely
+    /// incompatible box the cast throws and this method catches it, demoting to Local (safe for survival:
+    /// a value the setter could not have produced does not deserve to keep the source's origin). The catch
+    /// arm is unreachable for chain writes (a box the setter would reject never produced a successful
+    /// write) and only guards hand-constructed sent values. Kept out of the inlined finalize path: an
+    /// exception handler would make FinalizeOrigin uninlinable for every write.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool SentValueEqualsAfterUnbox(object sentValue, TProperty newValue)
+    {
+        var targetType = Nullable.GetUnderlyingType(typeof(TProperty)) ?? typeof(TProperty);
+        if (targetType.IsEnum && sentValue.GetType() == Enum.GetUnderlyingType(targetType))
+        {
+            sentValue = Enum.ToObject(targetType, sentValue);
+        }
+
+        try
+        {
+            return EqualityComparer<TProperty>.Default.Equals((TProperty)sentValue, newValue);
+        }
+        catch (InvalidCastException)
+        {
+            return false;
         }
     }
 }
