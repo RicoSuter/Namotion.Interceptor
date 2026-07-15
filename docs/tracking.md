@@ -213,7 +213,7 @@ This goes through the same pipeline as automatic recalculation: the getter is re
 
 ## Context Inheritance
 
-Automatically assigns the parent context to child subjects, ensuring they participate in the same tracking and interception pipeline:
+Automatically assigns the parent context to child subjects when they are attached via properties, ensuring they participate in the same tracking and interception pipeline. On detach, the parent context and all ancestor contexts are removed from the child, fully disconnecting it from the tree.
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -223,10 +223,31 @@ var context = InterceptorSubjectContext
 var car = new Car(context);
 var tire = new Tire(); // No context assigned yet
 
-car.Tire = tire; // tire.Context is automatically set to context
+car.Tire = tire; // tire inherits services from car's context chain
 ```
 
-This ensures that all objects in the subject graph share the same context, enabling consistent tracking, validation, and other interceptor features.
+### Attach behavior
+
+When a subject is assigned to a property (`car.Tire = tire`), the `ContextInheritanceHandler` calls `tire.Context.AddFallbackContext(car.Context)`. This gives the child access to all services registered on the parent and its ancestors.
+
+### Detach behavior
+
+When a subject is removed from a property (`car.Tire = null`), the handler removes the parent context and all ancestor contexts (captured at attach time) from the child's fallback set. After detach, the child has no inherited services and can be garbage collected.
+
+Independently added fallback contexts (those not in the parent's fallback chain) are preserved after detach.
+
+### Manual fallback context management
+
+For advanced scenarios (staging areas, shared contexts without tree membership), you can manage fallback contexts directly:
+
+```csharp
+var subject = new MySubject();
+subject.Context.AddFallbackContext(sharedContext);    // explicit add
+// ... use subject ...
+subject.Context.RemoveFallbackContext(sharedContext);  // explicit cleanup
+```
+
+Manual adds require manual cleanup. The inheritance handler only manages the links it creates.
 
 ## Subject Lifecycle Tracking
 

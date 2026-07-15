@@ -81,4 +81,10 @@ public interface IInterceptorSubjectContext
     /// <param name="context">The fallback context to remove.</param>
     /// <returns>True if the fallback context was removed, false if it was not present.</returns>
     bool RemoveFallbackContext(IInterceptorSubjectContext context);
+
+    /// <summary>
+    /// Returns a snapshot of the direct fallback contexts currently registered on this context.
+    /// </summary>
+    /// <returns>A read-only collection of the current fallback contexts.</returns>
+    IReadOnlyCollection<IInterceptorSubjectContext> GetFallbackContexts();
 }
