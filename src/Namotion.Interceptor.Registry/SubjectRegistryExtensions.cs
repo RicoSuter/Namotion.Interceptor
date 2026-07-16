@@ -186,11 +186,31 @@ public static class SubjectRegistryExtensions
                 MemberExpression member => ResolveSubject(member.Expression, root, rootParameter)?
                     .TryGetRegisteredProperty(member.Member.Name)?
                     .GetValue() as IInterceptorSubject,
-                _ => Expression
+                _ => TryEvaluate(expression, root, rootParameter),
+            };
+
+        // Compiles and invokes a non-member segment (index, dictionary key or method call) against the real
+        // object graph. Navigation misses - a null subject before the index, an out-of-range index or a
+        // missing dictionary key - return null to match the null-safe member-access path; any other exception
+        // (for example a throwing property getter) is left to propagate.
+        static IInterceptorSubject? TryEvaluate(Expression expression, T root, ParameterExpression rootParameter)
+        {
+            try
+            {
+                return Expression
                     .Lambda<Func<T, object?>>(Expression.Convert(expression, typeof(object)), rootParameter)
                     .Compile()
-                    .Invoke(root) as IInterceptorSubject,
-            };
+                    .Invoke(root) as IInterceptorSubject;
+            }
+            catch (Exception exception) when (exception
+                is NullReferenceException
+                or IndexOutOfRangeException
+                or ArgumentOutOfRangeException
+                or KeyNotFoundException)
+            {
+                return null;
+            }
+        }
     }
 
     /// <summary>
