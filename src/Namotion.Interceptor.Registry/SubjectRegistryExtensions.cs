@@ -191,8 +191,8 @@ public static class SubjectRegistryExtensions
 
         // Compiles and invokes a non-member segment (index, dictionary key or method call) against the real
         // object graph. Navigation misses - a null subject before the index, an out-of-range index or a
-        // missing dictionary key - return null to match the null-safe member-access path; any other exception
-        // (for example a throwing property getter) is left to propagate.
+        // missing dictionary key - return null to match the null-safe member-access path. Other exception
+        // types propagate unchanged.
         static IInterceptorSubject? TryEvaluate(Expression expression, T root, ParameterExpression rootParameter)
         {
             try

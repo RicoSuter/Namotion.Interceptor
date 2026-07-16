@@ -36,13 +36,13 @@ You can also resolve a specific registered property from a strongly-typed expres
 
 ```csharp
 // Direct property
-var pressure = tire.TryGetRegisteredProperty(t => t.Pressure);
+var pressureProperty = tire.TryGetRegisteredProperty(t => t.Pressure);
 
 // Nested path, including collection or dictionary segments
-var frontPressure = car.TryGetRegisteredProperty(c => c.Tires[0].Pressure);
+var frontPressureProperty = car.TryGetRegisteredProperty(c => c.Tires[0].Pressure);
 ```
 
-The expression is resolved through the registry and is null-safe: if any subject along the path is null or not tracked by the registry, the method returns `null` instead of throwing.
+Member-access hops resolve through the registry; index and dictionary segments evaluate against the object graph. The lookup is null-safe either way: if a subject along the path is null or not tracked by the registry, the method returns `null` instead of throwing.
 
 ## Enumerate property attributes
 
