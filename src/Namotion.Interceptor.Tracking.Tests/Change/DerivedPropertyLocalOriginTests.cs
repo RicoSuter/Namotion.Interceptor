@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -47,24 +48,12 @@ public class DerivedPropertyLocalOriginTests
     }
 
     // Writes a sentinel change on a fresh subject and drains the subscription up to it (excluded),
-    // returning everything published before the sentinel; throws TimeoutException after 10 seconds.
+    // returning everything published before the sentinel.
     private static List<SubjectPropertyChange> DrainUntilSentinel(
         IInterceptorSubjectContext context, PropertyChangeQueueSubscription subscription)
     {
         var sentinel = new ManualInpcDerivedPerson(context);
         sentinel.FirstName = "Sentinel";
-
-        var changes = new List<SubjectPropertyChange>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (subscription.TryDequeue(out var change, timeout.Token))
-        {
-            if (ReferenceEquals(change.Property.Subject, sentinel)
-                && change.Property.Name == nameof(ManualInpcDerivedPerson.FirstName))
-            {
-                return changes;
-            }
-            changes.Add(change);
-        }
-        throw new TimeoutException("Sentinel notification was not received within 10 seconds.");
+        return ChangeQueueTestHelpers.DrainUntilSubject(subscription, sentinel);
     }
 }

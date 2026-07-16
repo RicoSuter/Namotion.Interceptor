@@ -64,6 +64,47 @@ internal static class PendingOrigin
     {
         _frame = frame;
     }
+
+    // Write-outcome slot for correction detection. PropertyValueEqualityCheckHandler records the
+    // outcome of a stamped write here; SetValueFromOrigin reads it after the setter returns. The
+    // slot carries no finalized origin (SetValueFromOrigin re-derives kind and source from its own
+    // origin argument, so a stored origin would be dead storage). It is the equality handler's only
+    // producer, which makes the correction kind's dependency on that handler structural: an outcome
+    // in hand proves the handler ran.
+    [ThreadStatic] private static bool _hasOutcome;
+    [ThreadStatic] private static bool _outcomeValueUnchanged;
+
+    internal static void SetOutcome(bool valueUnchanged)
+    {
+        _hasOutcome = true;
+        _outcomeValueUnchanged = valueUnchanged;
+    }
+
+    /// <summary>
+    /// Clear-on-entry: wipe any outcome a prior write on this thread may have left before the next
+    /// stamped setter runs, so a later cancelled write can never misread a leaked outcome as its own.
+    /// A commit replay writes through <see cref="Set"/> directly and records a Confirmed outcome that
+    /// no primitive consumes, so this is the guarantee that no stale outcome survives, not the
+    /// generated setter's notification gating.
+    /// </summary>
+    internal static void ClearOutcome()
+    {
+        _hasOutcome = false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool TryTakeOutcome(out bool valueUnchanged)
+    {
+        if (_hasOutcome)
+        {
+            valueUnchanged = _outcomeValueUnchanged;
+            _hasOutcome = false;
+            return true;
+        }
+
+        valueUnchanged = false;
+        return false;
+    }
 }
 
 internal readonly ref struct PendingOriginScope

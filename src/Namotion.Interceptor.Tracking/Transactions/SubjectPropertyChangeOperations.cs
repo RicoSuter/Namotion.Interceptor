@@ -122,7 +122,7 @@ internal static class SubjectPropertyChangeOperations
             // Local origins arm no stamp: an absent stamp and a Local stamp both finalize to Local
             // (FinalizeOrigin short-circuits on Local before reading the sent value), so skip
             // PendingOrigin.Set on the Local replay/revert hot path. Non-Local origins (FromSource,
-            // Confirmed) still arm so echo suppression sees the source.
+            // Confirmed, Correction) still arm so echo suppression sees the source.
             using (SubjectChangeContext.WithTimestamps(change.ChangedTimestamp, change.ReceivedTimestamp))
             {
                 if (change.Origin.Kind == ChangeOriginKind.Local)

@@ -73,6 +73,13 @@ public sealed class PropertyChangeQueue : IWriteInterceptor, IDisposable
         Enqueue(in propertyChange);
     }
 
+    /// <summary>
+    /// Injects a synthesized correction into the queue subscriptions. A correction is not a model
+    /// change, so it fans out to the queue subscriptions only and never to <c>PropertyChangeObservable</c>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void EnqueueCorrection(in SubjectPropertyChange change) => Enqueue(in change);
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Enqueue(in SubjectPropertyChange change)
     {

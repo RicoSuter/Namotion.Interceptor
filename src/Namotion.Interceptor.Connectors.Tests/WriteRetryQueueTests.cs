@@ -373,6 +373,47 @@ public class WriteRetryQueueTests
         Assert.True(queue.IsEmpty);
     }
 
+    [Fact]
+    public async Task WhenBatchContainsCorrection_ThenCorrectionIsFilteredOutButNormalIsRetained()
+    {
+        // Arrange: a failed correction write must never be retried. Reapplying a correction is a
+        // silent no-op and re-sending it raw could push the source off the current model value, so
+        // the sole public enqueue entry point filters corrections per item.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var subjectMock = new Mock<IInterceptorSubject>();
+
+        var normal = SubjectPropertyChange.Create(
+            new PropertyReference(subjectMock.Object, "Normal"),
+            ChangeOrigin.Local, DateTimeOffset.UtcNow, null, 1, 2);
+        var correction = SubjectPropertyChange.Create(
+            new PropertyReference(subjectMock.Object, "Corrected"),
+            ChangeOrigin.Correction(new object()), DateTimeOffset.UtcNow, null, 5, 5);
+
+        var sourceMock = new Mock<ISubjectSource>();
+        SubjectPropertyChange[]? writtenChanges = null;
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writtenChanges = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        // Act: a mixed batch; only the normal change survives into the queue.
+        queue.Enqueue(new[] { correction, normal }.AsMemory());
+
+        // Assert: nothing correction-shaped entered the queue.
+        Assert.Equal(1, queue.PendingWriteCount);
+
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        Assert.NotNull(writtenChanges);
+        var flushed = Assert.Single(writtenChanges);
+        Assert.Equal("Normal", flushed.Property.Name);
+        Assert.Equal(ChangeOriginKind.Local, flushed.Origin.Kind);
+        Assert.True(queue.IsEmpty);
+    }
+
     private static SubjectPropertyChange CreateChange(int id)
     {
         var subjectMock = new Mock<IInterceptorSubject>();

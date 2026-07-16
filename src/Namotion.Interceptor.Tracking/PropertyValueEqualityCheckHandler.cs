@@ -13,9 +13,27 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (!EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue))
+        // Only stamped (inbound) writes record an outcome for correction detection; a local write
+        // records nothing and pays a single predictable branch.
+        var stamped = context.Origin.Kind != ChangeOriginKind.Local;
+
+        if (EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue))
         {
-            next(ref context);
+            // Suppressed: the projected value already equals the stored value. A stamped suppressed
+            // write is the correction candidate; valueUnchanged is this typed comparison itself.
+            if (stamped)
+            {
+                PendingOrigin.SetOutcome(valueUnchanged: true);
+            }
+
+            return;
+        }
+
+        next(ref context);
+
+        if (stamped)
+        {
+            PendingOrigin.SetOutcome(valueUnchanged: false);
         }
     }
 }

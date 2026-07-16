@@ -4,6 +4,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -623,6 +624,66 @@ public partial class SubjectUpdateExtensionsTests
         Assert.NotNull(capturedChange);
         Assert.Equal(ChangeOriginKind.FromSource, capturedChange.Value.Origin.Kind);
         Assert.Same(source, capturedChange.Value.Origin.Source);
+    }
+
+    [Fact]
+    public void WhenFromSourceApplyTransformProjectsOntoStoredValue_ThenCorrectionIsPublished()
+    {
+        // Arrange - the model already stores 100; the source sends 105 and the transform corrects it
+        // to the stored 100, so the equality check suppresses the write. Divergence must be judged
+        // against the pre-transform sent value (105), not the applied value (100): the applied value
+        // trivially equals the observable value, and comparing it would misread the suppressed write
+        // as a pure echo while the source still holds 105. A Correction(source) must be synthesized.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new NumericNode(context) { Value = 100 };
+        var source = new object();
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Value"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = 105
+                    }
+                }
+            }
+        };
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act - the transform projects the sent 105 onto the stored 100
+        target.ApplySubjectUpdate(
+            update,
+            DefaultSubjectFactory.Instance,
+            ChangeOrigin.FromSource(source),
+            (_, propertyUpdate) => propertyUpdate.Value = 100);
+
+        var changes = DrainQueueUntilSentinel(context, subscription);
+
+        // Assert - the model is unchanged and a correction (old == new == 100) carries the source
+        Assert.Equal(100, target.Value);
+        var targetChanges = changes.Where(c => ReferenceEquals(c.Property.Subject, target)).ToList();
+        var correction = Assert.Single(targetChanges);
+        Assert.Equal(ChangeOriginKind.Correction, correction.Origin.Kind);
+        Assert.Same(source, correction.Origin.Source);
+        Assert.Equal(100, correction.GetOldValue<int>());
+        Assert.Equal(100, correction.GetNewValue<int>());
+    }
+
+    // Writes a sentinel change on a fresh subject and drains the queue subscription up to it
+    // (excluded), returning everything published before the sentinel; corrections are visible only
+    // on the queue, never on the observable.
+    private static List<SubjectPropertyChange> DrainQueueUntilSentinel(
+        IInterceptorSubjectContext context, PropertyChangeQueueSubscription subscription)
+    {
+        var sentinel = new NumericNode(context);
+        sentinel.Value = 7;
+        return ChangeQueueTestHelpers.DrainUntilSubject(subscription, sentinel);
     }
 
     [Fact]
