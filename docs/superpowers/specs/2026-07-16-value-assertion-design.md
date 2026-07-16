@@ -49,15 +49,26 @@ The marked context proceeds through the chain like any write, with one branch at
 - **Observable** (application-facing): gains one gate, skips assertions. Application subscribers see nothing.
 - **Generated code: zero changes.** `IsWritten` stays false, so the setter's existing bool gating already skips `OnChanged` and `RaisePropertyChanged`. No generator, metadata, or executor change anywhere in this design.
 - **Transaction interceptor**: passes assertions through without capturing (one gate). An assertion asserts committed state and must deliver immediately; it is not a pending write.
-- **Derived recalculation and lifecycle**: key on written changes and reference differences respectively; assertions no-op through them naturally. Gates are added only if profiling shows the wasted traversal matters.
-- **Validation**: re-validates a value that is already stored; idempotent and harmless.
+- **Derived recalculation**: gated, and the gate is required for correctness, not an optimization. `DerivedPropertyChangeHandler.WriteProperty` recalculates unconditionally after `next()` (it does not key on `IsWritten`; the existing transaction-capture suppression exists precisely because of that), so an ungated assertion would evaluate dependent getters, including side-effecting ones, breaking the application-silent contract.
+- **Validation**: gated. `ValidationInterceptor` throws on failure and runs before the terminal, so an ungated assertion would reach validators with origin still `FromSource` (demotion happens at the terminal) and could turn a previously silent equal-valued apply into a connector-facing `ValidationException` (a stored-but-now-invalid legacy value, or a provenance-aware validator). The asserted value is already committed; validating it is not this write's job.
+- **Lifecycle**: keys on reference differences; assertions (old == new) no-op through it naturally.
+
+The gating principle, stated honestly: every write interceptor must decide act-or-pass for assertions. The default answer is pass (queue publishes, everything else skips or no-ops), and each gate is one visible branch in the interceptor it belongs to, not a parallel delivery mechanism.
 
 ### Delivery falls out of existing rules
 
 - **Echo skip**: the assertion is `Local` with a null source, so the own-source skip never matches and the change is delivered to every bound source, including the diverged one. That is the goal, achieved with zero new rules.
-- **Dedup/coalescing**: ordinary merging is already correct. An assertion (100,100) followed by a real write (100,110) coalesces to (100,110).
-- **Retry**: assertions retry like any write; re-asserting committed state is harmless.
-- **Ordering and concurrency**: assertions sit in the queue in-order with every other change under the same locks. The entire revalidation apparatus of the synthesized design has no reason to exist.
+- **Dedup/coalescing**: ordinary merging is already correct in queue order. An assertion (100,100) followed by a real write (100,110) coalesces to (100,110).
+- **Retry**: `WriteRetryQueue.FlushAsync` sends dequeued changes straight to `source.WriteChangesInBatchesAsync`; no local reapplication and no equality handler are involved, so assertions ride the retry path mechanically. Staleness of retried assertions is handled by the send-time guard below. Reconnect additionally runs `LoadInitialStateAsync`, which re-applies the source's state inbound and regenerates a fresh assertion if the source is still diverged, a natural self-healing path.
+
+### Staleness: what ordering does and does not give
+
+Publishers enqueue after `next()` returns, outside the terminal lock, so enqueue order is not write order: a concurrent real write (100,110) can enqueue before a stale assertion (100,100), and coalescing by queue position would then send 100 while the model holds 110. This race exists today for two concurrent ordinary writes; the assertion design must not add a publisher on a false ordering claim. Two cheap guards, both drop-on-doubt (a dropped assertion costs only "the source stays diverged until its next event", never a wrong value):
+
+1. **Terminal recheck**: the terminal assertion branch verifies under the subject lock that the backing field still equals `NewValue`; if not, the assertion is unmarked and nothing publishes. This closes the check-to-terminal window.
+2. **Send-time guard**: before writing a structurally identifiable assertion (old == new) to a source, the outbound writer verifies the model still holds that value and drops the assertion otherwise. Placed on the shared source-write path (`WriteChangesInBatchesAsync`), it covers both processor sends and retry flushes, including the terminal-to-publish residue of the race above.
+
+The genuinely in-flight window (an inbound value from the same source lands while the assertion write is already on the wire, and the inbound change is echo-skipped) is consciously accepted: it is an instance of the already documented limitation for all outbound writes racing inbound applies (`docs/connectors.md`, local-first sync model), with the same recovery paths (the source's next inbound event, read-after-write where supported, explicit resynchronization via #342). The synthesized design's bounded follow-up loop solved this window for corrections only; this design accepts parity with ordinary writes instead of rebuilding the loop.
 
 ### Identifying assertions downstream
 
@@ -79,7 +90,7 @@ Wire compatibility caveat: an old client ignores the unknown flag and merges, an
 
 ## What is deliberately not built
 
-`ChangeOriginKind.Correction` and its factory, `EnqueueCorrection`, send-time revalidation, the follow-up re-assert loop, kind-aware dedup, the echo-skip bypass, buffered/immediate delivery cases, retry filtering, and the observable-value getter read at synthesis (the asserted value is `context.NewValue`, already typed and in hand, so set-only properties work instead of being excluded).
+`ChangeOriginKind.Correction` and its factory, `EnqueueCorrection`, the bounded follow-up re-assert loop, kind-aware dedup, the echo-skip bypass, buffered/immediate delivery cases, retry filtering, and the observable-value getter read at synthesis (the asserted value is `context.NewValue`, already typed and in hand, so set-only properties work instead of being excluded). One piece of the synthesized design survives in simplified form: the send-time staleness guard (see above), a single drop-on-doubt check on the shared source-write path instead of a revalidation loop with follow-ups.
 
 ## Public API impact
 
@@ -110,7 +121,8 @@ Wire compatibility caveat: an old client ignores the unknown flag and merges, an
 ## Testing
 
 - Re-target the #365 behavioral tests from the #372 branch: diverged source converges, WebSocket delivery shape, transaction exclusion, pure-echo suppression.
-- New: the gating matrix (observable silent, INPC silent, queue publishes `Local` old == new, write-timestamp metadata unchanged, transaction ignores), collection complete-snapshot end to end, set-only property assertion, dedup coalescing with a following real write.
+- New: the gating matrix (observable silent, INPC silent, derived recalculation skipped including side-effecting derived getters, validation skipped, queue publishes `Local` old == new, write-timestamp metadata unchanged, transaction ignores), collection complete-snapshot end to end, set-only property assertion, dedup coalescing with a following real write.
+- Staleness guards: the concurrent-write race (stale assertion vs racing real write, terminal recheck drops), the send-time guard on both the processor path and the retry flush path, and reconnect self-healing via initial-state reload.
 - Benchmarks: the equality handler adds one `Kind` branch and only in the values-equal case; write benchmarks confirm no local-write regression.
 
 ## Relationship to other work
@@ -126,5 +138,6 @@ Wire compatibility caveat: an old client ignores the unknown flag and merges, an
 3. Verify the derived-property edge (can a stamped equality-suppressed write target a derived property at all).
 4. WebSocket client implementation of replace-on-complete, and the protocol version or capability gate so completes are never sent to clients that would silently merge them.
 5. Confirm assertion timestamps against the OPC UA read-after-write integration tests.
-6. Decide whether derived/validation gates are worth adding after profiling.
+6. Exact placement of the send-time guard so it covers processor sends and retry flushes once (`WriteChangesInBatchesAsync` on `SubjectSourceBase` is the candidate).
 7. Verify the applier honors `Count` truncation semantics under the flag (today complete updates assume empty client state, so truncation was never exercised).
+8. Whether the residual publish-order race for ordinary concurrent writes (pre-existing, independent of assertions) deserves its own issue.
