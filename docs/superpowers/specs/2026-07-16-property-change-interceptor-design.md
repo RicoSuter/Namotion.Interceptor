@@ -221,7 +221,7 @@ Unlike the observable (serialized through `Subject.Synchronize`), per-property c
 - Two racing writes to the same property can invoke the same observer concurrently.
 - One observer shared across several subjects can be invoked concurrently from writes to different subjects.
 
-The contract, documented in `docs/tracking.md` and the XML docs on `Subscribe`, `SubscribeToProperty`, and `IPropertyChangeObserver`:
+The contract, documented in `docs/tracking.md` and the XML docs on `Subscribe`, `SubscribeToProperty`, and `IPropertyChangeObserver` (the out-of-order and re-read points below also go on the queue and observable entry points, see the docs task):
 
 - Thread-safe. Observers may be invoked concurrently and must tolerate it.
 - Fast and non-blocking. A slow callback stalls the writer itself.
@@ -340,6 +340,7 @@ Performance (benchmark-gated):
 Public API and docs:
 
 - Update and accept the `VerifyChecksTests.PublicApi.verified.txt` snapshot for `Namotion.Interceptor.Tracking` (core snapshot unchanged; the dedup flag is internal).
+- XML docs on every notification entry point must document the out-of-order-under-concurrent-writes behavior and the re-read-for-current-value guidance, because it applies to all three delivery paths (and has existed unstated on master's queue and observable): `GetPropertyChangeObservable()`, `CreatePropertyChangeQueueSubscription()` and `PropertyChangeQueueSubscription`, and `Subscribe`/`SubscribeToProperty`/`IPropertyChangeObserver`. Wording, roughly: "Under concurrent writes to the same property, notifications may arrive out of commit order (dispatch runs outside the subject lock); if you need the current value, re-read the property rather than relying on the delivered new value." The per-property XML docs additionally carry the not-serialized, must-not-throw, and dispose/lifetime points.
 - Update `docs/tracking.md`: the merged interceptor, the per-property subscription API, the concurrency contract (not serialized, must not throw, possible out-of-order delivery, re-read for current value, transaction commit-replay and rollback visibility), the ownership/lifetime rule (standard `IDisposable`: dispose or drop the handle; a retained undisposed handle pins the subject, and an observer that captures the subject pins it too), dormancy/revival semantics, instance-not-path subscription semantics, and the note that a throwing synchronous Rx observer suppresses listener delivery for that write. Also fix the dangling references to removed APIs in other docs: `docs/tracking-transactions.md:525` (`WithPropertyChangeObservable()` -> `WithPropertyChangeNotifications()`) and `docs/blazor.md:171` (the `PropertyChangeObservable` type in the tracking-flow diagram -> `PropertyChangeInterceptor`). `docs/graphql.md:164` needs no change (it uses the retained `GetPropertyChangeObservable()`).
 
 ## Open questions
