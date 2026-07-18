@@ -227,4 +227,114 @@ public class PerPropertySubscriptionLifecycleTests
         // Assert: fully inert on a bare notifications context.
         Assert.Equal(0, hits);
     }
+
+    [Fact]
+    public void WhenTwoListenersOnSameProperty_ThenBothFireOnOneWrite()
+    {
+        // Arrange: two independent subscriptions on the SAME property.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        var firstHits = 0;
+        var secondHits = 0;
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        using var first = property.Subscribe((in SubjectPropertyChange _) => firstHits++);
+        using var second = property.Subscribe((in SubjectPropertyChange _) => secondHits++);
+
+        // Act
+        person.FirstName = "John";
+
+        // Assert: a single write fans out to both listeners on the property, each exactly once.
+        Assert.Equal(1, firstHits);
+        Assert.Equal(1, secondHits);
+    }
+
+    [Fact]
+    public void WhenSubscriptionHandleDroppedWithoutDispose_ThenLiveCountStaysPositive()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+
+        // Act: create a subscription and drop the returned handle without ever disposing it.
+        _ = new PropertyReference(person, nameof(Person.FirstName)).Subscribe((in SubjectPropertyChange _) => { });
+
+        // Assert: only Dispose decrements the process-wide live count, so a dropped, undisposed
+        // subscription leaves it positive. No GC assertion is made.
+        Assert.True(PropertyChangeSubscriptions.ReadLiveCount() > 0);
+    }
+
+    [Fact]
+    public async Task WhenConcurrentWritesRaceSubscriptionDispose_ThenNoExceptionEscapes()
+    {
+        // Arrange: one listener whose observer is captured into a dispatch local via Volatile.Read
+        // before invocation, so a concurrent Dispose that null-clears it must be null-safe.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange _) => { });
+        using var start = new ManualResetEventSlim(false);
+
+        // Act & Assert: writers fan out and race the dispatch against a concurrent Dispose. Parallel.For
+        // joins every writer and Task.WhenAll rethrows any faulted iteration, so an ObjectDisposedException
+        // or NullReferenceException from the dispatch path would surface here and fail the test.
+        var writers = Task.Run(() => Parallel.For(0, 2000, _ =>
+        {
+            start.Wait();
+            person.FirstName = "John";
+        }));
+        var disposer = Task.Run(() =>
+        {
+            start.Wait();
+            subscription.Dispose();
+        });
+
+        start.Set();
+        await Task.WhenAll(writers, disposer);
+    }
+
+    [Fact]
+    public async Task WhenSubscribeDisposeAndWriteRaceOnSameProperty_ThenLiveSubscriptionsSurvive()
+    {
+        // Arrange: four permanent listeners on one property that are never disposed during the storm;
+        // the copy-on-write CAS install/remove must not drop any of them under concurrent churn.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        var permanentHits = new int[4];
+        var permanent = new IDisposable[permanentHits.Length];
+        for (var i = 0; i < permanent.Length; i++)
+        {
+            var index = i;
+            permanent[i] = property.Subscribe((in SubjectPropertyChange _) => Interlocked.Increment(ref permanentHits[index]));
+        }
+
+        using var start = new ManualResetEventSlim(false);
+
+        // Act: concurrently churn short-lived subscriptions and write, all on the same property.
+        var churn = Task.Run(() => Parallel.For(0, 500, _ =>
+        {
+            start.Wait();
+            using var churned = property.Subscribe((in SubjectPropertyChange _) => { });
+            person.FirstName = "x";
+        }));
+        var writers = Task.Run(() => Parallel.For(0, 500, _ =>
+        {
+            start.Wait();
+            person.FirstName = "y";
+        }));
+
+        start.Set();
+        await Task.WhenAll(churn, writers);
+
+        // Assert: no permanent registration was lost by a racing CAS. After the storm has joined, one
+        // quiescent write reaches every still-live listener exactly once.
+        Array.Clear(permanentHits);
+        person.FirstName = "final";
+        Assert.All(permanentHits, hits => Assert.Equal(1, hits));
+
+        foreach (var handle in permanent)
+        {
+            handle.Dispose();
+        }
+    }
 }

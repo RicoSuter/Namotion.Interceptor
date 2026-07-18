@@ -63,6 +63,45 @@ public class SubscribeToPropertyResolverTests
     }
 
     [Fact]
+    public void WhenCapturedVariableSelector_ThenThrows()
+    {
+        // Arrange: the selector accesses a captured local rather than the lambda parameter, so the
+        // member's instance expression is a closure field access, not propertySelector.Parameters[0].
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        var other = new Person(context);
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() =>
+            person.SubscribeToProperty(_ => other.FirstName, (in SubjectPropertyChange _) => { }));
+    }
+
+    [Fact]
+    public void WhenStaticMemberSelector_ThenThrows()
+    {
+        // Arrange: a static property access has a null instance expression (Expression != parameter).
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() =>
+            person.SubscribeToProperty(_ => DateTime.Now, (in SubjectPropertyChange _) => { }));
+    }
+
+    [Fact]
+    public void WhenFieldSelector_ThenThrows()
+    {
+        // Arrange: a field access resolves to a FieldInfo member (Member is not PropertyInfo).
+        // DateTime.MinValue is a static readonly field, so the compiler keeps it as a field access.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() =>
+            person.SubscribeToProperty(_ => DateTime.MinValue, (in SubjectPropertyChange _) => { }));
+    }
+
+    [Fact]
     public void WhenPropertyIsNeitherInterceptedNorDerived_ThenThrows()
     {
         // Arrange

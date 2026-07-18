@@ -87,6 +87,29 @@ public class PropertyChangeInterceptorTests
     }
 
     [Fact]
+    public void WhenObservableChurnedThenQueueChurned_ThenGateReclosesToIdle()
+    {
+        // Arrange: transient observable use (subscribe an Rx observer, then dispose it) leaves the
+        // never-cleared _syncSubject field non-null. A later queue create/dispose must not resurrect
+        // that observer-less subject into the dispatch state and keep the gate open forever.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var interceptor = context.GetService<PropertyChangeInterceptor>();
+
+        // Act: churn the observable facet, then churn the queue facet.
+        var observer = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(_ => { });
+        observer.Dispose();
+
+        var queue = context.CreatePropertyChangeQueueSubscription();
+        queue.Dispose();
+
+        // Assert: both facets are empty again, so the gate has re-closed to idle. Before the
+        // ActiveSyncSubject gating this would be false (the stale subject was re-published).
+        Assert.True(interceptor.IsIdle);
+    }
+
+    [Fact]
     public void WhenInterceptorDisposed_ThenQueueCompletesButObservableStillWorks()
     {
         // Arrange

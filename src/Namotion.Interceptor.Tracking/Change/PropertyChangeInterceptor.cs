@@ -31,6 +31,11 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     // Used by the gate-closure and idle tests instead of a no-op "must not throw" assertion.
     internal bool IsIdle => _state is null;
 
+    // Only surface the sync subject while at least one observable consumer is live; the field is
+    // never cleared, so publishing it unconditionally would resurrect an observer-less subject and
+    // permanently defeat the idle gate after transient observable use followed by queue churn.
+    private ISubject<SubjectPropertyChange>? ActiveSyncSubject => _observableConsumerCount > 0 ? _syncSubject : null;
+
     private sealed class DispatchState
     {
         public required PropertyChangeQueueSubscription[] QueueSubscriptions { get; init; } // never null
@@ -58,7 +63,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             var updated = new PropertyChangeQueueSubscription[current.Length + 1];
             Array.Copy(current, updated, current.Length);
             updated[current.Length] = subscription;
-            PublishState(updated, _syncSubject);
+            PublishState(updated, ActiveSyncSubject);
             return subscription;
         }
     }
@@ -77,7 +82,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             var updated = new PropertyChangeQueueSubscription[current.Length - 1];
             Array.Copy(current, 0, updated, 0, index);
             Array.Copy(current, index + 1, updated, index, current.Length - index - 1);
-            PublishState(updated, _syncSubject);
+            PublishState(updated, ActiveSyncSubject);
         }
     }
 
@@ -100,7 +105,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
             _observableConsumerCount++;
             syncSubject = _syncSubject!;
-            PublishState(_state?.QueueSubscriptions ?? [], _syncSubject);
+            PublishState(_state?.QueueSubscriptions ?? [], ActiveSyncSubject);
         }
 
         // Benign race: a concurrent write may OnNext into syncSubject before this observer joins here; no observer expects changes from before its Subscribe returns.
@@ -254,7 +259,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
             _disposed = true;
             toComplete = _state?.QueueSubscriptions ?? [];
-            PublishState([], _syncSubject); // preserve observable facet, drop queue
+            PublishState([], ActiveSyncSubject); // preserve observable facet, drop queue
         }
 
         foreach (var subscription in toComplete)
