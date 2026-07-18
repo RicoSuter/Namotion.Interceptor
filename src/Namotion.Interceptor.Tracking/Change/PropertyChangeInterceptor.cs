@@ -58,10 +58,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
             var subscription = new PropertyChangeQueueSubscription(this);
             var current = _state?.QueueSubscriptions ?? [];
-            var updated = new PropertyChangeQueueSubscription[current.Length + 1];
-            Array.Copy(current, updated, current.Length);
-            updated[current.Length] = subscription;
-            PublishState(updated, ActiveSyncSubject);
+            PublishState(CopyOnWriteArray.Add(current, subscription), ActiveSyncSubject);
             return subscription;
         }
     }
@@ -77,10 +74,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
                 return;
             }
 
-            var updated = new PropertyChangeQueueSubscription[current.Length - 1];
-            Array.Copy(current, 0, updated, 0, index);
-            Array.Copy(current, index + 1, updated, index, current.Length - index - 1);
-            PublishState(updated, ActiveSyncSubject);
+            PublishState(CopyOnWriteArray.RemoveAt(current, index), ActiveSyncSubject);
         }
     }
 
@@ -143,8 +137,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         // RESOLUTION is post-commit, so an install racing this write is never missed
         // (spec: Post-commit listener resolution / the Dekker pair).
         var state = _state;
-        var mayHaveListeners = PropertyChangeSubscriptions.ReadSubscriptionCount() != 0;
-        if (state is null && !mayHaveListeners)
+        if (state is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
         {
             next(ref context);
             DispatchLateListeners(ref context);
@@ -157,17 +150,20 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         var oldValue = context.CurrentValue;
         next(ref context);
 
-        // Post-commit listener resolution: full fence, count re-read, then the Data lookup.
-        // Notified during unwind; the innermost aggregated instance resolves first, outer
-        // instances observe the notification (same thread, by-ref context) and skip.
+        // Post-commit listener resolution during unwind: the innermost aggregated instance
+        // resolves first and sets the thread-local flag; checking it BEFORE the fence lets
+        // outer instances skip the fence entirely.
         PropertyChangeSubscription[]? listeners = null;
-        Interlocked.MemoryBarrier();
-        if (PropertyChangeSubscriptions.ReadSubscriptionCount() != 0 && !context.ArePropertyObserversNotified)
+        if (!context.ArePropertyObserversNotified)
         {
-            listeners = TryGetListeners(context.Property);
-            if (listeners is not null)
+            Interlocked.MemoryBarrier();
+            if (PropertyChangeSubscriptions.ReadSubscriptionCount() != 0)
             {
-                context.ArePropertyObserversNotified = true;
+                listeners = TryGetListeners(context.Property);
+                if (listeners is not null)
+                {
+                    context.ArePropertyObserversNotified = true;
+                }
             }
         }
 
@@ -208,8 +204,15 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void DispatchLateListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
+        // Thread-local flag first (skips the fence); the count read must stay BEHIND the
+        // fence (Dekker read side pairing with subscription install).
+        if (context.ArePropertyObserversNotified)
+        {
+            return;
+        }
+
         Interlocked.MemoryBarrier();
-        if (PropertyChangeSubscriptions.ReadSubscriptionCount() == 0 || context.ArePropertyObserversNotified)
+        if (PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
         {
             return;
         }

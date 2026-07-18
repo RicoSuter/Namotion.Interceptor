@@ -192,6 +192,26 @@ public class PerPropertySubscriptionLifecycleTests
     }
 
     [Fact]
+    public void WhenFirstObserverThrows_ThenLaterObserversAreSkippedAndQueueAlreadyDelivered()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        using var queue = context.CreatePropertyChangeQueueSubscription();
+        using var throwing = property.Subscribe((in SubjectPropertyChange _) => throw new InvalidOperationException("boom"));
+        var laterHits = 0;
+        using var later = property.Subscribe((in SubjectPropertyChange _) => laterHits++);
+
+        // Act & Assert: dispatch is fail-fast, so the observer installed after the throwing one
+        // is silently skipped; the queue is served before listeners, so it already has the change.
+        Assert.Throws<InvalidOperationException>(() => person.FirstName = "John");
+        Assert.Equal(0, laterHits);
+        Assert.True(queue.TryDequeue(out var change, new CancellationTokenSource(1000).Token));
+        Assert.Equal("John", change.GetNewValue<string?>());
+    }
+
+    [Fact]
     public void WhenDerivedDependencyChangesUnderFullTracking_ThenDerivedListenerFires()
     {
         // Arrange: full tracking includes derived-change detection. FullName = "{FirstName} {LastName}".

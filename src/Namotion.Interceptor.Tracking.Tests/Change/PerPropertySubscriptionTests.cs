@@ -77,6 +77,21 @@ public class PerPropertySubscriptionTests
     }
 
     [Fact]
+    public void WhenReservedDataKeyHoldsForeignValue_ThenSubscribeThrowsInsteadOfSpinning()
+    {
+        // Arrange: occupy the reserved listeners key with a foreign value.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        property.SetPropertyData(PropertyChangeSubscription.ListenersKey, "foreign");
+
+        // Act & Assert: fails loud instead of livelocking, and the count increment is rolled back.
+        Assert.Throws<InvalidOperationException>(() =>
+            property.Subscribe((in SubjectPropertyChange _) => { }));
+        Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
+    }
+
+    [Fact]
     public async Task WhenSubscriptionInstalledWhileWriteInFlight_ThenWriteDeliversWithOldValueEqualToNewValue()
     {
         // Arrange: the blocker sits AFTER PropertyChangeInterceptor in the chain, so the writer

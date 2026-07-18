@@ -11,6 +11,8 @@ public static class PropertyChangeSubscriptionExtensions
     /// with a <see cref="PropertyChangeInterceptor"/>. See <see cref="IPropertyChangeObserver"/> for the contract.
     /// </summary>
     /// <remarks>
+    /// Disposing the returned handle is mandatory: the subject holds a strong reference, so a dropped
+    /// handle keeps the observer alive and permanently disables the process-wide idle write fast path.
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value.
@@ -43,6 +45,8 @@ public static class PropertyChangeSubscriptionExtensions
     /// the lambda parameter is accepted; chained, captured, static, field, and method selectors throw.
     /// </summary>
     /// <remarks>
+    /// Disposing the returned handle is mandatory: the subject holds a strong reference, so a dropped
+    /// handle keeps the observer alive and permanently disables the process-wide idle write fast path.
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value.

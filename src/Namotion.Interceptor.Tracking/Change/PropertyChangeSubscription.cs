@@ -1,9 +1,9 @@
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
-/// A subject-stored per-property subscription. Stored in Subject.Data[(propertyName, ListenersKey)]
-/// as an element of an immutable copy-on-write array. Strong references (standard IDisposable
-/// ownership); dispose or drop the handle.
+/// A subject-stored per-property subscription, held in Subject.Data[(propertyName, ListenersKey)]
+/// as an element of an immutable copy-on-write array. Disposal is mandatory: the subject holds a
+/// strong reference, and only Dispose decrements the process-wide count gating the idle write fast path.
 /// </summary>
 internal sealed class PropertyChangeSubscription : IDisposable
 {
@@ -35,11 +35,20 @@ internal sealed class PropertyChangeSubscription : IDisposable
         var data = subject.Data;
         while (true)
         {
-            if (data.TryGetValue(key, out var existing) && existing is PropertyChangeSubscription[] current)
+            if (data.TryGetValue(key, out var existing))
             {
-                var updated = new PropertyChangeSubscription[current.Length + 1];
-                Array.Copy(current, updated, current.Length);
-                updated[current.Length] = subscription;
+                if (existing is not PropertyChangeSubscription[] current)
+                {
+                    // Foreign value under the reserved key: fail loud instead of livelocking,
+                    // and roll back the count increment.
+                    PropertyChangeSubscriptions.DecrementSubscriptionCount();
+                    throw new InvalidOperationException(
+                        $"The property data key '{ListenersKey}' on property '{propertyName}' of {subject.GetType().Name} " +
+                        $"is reserved for property change subscriptions but holds a value of type " +
+                        $"{existing?.GetType().ToString() ?? "null"}.");
+                }
+
+                var updated = CopyOnWriteArray.Add(current, subscription);
 
                 // TryUpdate is the compare-and-swap: it replaces only if the stored value is still
                 // the same array instance (EqualityComparer<object?>.Default = reference equality for arrays).
@@ -106,10 +115,7 @@ internal sealed class PropertyChangeSubscription : IDisposable
             }
             else
             {
-                var updated = new PropertyChangeSubscription[current.Length - 1];
-                Array.Copy(current, 0, updated, 0, index);
-                Array.Copy(current, index + 1, updated, index, current.Length - index - 1);
-                if (data.TryUpdate(key, updated, current))
+                if (data.TryUpdate(key, CopyOnWriteArray.RemoveAt(current, index), current))
                 {
                     return;
                 }

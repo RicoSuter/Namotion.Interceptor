@@ -191,6 +191,57 @@ public class PropertyChangeInterceptorTests
     }
 
     [Fact]
+    public async Task WhenInterceptorDisposeRacesCreateQueueSubscription_ThenEitherThrowsOrSubscriptionIsCompleted()
+    {
+        // Act & Assert: both interleavings are valid. If creation wins, disposal completes the
+        // subscription (consumer returns false without blocking); if disposal wins, creation throws.
+        for (var i = 0; i < 500; i++)
+        {
+            var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+            var interceptor = context.GetService<PropertyChangeInterceptor>();
+            using var start = new ManualResetEventSlim(false);
+
+            PropertyChangeQueueSubscription? subscription = null;
+            ObjectDisposedException? creationException = null;
+            var creator = Task.Run(() =>
+            {
+                start.Wait();
+                try
+                {
+                    subscription = context.CreatePropertyChangeQueueSubscription();
+                }
+                catch (ObjectDisposedException exception)
+                {
+                    creationException = exception;
+                }
+            });
+            var disposer = Task.Run(() =>
+            {
+                start.Wait();
+                interceptor.Dispose();
+            });
+
+            start.Set();
+            await Task.WhenAll(creator, disposer);
+
+            if (creationException is null)
+            {
+                Assert.NotNull(subscription);
+
+                // The token only bounds a lost completion wake; the check below distinguishes the two.
+                using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                Assert.False(subscription.TryDequeue(out _, cancellation.Token));
+                Assert.False(cancellation.IsCancellationRequested);
+                subscription.Dispose();
+            }
+            else
+            {
+                Assert.Null(subscription);
+            }
+        }
+    }
+
+    [Fact]
     public void WhenMultiplePropertiesChanged_ThenAllChangesAreDequeuedInOrder()
     {
         // Arrange

@@ -9,9 +9,9 @@ internal static class PropertyChangeSubscriptions
 {
     private static long _subscriptionCount;
 
-    public static void IncrementSubscriptionCount() => Interlocked.Increment(ref _subscriptionCount);
+    internal static void IncrementSubscriptionCount() => Interlocked.Increment(ref _subscriptionCount);
 
-    public static void DecrementSubscriptionCount() => Interlocked.Decrement(ref _subscriptionCount);
+    internal static void DecrementSubscriptionCount() => Interlocked.Decrement(ref _subscriptionCount);
 
     // Atomic 64-bit read. Volatile.Read (a plain acquire load, atomic for long on all supported
     // runtimes) and NOT Interlocked.Read: Interlocked.Read is CompareExchange(ref, 0, 0), an RMW
@@ -19,7 +19,7 @@ internal static class PropertyChangeSubscriptions
     // post-commit re-check gets its StoreLoad ordering from an explicit Interlocked.MemoryBarrier()
     // BEFORE calling this (core-local, no shared-line write); the Dekker pairing with
     // IncrementSubscriptionCount-then-install is documented in the spec's Fast-path rules.
-    public static long ReadSubscriptionCount() => Volatile.Read(ref _subscriptionCount);
+    internal static long ReadSubscriptionCount() => Volatile.Read(ref _subscriptionCount);
 
     // Test-only reset hook (see the serialized test collection in Task 4).
     internal static void ResetForTests() => Interlocked.Exchange(ref _subscriptionCount, 0);
