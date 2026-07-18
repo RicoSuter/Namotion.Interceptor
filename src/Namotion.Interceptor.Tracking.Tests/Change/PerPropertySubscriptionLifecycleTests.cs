@@ -60,7 +60,7 @@ public class PerPropertySubscriptionLifecycleTests
 
         // Subscribe raised the live count, so a later "returns to zero" is distinguishable from
         // "never left zero".
-        Assert.Equal(1, PropertyChangeSubscriptions.ReadLiveCount());
+        Assert.Equal(1, PropertyChangeSubscriptions.ReadSubscriptionCount());
 
         // Act
         s.Dispose();
@@ -68,7 +68,7 @@ public class PerPropertySubscriptionLifecycleTests
         s.Dispose();
 
         // Assert
-        Assert.Equal(0, PropertyChangeSubscriptions.ReadLiveCount());
+        Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
     }
 
     [Fact]
@@ -260,7 +260,7 @@ public class PerPropertySubscriptionLifecycleTests
 
         // Assert: only Dispose decrements the process-wide live count, so a dropped, undisposed
         // subscription leaves it positive. No GC assertion is made.
-        Assert.True(PropertyChangeSubscriptions.ReadLiveCount() > 0);
+        Assert.True(PropertyChangeSubscriptions.ReadSubscriptionCount() > 0);
     }
 
     [Fact]

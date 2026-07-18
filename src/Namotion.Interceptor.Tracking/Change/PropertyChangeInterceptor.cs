@@ -50,8 +50,6 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             : new DispatchState { QueueSubscriptions = queueSubscriptions, SyncSubject = syncSubject };
     }
 
-    // ----- Queue facet -----
-
     internal PropertyChangeQueueSubscription CreateQueueSubscription()
     {
         lock (_modificationLock)
@@ -85,8 +83,6 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             PublishState(updated, ActiveSyncSubject);
         }
     }
-
-    // ----- Observable facet -----
 
     public IDisposable Subscribe(IObserver<SubjectPropertyChange> observer)
     {
@@ -141,15 +137,13 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         }
     }
 
-    // ----- Write path -----
-
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         // Pre-commit gate decides only whether the old value must be captured; listener
         // RESOLUTION is post-commit, so an install racing this write is never missed
         // (spec: Post-commit listener resolution / the Dekker pair).
         var state = _state;
-        var mayHaveListeners = PropertyChangeSubscriptions.ReadLiveCount() != 0;
+        var mayHaveListeners = PropertyChangeSubscriptions.ReadSubscriptionCount() != 0;
         if (state is null && !mayHaveListeners)
         {
             next(ref context);
@@ -164,16 +158,16 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         next(ref context);
 
         // Post-commit listener resolution: full fence, count re-read, then the Data lookup.
-        // Claimed during unwind; the innermost aggregated instance resolves first, outer
-        // instances observe the claim (same thread, by-ref context) and skip.
+        // Published during unwind; the innermost aggregated instance resolves first, outer
+        // instances observe the publish (same thread, by-ref context) and skip.
         PropertyChangeSubscription[]? listeners = null;
         Interlocked.MemoryBarrier();
-        if (PropertyChangeSubscriptions.ReadLiveCount() != 0 && !context.ArePropertyListenersClaimed)
+        if (PropertyChangeSubscriptions.ReadSubscriptionCount() != 0 && !context.ArePropertyListenersPublished)
         {
             listeners = TryGetListeners(context.Property);
             if (listeners is not null)
             {
-                context.ArePropertyListenersClaimed = true;
+                context.ArePropertyListenersPublished = true;
             }
         }
 
@@ -215,7 +209,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     private static void DispatchLateListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
         Interlocked.MemoryBarrier();
-        if (PropertyChangeSubscriptions.ReadLiveCount() == 0 || context.ArePropertyListenersClaimed)
+        if (PropertyChangeSubscriptions.ReadSubscriptionCount() == 0 || context.ArePropertyListenersPublished)
         {
             return;
         }
@@ -226,7 +220,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             return;
         }
 
-        context.ArePropertyListenersClaimed = true;
+        context.ArePropertyListenersPublished = true;
 
         var finalValue = context.GetFinalValue();
         var change = SubjectPropertyChange.Create(

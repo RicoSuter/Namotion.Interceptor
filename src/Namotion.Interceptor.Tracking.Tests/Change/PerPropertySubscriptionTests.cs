@@ -61,7 +61,7 @@ public class PerPropertySubscriptionTests
 
         // Assert
         Assert.Equal(1, count);
-        Assert.Equal(0, PropertyChangeSubscriptions.ReadLiveCount());
+        Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
     }
 
     [Fact]

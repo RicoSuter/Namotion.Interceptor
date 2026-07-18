@@ -1,7 +1,7 @@
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 // EVERY test that creates a per-property subscription OR asserts on the count / fast-path / build
-// state must belong to this collection, because PropertyChangeSubscriptions.LiveCount is process-wide
+// state must belong to this collection, because the PropertyChangeSubscriptions subscription count is process-wide
 // and xUnit runs different collections in parallel. Membership is not only to stop per-property tests
 // racing each other: a Subscribe in this (serialized) collection bumps the shared count while it runs,
 // so a fast-path/count/allocation assertion in a DIFFERENT, parallel collection would read count != 0

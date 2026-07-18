@@ -29,7 +29,7 @@ internal sealed class PropertyChangeSubscription : IDisposable
         var key = (propertyName, ListenersKey);
 
         // Increment before publishing so a concurrent write cannot read zero while this is installed.
-        PropertyChangeSubscriptions.IncrementLiveCount();
+        PropertyChangeSubscriptions.IncrementSubscriptionCount();
 
         var data = subject.Data;
         while (true)
@@ -74,7 +74,7 @@ internal sealed class PropertyChangeSubscription : IDisposable
         Volatile.Write(ref Observer, null);
 
         // Decrement AFTER removal so a concurrent write cannot read zero while still installed.
-        PropertyChangeSubscriptions.DecrementLiveCount();
+        PropertyChangeSubscriptions.DecrementSubscriptionCount();
     }
 
     private static void RemoveFromData(IInterceptorSubject subject, string propertyName, PropertyChangeSubscription subscription)
