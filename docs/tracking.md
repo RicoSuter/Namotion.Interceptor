@@ -1,6 +1,6 @@
 # Tracking
 
-The `Namotion.Interceptor.Tracking` package provides comprehensive change tracking for interceptor subjects, including property value changes, derived property updates, subject lifecycle events, and parent-child relationships. It offers two mechanisms for observing changes: **Observable** (Rx-based) and the **(high performance) queue**, with the queue being the preferred choice for high-throughput scenarios.
+The `Namotion.Interceptor.Tracking` package provides comprehensive change tracking for interceptor subjects, including property value changes, derived property updates, subject lifecycle events, and parent-child relationships. A single `PropertyChangeInterceptor`, enabled with `WithPropertyChangeNotifications()`, delivers every property change through three facets that share one write path: an **Rx observable** for composition and UI, a **high-performance queue** for high-throughput consumers, and **per-property subscriptions** for observing one property on one subject instance.
 
 ## Setup
 
@@ -15,26 +15,25 @@ var context = InterceptorSubjectContext
 This is a convenience method that registers:
 - Equality checking to prevent unnecessary change notifications
 - Derived property change detection
-- Property changed observable (Rx-based)
-- Property changed queue (high performance)
+- Property change notifications (the `PropertyChangeInterceptor`, exposing the Rx observable, the high-performance queue, and per-property subscriptions)
 - Context inheritance for child subjects
 
 > **Note**: Transaction support is opt-in. Add `.WithTransactions()` or `.WithSourceTransactions()` to enable transaction support.
 
 You can also enable features individually for more granular control.
 
-## Change Tracking: Observable vs (High Performance) Queue
+## Change Tracking
 
-The Tracking package provides two mechanisms for monitoring property changes, each optimized for different use cases.
+All property change notifications flow through a single `PropertyChangeInterceptor`, registered with `WithPropertyChangeNotifications()` (also included in `WithFullPropertyTracking()`). The interceptor exposes three facets over one shared write path: the Rx observable, the high-performance queue, and per-property subscriptions. Enable it once and pick whichever facet fits the consumer.
 
-### Property Changed Observable (Rx-based)
+### Property Change Observable (Rx-based)
 
-The Observable approach uses Reactive Extensions (Rx) and is ideal for UI scenarios, complex query composition, and when you need rich operator support:
+The observable facet uses Reactive Extensions (Rx) and is ideal for UI scenarios, complex query composition, and when you need rich operator support:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithPropertyChangeObservable();
+    .WithPropertyChangeNotifications();
 
 context
     .GetPropertyChangeObservable()
@@ -52,25 +51,25 @@ var person = new Person(context)
 };
 ```
 
-**Observable Features:**
+**Observable features:**
 - Rich operator support (Where, Select, Throttle, Buffer, etc.)
 - Easy composition with other Rx streams
 - Scheduler support for thread control
 - Great for UI data binding scenarios
 
-**Observable Limitations:**
+**Observable limitations:**
 - Higher memory overhead per change event
 - Slightly lower throughput in high-frequency scenarios
 - Subject synchronization overhead
 
-### Property Changed Queue (High Performance)
+### Property Change Queue (High Performance)
 
-The queue approach uses a lock-free, allocation-conscious queue and is optimized for maximum throughput with minimal allocations. This is the preferred mechanism for high-performance scenarios such as background services, IoT data processing, and source synchronization:
+The queue facet uses a lock-free, allocation-conscious queue and is optimized for maximum throughput with minimal allocations. This is the preferred mechanism for high-performance scenarios such as background services, IoT data processing, and source synchronization:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithPropertyChangeQueue();
+    .WithPropertyChangeNotifications();
 
 using var subscription = context.CreatePropertyChangeQueueSubscription();
 
@@ -82,18 +81,55 @@ while (subscription.TryDequeue(out var change, cancellationToken))
 }
 ```
 
-**Queue Performance Characteristics:**
+**Queue performance characteristics:**
 
 1. Zero-allocation value storage: Primitive types (int, decimal, bool, etc.) and small structs are stored inline without boxing
 2. Lock-free queuing: Uses `ConcurrentQueue<T>` for non-blocking writes and low-overhead consumer wake-ups
 3. Efficient signaling: `ManualResetEventSlim` is used to wake the consumer without busy-waiting
 4. Single-reader optimization: Designed for efficient single-consumer scenarios
 
-**Queue Use Cases:**
+**Queue use cases:**
 - Source synchronization (MQTT, OPC UA, databases)
 - Background data processing services
 - High-frequency property change scenarios (>1000 changes/second)
 - IoT and industrial automation applications
+
+### Per-Property Subscriptions
+
+When you only care about a single property on a single subject, subscribe to that property directly instead of filtering the whole stream. Two entry points are available:
+
+```csharp
+// Strongly typed, via a direct property selector on the subject:
+using var handle = person.SubscribeToProperty(x => x.FirstName, (in SubjectPropertyChange change) =>
+{
+    Console.WriteLine($"FirstName is now '{change.GetNewValue<object?>()}'.");
+});
+
+// Or via a PropertyReference and an IPropertyChangeObserver or callback:
+var property = new PropertyReference(person, nameof(Person.FirstName));
+using var handle2 = property.Subscribe((in SubjectPropertyChange change) => { /* ... */ });
+```
+
+The observer can be an `IPropertyChangeObserver` implementation or a `PropertyChangeCallback` delegate; both receive the change by `in` reference.
+
+Only a direct property access on the lambda parameter is accepted (`x => x.FirstName`). Chained (`x => x.Child.Foo`), captured-variable, static, field, and method selectors throw `ArgumentException`. The property must be an intercepted or derived property; otherwise its changes never enter the interception chain and `Subscribe` throws.
+
+**Instance, not path**: a subscription binds to the given subject instance and property name. It observes writes to that property on that instance no matter where the subject sits in any object graph, and it is unaffected by how the subject is referenced or re-parented. It is not a subscription to a path.
+
+**Dormancy and revival**: you may subscribe before the subject is attached to a context that has the `PropertyChangeInterceptor`. The subscription is valid but dormant (no deliveries) until the subject is attached, and it revives automatically when the subject is re-attached. A subscription installed on an already attached subject is live immediately.
+
+**Delivery guarantee**: a write that commits after the subscription's install is always delivered. A write that committed before the install may not be, so read the property after subscribing to observe that earlier state. A write that races the install may be delivered with `OldValue` equal to `NewValue`.
+
+**Ownership and lifetime**: `Subscribe` and `SubscribeToProperty` return an `IDisposable` with standard ownership. Dispose the handle to unsubscribe. Dropping it without disposing does not stop delivery while the subject stays alive, but it does not leak: once nothing else references the subject, the subject and its subscriptions are collected together. A retained, undisposed handle pins the subject, and an observer that captures the subject pins it too, so keep the handle only as long as you need the notifications.
+
+### Concurrency and Delivery
+
+Notification dispatch starts on the writing thread, outside the subject lock, and shares one contract. The per-property listeners and the queue run inline there; `GetPropertyChangeObservable()` pushes there too but reschedules its subscribers onto its scheduler by default (unless you pass `ImmediateScheduler.Instance`).
+
+- **Ordering**: under concurrent writes to the same property, notifications may arrive out of commit order. If you need the current value, re-read the property rather than relying on the delivered new value.
+- **Per-property observers are not serialized**: an `IPropertyChangeObserver` or `PropertyChangeCallback` may be invoked concurrently on multiple threads and must be thread-safe, fast, non-blocking, and must not throw. Wrap failing work in a try-catch internally. (The Rx observable is serialized through `Subject.Synchronize()`; the queue is single-consumer per subscription.)
+- **A throwing synchronous Rx observer suppresses listener delivery**: the Rx observable is notified before the per-property listeners on each write, so a synchronous Rx observer that throws propagates out of the write and the per-property listeners do not run for that write. Keep synchronous Rx observers exception-free.
+- **Transactions replay on commit**: with `WithTransactions()`, writes captured inside a transaction do not notify during capture. They replay through the interceptor on commit and notifications fire then. If the transaction is rolled back (disposed without commit), the changes are discarded, no notifications fire, and the property keeps its pre-transaction value.
 
 ## Property Value Equality Check
 
@@ -151,6 +187,8 @@ See [Transactions](tracking-transactions.md) for detailed documentation.
 
 Automatically tracks dependencies between properties and triggers change events for derived properties when their dependencies change:
 
+> **Prerequisite**: Automatic derived-property notifications require `WithDerivedPropertyChangeDetection()`, which is bundled in `WithFullPropertyTracking()`. Manual `RecalculateDerivedProperty()` (below) also requires it.
+
 ```csharp
 [InterceptorSubject]
 public partial class Person
@@ -165,7 +203,7 @@ public partial class Person
 var context = InterceptorSubjectContext
     .Create()
     .WithDerivedPropertyChangeDetection()
-    .WithPropertyChangeObservable();
+    .WithPropertyChangeNotifications();
 
 context.GetPropertyChangeObservable().Subscribe(change =>
 {
@@ -207,7 +245,7 @@ property.RecalculateDerivedProperty();
 // Getter is re-evaluated; if the value changed, change notifications fire
 ```
 
-This goes through the same pipeline as automatic recalculation: the getter is re-evaluated, dependencies are updated, and all notifications (observable, queue, `INotifyPropertyChanged`) fire if the value changed. It is fully thread-safe and can be called concurrently with property writes.
+This goes through the same pipeline as automatic recalculation: the getter is re-evaluated, dependencies are updated, and all notifications (observable, queue, per-property subscriptions, `INotifyPropertyChanged`) fire if the value changed. It is fully thread-safe and can be called concurrently with property writes. Like automatic detection, it requires `WithDerivedPropertyChangeDetection()`.
 
 > **Internal design:** For details on the dependency graph, concurrency model, and correctness guarantees, see [Derived Property Design](design/tracking-derived-properties.md).
 
@@ -330,7 +368,7 @@ Events are useful for:
 
 ### Thread Safety
 
-The lifecycle interceptor is fully thread-safe. Multiple threads can concurrently write to the same structural property — reference counts remain consistent, no subjects are orphaned, and all attach/detach callbacks fire exactly once per transition.
+The lifecycle interceptor is fully thread-safe. Multiple threads can concurrently write to the same structural property. Reference counts remain consistent, no subjects are orphaned, and all attach/detach callbacks fire exactly once per transition.
 
 > **Internal design:** For details on the concurrency model and correctness guarantees, see [Lifecycle Interceptor Design](design/tracking-lifecycle.md).
 
@@ -524,8 +562,8 @@ The Tracking package is foundational and used by:
 
 - **Registry**: Requires `WithLifecycle()` for subject/property registration
 - **Hosting**: Requires `WithLifecycle()` for hosted service management  
-- **Sources**: Uses the high-performance queue via `WithPropertyChangeQueue()` for synchronization
+- **Sources**: Uses the high-performance queue via `WithPropertyChangeNotifications()` for synchronization
 - **Validation**: Can trigger validation on property changes
-- **Blazor**: Uses `WithPropertyChangeObservable()` for UI updates
+- **Blazor**: Uses `WithPropertyChangeNotifications()` for UI updates
 
 See the individual package documentation for integration details.

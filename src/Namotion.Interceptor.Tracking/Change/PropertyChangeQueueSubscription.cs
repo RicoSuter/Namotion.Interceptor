@@ -6,6 +6,9 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <summary>
 /// A pull-based subscription to receive property changes from a <see cref="PropertyChangeInterceptor"/>.
 /// Each subscription owns an isolated queue. TryDequeue must be called from a single consumer thread.
+/// Under concurrent writes to the same property, changes may be enqueued out of commit order because
+/// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
+/// than relying on the delivered new value.
 /// </summary>
 public sealed class PropertyChangeQueueSubscription : IDisposable
 {

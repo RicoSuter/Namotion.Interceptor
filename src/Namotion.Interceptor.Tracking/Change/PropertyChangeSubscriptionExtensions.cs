@@ -10,6 +10,14 @@ public static class PropertyChangeSubscriptionExtensions
     /// synchronous, on the writing thread, and dormant while the subject is not attached to a context
     /// with a <see cref="PropertyChangeInterceptor"/>. See <see cref="IPropertyChangeObserver"/> for the contract.
     /// </summary>
+    /// <remarks>
+    /// Under concurrent writes to the same property, notifications may arrive out of commit order because
+    /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
+    /// than relying on the delivered new value.
+    /// A write that commits after this subscription is installed is always delivered; a write that committed
+    /// before the install may not be, and reading the property after subscribing observes that earlier state;
+    /// a write that raced the install may be delivered with OldValue equal to NewValue.
+    /// </remarks>
     public static IDisposable Subscribe(this PropertyReference property, IPropertyChangeObserver observer)
     {
         if (!property.Subject.Properties.TryGetValue(property.Name, out var metadata)
@@ -34,6 +42,14 @@ public static class PropertyChangeSubscriptionExtensions
     /// <c>subject.SubscribeToProperty(x => x.Temperature, observer)</c>. Only a direct property access on
     /// the lambda parameter is accepted; chained, captured, static, field, and method selectors throw.
     /// </summary>
+    /// <remarks>
+    /// Under concurrent writes to the same property, notifications may arrive out of commit order because
+    /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
+    /// than relying on the delivered new value.
+    /// A write that commits after this subscription is installed is always delivered; a write that committed
+    /// before the install may not be, and reading the property after subscribing observes that earlier state;
+    /// a write that raced the install may be delivered with OldValue equal to NewValue.
+    /// </remarks>
     public static IDisposable SubscribeToProperty<TSubject, TValue>(
         this TSubject subject,
         Expression<Func<TSubject, TValue>> propertySelector,
