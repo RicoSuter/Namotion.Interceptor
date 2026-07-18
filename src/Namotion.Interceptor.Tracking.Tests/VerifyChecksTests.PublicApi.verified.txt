@@ -44,6 +44,10 @@ namespace Namotion.Interceptor.Tracking.Change
     {
         public static System.IDisposable Subscribe(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.IPropertyChangeObserver observer) { }
         public static System.IDisposable Subscribe(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.PropertyChangeCallback callback) { }
+        public static System.IDisposable SubscribeToProperty<TSubject, TValue>(this TSubject subject, System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> propertySelector, Namotion.Interceptor.Tracking.Change.IPropertyChangeObserver observer)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static System.IDisposable SubscribeToProperty<TSubject, TValue>(this TSubject subject, System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> propertySelector, Namotion.Interceptor.Tracking.Change.PropertyChangeCallback callback)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
     }
     public sealed class PropertyReferenceCollection
     {

@@ -59,6 +59,18 @@ public class PerPropertySubscriptionTests
         Assert.Equal(1, count);
         Assert.Equal(0, PropertyChangeSubscriptions.ReadLiveCount());
     }
+
+    [Fact]
+    public void WhenUnknownMember_ThenThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() =>
+            new PropertyReference(person, "DoesNotExist").Subscribe((in SubjectPropertyChange _) => { }));
+    }
 }
 
 [CollectionDefinition(PerPropertySubscriptionCollection.Name, DisableParallelization = true)]
