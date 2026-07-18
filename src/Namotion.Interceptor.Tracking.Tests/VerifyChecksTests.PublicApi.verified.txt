@@ -21,6 +21,11 @@ namespace Namotion.Interceptor.Tracking.Change
         public static Namotion.Interceptor.Tracking.Change.PropertyReferenceCollection GetUsedByProperties(this Namotion.Interceptor.PropertyReference property) { }
         public static void RecalculateDerivedProperty(this Namotion.Interceptor.PropertyReference property) { }
     }
+    public interface IPropertyChangeObserver
+    {
+        void OnChange(in Namotion.Interceptor.Tracking.Change.SubjectPropertyChange change);
+    }
+    public delegate void PropertyChangeCallback(in Namotion.Interceptor.Tracking.Change.SubjectPropertyChange change);
     [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Transactions.SubjectTransactionInterceptor)})]
     public sealed class PropertyChangeInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, System.IDisposable, System.IObservable<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>
@@ -34,6 +39,11 @@ namespace Namotion.Interceptor.Tracking.Change
     {
         public void Dispose() { }
         public bool TryDequeue(out Namotion.Interceptor.Tracking.Change.SubjectPropertyChange item, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public static class PropertyChangeSubscriptionExtensions
+    {
+        public static System.IDisposable Subscribe(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.IPropertyChangeObserver observer) { }
+        public static System.IDisposable Subscribe(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.PropertyChangeCallback callback) { }
     }
     public sealed class PropertyReferenceCollection
     {

@@ -140,14 +140,32 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         var state = _state;
-        if (state is null)
+        var mayHaveListeners = PropertyChangeSubscriptions.ReadLiveCount() != 0;
+        if (state is null && !mayHaveListeners)
         {
             next(ref context);
             return;
         }
 
-        var subscriptions = state.QueueSubscriptions;
-        var syncSubject = state.SyncSubject;
+        var subscriptions = state?.QueueSubscriptions ?? [];
+        var syncSubject = state?.SyncSubject;
+
+        PropertyChangeSubscription[]? listeners = null;
+        if (mayHaveListeners && !context.ArePropertyListenersClaimed)
+        {
+            listeners = TryGetListeners(context.Property);
+        }
+
+        if (syncSubject is null && subscriptions.Length == 0 && listeners is null)
+        {
+            next(ref context);
+            return;
+        }
+
+        if (listeners is not null)
+        {
+            context.ArePropertyListenersClaimed = true;
+        }
 
         var oldValue = context.CurrentValue;
         next(ref context);
@@ -169,6 +187,18 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         {
             syncSubject.OnNext(change);
         }
+
+        if (listeners is not null)
+        {
+            PropertyChangeSubscription.Dispatch(listeners, in change);
+        }
+    }
+
+    private static PropertyChangeSubscription[]? TryGetListeners(PropertyReference property)
+    {
+        return property.Subject.Data.TryGetValue((property.Name, PropertyChangeSubscription.ListenersKey), out var value)
+            ? value as PropertyChangeSubscription[]
+            : null;
     }
 
     public void Dispose()

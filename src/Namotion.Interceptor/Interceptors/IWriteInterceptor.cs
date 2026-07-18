@@ -40,6 +40,13 @@ public struct PropertyWriteContext<TProperty>
     private long _writeTimestamp;
 
     /// <summary>
+    /// Set by the first PropertyChangeInterceptor instance that dispatches per-property listeners for this
+    /// write, so deeper interceptor instances in an aggregated fallback chain do not double-deliver.
+    /// Internal: Tracking sets it; no external interceptor may.
+    /// </summary>
+    internal bool ArePropertyListenersClaimed;
+
+    /// <summary>
     /// Gets the property to write a value to.
     /// </summary>
     public PropertyReference Property { get; }
