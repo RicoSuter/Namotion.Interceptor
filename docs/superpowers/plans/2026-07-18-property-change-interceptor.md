@@ -826,12 +826,13 @@ internal static class PropertyChangeSubscriptions
 
     public static void DecrementLiveCount() => Interlocked.Decrement(ref _liveCount);
 
-    // Atomic 64-bit read (matches PropertyReference.SetWriteTimestamp's Interlocked.Read pattern).
-    // The design's write-path pseudocode reads the field directly; use this accessor instead so the
-    // field stays private. On the net9.0/x64 Tracking target Interlocked.Read lowers to a single
-    // load, so it is hot-path safe (the atomic form only matters on 32-bit runtimes, which Tracking
-    // does not target; volatile is not applicable to a 64-bit field, hence the explicit atomic read).
-    public static long ReadLiveCount() => Interlocked.Read(ref _liveCount);
+    // Atomic 64-bit read. Volatile.Read (a plain acquire load, atomic for long on all supported
+    // runtimes) and NOT Interlocked.Read: Interlocked.Read is CompareExchange(ref, 0, 0), an RMW
+    // that dirties the cache line and contends across writer cores on every write. The write path's
+    // post-commit re-check gets its StoreLoad ordering from an explicit Interlocked.MemoryBarrier()
+    // BEFORE calling this (core-local, no shared-line write); the Dekker pairing with
+    // IncrementLiveCount-then-install is documented in the spec's Fast-path rules.
+    public static long ReadLiveCount() => Volatile.Read(ref _liveCount);
 
     // Test-only reset hook (see the serialized test collection in Task 4).
     internal static void ResetForTests() => Interlocked.Exchange(ref _liveCount, 0);
@@ -1000,13 +1001,24 @@ public static class PropertyChangeSubscriptionExtensions
     /// </summary>
     public static IDisposable Subscribe(this PropertyReference property, IPropertyChangeObserver observer)
     {
+        // Validate here so every entry point (including SubscribeToProperty) inherits it. Reject an
+        // unknown member and a member that is neither intercepted nor derived: its writes never enter
+        // the chain, so the subscription would silently never fire. Derived properties are accepted.
+        if (!property.Subject.Properties.TryGetValue(property.Name, out var metadata)
+            || !(metadata.IsIntercepted || metadata.IsDerived))
+        {
+            throw new ArgumentException(
+                $"Property '{property.Name}' on {property.Subject.GetType().Name} cannot be subscribed to: it is not an intercepted or derived property, so its changes never enter the interception chain.",
+                nameof(property));
+        }
+
         return PropertyChangeSubscription.Install(property, observer);
     }
 
     /// <summary>Delegate overload of <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>.</summary>
     public static IDisposable Subscribe(this PropertyReference property, PropertyChangeCallback callback)
     {
-        return PropertyChangeSubscription.Install(property, new DelegateObserver(callback));
+        return property.Subscribe(new DelegateObserver(callback));
     }
 
     private sealed class DelegateObserver(PropertyChangeCallback callback) : IPropertyChangeObserver
@@ -1023,36 +1035,42 @@ Replace the `WriteProperty` method in `PropertyChangeInterceptor.cs` with the fu
 ```csharp
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
+        // Pre-commit gate decides only whether the old value must be captured; listener
+        // RESOLUTION is post-commit, so an install racing this write is never missed
+        // (spec: Post-commit listener resolution / the Dekker pair).
         var state = _state;
         var mayHaveListeners = PropertyChangeSubscriptions.ReadLiveCount() != 0;
         if (state is null && !mayHaveListeners)
         {
             next(ref context);
+            DispatchLateListeners(ref context);
             return;
         }
 
         var subscriptions = state?.QueueSubscriptions ?? [];
         var syncSubject = state?.SyncSubject;
 
+        var oldValue = context.CurrentValue;
+        next(ref context);
+
+        // Post-commit listener resolution: full fence, count re-read, then the Data lookup.
+        // Claimed during unwind; the innermost aggregated instance resolves first, outer
+        // instances observe the claim (same thread, by-ref context) and skip.
         PropertyChangeSubscription[]? listeners = null;
-        if (mayHaveListeners && !context.ArePropertyListenersClaimed)
+        Interlocked.MemoryBarrier();
+        if (PropertyChangeSubscriptions.ReadLiveCount() != 0 && !context.ArePropertyListenersClaimed)
         {
             listeners = TryGetListeners(context.Property);
+            if (listeners is not null)
+            {
+                context.ArePropertyListenersClaimed = true;
+            }
         }
 
         if (syncSubject is null && subscriptions.Length == 0 && listeners is null)
         {
-            next(ref context);
             return;
         }
-
-        if (listeners is not null)
-        {
-            context.ArePropertyListenersClaimed = true;
-        }
-
-        var oldValue = context.CurrentValue;
-        next(ref context);
 
         var change = SubjectPropertyChange.Create(
             context.Property,
@@ -1076,6 +1094,40 @@ Replace the `WriteProperty` method in `PropertyChangeInterceptor.cs` with the fu
         {
             PropertyChangeSubscription.Dispatch(listeners, in change);
         }
+    }
+
+    /// <summary>
+    /// Idle-entry path: the pre-commit gate saw no consumers, so no old value was captured. A
+    /// listener installed while the write was in flight is still delivered, with the final value
+    /// as both old and new (documented caveat). Non-inlined so the idle fast path stays small.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void DispatchLateListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
+    {
+        Interlocked.MemoryBarrier();
+        if (PropertyChangeSubscriptions.ReadLiveCount() == 0 || context.ArePropertyListenersClaimed)
+        {
+            return;
+        }
+
+        var listeners = TryGetListeners(context.Property);
+        if (listeners is null)
+        {
+            return;
+        }
+
+        context.ArePropertyListenersClaimed = true;
+
+        var finalValue = context.GetFinalValue();
+        var change = SubjectPropertyChange.Create(
+            context.Property,
+            context.Origin,
+            context.WriteTimestampForPublishing,
+            SubjectChangeContext.Current.ReceivedTimestamp,
+            finalValue,
+            finalValue);
+
+        PropertyChangeSubscription.Dispatch(listeners, in change);
     }
 
     private static PropertyChangeSubscription[]? TryGetListeners(PropertyReference property)
@@ -1192,12 +1244,7 @@ Append to `PropertyChangeSubscriptionExtensions.cs` (add `using System.Linq.Expr
         where TSubject : IInterceptorSubject
     {
         var name = ResolveDirectPropertyName(propertySelector);
-        if (!subject.Properties.ContainsKey(name))
-        {
-            throw new ArgumentException(
-                $"'{name}' is not a tracked property of {subject.GetType().Name}.", nameof(propertySelector));
-        }
-
+        // Validation (unknown member / neither intercepted nor derived) happens in the low-level Subscribe.
         return new PropertyReference(subject, name).Subscribe(observer);
     }
 
@@ -1450,6 +1497,68 @@ public class PerPropertySubscriptionLifecycleTests
         // Assert: fully inert on a bare notifications context.
         Assert.Equal(0, hits);
     }
+
+    [Fact]
+    public void WhenSubscriptionInstalledWhileWriteInFlight_ThenWriteDeliversWithOldValueEqualToNewValue()
+    {
+        // Arrange: the blocker sits AFTER PropertyChangeInterceptor in the chain, so the writer
+        // passes the idle pre-commit gate (count zero, no old value captured), then parks before
+        // the commit. Pins post-commit listener resolution and the DispatchLateListeners caveat.
+        var blocker = new BlockingWriteInterceptor();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        context.WithService(() => blocker);
+        var person = new Person(context);
+        var received = new List<(string OldValue, string NewValue)>();
+
+        var writer = Task.Run(() => person.FirstName = "John");
+        Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
+
+        // Act: install while the write is in flight (post-gate, pre-commit), then release the commit.
+        using var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange change) =>
+                received.Add((change.GetOldValue<string>(), change.GetNewValue<string>())));
+        blocker.ProceedWithCommit.Set();
+        Assert.True(writer.Wait(TimeSpan.FromSeconds(10)));
+
+        // Assert: the racing write was delivered (commit happened after the install); the idle-entry
+        // path could not capture the pre-write value, so OldValue equals NewValue (documented caveat).
+        var change = Assert.Single(received);
+        Assert.Equal("John", change.NewValue);
+        Assert.Equal("John", change.OldValue);
+    }
+
+    [Fact]
+    public void WhenWriteCommitsBeforeInstall_ThenSubscriberSeesCommittedValueByReading()
+    {
+        // Arrange: the write completes fully before the subscription exists.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        person.FirstName = "John";
+        var hits = 0;
+
+        // Act: a write that committed before the install is not delivered; the documented recovery
+        // is reading the property after Subscribe returns.
+        using var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange _) => hits++);
+
+        // Assert
+        Assert.Equal(0, hits);
+        Assert.Equal("John", person.FirstName);
+    }
+
+    [RunsAfter(typeof(PropertyChangeInterceptor))]
+    private sealed class BlockingWriteInterceptor : IWriteInterceptor
+    {
+        public ManualResetEventSlim EnteredInnerChain { get; } = new(false);
+        public ManualResetEventSlim ProceedWithCommit { get; } = new(false);
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            EnteredInnerChain.Set();
+            ProceedWithCommit.Wait(TimeSpan.FromSeconds(10));
+            next(ref context);
+        }
+    }
 }
 ```
 
@@ -1503,7 +1612,7 @@ git commit -m "Add concurrency, lifecycle, dedup, and resolver tests for per-pro
 
 - [ ] **Step 1: Add benchmark configurations**
 
-Create `src/Namotion.Interceptor.Benchmark/PropertyChangeNotificationBenchmark.cs` with BenchmarkDotNet benchmarks for the write hot path in each state the spec's Performance section names: idle (no consumers), queue-only active, observable-only active, both-active, listener-on-written-property, listener-elsewhere (LiveCount nonzero, lookup miss, the active-lookup state), and observable-subscribed-then-fully-unsubscribed. Follow the existing benchmark style in `SubjectSourceBenchmark.cs`. Each benchmark sets up its state in `[GlobalSetup]` and writes a property in the `[Benchmark]` method. Annotate the class with `[MemoryDiagnoser]`: the allocations-per-op column is the proof of the build-once win and of zero-allocation idle/listener-elsewhere fast paths (this is the "no build" assertion the spec asks for, done here rather than as a flaky unit test).
+Create `src/Namotion.Interceptor.Benchmark/PropertyChangeNotificationBenchmark.cs` with BenchmarkDotNet benchmarks for the write hot path in each state the spec's Performance section names: idle (no consumers; this configuration now includes the post-commit fence and count re-read and is the gate for that cost), queue-only active, observable-only active, both-active, listener-on-written-property, listener-elsewhere (LiveCount nonzero, lookup miss, the active-lookup state), and observable-subscribed-then-fully-unsubscribed. Follow the existing benchmark style in `SubjectSourceBenchmark.cs`. Each benchmark sets up its state in `[GlobalSetup]` and writes a property in the `[Benchmark]` method. Annotate the class with `[MemoryDiagnoser]`: the allocations-per-op column is the proof of the build-once win and of zero-allocation idle/listener-elsewhere fast paths (this is the "no build" assertion the spec asks for, done here rather than as a flaky unit test).
 
 - [ ] **Step 2: Build the benchmark project**
 
@@ -1547,6 +1656,8 @@ Rewrite the change-tracking sections to describe: the single `PropertyChangeInte
 - [ ] **Step 3: Add the out-of-order / re-read caveat to XML docs of all three notification entry points**
 
 On `GetPropertyChangeObservable()`, `CreatePropertyChangeQueueSubscription()` (and `PropertyChangeQueueSubscription`), and `Subscribe`/`SubscribeToProperty`/`IPropertyChangeObserver`, add: "Under concurrent writes to the same property, notifications may arrive out of commit order because dispatch runs outside the subject lock; if you need the current value, re-read the property rather than relying on the delivered new value." (The per-property XML docs already carry the not-serialized, must-not-throw, and dispose/lifetime points from Task 2/3.)
+
+On `Subscribe`/`SubscribeToProperty` additionally document the post-commit delivery guarantee and its caveat (spec third revision): a write that commits after the subscription's install is always delivered; a write that commits before it may not be, and reading the property after subscribing observes that earlier state; a write that raced the install may deliver with OldValue equal to NewValue. Mention the same three sentences in the docs/tracking.md per-property section (Step 1).
 
 - [ ] **Step 4: Verify docs build and prose rules**
 
