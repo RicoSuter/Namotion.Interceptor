@@ -12,6 +12,8 @@
 
 **Shipping:** Phase 1 (Task 1) is a self-contained, release-safe PR: a behavior-preserving merge plus the new `WithPropertyChangeNotifications()` surface, fully wired and used. Phase 2 (Tasks 2-4) is a second release-safe PR that adds the per-property API. Phase 3 (Tasks 5-6) is docs and benchmarks. Do not split a phase across PRs in a way that leaves public API without callers.
 
+**Performance gate (hard):** Constraint 2 of the spec ("no performance regression, proven by benchmarks") is a hard gate, not a Phase 3 afterthought. Before the Phase 1 PR is marked ready, the idle, single-facet (queue-only, observable-only), and both-active write-path numbers (time and allocations/op) must be measured against `master` and recorded in the PR. The full benchmark file is committed in Phase 3 (Task 5), but its harness must be run against the Phase 1 branch (and the Phase 2 branch if the per-property gate adds hot-path cost) so a perf-regressing merge never reaches master. A measured regression blocks the merge.
+
 ## Global Constraints
 
 - Target frameworks: core `Namotion.Interceptor` = .NET Standard 2.0; `Namotion.Interceptor.Tracking` = net9.0. Copy these; do not change them.
@@ -63,6 +65,7 @@ Create `src/Namotion.Interceptor.Tracking.Tests/Change/PropertyChangeInterceptor
 ```csharp
 using System.Reactive.Concurrency;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
@@ -132,32 +135,98 @@ public class PropertyChangeInterceptorTests
         var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         var person = new Person(context);
-        var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(_ => { });
+        var received = 0;
+        var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(_ => received++);
 
         // Act
         subscription.Dispose();
-        person.FirstName = "John"; // must take the idle fast path (no observers, no queue)
+        person.FirstName = "John"; // no consumers left: must take the idle fast path
 
-        // Assert: with no consumers, writing does not throw and the interceptor is idle.
-        // (White-box: an internal test hook or reflection can confirm _state is null; at minimum this must not throw.)
-        Assert.True(true);
+        // Assert: the gate actually closed (idle) and the write delivered nothing.
+        Assert.True(interceptor.IsIdle);
+        Assert.Equal(0, received);
     }
 
     [Fact]
-    public void WhenInterceptorDisposed_ThenQueueSubscriberIsCompletedButObservableStillWorks()
+    public void WhenInterceptorDisposed_ThenQueueCompletesButObservableStillWorks()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
+        var person = new Person(context);
         var queue = context.CreatePropertyChangeQueueSubscription();
 
         // Act
         interceptor.Dispose();
 
-        // Assert: a completed queue subscription returns false without blocking.
+        // Assert: the queue facet is torn down (completed subscription returns false without blocking,
+        // and new queue subscriptions throw).
         Assert.False(queue.TryDequeue(out _, new CancellationTokenSource(1000).Token));
-        // And creating a new queue subscription now throws.
         Assert.Throws<ObjectDisposedException>(() => context.CreatePropertyChangeQueueSubscription());
+
+        // Assert: the observable facet is unaffected. A NEW observer subscribed AFTER Dispose still
+        // receives changes (spec: observable is unaffected by interceptor disposal).
+        SubjectPropertyChange? captured = null;
+        using var observer = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => captured = c);
+        person.FirstName = "John";
+        Assert.NotNull(captured);
+        Assert.Equal(nameof(Person.FirstName), captured.Value.Property.Name);
+    }
+
+    [Fact]
+    public void WhenDisposedWhileConsumerWaits_ThenConsumerReturnsFalseWithoutBlocking()
+    {
+        // Arrange (lost-wakeup race fix)
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        using var consumerStarted = new ManualResetEventSlim(false);
+        bool? result = null;
+
+        var consumer = Task.Run(() =>
+        {
+            consumerStarted.Set();
+            // Long cancellation bound: only a working completion wake (not the token) should end this.
+            result = subscription.TryDequeue(out _, new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token);
+        });
+
+        // Act: dispose while the consumer is blocked (or about to block) on the empty queue.
+        consumerStarted.Wait();
+        subscription.Dispose();
+
+        // Assert: the consumer wakes on completion well within the 30s token bound (no lost wakeup).
+        Assert.True(consumer.Wait(TimeSpan.FromSeconds(5)), "Consumer did not return after Dispose (lost wakeup).");
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void WhenConcurrentWriteRacesSubscriptionDispose_ThenNoObjectDisposedException()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+
+        // Act & Assert (enqueue-vs-dispose race fix): repeatedly race a producing write (which fans
+        // out to subscription.Enqueue -> _signal.Set()) against Dispose. Because Dispose no longer
+        // disposes _signal, Set() must never hit a disposed signal. writer.Wait() rethrows any
+        // ObjectDisposedException, failing the test.
+        for (var i = 0; i < 1000; i++)
+        {
+            var subscription = context.CreatePropertyChangeQueueSubscription();
+            using var start = new ManualResetEventSlim(false);
+            var writer = Task.Run(() =>
+            {
+                start.Wait();
+                person.FirstName = "John";
+            });
+
+            start.Set();
+            subscription.Dispose();
+            writer.Wait();
+        }
     }
 }
 ```
@@ -311,6 +380,10 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     private bool _disposed;
 
+    // White-box test hook: true when neither facet has consumers (the idle fast path).
+    // Used by the gate-closure and idle tests instead of a no-op "must not throw" assertion.
+    internal bool IsIdle => _state is null;
+
     private sealed class DispatchState
     {
         public required PropertyChangeQueueSubscription[] QueueSubscriptions { get; init; } // never null
@@ -368,7 +441,9 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         ISubject<SubjectPropertyChange> syncSubject;
         lock (_modificationLock)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            // Intentionally NOT gated on _disposed. Interceptor disposal tears down the queue facet
+            // only; the observable facet is unaffected (spec: existing observers keep receiving and
+            // new observers may still subscribe after Dispose). Only CreateQueueSubscription throws.
 
             if (_subject is null)
             {
@@ -534,7 +609,7 @@ Apply these mechanical edits (all in test/benchmark code (no product code calls 
 - Replace every standalone `.WithPropertyChangeObservable()` and `.WithPropertyChangeQueue()` call with `.WithPropertyChangeNotifications()`. A test that used only one facet now also gets the other (unused, free).
 - `src/Namotion.Interceptor.Connectors.Tests/SubjectSourceBaseTests.cs` (7 sites): replace `new PropertyChangeQueue()` with `new PropertyChangeInterceptor()`; the surrounding `AddService(...)` stays.
 - `src/Namotion.Interceptor.Benchmark/SubjectSourceBenchmark.cs:93`: replace `GetService<PropertyChangeQueue>()` with `GetService<PropertyChangeInterceptor>()`.
-- `src/Namotion.Interceptor.Connectors.Tests/Transactions/SubjectTransactionLifecycleTests.cs` (around lines 116-133): the ordering assertion uses the literal string `"PropertyChangeObservable"`. Change `types.IndexOf("PropertyChangeObservable")` to `types.IndexOf("PropertyChangeInterceptor")` and update the assertion message.
+- `src/Namotion.Interceptor.Connectors.Tests/Transactions/SubjectTransactionLifecycleTests.cs` (around lines 116-133): the ordering assertion uses the literal string `"PropertyChangeObservable"`. Change `types.IndexOf("PropertyChangeObservable")` to `types.IndexOf("PropertyChangeInterceptor")` and update the assertion message. Because the ordering mechanism changes here (source-side `[RunsBefore]` on the transaction interceptor becomes target-side `[RunsAfter]` on `PropertyChangeInterceptor`, Step 7), this test must assert `SubjectTransactionInterceptor` precedes `PropertyChangeInterceptor` under BOTH registration orders (transaction registered before notifications, and after). If the existing test covers only one order, add the mirror case; the target-side edge must hold regardless of registration order.
 - Delete `src/Namotion.Interceptor.Tracking.Tests/Change/PropertyChangeQueueTests.cs` (superseded by `PropertyChangeInterceptorTests.cs`); migrate any unique assertions worth keeping (e.g. its `:211` `queue.Subscribe()` usage becomes `context.CreatePropertyChangeQueueSubscription()`) into `PropertyChangeInterceptorTests.cs`.
 
 ```bash
@@ -549,7 +624,7 @@ Expected: PASS (0 warnings (warnings are errors)). Fix any remaining references 
 - [ ] **Step 10: Run the new interceptor tests**
 
 Run: `dotnet test src/Namotion.Interceptor.Tracking.Tests --filter "FullyQualifiedName~PropertyChangeInterceptorTests"`
-Expected: PASS (all 5).
+Expected: PASS (all 7, including the two queue-race regression tests).
 
 - [ ] **Step 11: Run the full unit suite (behavior preservation)**
 
@@ -628,6 +703,7 @@ Create `src/Namotion.Interceptor.Tracking.Tests/Change/PerPropertySubscriptionTe
 
 ```csharp
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
@@ -751,6 +827,10 @@ internal static class PropertyChangeSubscriptions
     public static void DecrementLiveCount() => Interlocked.Decrement(ref _liveCount);
 
     // Atomic 64-bit read (matches PropertyReference.SetWriteTimestamp's Interlocked.Read pattern).
+    // The design's write-path pseudocode reads the field directly; use this accessor instead so the
+    // field stays private. On the net9.0/x64 Tracking target Interlocked.Read lowers to a single
+    // load, so it is hot-path safe (the atomic form only matters on 32-bit runtimes, which Tracking
+    // does not target; volatile is not applicable to a 64-bit field, hence the explicit atomic read).
     public static long ReadLiveCount() => Interlocked.Read(ref _liveCount);
 
     // Test-only reset hook (see the serialized test collection in Task 4).
@@ -1039,6 +1119,7 @@ Create `src/Namotion.Interceptor.Tracking.Tests/Change/SubscribeToPropertyResolv
 
 ```csharp
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
@@ -1190,9 +1271,13 @@ Create `src/Namotion.Interceptor.Tracking.Tests/Change/PerPropertySubscriptionCo
 ```csharp
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
-// EVERY test that creates a per-property subscription must belong to this collection, because
-// PropertyChangeSubscriptions.LiveCount is process-wide and xUnit runs different collections in
-// parallel; a Subscribe in a parallel collection would poison fast-path/count assertions.
+// EVERY test that creates a per-property subscription OR asserts on the count / fast-path / build
+// state must belong to this collection, because PropertyChangeSubscriptions.LiveCount is process-wide
+// and xUnit runs different collections in parallel. Membership is not only to stop per-property tests
+// racing each other: a Subscribe in this (serialized) collection bumps the shared count while it runs,
+// so a fast-path/count/allocation assertion in a DIFFERENT, parallel collection would read count != 0
+// and take the listener-lookup branch, poisoning the assertion. Keeping every such assertion inside
+// this one serialized collection means no per-property Subscribe can run concurrently with it.
 [CollectionDefinition(Name, DisableParallelization = true)]
 public class PerPropertySubscriptionCollection
 {
@@ -1200,7 +1285,7 @@ public class PerPropertySubscriptionCollection
 }
 ```
 
-Remove the inline `[CollectionDefinition]` placeholder added in Task 2 (Step 3). Ensure `PerPropertySubscriptionTests`, `SubscribeToPropertyResolverTests`, and the new lifecycle tests all carry `[Collection(PerPropertySubscriptionCollection.Name)]`. Each such test class should call `PropertyChangeSubscriptions.ResetForTests()` in its constructor to normalize the shared count.
+Remove the inline `[CollectionDefinition]` placeholder added in Task 2 (Step 3). Ensure `PerPropertySubscriptionTests`, `SubscribeToPropertyResolverTests`, and the new lifecycle tests all carry `[Collection(PerPropertySubscriptionCollection.Name)]`. Critically, any NEW test that asserts on the count, the idle fast path, or allocation/build behavior (see Step 2 below and Task 5) must also carry this attribute, for the cross-collection reason in the comment above. Each such test class should call `PropertyChangeSubscriptions.ResetForTests()` in its constructor to normalize the shared count. Belt-and-suspenders fallback if this proves fragile: disable assembly parallelization for the Tracking test project (`[assembly: CollectionBehavior(DisableTestParallelization = true)]`), which the spec explicitly permits; it is slower but removes the shared-static hazard entirely.
 
 - [ ] **Step 2: Write the lifecycle and edge-case tests**
 
@@ -1208,6 +1293,7 @@ Create `src/Namotion.Interceptor.Tracking.Tests/Change/PerPropertySubscriptionLi
 
 ```csharp
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
@@ -1274,10 +1360,11 @@ public class PerPropertySubscriptionLifecycleTests
     [Fact]
     public void WhenSubjectDetachedThenReattached_ThenSubscriptionRevives()
     {
-        // Arrange: subscribe before attach.
+        // Arrange: subscribe before attach. Person.Mother is a reference property, so assigning it
+        // attaches/detaches the child via context inheritance (WithFullPropertyTracking).
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var root = new Container(context);
-        var child = new Person(); // no context yet
+        var root = new Person(context);
+        var child = new Person(); // no context yet -> dormant
         var hits = 0;
         using var s = new PropertyReference(child, nameof(Person.FirstName)).Subscribe((in SubjectPropertyChange _) => hits++);
 
@@ -1286,12 +1373,12 @@ public class PerPropertySubscriptionLifecycleTests
         Assert.Equal(0, hits);
 
         // Act 2: attach -> delivery resumes
-        root.Item = child;
+        root.Mother = child;
         child.FirstName = "B";
         Assert.Equal(1, hits);
 
         // Act 3: detach -> dormant again
-        root.Item = null;
+        root.Mother = null;
         child.FirstName = "C";
         Assert.Equal(1, hits);
     }
@@ -1326,12 +1413,52 @@ public class PerPropertySubscriptionLifecycleTests
         // Act & Assert (must-not-throw contract: not caught by the framework)
         Assert.Throws<InvalidOperationException>(() => person.FirstName = "John");
     }
+
+    [Fact]
+    public void WhenDerivedDependencyChangesUnderFullTracking_ThenDerivedListenerFires()
+    {
+        // Arrange: full tracking includes derived-change detection. FullName = "{FirstName} {LastName}".
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context);
+        string? captured = null;
+        using var s = new PropertyReference(person, nameof(Person.FullName))
+            .Subscribe((in SubjectPropertyChange c) => captured = c.GetNewValue<string?>());
+
+        // Act: writing a dependency recalculates FullName, which re-enters the write chain as its own
+        // (fresh, unclaimed) write context.
+        person.FirstName = "John";
+
+        // Assert: the listener on the derived property fires with the recalculated value.
+        Assert.Equal("John", captured);
+    }
+
+    [Fact]
+    public void WhenDerivedDependencyChangesWithoutDerivedDetection_ThenDerivedListenerIsInert()
+    {
+        // Arrange: a bare notifications context has no DerivedPropertyChangeHandler.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        var hits = 0;
+        using var s = new PropertyReference(person, nameof(Person.FullName))
+            .Subscribe((in SubjectPropertyChange _) => hits++);
+
+        // Act: the dependency write never re-enters to recalc FullName, and manual RecalculateDerivedProperty
+        // is also a no-op without the attached DerivedPropertyData.
+        person.FirstName = "John";
+        new PropertyReference(person, nameof(Person.FullName)).RecalculateDerivedProperty();
+
+        // Assert: fully inert on a bare notifications context.
+        Assert.Equal(0, hits);
+    }
 }
 ```
 
-Adjust model names (`Container`/`Item`, `Person`) to whatever the Tracking test project actually provides for a root-with-child-reference topology. If none exists, add a minimal `[InterceptorSubject]` test model in the test project's Models folder.
+These use the existing `Namotion.Interceptor.Tracking.Tests.Models.Person` (reference properties `Mother`/`Father` for attach/detach, derived `FullName`); no new model is needed. Verify `Person` still exposes those members when implementing.
 
-Also add, into the appropriate class, the two derived-property tests from the spec (full tracking fires; bare `WithPropertyChangeNotifications()` is inert and manual `RecalculateDerivedProperty()` is also a no-op without derived detection).
+Notes on the remaining spec behaviors:
+- The two derived-property tests (full tracking fires; bare `WithPropertyChangeNotifications()` inert, and manual `RecalculateDerivedProperty()` also a no-op) are the `WhenDerivedDependency...` tests above.
+- The applicability gate (consumers exist but none applies to the written property) is already covered behaviorally by `WhenOtherPropertyChanges_ThenListenerIsNotInvoked` (Task 2). The "no build / allocation-free" proof of that gate is not a flaky unit-test allocation assertion; it is the `[MemoryDiagnoser]` allocations-per-op column of the Task 5 benchmarks (idle and listener-elsewhere configs must show zero build allocations).
+- Transaction under aggregation: add one test combining the transaction and aggregation cases (a subject whose context aggregates two full-tracking contexts, writing a watched property inside a transaction) to prove staged writes do not reach listeners during capture and deliver exactly once at commit replay. This is the behavioral check that the target-side `[RunsAfter]` ordering holds for every aggregated interceptor instance. Follow the transaction setup in `src/Namotion.Interceptor.Connectors.Tests/Transactions/TransactionTestBase.cs`.
 
 - [ ] **Step 3: Run the per-property test suite**
 
@@ -1376,17 +1503,19 @@ git commit -m "Add concurrency, lifecycle, dedup, and resolver tests for per-pro
 
 - [ ] **Step 1: Add benchmark configurations**
 
-Create `src/Namotion.Interceptor.Benchmark/PropertyChangeNotificationBenchmark.cs` with BenchmarkDotNet benchmarks for the write hot path in each state the spec's Performance section names: idle (no consumers), queue-only active, observable-only active, both-active, listener-on-written-property, listener-elsewhere (LiveCount nonzero, lookup miss, the active-lookup state), and observable-subscribed-then-fully-unsubscribed. Follow the existing benchmark style in `SubjectSourceBenchmark.cs`. Each benchmark sets up its state in `[GlobalSetup]` and writes a property in the `[Benchmark]` method.
+Create `src/Namotion.Interceptor.Benchmark/PropertyChangeNotificationBenchmark.cs` with BenchmarkDotNet benchmarks for the write hot path in each state the spec's Performance section names: idle (no consumers), queue-only active, observable-only active, both-active, listener-on-written-property, listener-elsewhere (LiveCount nonzero, lookup miss, the active-lookup state), and observable-subscribed-then-fully-unsubscribed. Follow the existing benchmark style in `SubjectSourceBenchmark.cs`. Each benchmark sets up its state in `[GlobalSetup]` and writes a property in the `[Benchmark]` method. Annotate the class with `[MemoryDiagnoser]`: the allocations-per-op column is the proof of the build-once win and of zero-allocation idle/listener-elsewhere fast paths (this is the "no build" assertion the spec asks for, done here rather than as a flaky unit test).
 
 - [ ] **Step 2: Build the benchmark project**
 
 Run: `dotnet build src/Namotion.Interceptor.Benchmark -c Release`
 Expected: PASS.
 
-- [ ] **Step 3: (Optional, gated) Run benchmarks before/after**
+- [ ] **Step 3: Run benchmarks before/after (required gate)**
 
 Run: `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release`
-Compare idle and single-facet-active numbers against `master` to confirm no regression (spec Constraint 2). This is a gated check; record the numbers in the PR. Do not block the plan on absolute thresholds; the gate is "no regression vs master," judged from the run.
+Compare idle, single-facet-active (queue-only and observable-only), and both-active numbers (time and allocations/op) against `master`. Constraint 2 (no regression) is HARD, so this is a required gate, not optional: a measured regression blocks the merge. Record the before/after numbers in the PR. The gate is "no regression vs master" (time and allocations), judged from the run, not an absolute threshold.
+
+Because the benchmark file's commit lands in Phase 3 but the merged interceptor ships in Phase 1, this harness must be run against the Phase 1 branch (and again against the Phase 2 branch if per-property adds hot-path cost) so no perf-regressing PR reaches master. Run it locally against those branches and paste the numbers into the respective PR even though the committed benchmark file arrives here. See the Shipping note for the gating requirement.
 
 - [ ] **Step 4: Commit**
 
@@ -1439,14 +1568,15 @@ Coverage check against the spec (each mapped to a task):
 - Merged `PropertyChangeInterceptor`, `DispatchState`, lazy observable, gate closure -> Task 1.
 - `WithPropertyChangeNotifications()`, removed methods, resolution, `WithFullPropertyTracking` -> Task 1.
 - Target-side `[RunsAfter]` ordering; migration surface; snapshot -> Task 1.
-- `PropertyChangeQueueSubscription` internal ctor + three race fixes (enqueue-vs-dispose signal, lost-wakeup, atomic dispose) -> Task 1 (Step 4).
-- Interceptor `Dispose` (queue completed, observable preserved, post-dispose create throws) -> Task 1 (Step 5, test Step 2).
+- `PropertyChangeQueueSubscription` internal ctor + three race fixes (enqueue-vs-dispose signal, lost-wakeup, atomic dispose) -> Task 1 (Step 4); regression tests `WhenDisposedWhileConsumerWaits...` and `WhenConcurrentWriteRacesSubscriptionDispose...` -> Task 1 (Step 2).
+- Interceptor `Dispose` (queue completed; observable preserved AND new observers can still subscribe post-dispose, asserted; post-dispose queue-create throws) -> Task 1 (Step 5 `Subscribe` un-gated on `_disposed`, `WhenInterceptorDisposed...` test Step 2).
+- Gate closure asserted via the `IsIdle` white-box hook (not a no-op assertion) -> Task 1 (Step 5, `WhenLastObservableSubscriberLeaves...` Step 2).
 - Subject-stored storage, CAS, one-shot dispose, `LiveCount` (long, atomic), observer capture -> Task 2.
 - Internal `ArePropertyListenersClaimed` dedup flag; three-tier gated `WriteProperty` -> Task 2.
 - `IPropertyChangeObserver`, `PropertyChangeCallback`, low-level `Subscribe` -> Task 2.
 - Strict resolver (Convert unwrap, ParameterExpression target, `PropertyInfo`, name validation); `SubscribeToProperty` -> Task 3.
 - Dormancy/revival, aggregation dedup, re-entrancy, exception contract, repeated dispose, derived prerequisite, static-state isolation -> Task 4.
-- Benchmark configurations (idle, single-facet, both, listener on/elsewhere, subscribed-then-unsubscribed) -> Task 5.
+- Benchmark configurations (idle, single-facet, both, listener on/elsewhere, subscribed-then-unsubscribed), `[MemoryDiagnoser]` allocations-per-op as the build-once / no-build proof, run as a required perf gate against master -> Task 5 + Shipping note.
 - All docs + XML-doc caveats on the three entry points -> Task 6.
 
 Open items deferred by the spec and intentionally not in this plan: value-assertion corrections (out of scope); the per-subject-field escalation for `LiveCount` (only if benchmarks flag it).
