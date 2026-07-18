@@ -6,6 +6,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 [Collection(PerPropertySubscriptionCollection.Name)]
 public class SubscribeToPropertyResolverTests
 {
+    public SubscribeToPropertyResolverTests() => PropertyChangeSubscriptions.ResetForTests();
+
     [Fact]
     public void WhenDirectPropertySelector_ThenResolvesAndFires()
     {

@@ -8,6 +8,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 [Collection(PerPropertySubscriptionCollection.Name)] // serialized; see Task 4
 public class PerPropertySubscriptionTests
 {
+    public PerPropertySubscriptionTests() => PropertyChangeSubscriptions.ResetForTests();
+
     [Fact]
     public void WhenPropertyChanges_ThenListenerIsInvokedByRef()
     {
@@ -140,6 +142,3 @@ public class PerPropertySubscriptionTests
         }
     }
 }
-
-[CollectionDefinition(PerPropertySubscriptionCollection.Name, DisableParallelization = true)]
-public class PerPropertySubscriptionCollection { public const string Name = "PerPropertySubscription"; }
