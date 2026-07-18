@@ -13,12 +13,13 @@ internal static class PropertyChangeSubscriptions
 
     public static void DecrementLiveCount() => Interlocked.Decrement(ref _liveCount);
 
-    // Atomic 64-bit read (matches PropertyReference.SetWriteTimestamp's Interlocked.Read pattern).
-    // Use this accessor so the field stays private. Interlocked.Read is correct on every runtime; on
-    // the common 64-bit target it lowers to a single load, so it is hot-path safe (a plain 64-bit read
-    // could tear on a 32-bit runtime, and volatile is not applicable to a 64-bit field, hence the
-    // explicit atomic read).
-    public static long ReadLiveCount() => Interlocked.Read(ref _liveCount);
+    // Atomic 64-bit read. Volatile.Read (a plain acquire load, atomic for long on all supported
+    // runtimes) and NOT Interlocked.Read: Interlocked.Read is CompareExchange(ref, 0, 0), an RMW
+    // that dirties the cache line and contends across writer cores on every write. The write path's
+    // post-commit re-check gets its StoreLoad ordering from an explicit Interlocked.MemoryBarrier()
+    // BEFORE calling this (core-local, no shared-line write); the Dekker pairing with
+    // IncrementLiveCount-then-install is documented in the spec's Fast-path rules.
+    public static long ReadLiveCount() => Volatile.Read(ref _liveCount);
 
     // Test-only reset hook (see the serialized test collection in Task 4).
     internal static void ResetForTests() => Interlocked.Exchange(ref _liveCount, 0);

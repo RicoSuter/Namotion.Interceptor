@@ -1,4 +1,5 @@
 using System.Reactive.Subjects;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -139,36 +140,42 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
+        // Pre-commit gate decides only whether the old value must be captured; listener
+        // RESOLUTION is post-commit, so an install racing this write is never missed
+        // (spec: Post-commit listener resolution / the Dekker pair).
         var state = _state;
         var mayHaveListeners = PropertyChangeSubscriptions.ReadLiveCount() != 0;
         if (state is null && !mayHaveListeners)
         {
             next(ref context);
+            DispatchLateListeners(ref context);
             return;
         }
 
         var subscriptions = state?.QueueSubscriptions ?? [];
         var syncSubject = state?.SyncSubject;
 
+        var oldValue = context.CurrentValue;
+        next(ref context);
+
+        // Post-commit listener resolution: full fence, count re-read, then the Data lookup.
+        // Claimed during unwind; the innermost aggregated instance resolves first, outer
+        // instances observe the claim (same thread, by-ref context) and skip.
         PropertyChangeSubscription[]? listeners = null;
-        if (mayHaveListeners && !context.ArePropertyListenersClaimed)
+        Interlocked.MemoryBarrier();
+        if (PropertyChangeSubscriptions.ReadLiveCount() != 0 && !context.ArePropertyListenersClaimed)
         {
             listeners = TryGetListeners(context.Property);
+            if (listeners is not null)
+            {
+                context.ArePropertyListenersClaimed = true;
+            }
         }
 
         if (syncSubject is null && subscriptions.Length == 0 && listeners is null)
         {
-            next(ref context);
             return;
         }
-
-        if (listeners is not null)
-        {
-            context.ArePropertyListenersClaimed = true;
-        }
-
-        var oldValue = context.CurrentValue;
-        next(ref context);
 
         var change = SubjectPropertyChange.Create(
             context.Property,
@@ -192,6 +199,40 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         {
             PropertyChangeSubscription.Dispatch(listeners, in change);
         }
+    }
+
+    /// <summary>
+    /// Idle-entry path: the pre-commit gate saw no consumers, so no old value was captured. A
+    /// listener installed while the write was in flight is still delivered, with the final value
+    /// as both old and new (documented caveat). Non-inlined so the idle fast path stays small.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void DispatchLateListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
+    {
+        Interlocked.MemoryBarrier();
+        if (PropertyChangeSubscriptions.ReadLiveCount() == 0 || context.ArePropertyListenersClaimed)
+        {
+            return;
+        }
+
+        var listeners = TryGetListeners(context.Property);
+        if (listeners is null)
+        {
+            return;
+        }
+
+        context.ArePropertyListenersClaimed = true;
+
+        var finalValue = context.GetFinalValue();
+        var change = SubjectPropertyChange.Create(
+            context.Property,
+            context.Origin,
+            context.WriteTimestampForPublishing,
+            SubjectChangeContext.Current.ReceivedTimestamp,
+            finalValue,
+            finalValue);
+
+        PropertyChangeSubscription.Dispatch(listeners, in change);
     }
 
     private static PropertyChangeSubscription[]? TryGetListeners(PropertyReference property)
