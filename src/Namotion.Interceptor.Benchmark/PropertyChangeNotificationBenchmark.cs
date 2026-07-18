@@ -32,6 +32,10 @@ public class PropertyChangeNotificationBenchmark
     private IDisposable? _observableSubscription;
     private IDisposable? _perPropertySubscription;
 
+    // A reference-typed value (not a string, not inline-sized): its change takes the two-holder
+    // BoxedValueHolder path, so the build-once merge shows up as halved allocations under both facets.
+    private Car[]? _boxedValue;
+
     private CancellationTokenSource? _drainCancellation;
     private Thread? _drainThread;
 
@@ -103,10 +107,48 @@ public class PropertyChangeNotificationBenchmark
         subscription.Dispose();
     }
 
+    // observable-only, reference-typed value: only one facet builds the change, so the allocation
+    // count is the single-facet baseline (parity with the old code, which also builds once here).
+    [GlobalSetup(Target = nameof(WriteObservableOnlyBoxed))]
+    public void SetupObservableOnlyBoxed()
+    {
+        _car = CreateCar();
+        _boxedValue = new[] { _car };
+        _observableSubscription = _context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(_ => { });
+    }
+
+    // both-active, reference-typed value: the old code built the change twice (four holder allocations),
+    // the merged interceptor builds once (two). This is where the build-once allocation win shows.
+    [GlobalSetup(Target = nameof(WriteBothActiveBoxed))]
+    public void SetupBothBoxed()
+    {
+        _car = CreateCar();
+        _boxedValue = new[] { _car };
+        _queueSubscription = _context.CreatePropertyChangeQueueSubscription();
+        StartQueueDrain(_queueSubscription);
+        _observableSubscription = _context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(_ => { });
+    }
+
     [Benchmark(Baseline = true)]
     public void WriteIdle()
     {
         _car.Name = WriteValue;
+    }
+
+    [Benchmark]
+    public void WriteObservableOnlyBoxed()
+    {
+        _car.PreviousCars = _boxedValue;
+    }
+
+    [Benchmark]
+    public void WriteBothActiveBoxed()
+    {
+        _car.PreviousCars = _boxedValue;
     }
 
     [Benchmark]
