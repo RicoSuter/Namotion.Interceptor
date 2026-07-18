@@ -358,7 +358,7 @@ public class SubjectUpdateCycleTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangeObservable()
+            .WithPropertyChangeNotifications()
             .WithRegistry();
 
         var root = new CycleTestNode(context) { Name = "Root" };

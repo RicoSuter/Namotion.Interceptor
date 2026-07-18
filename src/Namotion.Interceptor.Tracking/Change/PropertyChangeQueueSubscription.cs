@@ -4,27 +4,22 @@ using System.Runtime.CompilerServices;
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
-/// A subscription to receive property changes from a PropertyChangeQueue.
-/// Each subscription maintains its own isolated queue.
-/// Thread-safe for concurrent Enqueue calls from multiple threads.
-/// TryDequeue should only be called from a single consumer thread per subscription.
+/// A pull-based subscription to receive property changes from a <see cref="PropertyChangeInterceptor"/>.
+/// Each subscription owns an isolated queue. TryDequeue must be called from a single consumer thread.
 /// </summary>
 public sealed class PropertyChangeQueueSubscription : IDisposable
 {
-    private readonly PropertyChangeQueue _changeQueue;
+    private readonly PropertyChangeInterceptor _interceptor;
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
-    private readonly ManualResetEventSlim _signal = new(false); // non-counting signal
+    private readonly ManualResetEventSlim _signal = new(false);
     private volatile bool _completed;
+    private int _disposed; // one-shot flag
 
-    public PropertyChangeQueueSubscription(PropertyChangeQueue queue)
+    internal PropertyChangeQueueSubscription(PropertyChangeInterceptor interceptor)
     {
-        _changeQueue = queue;
+        _interceptor = interceptor;
     }
 
-    /// <summary>
-    /// Enqueues a property change. Thread-safe and can be called concurrently from multiple threads.
-    /// </summary>
-    /// <param name="item">The property change to enqueue.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void Enqueue(in SubjectPropertyChange item)
     {
@@ -33,30 +28,27 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
             return;
         }
 
-        _queue.Enqueue(item); // copy happens here into the queue
-        _signal.Set(); // wake consumer (idempotent if already set)
+        _queue.Enqueue(item);
+        _signal.Set(); // safe even after Dispose: the signal is never disposed (see Dispose)
     }
 
-    /// <summary>
-    /// Attempts to dequeue a property change, waiting if the queue is empty.
-    /// Should only be called from a single consumer thread per subscription (not thread-safe for concurrent TryDequeue calls).
-    /// </summary>
-    /// <param name="item">The dequeued property change if available.</param>
-    /// <param name="cancellationToken">Cancellation token to abort the wait.</param>
-    /// <returns>True if an item was dequeued; false if the subscription is completed or cancelled.</returns>
+    /// <summary>Completes the subscription without unsubscribing from the interceptor (interceptor-side teardown).</summary>
+    internal void Complete()
+    {
+        _completed = true;
+        _signal.Set();
+    }
+
     public bool TryDequeue(out SubjectPropertyChange item, CancellationToken cancellationToken)
     {
         while (true)
         {
-            // Check cancellation before dequeuing so that kill/shutdown signals
-            // are observed even when the queue is continuously fed by producers.
             if (cancellationToken.IsCancellationRequested)
             {
                 item = default!;
                 return false;
             }
 
-            // Fast path: dequeue if available
             if (_queue.TryDequeue(out item))
             {
                 return true;
@@ -68,14 +60,21 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
                 return false;
             }
 
-            // Reset the signal and re-check via TryDequeue to avoid lost wake-ups
             _signal.Reset();
+
+            // Re-check BOTH the queue and completion after Reset so a producer's or Complete()'s
+            // Set() that raced the Reset is not lost (completion lost-wakeup fix).
             if (_queue.TryDequeue(out item))
             {
                 return true;
             }
 
-            // Still empty after reset: wait for a producer to Set()
+            if (_completed)
+            {
+                item = default!;
+                return false;
+            }
+
             try
             {
                 _signal.Wait(cancellationToken);
@@ -85,23 +84,22 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
                 item = default!;
                 return false;
             }
-            // loop and try dequeuing again
         }
     }
 
     public void Dispose()
     {
-        if (_completed)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
-            return;
+            return; // one-shot
         }
 
         _completed = true;
-
-        // Wake any waiting TryDequeue
         _signal.Set();
+        _interceptor.RemoveQueueSubscription(this);
 
-        _changeQueue.Unsubscribe(this);
-        _signal.Dispose();
+        // Deliberately do NOT dispose _signal: a concurrent producer may still call _signal.Set()
+        // between its _completed check and here (enqueue-vs-dispose ObjectDisposedException fix).
+        // The ManualResetEventSlim is reclaimed by GC together with this subscription.
     }
 }

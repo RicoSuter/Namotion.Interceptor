@@ -1,0 +1,326 @@
+using System.Reactive.Concurrency;
+using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Tests.Models;
+
+namespace Namotion.Interceptor.Tracking.Tests.Change;
+
+public class PropertyChangeInterceptorTests
+{
+    [Fact]
+    public void WhenQueueSubscriberExists_ThenWriteIsEnqueued()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        person.FirstName = "John";
+
+        // Assert
+        Assert.True(subscription.TryDequeue(out var change, new CancellationTokenSource(1000).Token));
+        Assert.Equal(nameof(Person.FirstName), change.Property.Name);
+        Assert.Null(change.GetOldValue<string?>());
+        Assert.Equal("John", change.GetNewValue<string?>());
+    }
+
+    [Fact]
+    public void WhenObservableSubscriberExists_ThenWriteIsPublished()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        SubjectPropertyChange? captured = null;
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => captured = c);
+
+        // Act
+        person.FirstName = "John";
+
+        // Assert
+        Assert.NotNull(captured);
+        Assert.Equal(nameof(Person.FirstName), captured.Value.Property.Name);
+    }
+
+    [Fact]
+    public void WhenBothFacetsActive_ThenBothReceiveTheSameChange()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        SubjectPropertyChange? observed = null;
+        using var observable = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => observed = c);
+        using var queue = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        person.FirstName = "John";
+
+        // Assert
+        Assert.True(queue.TryDequeue(out var dequeued, new CancellationTokenSource(1000).Token));
+        Assert.NotNull(observed);
+        Assert.Equal(observed.Value.Property, dequeued.Property);
+    }
+
+    [Fact]
+    public void WhenLastObservableSubscriberLeaves_ThenGateCloses()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var interceptor = context.GetService<PropertyChangeInterceptor>();
+        var person = new Person(context);
+        var received = 0;
+        var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(_ => received++);
+
+        // Act
+        subscription.Dispose();
+        person.FirstName = "John"; // no consumers left: must take the idle fast path
+
+        // Assert: the gate actually closed (idle) and the write delivered nothing.
+        Assert.True(interceptor.IsIdle);
+        Assert.Equal(0, received);
+    }
+
+    [Fact]
+    public void WhenInterceptorDisposed_ThenQueueCompletesButObservableStillWorks()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var interceptor = context.GetService<PropertyChangeInterceptor>();
+        var person = new Person(context);
+        var queue = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        interceptor.Dispose();
+
+        // Assert: the queue facet is torn down (completed subscription returns false without blocking,
+        // and new queue subscriptions throw).
+        Assert.False(queue.TryDequeue(out _, new CancellationTokenSource(1000).Token));
+        Assert.Throws<ObjectDisposedException>(() => context.CreatePropertyChangeQueueSubscription());
+
+        // Assert: the observable facet is unaffected. A NEW observer subscribed AFTER Dispose still
+        // receives changes (spec: observable is unaffected by interceptor disposal).
+        SubjectPropertyChange? captured = null;
+        using var observer = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => captured = c);
+        person.FirstName = "John";
+        Assert.NotNull(captured);
+        Assert.Equal(nameof(Person.FirstName), captured.Value.Property.Name);
+    }
+
+    [Fact]
+    public async Task WhenDisposedWhileConsumerWaits_ThenConsumerReturnsFalseWithoutBlocking()
+    {
+        // Arrange (lost-wakeup race fix)
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        using var consumerStarted = new ManualResetEventSlim(false);
+        bool? result = null;
+
+        var consumer = Task.Run(() =>
+        {
+            consumerStarted.Set();
+            // Long cancellation bound: only a working completion wake (not the token) should end this.
+            result = subscription.TryDequeue(out _, new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token);
+        });
+
+        // Act: dispose while the consumer is blocked (or about to block) on the empty queue.
+        consumerStarted.Wait();
+        subscription.Dispose();
+
+        // Assert: the consumer wakes on completion well within the 30s token bound (no lost wakeup).
+        // WaitAsync throws TimeoutException if the consumer did not return, failing the test.
+        await consumer.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task WhenConcurrentWriteRacesSubscriptionDispose_ThenNoObjectDisposedException()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+
+        // Act & Assert (enqueue-vs-dispose race fix): repeatedly race a producing write (which fans
+        // out to subscription.Enqueue -> _signal.Set()) against Dispose. Because Dispose no longer
+        // disposes _signal, Set() must never hit a disposed signal. Awaiting the writer rethrows any
+        // ObjectDisposedException, failing the test.
+        for (var i = 0; i < 1000; i++)
+        {
+            var subscription = context.CreatePropertyChangeQueueSubscription();
+            using var start = new ManualResetEventSlim(false);
+            var writer = Task.Run(() =>
+            {
+                start.Wait();
+                person.FirstName = "John";
+            });
+
+            start.Set();
+            subscription.Dispose();
+            await writer;
+        }
+    }
+
+    [Fact]
+    public void WhenMultiplePropertiesChanged_ThenAllChangesAreDequeuedInOrder()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        // Assert
+        Assert.True(subscription.TryDequeue(out var change1, CancellationToken.None));
+        Assert.Equal(nameof(Person.FirstName), change1.Property.Name);
+
+        Assert.True(subscription.TryDequeue(out var change2, CancellationToken.None));
+        Assert.Equal(nameof(Person.LastName), change2.Property.Name);
+    }
+
+    [Fact]
+    public void WhenMultipleSubscriptionsExist_ThenAllReceiveChanges()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        using var subscription1 = context.CreatePropertyChangeQueueSubscription();
+        using var subscription2 = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        person.FirstName = "John";
+
+        // Assert
+        Assert.True(subscription1.TryDequeue(out var change1, CancellationToken.None));
+        Assert.Equal("John", change1.GetNewValue<string?>());
+
+        Assert.True(subscription2.TryDequeue(out var change2, CancellationToken.None));
+        Assert.Equal("John", change2.GetNewValue<string?>());
+    }
+
+    [Fact]
+    public void WhenCancellationRequested_ThenTryDequeueReturnsFalse()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // Act
+        var result = subscription.TryDequeue(out _, cts.Token);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task WhenWriteArrivesWhileConsumerWaits_ThenConsumerWakesWithItem()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        using var consumerStarted = new ManualResetEventSlim(false);
+        SubjectPropertyChange? received = null;
+
+        var consumer = Task.Run(() =>
+        {
+            consumerStarted.Set();
+            // Long cancellation bound: only a producing write (not the token) should wake the consumer.
+            if (subscription.TryDequeue(out var change, new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token))
+            {
+                received = change;
+            }
+        });
+
+        // Act: produce a change while the consumer is blocked (or about to block) on the empty queue.
+        consumerStarted.Wait();
+        person.FirstName = "John";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => consumer.IsCompleted, message: "Consumer should have received change");
+        Assert.NotNull(received);
+        Assert.Equal("John", received.Value.GetNewValue<string?>());
+    }
+
+    [Fact]
+    public void WhenSubscriptionDisposed_ThenSubsequentWriteIsNotDelivered()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        person.FirstName = "Before";
+        Assert.True(subscription.TryDequeue(out _, CancellationToken.None));
+
+        // Act
+        subscription.Dispose();
+        person.FirstName = "After";
+
+        // Assert
+        Assert.False(subscription.TryDequeue(out _, CancellationToken.None));
+    }
+
+    [Fact]
+    public void WhenSetValueFromSourceCalled_ThenOriginAndTimestampsPropagateThroughQueue()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var source = new object();
+        var changedTimestamp = new DateTimeOffset(2026, 1, 15, 10, 30, 0, TimeSpan.Zero);
+        var receivedTimestamp = new DateTimeOffset(2026, 1, 15, 10, 30, 1, TimeSpan.Zero);
+
+        // Act
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        property.SetValueFromSource(source, changedTimestamp, receivedTimestamp, "FromSource");
+
+        // Assert
+        Assert.True(subscription.TryDequeue(out var change, CancellationToken.None));
+        Assert.Equal("FromSource", change.GetNewValue<string?>());
+        Assert.Same(source, change.Origin.Source);
+        Assert.Equal(changedTimestamp, change.ChangedTimestamp);
+        Assert.Equal(receivedTimestamp, change.ReceivedTimestamp);
+    }
+
+    [Fact]
+    public void WhenConcurrentProducers_ThenAllChangesAreDequeued()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var changeCount = 100;
+
+        // Act
+        Parallel.For(0, changeCount, i =>
+        {
+            person.FirstName = $"Name{i}";
+        });
+
+        // Assert: Parallel.For has joined, so all changes are already enqueued; drain exactly
+        // changeCount (instant, no timeout burned). The safety-net token only elapses if a change
+        // was lost (fails cleanly instead of hanging). After dispose the queue is completed, so a
+        // surplus change would still dequeue true, proving none-extra as well as all-delivered.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        for (var i = 0; i < changeCount; i++)
+        {
+            Assert.True(subscription.TryDequeue(out _, cts.Token));
+        }
+
+        subscription.Dispose();
+        Assert.False(subscription.TryDequeue(out _, CancellationToken.None));
+    }
+}

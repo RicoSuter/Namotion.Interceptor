@@ -15,7 +15,7 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable();
+            .WithPropertyChangeNotifications();
 
         context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -52,7 +52,7 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable()
+            .WithPropertyChangeNotifications()
             .WithContextInheritance();
         
         // Act
@@ -76,7 +76,7 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable();
+            .WithPropertyChangeNotifications();
 
         var dateTime = DateTimeOffset.UtcNow.AddHours(-1);
         var person = new Person(context);
@@ -112,7 +112,7 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable();
+            .WithPropertyChangeNotifications();
 
         context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -180,7 +180,7 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable();
+            .WithPropertyChangeNotifications();
 
         context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -216,7 +216,7 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable();
+            .WithPropertyChangeNotifications();
 
         context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -251,7 +251,7 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable()
+            .WithPropertyChangeNotifications()
             .WithContextInheritance();
 
         var car = new Car(context);
@@ -285,7 +285,7 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable();
+            .WithPropertyChangeNotifications();
         
         var person = new Person(context)
         {

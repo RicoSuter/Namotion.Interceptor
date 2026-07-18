@@ -21,23 +21,17 @@ namespace Namotion.Interceptor.Tracking.Change
         public static Namotion.Interceptor.Tracking.Change.PropertyReferenceCollection GetUsedByProperties(this Namotion.Interceptor.PropertyReference property) { }
         public static void RecalculateDerivedProperty(this Namotion.Interceptor.PropertyReference property) { }
     }
-    public class PropertyChangeObservable : Namotion.Interceptor.Interceptors.IWriteInterceptor, System.IObservable<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>
+    [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
+            typeof(Namotion.Interceptor.Tracking.Transactions.SubjectTransactionInterceptor)})]
+    public sealed class PropertyChangeInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, System.IDisposable, System.IObservable<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>
     {
-        public PropertyChangeObservable() { }
-        public System.IDisposable Subscribe(System.IObserver<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> observer) { }
-        public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
-    }
-    public sealed class PropertyChangeQueue : Namotion.Interceptor.Interceptors.IWriteInterceptor, System.IDisposable
-    {
-        public PropertyChangeQueue() { }
+        public PropertyChangeInterceptor() { }
         public void Dispose() { }
-        public Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription Subscribe() { }
-        public void Unsubscribe(Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription subscription) { }
+        public System.IDisposable Subscribe(System.IObserver<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> observer) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
     public sealed class PropertyChangeQueueSubscription : System.IDisposable
     {
-        public PropertyChangeQueueSubscription(Namotion.Interceptor.Tracking.Change.PropertyChangeQueue queue) { }
         public void Dispose() { }
         public bool TryDequeue(out Namotion.Interceptor.Tracking.Change.SubjectPropertyChange item, System.Threading.CancellationToken cancellationToken) { }
     }
@@ -84,8 +78,7 @@ namespace Namotion.Interceptor.Tracking
         public static Namotion.Interceptor.IInterceptorSubjectContext WithFullPropertyTracking(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithLifecycle(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithParents(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
-        public static Namotion.Interceptor.IInterceptorSubjectContext WithPropertyChangeObservable(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
-        public static Namotion.Interceptor.IInterceptorSubjectContext WithPropertyChangeQueue(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithPropertyChangeNotifications(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithReadPropertyRecorder(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithTransactions(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
     }
@@ -266,10 +259,6 @@ namespace Namotion.Interceptor.Tracking.Transactions
     }
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler)})]
-    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeObservable)})]
-    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeQueue)})]
     public sealed class SubjectTransactionInterceptor : Namotion.Interceptor.Interceptors.IReadInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
         public SubjectTransactionInterceptor() { }

@@ -20,8 +20,7 @@ public static class InterceptorSubjectContextExtensions
         return context
             .WithEqualityCheck()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable()
-            .WithPropertyChangeQueue()
+            .WithPropertyChangeNotifications()
             .WithContextInheritance();
     }
 
@@ -74,14 +73,16 @@ public static class InterceptorSubjectContextExtensions
     }
 
     /// <summary>
-    /// Registers the property changed observable which can be retrieved using subject.GetPropertyChangeObservable().
+    /// Registers the property change interceptor, enabling both the Rx observable
+    /// (<see cref="GetPropertyChangeObservable"/>) and the high-performance queue
+    /// (<see cref="CreatePropertyChangeQueueSubscription"/>) facets, and per-property subscriptions.
     /// </summary>
-    /// <param name="context">The collection.</param>
-    /// <returns>The collection.</returns>
-    public static IInterceptorSubjectContext WithPropertyChangeObservable(this IInterceptorSubjectContext context)
+    /// <param name="context">The context.</param>
+    /// <returns>The context.</returns>
+    public static IInterceptorSubjectContext WithPropertyChangeNotifications(this IInterceptorSubjectContext context)
     {
-        return context
-            .WithService(() => new PropertyChangeObservable());
+        context.TryAddService(() => new PropertyChangeInterceptor(), _ => true);
+        return context;
     }
 
     /// <summary>
@@ -94,7 +95,7 @@ public static class InterceptorSubjectContextExtensions
     public static IObservable<SubjectPropertyChange> GetPropertyChangeObservable(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
     {
         var observable = context
-            .GetService<PropertyChangeObservable>()
+            .GetService<PropertyChangeInterceptor>()
             .Publish()
             .RefCount(); // single upstream subscription (shared)
 
@@ -108,17 +109,6 @@ public static class InterceptorSubjectContextExtensions
     }
 
     /// <summary>
-    /// Registers the property changed observable which can be retrieved using subject.GetPropertyChangeObservable().
-    /// </summary>
-    /// <param name="context">The collection.</param>
-    /// <returns>The collection.</returns>
-    public static IInterceptorSubjectContext WithPropertyChangeQueue(this IInterceptorSubjectContext context)
-    {
-        return context
-            .WithService(() => new PropertyChangeQueue());
-    }
-
-    /// <summary>
     /// Gets the property changed observable which is registered in the context.
     /// </summary>
     /// <param name="context">The context.</param>
@@ -127,8 +117,8 @@ public static class InterceptorSubjectContextExtensions
     public static PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
     {
         return context
-            .GetService<PropertyChangeQueue>()
-            .Subscribe();
+            .GetService<PropertyChangeInterceptor>()
+            .CreateQueueSubscription();
     }
 
     /// <summary>

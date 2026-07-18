@@ -65,7 +65,7 @@ public class SubjectSourceBaseTests
     public async Task WhenPropertyChangeIsTriggered_ThenWriteToSourceAsyncIsCalled()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -111,7 +111,7 @@ public class SubjectSourceBaseTests
     public async Task WhenWriteChangesThrowsException_ThenErrorIsLoggedAndServiceContinues()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -151,7 +151,7 @@ public class SubjectSourceBaseTests
     public async Task WhenWriteChangesThrowsOperationCanceled_ThenServiceStops()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -191,7 +191,7 @@ public class SubjectSourceBaseTests
     public async Task WhenFlushFails_ThenChangesAreEnqueued()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -249,7 +249,7 @@ public class SubjectSourceBaseTests
     public async Task WhenWriteChangesInBatchesThrowsOperationCanceled_ThenExceptionPropagates()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -288,7 +288,7 @@ public class SubjectSourceBaseTests
     public async Task WhenWriteChangesInBatchesThrowsException_ThenChangesAreEnqueued()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -344,7 +344,7 @@ public class SubjectSourceBaseTests
     public async Task WhenWriteReturnsFailureResult_ThenFailedChangesAreEnqueuedAndRetried()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
