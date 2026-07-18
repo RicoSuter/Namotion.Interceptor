@@ -14,7 +14,7 @@ public class PerPropertySubscriptionTests
     public void WhenPropertyChanges_ThenListenerIsInvokedByRef()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         string? captured = null;
@@ -31,7 +31,7 @@ public class PerPropertySubscriptionTests
     public void WhenOtherPropertyChanges_ThenListenerIsNotInvoked()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var invoked = false;
         using var subscription = new PropertyReference(person, nameof(Person.FirstName))
@@ -48,7 +48,7 @@ public class PerPropertySubscriptionTests
     public void WhenSubscriptionDisposed_ThenListenerStopsAndCountReturnsToZero()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var count = 0;
         var subscription = new PropertyReference(person, nameof(Person.FirstName))
@@ -68,7 +68,7 @@ public class PerPropertySubscriptionTests
     public void WhenUnknownMember_ThenThrows()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
 
         // Act & Assert
@@ -83,7 +83,7 @@ public class PerPropertySubscriptionTests
         // passes the idle pre-commit gate (count zero, no old value captured), then parks before
         // the commit. Pins post-commit listener resolution and the DispatchLateListeners caveat.
         var blocker = new BlockingWriteInterceptor();
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         context.WithService(() => blocker);
         var person = new Person(context);
         var received = new List<(string OldValue, string NewValue)>();
@@ -109,7 +109,7 @@ public class PerPropertySubscriptionTests
     public void WhenWriteCommitsBeforeInstall_ThenSubscriberSeesCommittedValueByReading()
     {
         // Arrange: the write completes fully before the subscription exists.
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         person.FirstName = "John";
         var hits = 0;

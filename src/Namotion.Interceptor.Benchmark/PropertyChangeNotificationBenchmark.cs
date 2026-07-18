@@ -17,7 +17,7 @@ namespace Namotion.Interceptor.Benchmark;
 /// Each state runs in its own process (BenchmarkDotNet default), set up by a targeted
 /// <see cref="GlobalSetupAttribute"/>. This isolation matters: the per-property listener live count
 /// is a process-wide static, so a listener created for one state must not be visible to another.
-/// The context is registered with WithPropertyChangeNotifications only (no equality check), so every
+/// The context is registered with WithPropertyChangeSubscriptions only (no equality check), so every
 /// write reaches the interceptor even when the value does not change.
 /// </summary>
 [MemoryDiagnoser]
@@ -33,7 +33,7 @@ public class PropertyChangeNotificationBenchmark
     private IDisposable? _perPropertySubscription;
 
     // A reference-typed value (not a string, not inline-sized): its change takes the two-holder
-    // BoxedValueHolder path, so the build-once merge shows up as halved allocations under both facets.
+    // BoxedValueHolder path, so the build-once merge shows up as halved allocations under both channels.
     private Car[]? _boxedValue;
 
     private CancellationTokenSource? _drainCancellation;
@@ -107,8 +107,8 @@ public class PropertyChangeNotificationBenchmark
         subscription.Dispose();
     }
 
-    // observable-only, reference-typed value: only one facet builds the change, so the allocation
-    // count is the single-facet baseline (parity with the old code, which also builds once here).
+    // observable-only, reference-typed value: only one channel builds the change, so the allocation
+    // count is the single-channel baseline (parity with the old code, which also builds once here).
     [GlobalSetup(Target = nameof(WriteObservableOnlyBoxed))]
     public void SetupObservableOnlyBoxed()
     {
@@ -203,7 +203,7 @@ public class PropertyChangeNotificationBenchmark
     {
         _context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangeNotifications();
+            .WithPropertyChangeSubscriptions();
 
         return new Car(_context);
     }

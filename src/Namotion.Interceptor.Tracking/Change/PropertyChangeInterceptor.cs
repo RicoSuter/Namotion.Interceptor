@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking.Transactions;
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
-/// Single write interceptor that delivers property changes through two facets: an Rx observable
+/// Single write interceptor that delivers property changes through two channels: an Rx observable
 /// (see <see cref="InterceptorSubjectContextExtensions.GetPropertyChangeObservable"/>) and a
 /// high-performance pull queue (see <see cref="InterceptorSubjectContextExtensions.CreatePropertyChangeQueueSubscription"/>).
 /// Replaces the former PropertyChangeObservable and PropertyChangeQueue.
@@ -17,17 +17,17 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 {
     private readonly Lock _modificationLock = new();
 
-    // The single hot-path field. Null means neither facet has consumers (idle).
+    // The single hot-path field. Null means neither channel has consumers (idle).
     private volatile DispatchState? _state;
 
-    // Observable facet state, guarded by _modificationLock. Lazily created on first subscribe.
+    // Observable channel state, guarded by _modificationLock. Lazily created on first subscribe.
     private Subject<SubjectPropertyChange>? _subject;
     private ISubject<SubjectPropertyChange>? _syncSubject;
     private int _observableConsumerCount;
 
     private bool _disposed;
 
-    // White-box test hook: true when neither facet has consumers (the idle fast path).
+    // White-box test hook: true when neither channel has consumers (the idle fast path).
     // Used by the gate-closure and idle tests instead of a no-op "must not throw" assertion.
     internal bool IsIdle => _state is null;
 
@@ -42,7 +42,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         public required ISubject<SubjectPropertyChange>? SyncSubject { get; init; }          // null = no observers
     }
 
-    // Called under _modificationLock. Publishes null when both facets are empty.
+    // Called under _modificationLock. Publishes null when both channels are empty.
     private void PublishState(PropertyChangeQueueSubscription[] queueSubscriptions, ISubject<SubjectPropertyChange>? syncSubject)
     {
         _state = queueSubscriptions.Length == 0 && syncSubject is null
@@ -89,8 +89,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         ISubject<SubjectPropertyChange> syncSubject;
         lock (_modificationLock)
         {
-            // Intentionally NOT gated on _disposed. Interceptor disposal tears down the queue facet
-            // only; the observable facet is unaffected (spec: existing observers keep receiving and
+            // Intentionally NOT gated on _disposed. Interceptor disposal tears down the queue channel
+            // only; the observable channel is unaffected (spec: existing observers keep receiving and
             // new observers may still subscribe after Dispose). Only CreateQueueSubscription throws.
 
             if (_subject is null)
@@ -253,7 +253,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
             _disposed = true;
             toComplete = _state?.QueueSubscriptions ?? [];
-            PublishState([], ActiveSyncSubject); // preserve observable facet, drop queue
+            PublishState([], ActiveSyncSubject); // preserve observable channel, drop queue
         }
 
         foreach (var subscription in toComplete)

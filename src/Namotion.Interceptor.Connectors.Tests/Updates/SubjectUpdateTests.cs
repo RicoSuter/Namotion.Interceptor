@@ -210,7 +210,7 @@ public class SubjectUpdateTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangeNotifications()
+            .WithPropertyChangeSubscriptions()
             .WithRegistry();
 
         var child1 = new Person { FirstName = "Child1" };

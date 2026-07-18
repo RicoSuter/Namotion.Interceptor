@@ -20,7 +20,7 @@ public static class InterceptorSubjectContextExtensions
         return context
             .WithEqualityCheck()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeNotifications()
+            .WithPropertyChangeSubscriptions()
             .WithContextInheritance();
     }
 
@@ -75,11 +75,11 @@ public static class InterceptorSubjectContextExtensions
     /// <summary>
     /// Registers the property change interceptor, enabling both the Rx observable
     /// (<see cref="GetPropertyChangeObservable"/>) and the high-performance queue
-    /// (<see cref="CreatePropertyChangeQueueSubscription"/>) facets, and per-property subscriptions.
+    /// (<see cref="CreatePropertyChangeQueueSubscription"/>) channels, and per-property subscriptions.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
-    public static IInterceptorSubjectContext WithPropertyChangeNotifications(this IInterceptorSubjectContext context)
+    public static IInterceptorSubjectContext WithPropertyChangeSubscriptions(this IInterceptorSubjectContext context)
     {
         context.TryAddService(() => new PropertyChangeInterceptor(), _ => true);
         return context;

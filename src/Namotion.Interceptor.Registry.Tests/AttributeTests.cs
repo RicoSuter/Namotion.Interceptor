@@ -58,7 +58,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangeNotifications()
+            .WithPropertyChangeSubscriptions()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -91,7 +91,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangeNotifications()
+            .WithPropertyChangeSubscriptions()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -125,7 +125,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangeNotifications()
+            .WithPropertyChangeSubscriptions()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -160,7 +160,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangeNotifications()
+            .WithPropertyChangeSubscriptions()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 

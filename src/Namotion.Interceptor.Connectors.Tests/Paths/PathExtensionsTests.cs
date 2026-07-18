@@ -458,7 +458,7 @@ public class PathExtensionsTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
-            .WithPropertyChangeNotifications();
+            .WithPropertyChangeSubscriptions();
 
         var person = new Person(context)
         {

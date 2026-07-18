@@ -1,6 +1,6 @@
 # Tracking
 
-The `Namotion.Interceptor.Tracking` package provides comprehensive change tracking for interceptor subjects, including property value changes, derived property updates, subject lifecycle events, and parent-child relationships. A single `PropertyChangeInterceptor`, enabled with `WithPropertyChangeNotifications()`, delivers every property change through three facets that share one write path: an **Rx observable** for composition and UI, a **high-performance queue** for high-throughput consumers, and **per-property subscriptions** for observing one property on one subject instance.
+The `Namotion.Interceptor.Tracking` package provides comprehensive change tracking for interceptor subjects, including property value changes, derived property updates, subject lifecycle events, and parent-child relationships. A single `PropertyChangeInterceptor`, enabled with `WithPropertyChangeSubscriptions()`, delivers every property change through three channels that share one write path: an **Rx observable** for composition and UI, a **high-performance queue** for high-throughput consumers, and **per-property subscriptions** for observing one property on one subject instance.
 
 ## Setup
 
@@ -24,16 +24,16 @@ You can also enable features individually for more granular control.
 
 ## Change Tracking
 
-All property change notifications flow through a single `PropertyChangeInterceptor`, registered with `WithPropertyChangeNotifications()` (also included in `WithFullPropertyTracking()`). The interceptor exposes three facets over one shared write path: the Rx observable, the high-performance queue, and per-property subscriptions. Enable it once and pick whichever facet fits the consumer.
+All property change notifications flow through a single `PropertyChangeInterceptor`, registered with `WithPropertyChangeSubscriptions()` (also included in `WithFullPropertyTracking()`). The interceptor exposes three channels over one shared write path: the Rx observable, the high-performance queue, and per-property subscriptions. Enable it once and pick whichever channel fits the consumer.
 
 ### Property Change Observable (Rx-based)
 
-The observable facet uses Reactive Extensions (Rx) and is ideal for UI scenarios, complex query composition, and when you need rich operator support:
+The observable channel uses Reactive Extensions (Rx) and is ideal for UI scenarios, complex query composition, and when you need rich operator support:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithPropertyChangeNotifications();
+    .WithPropertyChangeSubscriptions();
 
 context
     .GetPropertyChangeObservable()
@@ -64,12 +64,12 @@ var person = new Person(context)
 
 ### Property Change Queue (High Performance)
 
-The queue facet uses a lock-free, allocation-conscious queue and is optimized for maximum throughput with minimal allocations. This is the preferred mechanism for high-performance scenarios such as background services, IoT data processing, and source synchronization:
+The queue channel uses a lock-free, allocation-conscious queue and is optimized for maximum throughput with minimal allocations. This is the preferred mechanism for high-performance scenarios such as background services, IoT data processing, and source synchronization:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithPropertyChangeNotifications();
+    .WithPropertyChangeSubscriptions();
 
 using var subscription = context.CreatePropertyChangeQueueSubscription();
 
@@ -203,7 +203,7 @@ public partial class Person
 var context = InterceptorSubjectContext
     .Create()
     .WithDerivedPropertyChangeDetection()
-    .WithPropertyChangeNotifications();
+    .WithPropertyChangeSubscriptions();
 
 context.GetPropertyChangeObservable().Subscribe(change =>
 {
@@ -562,8 +562,8 @@ The Tracking package is foundational and used by:
 
 - **Registry**: Requires `WithLifecycle()` for subject/property registration
 - **Hosting**: Requires `WithLifecycle()` for hosted service management  
-- **Sources**: Uses the high-performance queue via `WithPropertyChangeNotifications()` for synchronization
+- **Sources**: Uses the high-performance queue via `WithPropertyChangeSubscriptions()` for synchronization
 - **Validation**: Can trigger validation on property changes
-- **Blazor**: Uses `WithPropertyChangeNotifications()` for UI updates
+- **Blazor**: Uses `WithPropertyChangeSubscriptions()` for UI updates
 
 See the individual package documentation for integration details.

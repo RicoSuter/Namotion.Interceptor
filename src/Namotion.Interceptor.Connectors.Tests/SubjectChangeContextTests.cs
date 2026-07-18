@@ -16,7 +16,7 @@ public class SubjectChangeContextTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
-            .WithPropertyChangeNotifications();
+            .WithPropertyChangeSubscriptions();
         
         var person = new Person(context);
         var propertyName = nameof(Person.FirstName);

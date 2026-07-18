@@ -92,7 +92,7 @@ namespace Namotion.Interceptor.Tracking
         public static Namotion.Interceptor.IInterceptorSubjectContext WithFullPropertyTracking(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithLifecycle(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithParents(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
-        public static Namotion.Interceptor.IInterceptorSubjectContext WithPropertyChangeNotifications(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithPropertyChangeSubscriptions(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithReadPropertyRecorder(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithTransactions(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
     }

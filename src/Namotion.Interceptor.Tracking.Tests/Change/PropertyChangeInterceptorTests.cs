@@ -11,7 +11,7 @@ public class PropertyChangeInterceptorTests
     public void WhenQueueSubscriberExists_ThenWriteIsEnqueued()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
@@ -29,7 +29,7 @@ public class PropertyChangeInterceptorTests
     public void WhenObservableSubscriberExists_ThenWriteIsPublished()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         SubjectPropertyChange? captured = null;
         using var subscription = context
@@ -45,10 +45,10 @@ public class PropertyChangeInterceptorTests
     }
 
     [Fact]
-    public void WhenBothFacetsActive_ThenBothReceiveTheSameChange()
+    public void WhenBothChannelsActive_ThenBothReceiveTheSameChange()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         SubjectPropertyChange? observed = null;
         using var observable = context
@@ -69,7 +69,7 @@ public class PropertyChangeInterceptorTests
     public void WhenLastObservableSubscriberLeaves_ThenGateCloses()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         var person = new Person(context);
         var received = 0;
@@ -92,10 +92,10 @@ public class PropertyChangeInterceptorTests
         // Arrange: transient observable use (subscribe an Rx observer, then dispose it) leaves the
         // never-cleared _syncSubject field non-null. A later queue create/dispose must not resurrect
         // that observer-less subject into the dispatch state and keep the gate open forever.
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
 
-        // Act: churn the observable facet, then churn the queue facet.
+        // Act: churn the observable channel, then churn the queue channel.
         var observer = context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(_ => { });
@@ -104,7 +104,7 @@ public class PropertyChangeInterceptorTests
         var queue = context.CreatePropertyChangeQueueSubscription();
         queue.Dispose();
 
-        // Assert: both facets are empty again, so the gate has re-closed to idle. Before the
+        // Assert: both channels are empty again, so the gate has re-closed to idle. Before the
         // ActiveSyncSubject gating this would be false (the stale subject was re-published).
         Assert.True(interceptor.IsIdle);
     }
@@ -113,7 +113,7 @@ public class PropertyChangeInterceptorTests
     public void WhenInterceptorDisposed_ThenQueueCompletesButObservableStillWorks()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         var person = new Person(context);
         var queue = context.CreatePropertyChangeQueueSubscription();
@@ -121,12 +121,12 @@ public class PropertyChangeInterceptorTests
         // Act
         interceptor.Dispose();
 
-        // Assert: the queue facet is torn down (completed subscription returns false without blocking,
+        // Assert: the queue channel is torn down (completed subscription returns false without blocking,
         // and new queue subscriptions throw).
         Assert.False(queue.TryDequeue(out _, new CancellationTokenSource(1000).Token));
         Assert.Throws<ObjectDisposedException>(() => context.CreatePropertyChangeQueueSubscription());
 
-        // Assert: the observable facet is unaffected. A NEW observer subscribed AFTER Dispose still
+        // Assert: the observable channel is unaffected. A NEW observer subscribed AFTER Dispose still
         // receives changes (spec: observable is unaffected by interceptor disposal).
         SubjectPropertyChange? captured = null;
         using var observer = context
@@ -141,7 +141,7 @@ public class PropertyChangeInterceptorTests
     public async Task WhenDisposedWhileConsumerWaits_ThenConsumerReturnsFalseWithoutBlocking()
     {
         // Arrange (lost-wakeup race fix)
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         using var subscription = context.CreatePropertyChangeQueueSubscription();
         using var consumerStarted = new ManualResetEventSlim(false);
         bool? result = null;
@@ -167,7 +167,7 @@ public class PropertyChangeInterceptorTests
     public async Task WhenConcurrentWriteRacesSubscriptionDispose_ThenNoObjectDisposedException()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
 
         // Act & Assert (enqueue-vs-dispose race fix): repeatedly race a producing write (which fans
@@ -194,7 +194,7 @@ public class PropertyChangeInterceptorTests
     public void WhenMultiplePropertiesChanged_ThenAllChangesAreDequeuedInOrder()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
@@ -214,7 +214,7 @@ public class PropertyChangeInterceptorTests
     public void WhenMultipleSubscriptionsExist_ThenAllReceiveChanges()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var subscription1 = context.CreatePropertyChangeQueueSubscription();
         using var subscription2 = context.CreatePropertyChangeQueueSubscription();
@@ -234,7 +234,7 @@ public class PropertyChangeInterceptorTests
     public void WhenCancellationRequested_ThenTryDequeueReturnsFalse()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         using var subscription = context.CreatePropertyChangeQueueSubscription();
         using var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -250,7 +250,7 @@ public class PropertyChangeInterceptorTests
     public async Task WhenWriteArrivesWhileConsumerWaits_ThenConsumerWakesWithItem()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var subscription = context.CreatePropertyChangeQueueSubscription();
         using var consumerStarted = new ManualResetEventSlim(false);
@@ -280,7 +280,7 @@ public class PropertyChangeInterceptorTests
     public void WhenSubscriptionDisposed_ThenSubsequentWriteIsNotDelivered()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var subscription = context.CreatePropertyChangeQueueSubscription();
 
@@ -299,7 +299,7 @@ public class PropertyChangeInterceptorTests
     public void WhenSetValueFromSourceCalled_ThenOriginAndTimestampsPropagateThroughQueue()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var subscription = context.CreatePropertyChangeQueueSubscription();
         var source = new object();
@@ -322,7 +322,7 @@ public class PropertyChangeInterceptorTests
     public void WhenConcurrentProducers_ThenAllChangesAreDequeued()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var subscription = context.CreatePropertyChangeQueueSubscription();
         var changeCount = 100;

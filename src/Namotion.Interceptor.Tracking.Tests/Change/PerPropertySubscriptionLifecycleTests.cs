@@ -13,7 +13,7 @@ public class PerPropertySubscriptionLifecycleTests
     public void WhenSameObserverSubscribedToMultipleProperties_ThenEachFiresIndependently()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var firstNameHits = 0;
         var lastNameHits = 0;
@@ -34,7 +34,7 @@ public class PerPropertySubscriptionLifecycleTests
     public void WhenReentrantWriteInCallback_ThenDeliversPerWriteWithoutDeadlock()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var lastNameHits = 0;
         using var first = new PropertyReference(person, nameof(Person.FirstName))
@@ -54,7 +54,7 @@ public class PerPropertySubscriptionLifecycleTests
     public void WhenRepeatedDispose_ThenNoOpAndCountNeverNegative()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var s = new PropertyReference(person, nameof(Person.FirstName)).Subscribe((in SubjectPropertyChange _) => { });
 
@@ -182,7 +182,7 @@ public class PerPropertySubscriptionLifecycleTests
     public void WhenObserverThrows_ThenExceptionPropagates()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var s = new PropertyReference(person, nameof(Person.FirstName))
             .Subscribe((in SubjectPropertyChange _) => throw new InvalidOperationException("boom"));
@@ -213,7 +213,7 @@ public class PerPropertySubscriptionLifecycleTests
     public void WhenDerivedDependencyChangesWithoutDerivedDetection_ThenDerivedListenerIsInert()
     {
         // Arrange: a bare notifications context has no DerivedPropertyChangeHandler.
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var hits = 0;
         using var s = new PropertyReference(person, nameof(Person.FullName))
@@ -232,7 +232,7 @@ public class PerPropertySubscriptionLifecycleTests
     public void WhenTwoListenersOnSameProperty_ThenBothFireOnOneWrite()
     {
         // Arrange: two independent subscriptions on the SAME property.
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var firstHits = 0;
         var secondHits = 0;
@@ -252,7 +252,7 @@ public class PerPropertySubscriptionLifecycleTests
     public void WhenSubscriptionHandleDroppedWithoutDispose_ThenLiveCountStaysPositive()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
 
         // Act: create a subscription and drop the returned handle without ever disposing it.
@@ -268,7 +268,7 @@ public class PerPropertySubscriptionLifecycleTests
     {
         // Arrange: one listener whose observer is captured into a dispatch local via Volatile.Read
         // before invocation, so a concurrent Dispose that null-clears it must be null-safe.
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var subscription = new PropertyReference(person, nameof(Person.FirstName))
             .Subscribe((in SubjectPropertyChange _) => { });
@@ -297,7 +297,7 @@ public class PerPropertySubscriptionLifecycleTests
     {
         // Arrange: four permanent listeners on one property that are never disposed during the storm;
         // the copy-on-write CAS install/remove must not drop any of them under concurrent churn.
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var permanentHits = new int[4];

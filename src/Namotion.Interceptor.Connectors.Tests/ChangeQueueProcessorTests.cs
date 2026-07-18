@@ -15,7 +15,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeNotifications();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -56,7 +56,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeNotifications();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -95,7 +95,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeNotifications();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -140,7 +140,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeNotifications();
+        context.WithPropertyChangeSubscriptions();
 
         var writeHandlerCalled = false;
 
@@ -172,7 +172,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeNotifications();
+        context.WithPropertyChangeSubscriptions();
 
         var processor = new ChangeQueueProcessor(
             source: null,
@@ -194,7 +194,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeNotifications();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var flushCount = 0;
@@ -244,7 +244,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeNotifications();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
 
@@ -287,7 +287,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeNotifications();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
 

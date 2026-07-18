@@ -12,7 +12,7 @@ public class SubscribeToPropertyResolverTests
     public void WhenDirectPropertySelector_ThenResolvesAndFires()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         string? captured = null;
         using var subscription = person.SubscribeToProperty(p => p.FirstName, (in SubjectPropertyChange c) => captured = c.GetNewValue<string?>());
@@ -28,7 +28,7 @@ public class SubscribeToPropertyResolverTests
     public void WhenChainedSelector_ThenThrows()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context) { Mother = new Person(context) };
 
         // Act & Assert
@@ -40,7 +40,7 @@ public class SubscribeToPropertyResolverTests
     public void WhenMethodSelector_ThenThrows()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
 
         // Act & Assert
@@ -52,7 +52,7 @@ public class SubscribeToPropertyResolverTests
     public void WhenDerivedPropertySelector_ThenSubscribesWithoutThrowing()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
 
         // Act
@@ -67,7 +67,7 @@ public class SubscribeToPropertyResolverTests
     {
         // Arrange: the selector accesses a captured local rather than the lambda parameter, so the
         // member's instance expression is a closure field access, not propertySelector.Parameters[0].
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var other = new Person(context);
 
@@ -80,7 +80,7 @@ public class SubscribeToPropertyResolverTests
     public void WhenStaticMemberSelector_ThenThrows()
     {
         // Arrange: a static property access has a null instance expression (Expression != parameter).
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
 
         // Act & Assert
@@ -93,7 +93,7 @@ public class SubscribeToPropertyResolverTests
     {
         // Arrange: a field access resolves to a FieldInfo member (Member is not PropertyInfo).
         // DateTime.MinValue is a static readonly field, so the compiler keeps it as a field access.
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
 
         // Act & Assert
@@ -105,7 +105,7 @@ public class SubscribeToPropertyResolverTests
     public void WhenPropertyIsNeitherInterceptedNorDerived_ThenThrows()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeNotifications();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var holder = new PlainPropertyHolder(context);
 
         // Act & Assert
