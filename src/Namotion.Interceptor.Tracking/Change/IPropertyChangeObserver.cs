@@ -8,5 +8,9 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 public interface IPropertyChangeObserver
 {
+    /// <summary>
+    /// Invoked synchronously when a subscribed property changes.
+    /// </summary>
+    /// <param name="change">The property change that occurred.</param>
     void OnChange(in SubjectPropertyChange change);
 }

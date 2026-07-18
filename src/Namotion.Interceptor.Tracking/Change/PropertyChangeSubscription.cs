@@ -7,7 +7,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 internal sealed class PropertyChangeSubscription : IDisposable
 {
-    internal const string ListenersKey = "Namotion.Interceptor.PropertyChangeListeners";
+    // Short key to reduce dictionary hash cost on the hot lookup path (matches the ni.dpd convention).
+    internal const string ListenersKey = "ni.pcl";
 
     private readonly string _propertyName;
     private IInterceptorSubject? _subject;                 // cleared on dispose
@@ -21,7 +22,7 @@ internal sealed class PropertyChangeSubscription : IDisposable
         Observer = observer;
     }
 
-    public static IDisposable Install(PropertyReference property, IPropertyChangeObserver observer)
+    public static IDisposable Create(PropertyReference property, IPropertyChangeObserver observer)
     {
         var subject = property.Subject;
         var propertyName = property.Name;

@@ -84,7 +84,7 @@ namespace Namotion.Interceptor.Tracking
 {
     public static class InterceptorSubjectContextExtensions
     {
-        public static Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this Namotion.Interceptor.IInterceptorSubjectContext context, System.Reactive.Concurrency.IScheduler? scheduler = null) { }
+        public static Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static System.IObservable<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> GetPropertyChangeObservable(this Namotion.Interceptor.IInterceptorSubjectContext context, System.Reactive.Concurrency.IScheduler? scheduler = null) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithContextInheritance(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithDerivedPropertyChangeDetection(this Namotion.Interceptor.IInterceptorSubjectContext context) { }

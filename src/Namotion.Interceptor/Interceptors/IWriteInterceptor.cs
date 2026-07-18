@@ -39,8 +39,8 @@ public struct PropertyWriteContext<TProperty>
     // trigger's already-resolved value.
     private long _writeTimestamp;
 
-    // Set by the PropertyChangeInterceptor instance that publishes this write's per-property listeners, so deeper aggregated instances do not double-deliver.
-    internal bool ArePropertyListenersPublished;
+    // Set by the PropertyChangeInterceptor instance that notifies this write's per-property observers, so deeper aggregated instances do not double-notify.
+    internal bool ArePropertyObserversNotified;
 
     /// <summary>
     /// Gets the property to write a value to.

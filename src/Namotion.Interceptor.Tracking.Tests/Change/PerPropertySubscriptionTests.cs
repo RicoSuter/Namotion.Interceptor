@@ -72,7 +72,7 @@ public class PerPropertySubscriptionTests
         var person = new Person(context);
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() =>
+        Assert.Throws<InvalidOperationException>(() =>
             new PropertyReference(person, "DoesNotExist").Subscribe((in SubjectPropertyChange _) => { }));
     }
 

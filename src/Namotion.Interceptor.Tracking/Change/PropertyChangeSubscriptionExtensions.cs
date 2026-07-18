@@ -20,15 +20,15 @@ public static class PropertyChangeSubscriptionExtensions
     /// </remarks>
     public static IDisposable Subscribe(this PropertyReference property, IPropertyChangeObserver observer)
     {
-        if (!property.Subject.Properties.TryGetValue(property.Name, out var metadata)
-            || !(metadata.IsIntercepted || metadata.IsDerived))
+        var metadata = property.Metadata; // throws InvalidOperationException when the name is not a known property
+        if (!(metadata.IsIntercepted || metadata.IsDerived))
         {
             throw new ArgumentException(
                 $"Property '{property.Name}' on {property.Subject.GetType().Name} cannot be subscribed to: it is not an intercepted or derived property, so its changes never enter the interception chain.",
                 nameof(property));
         }
 
-        return PropertyChangeSubscription.Install(property, observer);
+        return PropertyChangeSubscription.Create(property, observer);
     }
 
     /// <summary>Delegate overload of <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>.</summary>

@@ -118,9 +118,8 @@ public static class InterceptorSubjectContextExtensions
     /// than relying on the delivered new value.
     /// </summary>
     /// <param name="context">The context.</param>
-    /// <param name="scheduler">Unused. Retained for signature compatibility; the pull-based queue has no scheduler.</param>
     /// <returns>The queue subscription.</returns>
-    public static PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
+    public static PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this IInterceptorSubjectContext context)
     {
         return context
             .GetService<PropertyChangeInterceptor>()

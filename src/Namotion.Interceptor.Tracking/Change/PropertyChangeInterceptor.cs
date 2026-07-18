@@ -158,16 +158,16 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         next(ref context);
 
         // Post-commit listener resolution: full fence, count re-read, then the Data lookup.
-        // Published during unwind; the innermost aggregated instance resolves first, outer
-        // instances observe the publish (same thread, by-ref context) and skip.
+        // Notified during unwind; the innermost aggregated instance resolves first, outer
+        // instances observe the notification (same thread, by-ref context) and skip.
         PropertyChangeSubscription[]? listeners = null;
         Interlocked.MemoryBarrier();
-        if (PropertyChangeSubscriptions.ReadSubscriptionCount() != 0 && !context.ArePropertyListenersPublished)
+        if (PropertyChangeSubscriptions.ReadSubscriptionCount() != 0 && !context.ArePropertyObserversNotified)
         {
             listeners = TryGetListeners(context.Property);
             if (listeners is not null)
             {
-                context.ArePropertyListenersPublished = true;
+                context.ArePropertyObserversNotified = true;
             }
         }
 
@@ -209,7 +209,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     private static void DispatchLateListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
         Interlocked.MemoryBarrier();
-        if (PropertyChangeSubscriptions.ReadSubscriptionCount() == 0 || context.ArePropertyListenersPublished)
+        if (PropertyChangeSubscriptions.ReadSubscriptionCount() == 0 || context.ArePropertyObserversNotified)
         {
             return;
         }
@@ -220,7 +220,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             return;
         }
 
-        context.ArePropertyListenersPublished = true;
+        context.ArePropertyObserversNotified = true;
 
         var finalValue = context.GetFinalValue();
         var change = SubjectPropertyChange.Create(

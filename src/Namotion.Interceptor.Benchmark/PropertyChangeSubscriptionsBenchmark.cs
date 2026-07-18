@@ -21,7 +21,7 @@ namespace Namotion.Interceptor.Benchmark;
 /// write reaches the interceptor even when the value does not change.
 /// </summary>
 [MemoryDiagnoser]
-public class PropertyChangeNotificationBenchmark
+public class PropertyChangeSubscriptionsBenchmark
 {
     private const string WriteValue = "benchmark-value";
 
