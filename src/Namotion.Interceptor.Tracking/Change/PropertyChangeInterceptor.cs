@@ -91,7 +91,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         // published, with no handle to dispose, leaving the gate permanently open.
         ArgumentNullException.ThrowIfNull(observer);
 
-        ISubject<SubjectPropertyChange> syncSubject;
+        IDisposable inner;
         lock (_modificationLock)
         {
             // Intentionally NOT gated on _disposed. Interceptor disposal tears down the queue channel
@@ -104,19 +104,16 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
                 _syncSubject = Subject.Synchronize(_subject);
             }
 
-            syncSubject = _syncSubject!;
-        }
+            // Join BEFORE publishing state: the join's CAS-install into the subject's observer
+            // array precedes the volatile _state publish in program order, so a writer that
+            // observes the published state also observes the join (OnNext volatile-reads the
+            // observer array); moving the join after the publish reopens the missed-write window
+            // for a first observer racing a writer. Joining the raw subject under the lock is safe
+            // only because this subject is never completed, errored, or disposed, so Subscribe is
+            // a pure CAS and never invokes user code. The Synchronize wrapper gates OnNext only;
+            // its Subscribe forwards to this same subject.
+            inner = _subject.Subscribe(observer);
 
-        // Join BEFORE publishing state: the join's CAS-install into the subject's observer array
-        // precedes the volatile _state publish in program order, so a writer that observes the
-        // published state also observes the join (OnNext volatile-reads the observer array).
-        // Moving the join after the publish reopens the missed-write window for a first observer
-        // racing a writer. The Subject.Synchronize gate covers only OnNext, not Subscribe, so it
-        // provides no ordering here; joining outside the lock is robustness against Rx internals.
-        var inner = syncSubject.Subscribe(observer);
-
-        lock (_modificationLock)
-        {
             _observableConsumerCount++;
             if (_observableConsumerCount == 1)
             {
