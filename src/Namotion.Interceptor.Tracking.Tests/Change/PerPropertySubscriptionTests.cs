@@ -1,5 +1,3 @@
-using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -139,21 +137,4 @@ public class PerPropertySubscriptionTests
         Assert.Equal("John", person.FirstName);
     }
 
-    [RunsAfter(typeof(PropertyChangeInterceptor))]
-    private sealed class BlockingWriteInterceptor : IWriteInterceptor
-    {
-        public ManualResetEventSlim EnteredInnerChain { get; } = new(false);
-        public ManualResetEventSlim ProceedWithCommit { get; } = new(false);
-
-        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
-        {
-            EnteredInnerChain.Set();
-            if (!ProceedWithCommit.Wait(TimeSpan.FromSeconds(10)))
-            {
-                throw new TimeoutException("The test did not release the blocked write within 10 seconds.");
-            }
-
-            next(ref context);
-        }
-    }
 }

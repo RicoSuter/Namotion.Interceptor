@@ -13,6 +13,7 @@ public static class PropertyChangeSubscriptionExtensions
     /// <remarks>
     /// Disposing the returned handle is mandatory: the subject holds a strong reference, so a dropped
     /// handle keeps the observer alive and permanently disables the process-wide idle write fast path.
+    /// A dispatch already in flight may invoke the observer once more after Dispose returns.
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value.
@@ -47,6 +48,7 @@ public static class PropertyChangeSubscriptionExtensions
     /// <remarks>
     /// Disposing the returned handle is mandatory: the subject holds a strong reference, so a dropped
     /// handle keeps the observer alive and permanently disables the process-wide idle write fast path.
+    /// A dispatch already in flight may invoke the observer once more after Dispose returns.
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value.

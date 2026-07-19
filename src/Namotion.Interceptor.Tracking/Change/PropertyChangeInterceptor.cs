@@ -27,8 +27,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     private bool _disposed;
 
-    // White-box test hook: true when neither channel has consumers (the idle fast path).
-    // Used by the gate-closure and idle tests instead of a no-op "must not throw" assertion.
+    // White-box test hook: true when neither channel has consumers. The idle write fast path
+    // additionally requires the process-wide subscription count to be zero.
     internal bool IsIdle => _state is null;
 
     // Only surface the sync subject while at least one observable consumer is live; the field is
@@ -80,6 +80,10 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     public IDisposable Subscribe(IObserver<SubjectPropertyChange> observer)
     {
+        // Validate before publishing state: Rx would throw AFTER the consumer count was
+        // published, with no handle to dispose, leaving the gate permanently open.
+        ArgumentNullException.ThrowIfNull(observer);
+
         ISubject<SubjectPropertyChange> syncSubject;
         lock (_modificationLock)
         {
@@ -98,7 +102,9 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             PublishState(_state?.QueueSubscriptions ?? [], ActiveSyncSubject);
         }
 
-        // Benign race: a concurrent write may OnNext into syncSubject before this observer joins here; no observer expects changes from before its Subscribe returns.
+        // Joining outside the lock: a write may OnNext before this observer joins (treated as
+        // committed before install). A write already past the idle gate may be missed entirely
+        // when this is the first consumer (documented channel caveat).
         var inner = syncSubject.Subscribe(observer);
         return new ObservableSubscription(this, inner);
     }
@@ -136,36 +142,26 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         // Pre-commit gate decides only whether the old value must be captured; listener
         // RESOLUTION is post-commit, so an install racing this write is never missed
         // (spec: Post-commit listener resolution / the Dekker pair).
-        var state = _state;
-        if (state is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
+        if (_state is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
         {
             next(ref context);
             DispatchLateListeners(ref context);
             return;
         }
 
-        var subscriptions = state?.QueueSubscriptions ?? [];
-        var syncSubject = state?.SyncSubject;
-
         var oldValue = context.CurrentValue;
         next(ref context);
 
-        // Post-commit listener resolution during unwind: the innermost aggregated instance
-        // resolves first and sets the thread-local flag; checking it BEFORE the fence lets
-        // outer instances skip the fence entirely.
-        PropertyChangeSubscription[]? listeners = null;
-        if (!context.ArePropertyObserversNotified)
-        {
-            Interlocked.MemoryBarrier();
-            if (PropertyChangeSubscriptions.ReadSubscriptionCount() != 0)
-            {
-                listeners = TryGetListeners(context.Property);
-                if (listeners is not null)
-                {
-                    context.ArePropertyObserversNotified = true;
-                }
-            }
-        }
+        // Resolved during unwind; the innermost aggregated instance resolves first and marks
+        // the shared write context so outer instances skip.
+        var listeners = ResolveListeners(ref context);
+
+        // Channel state is re-read post-commit so a subscription installed while this write was
+        // in flight is still delivered; a full fence already ran post-commit on this thread
+        // (in ResolveListeners here or in an inner aggregated instance).
+        var state = _state;
+        var subscriptions = state?.QueueSubscriptions ?? [];
+        var syncSubject = state?.SyncSubject;
 
         if (syncSubject is null && subscriptions.Length == 0 && listeners is null)
         {
@@ -204,26 +200,11 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void DispatchLateListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
-        // Thread-local flag first (skips the fence); the count read must stay BEHIND the
-        // fence (Dekker read side pairing with subscription install).
-        if (context.ArePropertyObserversNotified)
-        {
-            return;
-        }
-
-        Interlocked.MemoryBarrier();
-        if (PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
-        {
-            return;
-        }
-
-        var listeners = TryGetListeners(context.Property);
+        var listeners = ResolveListeners(ref context);
         if (listeners is null)
         {
             return;
         }
-
-        context.ArePropertyObserversNotified = true;
 
         var finalValue = context.GetFinalValue();
         var change = SubjectPropertyChange.Create(
@@ -235,6 +216,32 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             finalValue);
 
         PropertyChangeSubscription.Dispatch(listeners, in change);
+    }
+
+    // Post-commit listener resolution, shared by both entry paths. The dedup flag is per-write
+    // context (by-ref on the writing thread), so reading it needs no fence; the count read must
+    // stay BEHIND the fence (Dekker read side pairing with subscription install).
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static PropertyChangeSubscription[]? ResolveListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
+    {
+        if (context.ArePropertyObserversNotified)
+        {
+            return null;
+        }
+
+        Interlocked.MemoryBarrier();
+        if (PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
+        {
+            return null;
+        }
+
+        var listeners = TryGetListeners(context.Property);
+        if (listeners is not null)
+        {
+            context.ArePropertyObserversNotified = true;
+        }
+
+        return listeners;
     }
 
     private static PropertyChangeSubscription[]? TryGetListeners(PropertyReference property)

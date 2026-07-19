@@ -191,6 +191,45 @@ public class PropertyChangeInterceptorTests
     }
 
     [Fact]
+    public async Task WhenQueueSubscriptionCreatedWhileWriteInFlight_ThenCommittedChangeIsDelivered()
+    {
+        // Arrange: an existing subscription keeps the write on the active path; the blocker parks
+        // the writer after the interceptor's pre-commit work and before the commit.
+        var blocker = new BlockingWriteInterceptor();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        context.WithService(() => blocker);
+        var person = new Person(context);
+        using var existing = context.CreatePropertyChangeQueueSubscription();
+
+        var writer = Task.Run(() => person.FirstName = "John");
+        Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
+
+        // Act: subscribe while the write is in flight, then release the commit.
+        using var late = context.CreatePropertyChangeQueueSubscription();
+        blocker.ProceedWithCommit.Set();
+        await writer.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert: the write committed after the late subscription was created, so it is delivered
+        // (channel state is re-read post-commit).
+        Assert.True(late.TryDequeue(out var change, new CancellationTokenSource(1000).Token));
+        Assert.Equal("John", change.GetNewValue<string?>());
+        Assert.Null(change.GetOldValue<string?>());
+    }
+
+    [Fact]
+    public void WhenNullObserverSubscribed_ThenThrowsAndInterceptorStaysIdle()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var interceptor = context.GetService<PropertyChangeInterceptor>();
+
+        // Act & Assert: validation runs before the consumer count is published, so the failed
+        // subscribe cannot permanently open the notification gate.
+        Assert.Throws<ArgumentNullException>(() => interceptor.Subscribe(null!));
+        Assert.True(interceptor.IsIdle);
+    }
+
+    [Fact]
     public async Task WhenInterceptorDisposeRacesCreateQueueSubscription_ThenEitherThrowsOrSubscriptionIsCompleted()
     {
         // Act & Assert: both interleavings are valid. If creation wins, disposal completes the

@@ -83,7 +83,8 @@ internal sealed class PropertyChangeSubscription : IDisposable
         Volatile.Write(ref _subject, null);
         Volatile.Write(ref Observer, null);
 
-        // Decrement AFTER removal so a concurrent write cannot read zero while still installed.
+        // Decrement after removal: defense in depth, not required for correctness (no delivery
+        // is owed to a subscription whose Dispose has begun).
         PropertyChangeSubscriptions.DecrementSubscriptionCount();
     }
 

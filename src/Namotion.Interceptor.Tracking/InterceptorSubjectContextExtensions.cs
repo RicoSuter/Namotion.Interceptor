@@ -89,7 +89,8 @@ public static class InterceptorSubjectContextExtensions
     /// Gets the property changed observable which is registered in the context.
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
-    /// than relying on the delivered new value.
+    /// than relying on the delivered new value. An observer subscribed while a write is already in flight
+    /// may not receive that write when it is the first consumer; read the current state after subscribing.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).
@@ -115,7 +116,8 @@ public static class InterceptorSubjectContextExtensions
     /// Creates a pull-based queue subscription over the property change interceptor registered in the context.
     /// Under concurrent writes to the same property, changes may be enqueued out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
-    /// than relying on the delivered new value.
+    /// than relying on the delivered new value. A subscription created while a write is already in flight
+    /// may not receive that write when it is the first consumer; read the current state after subscribing.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The queue subscription.</returns>
