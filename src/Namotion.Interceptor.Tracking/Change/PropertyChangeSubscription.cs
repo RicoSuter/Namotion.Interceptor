@@ -12,14 +12,14 @@ internal sealed class PropertyChangeSubscription : IDisposable
 
     private readonly string _propertyName;
     private IInterceptorSubject? _subject;                 // cleared on dispose
-    internal IPropertyChangeObserver? Observer;            // read via Volatile.Read on dispatch; cleared on dispose
+    private IPropertyChangeObserver? _observer;            // read via Volatile.Read on dispatch; cleared on dispose
     private int _disposed;                                 // one-shot flag
 
     private PropertyChangeSubscription(IInterceptorSubject subject, string propertyName, IPropertyChangeObserver observer)
     {
         _subject = subject;
         _propertyName = propertyName;
-        Observer = observer;
+        _observer = observer;
     }
 
     public static IDisposable Create(PropertyReference property, IPropertyChangeObserver observer)
@@ -62,7 +62,7 @@ internal sealed class PropertyChangeSubscription : IDisposable
                 }
                 // lost the race; retry
             }
-            else if (data.TryAdd(key, new PropertyChangeSubscription[] { subscription }))
+            else if (data.TryAdd(key, new[] { subscription }))
             {
                 Interlocked.MemoryBarrier(); // subscriber-side Dekker half, see above
                 return subscription;
@@ -86,7 +86,7 @@ internal sealed class PropertyChangeSubscription : IDisposable
 
         // Clear references so a retained handle pins neither subject nor observer; pair with dispatch Volatile.Read.
         Volatile.Write(ref _subject, null);
-        Volatile.Write(ref Observer, null);
+        Volatile.Write(ref _observer, null);
 
         // Decrement after removal: defense in depth, not required for correctness (no delivery
         // is owed to a subscription whose Dispose has begun).
@@ -134,11 +134,8 @@ internal sealed class PropertyChangeSubscription : IDisposable
     {
         for (var i = 0; i < subscriptions.Length; i++)
         {
-            var observer = Volatile.Read(ref subscriptions[i].Observer);
-            if (observer is not null)
-            {
-                observer.OnChange(in change);
-            }
+            var observer = Volatile.Read(ref subscriptions[i]._observer);
+            observer?.OnChange(in change);
         }
     }
 }

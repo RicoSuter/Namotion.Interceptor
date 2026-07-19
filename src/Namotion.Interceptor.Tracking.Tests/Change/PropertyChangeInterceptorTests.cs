@@ -199,17 +199,16 @@ public class PropertyChangeInterceptorTests
         var person = new Person(context);
         SubjectPropertyChange? first = null;
         SubjectPropertyChange? second = null;
-        using var existing = context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+        var observable = context.GetPropertyChangeObservable(ImmediateScheduler.Instance);
+        using var existing = observable
             .Subscribe(change => first = change);
 
         var writer = Task.Run(() => person.FirstName = "John");
         Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
 
-        // Act: a second observer joins mid-write (the join happens before the state publish), then
-        // the commit is released.
-        using var late = context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+        // Act: a second observer joins the same observable mid-write. Its subscription must reach
+        // the interceptor's guaranteed subscribe path before the commit is released.
+        using var late = observable
             .Subscribe(change => second = change);
         blocker.ProceedWithCommit.Set();
         await writer.WaitAsync(TimeSpan.FromSeconds(10));

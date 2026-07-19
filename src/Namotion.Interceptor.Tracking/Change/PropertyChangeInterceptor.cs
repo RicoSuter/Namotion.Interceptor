@@ -18,7 +18,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     private readonly Lock _modificationLock = new();
 
     // The single hot-path field. Null means neither channel has consumers (idle).
-    private volatile DispatchState? _state;
+    private volatile DispatchState? _dispatchState;
 
     // Observable channel state, guarded by _modificationLock. Lazily created on first subscribe.
     private Subject<SubjectPropertyChange>? _subject;
@@ -27,7 +27,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     // White-box test hook: true when neither channel has consumers. The idle write fast path
     // additionally requires the process-wide subscription count to be zero.
-    internal bool IsIdle => _state is null;
+    internal bool IsIdle => _dispatchState is null;
 
     // Only surface the sync subject while at least one observable consumer is live; the field is
     // never cleared, so publishing it unconditionally would resurrect an observer-less subject and
@@ -37,13 +37,13 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     private sealed class DispatchState
     {
         public required PropertyChangeQueueSubscription[] QueueSubscriptions { get; init; } // never null
-        public required ISubject<SubjectPropertyChange>? SyncSubject { get; init; }          // null = no observers
+        public required ISubject<SubjectPropertyChange>? SyncSubject { get; init; } // null = no observers
     }
 
     // Called under _modificationLock.
-    private void PublishState(PropertyChangeQueueSubscription[] queueSubscriptions, ISubject<SubjectPropertyChange>? syncSubject)
+    private void UpdateDispatchState(PropertyChangeQueueSubscription[] queueSubscriptions, ISubject<SubjectPropertyChange>? syncSubject)
     {
-        _state = queueSubscriptions.Length == 0 && syncSubject is null
+        _dispatchState = queueSubscriptions.Length == 0 && syncSubject is null
             ? null
             : new DispatchState { QueueSubscriptions = queueSubscriptions, SyncSubject = syncSubject };
     }
@@ -54,8 +54,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         lock (_modificationLock)
         {
             subscription = new PropertyChangeQueueSubscription(this);
-            var current = _state?.QueueSubscriptions ?? [];
-            PublishState(CopyOnWriteArray.Add(current, subscription), ActiveSyncSubject);
+            var current = _dispatchState?.QueueSubscriptions ?? [];
+            UpdateDispatchState(CopyOnWriteArray.Add(current, subscription), ActiveSyncSubject);
         }
 
         // Subscriber-side Dekker half: the state publish must be globally visible before the
@@ -69,14 +69,14 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     {
         lock (_modificationLock)
         {
-            var current = _state?.QueueSubscriptions ?? [];
+            var current = _dispatchState?.QueueSubscriptions ?? [];
             var index = Array.IndexOf(current, subscription);
             if (index < 0)
             {
                 return;
             }
 
-            PublishState(CopyOnWriteArray.RemoveAt(current, index), ActiveSyncSubject);
+            UpdateDispatchState(CopyOnWriteArray.RemoveAt(current, index), ActiveSyncSubject);
         }
     }
 
@@ -94,7 +94,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
                 _syncSubject = Subject.Synchronize(_subject);
             }
 
-            // Join BEFORE publishing state: the join's CAS-install precedes the volatile _state
+            // Join BEFORE publishing state: the join's CAS-install precedes the volatile _dispatchState
             // publish in program order, so a writer that observes the state also observes the
             // join; joining after the publish reopens the missed-write window. Safe under the
             // lock only because this subject is never completed, errored, or disposed (Subscribe
@@ -105,7 +105,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             if (_observableConsumerCount == 1)
             {
                 // Mirrors RemoveObservableConsumer's 1 to 0; later consumers share the published subject.
-                PublishState(_state?.QueueSubscriptions ?? [], ActiveSyncSubject);
+                UpdateDispatchState(_dispatchState?.QueueSubscriptions ?? [], ActiveSyncSubject);
             }
         }
 
@@ -120,7 +120,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         {
             if (_observableConsumerCount > 0 && --_observableConsumerCount == 0)
             {
-                PublishState(_state?.QueueSubscriptions ?? [], null);
+                UpdateDispatchState(_dispatchState?.QueueSubscriptions ?? [], null);
             }
         }
     }
@@ -128,7 +128,6 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     private sealed class ObservableSubscription(PropertyChangeInterceptor interceptor, IDisposable inner) : IDisposable
     {
         private PropertyChangeInterceptor? _interceptor = interceptor;
-        private readonly IDisposable _inner = inner;
 
         public void Dispose()
         {
@@ -137,7 +136,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
                 return; // one-shot
             }
 
-            _inner.Dispose();
+            inner.Dispose();
             owner.RemoveObservableConsumer();
         }
     }
@@ -147,7 +146,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         // Pre-commit gate decides only whether the old value needs a local snapshot before the
         // inner chain; listener RESOLUTION is post-commit (see ResolveListeners), so an install
         // racing this write is never missed. The idle path retains CurrentValue in the context.
-        if (_state is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
+        if (_dispatchState is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
         {
             next(ref context);
             DispatchLateConsumers(ref context);
@@ -168,7 +167,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
         // Re-read post-commit so a subscription installed mid-write is delivered; a full fence
         // already ran on this thread (ResolveListeners here or in an inner aggregated instance).
-        var state = _state;
+        var state = _dispatchState;
         var subscriptions = state?.QueueSubscriptions ?? [];
         var syncSubject = state?.SyncSubject;
 
@@ -190,10 +189,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             subscriptions[i].Enqueue(in change);
         }
 
-        if (syncSubject is not null)
-        {
-            syncSubject.OnNext(change);
-        }
+        syncSubject?.OnNext(change);
 
         if (listeners is not null)
         {
@@ -218,8 +214,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
         // Channel state re-read behind the fence (ResolveListeners fenced on this thread, or an
         // inner aggregated instance did): pairs with the fence after the channel install.
-        var state = _state;
-
+        var state = _dispatchState;
         if (state is null && listeners is null)
         {
             return;

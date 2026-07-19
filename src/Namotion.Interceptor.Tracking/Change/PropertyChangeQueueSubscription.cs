@@ -12,7 +12,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 public sealed class PropertyChangeQueueSubscription : IDisposable
 {
     // Cleared on disposal (doubles as the one-shot dispose flag) so a retained handle does not
-    // pin the interceptor and its other consumers.
+    // directly pin the interceptor and its other consumers. Buffered changes can retain their
+    // subjects and contexts until they are drained or the handle itself is collected.
     private PropertyChangeInterceptor? _interceptor;
 
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
@@ -73,7 +74,7 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
             }
 
             // Reset the signal and re-check via TryDequeue to avoid lost wake-ups; also re-check
-            // completion so a Complete()/Dispose() Set() that raced the Reset is not lost.
+            // completion so a Dispose() Set() that raced the Reset is not lost.
             _signal.Reset();
             if (_queue.TryDequeue(out item))
             {

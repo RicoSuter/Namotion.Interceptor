@@ -37,7 +37,7 @@ public static class InterceptorSubjectContextExtensions
 
     /// <summary>
     /// Registers an interceptor that checks if the new value is different from the current value and only calls inner interceptors when the property has changed.
-    /// Uses EqualityComparer.Default for value types or strings and does nothing for reference types.
+    /// Uses <c>EqualityComparer&lt;T&gt;.Default</c> for all property types, including reference types.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
@@ -76,9 +76,10 @@ public static class InterceptorSubjectContextExtensions
     /// Registers the property change interceptor, enabling both the Rx observable
     /// (<see cref="GetPropertyChangeObservable"/>) and the high-performance queue
     /// (<see cref="CreatePropertyChangeQueueSubscription"/>) channels, and per-property subscriptions.
-    /// Every committed write is published, including writes of an equal value; combine with
-    /// <see cref="WithEqualityCheck"/> (or use <see cref="WithFullPropertyTracking"/>) to suppress
-    /// no-op writes of value types and strings (reference-typed values are not compared).
+    /// By itself, the interceptor does not suppress writes of equal values. Combine with
+    /// <see cref="WithEqualityCheck"/> (or use
+    /// <see cref="WithFullPropertyTracking"/>) to suppress values that compare equal according to
+    /// <c>EqualityComparer&lt;T&gt;.Default</c>.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
@@ -93,12 +94,12 @@ public static class InterceptorSubjectContextExtensions
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value.
-    /// A write that commits after Subscribe returns is always delivered while the subscription stays live
-    /// and no earlier synchronous observer of the same write throws; a write that committed before may not
-    /// be, and reading the property after subscribing observes that earlier state. OldValue is the value
-    /// the setter observed when it started, including when the subscription raced the write. For a
-    /// scheduler-based observer, delivered means accepted by the channel, not that the callback has
-    /// already run.
+    /// Provided the downstream interceptor chain returns normally after the commit, a write that commits
+    /// after Subscribe returns is always delivered while the subscription stays live and no earlier
+    /// synchronous observer of the same write throws. A write that committed before may not be, and reading
+    /// the property after subscribing observes that earlier state. OldValue is the value the setter observed
+    /// when it started, including when the subscription raced the write. For a scheduler-based observer,
+    /// delivered means accepted by the channel, not that the callback has already run.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).
@@ -108,7 +109,7 @@ public static class InterceptorSubjectContextExtensions
     {
         // The interceptor is already a synchronized multicast observable, so every observer goes
         // through its guaranteed subscribe path directly; AsObservable only hides the concrete
-        // type so callers cannot cast the result and dispose the interceptor.
+        // implementation type from consumers.
         var observable = context
             .GetService<PropertyChangeInterceptor>()
             .AsObservable();
