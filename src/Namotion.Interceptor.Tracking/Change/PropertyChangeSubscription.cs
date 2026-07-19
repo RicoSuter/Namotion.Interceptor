@@ -54,12 +54,18 @@ internal sealed class PropertyChangeSubscription : IDisposable
                 // the same array instance (EqualityComparer<object?>.Default = reference equality for arrays).
                 if (data.TryUpdate(key, updated, current))
                 {
+                    // Subscriber-side Dekker half: the publication must be globally visible before
+                    // the caller's post-subscribe property reads. The count increment fences before
+                    // the install, not after it, and a dictionary bucket-lock release is not a full
+                    // fence. Mirrors CreateQueueSubscription.
+                    Interlocked.MemoryBarrier();
                     return subscription;
                 }
                 // lost the race; retry
             }
             else if (data.TryAdd(key, new PropertyChangeSubscription[] { subscription }))
             {
+                Interlocked.MemoryBarrier(); // subscriber-side Dekker half, see above
                 return subscription;
             }
             // else another thread added first; loop and TryUpdate
