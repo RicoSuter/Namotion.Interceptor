@@ -152,6 +152,11 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         var oldValue = context.CurrentValue;
         next(ref context);
 
+        if (!context.IsWritten)
+        {
+            return; // vetoed by an inner interceptor: nothing was stored, publish nothing
+        }
+
         // Resolved during unwind; the innermost aggregated instance resolves first and marks
         // the shared write context so outer instances skip.
         var listeners = ResolveListeners(ref context);
@@ -200,6 +205,11 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void DispatchLateListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
+        if (!context.IsWritten)
+        {
+            return; // vetoed: nothing was stored
+        }
+
         var listeners = ResolveListeners(ref context);
         if (listeners is null)
         {

@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -355,6 +357,39 @@ public class PerPropertySubscriptionLifecycleTests
         foreach (var handle in permanent)
         {
             handle.Dispose();
+        }
+    }
+
+    [Fact]
+    public void WhenInnerInterceptorVetoesWrite_ThenNoNotificationIsPublished()
+    {
+        // Arrange: the veto interceptor sits deeper than PropertyChangeInterceptor and returns
+        // without calling next, so the terminal never runs and IsWritten stays false.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        context.WithService(() => new VetoWriteInterceptor());
+        var person = new Person(context);
+        var queue = context.CreatePropertyChangeQueueSubscription();
+        var hits = 0;
+        using var listener = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange _) => hits++);
+
+        // Act
+        person.FirstName = "John";
+
+        // Assert: nothing was stored and nothing was published. Disposing first makes TryDequeue
+        // non-blocking: it would drain a wrongly delivered item and returns false on an empty queue.
+        queue.Dispose();
+        Assert.Null(person.FirstName);
+        Assert.Equal(0, hits);
+        Assert.False(queue.TryDequeue(out _, CancellationToken.None));
+    }
+
+    [RunsAfter(typeof(PropertyChangeInterceptor))]
+    private sealed class VetoWriteInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            // Intentionally does not call next: the write never commits.
         }
     }
 }
