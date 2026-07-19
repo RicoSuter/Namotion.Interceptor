@@ -90,12 +90,12 @@ public static class SubjectRegistryExtensions
     /// <param name="subject">The subject with the property.</param>
     /// <param name="propertyName">The property name to find.</param>
     /// <param name="registry">The optional registry, otherwise the registry is resolved dynamically.</param>
-    /// <returns>The registered property.</returns>
+    /// <returns>The registered property, or <see langword="null"/> when the context has no registry or the property is not registered.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName, ISubjectRegistry? registry = null)
     {
-        registry ??= subject.Context.GetService<ISubjectRegistry>();
-        return registry
+        registry ??= subject.Context.TryGetService<ISubjectRegistry>();
+        return registry?
             .TryGetRegisteredSubject(subject)?
             .TryGetProperty(propertyName);
     }

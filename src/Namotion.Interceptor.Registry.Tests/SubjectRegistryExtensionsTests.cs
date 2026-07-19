@@ -364,4 +364,22 @@ public class SubjectRegistryExtensionsTests
         // Assert
         Assert.Null(registeredSubjectProperty);
     }
+
+    [Fact]
+    public void WhenContextHasNoRegistry_ThenTryGetRegisteredPropertyReturnsNull()
+    {
+        // Arrange
+        var person = new Person(InterceptorSubjectContext.Create())
+        {
+            FirstName = "Child"
+        };
+
+        // Act
+        var byName = person.TryGetRegisteredProperty(nameof(Person.FirstName));
+        var byExpression = person.TryGetRegisteredProperty(p => p.FirstName);
+
+        // Assert
+        Assert.Null(byName);
+        Assert.Null(byExpression);
+    }
 }
