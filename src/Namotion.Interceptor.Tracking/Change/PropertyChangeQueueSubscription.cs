@@ -11,11 +11,13 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 public sealed class PropertyChangeQueueSubscription : IDisposable
 {
-    private readonly PropertyChangeInterceptor _interceptor;
+    // Cleared on completion and disposal (doubles as the one-shot dispose flag) so a retained
+    // handle does not pin the interceptor and its other consumers.
+    private PropertyChangeInterceptor? _interceptor;
+
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
     private readonly ManualResetEventSlim _signal = new(false); // non-counting signal
     private volatile bool _completed;
-    private int _disposed; // one-shot flag
 
     internal PropertyChangeQueueSubscription(PropertyChangeInterceptor interceptor)
     {
@@ -45,6 +47,7 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     {
         _completed = true;
         _signal.Set();
+        Interlocked.Exchange(ref _interceptor, null);
     }
 
     /// <summary>
@@ -53,7 +56,8 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     /// </summary>
     /// <param name="item">The dequeued property change if available.</param>
     /// <param name="cancellationToken">Cancellation token to abort the wait.</param>
-    /// <returns>True if an item was dequeued; false if the subscription is completed or cancelled.</returns>
+    /// <returns>True if an item was dequeued; false when cancellation is requested, or when the
+    /// subscription is completed and its queue is empty.</returns>
     public bool TryDequeue(out SubjectPropertyChange item, CancellationToken cancellationToken)
     {
         while (true)
@@ -108,9 +112,10 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        var owner = Interlocked.Exchange(ref _interceptor, null);
+        if (owner is null)
         {
-            return; // one-shot
+            return; // already disposed, or completed by the interceptor
         }
 
         _completed = true;
@@ -118,7 +123,7 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
         // Wake any waiting TryDequeue
         _signal.Set();
 
-        _interceptor.RemoveQueueSubscription(this);
+        owner.RemoveQueueSubscription(this);
 
         // Deliberately not disposing _signal: a concurrent producer may still call _signal.Set() after its _completed check (enqueue-vs-dispose fix).
     }

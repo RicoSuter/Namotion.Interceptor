@@ -17,9 +17,10 @@ public static class PropertyChangeSubscriptionExtensions
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value.
-    /// A write that commits after this subscription is installed is always delivered; a write that committed
-    /// before the install may not be, and reading the property after subscribing observes that earlier state;
-    /// a write that raced the install may be delivered with OldValue equal to NewValue.
+    /// A write that commits after Subscribe returns is always delivered while the subscription stays live
+    /// and no earlier synchronous observer of the same write throws; a write that committed before may not
+    /// be, and reading the property after subscribing observes that earlier state; a write that raced the
+    /// subscribe may be delivered with OldValue equal to NewValue.
     /// </remarks>
     public static IDisposable Subscribe(this PropertyReference property, IPropertyChangeObserver observer)
     {
@@ -60,6 +61,9 @@ public static class PropertyChangeSubscriptionExtensions
         IPropertyChangeObserver observer)
         where TSubject : IInterceptorSubject
     {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(propertySelector);
+
         var name = ResolveDirectPropertyName(propertySelector);
         return new PropertyReference(subject, name).Subscribe(observer);
     }

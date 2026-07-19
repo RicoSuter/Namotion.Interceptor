@@ -259,16 +259,22 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         }
     }
 
-    // Post-commit listener resolution, shared by both entry paths. The dedup flag is per-write
-    // context (by-ref on the writing thread), so reading it needs no fence; the count read must
-    // stay BEHIND the fence (Dekker read side pairing with subscription install).
+    // Post-commit listener resolution, shared by both entry paths and performed once per write:
+    // the innermost aggregated instance resolves (whether or not listeners exist) and marks the
+    // per-write context so outer instances skip. A listener installed after this resolution is
+    // not owed the write (it committed before the install; the post-subscribe read observes it).
+    // The flag needs no fence (by-ref context on the writing thread) and the instance that sets
+    // it always executes the fence, which the channel state re-reads rely on; the count read
+    // must stay BEHIND the fence (Dekker read side pairing with subscription install).
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static PropertyChangeSubscription[]? ResolveListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
-        if (context.ArePropertyObserversNotified)
+        if (context.ArePropertyObserversResolved)
         {
             return null;
         }
+
+        context.ArePropertyObserversResolved = true;
 
         Interlocked.MemoryBarrier();
         if (PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
@@ -276,13 +282,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             return null;
         }
 
-        var listeners = TryGetListeners(context.Property);
-        if (listeners is not null)
-        {
-            context.ArePropertyObserversNotified = true;
-        }
-
-        return listeners;
+        return TryGetListeners(context.Property);
     }
 
     private static PropertyChangeSubscription[]? TryGetListeners(PropertyReference property)
@@ -292,6 +292,11 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             : null;
     }
 
+    /// <summary>
+    /// Tears down the queue channel only: existing queue subscriptions are completed (buffered
+    /// items stay drainable) and creating new ones throws. The observable channel and per-property
+    /// subscriptions keep working, including observers subscribed after disposal.
+    /// </summary>
     public void Dispose()
     {
         PropertyChangeQueueSubscription[] toComplete;

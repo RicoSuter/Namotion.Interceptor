@@ -93,7 +93,7 @@ The library uses a fluent configuration API:
 
 - **Global Settings**: `Directory.Build.props` with nullable enabled, warnings as errors
 - **Target Frameworks**: .NET Standard 2.0 (core), .NET 9.0 (extensions)
-- **Package Version**: 0.0.2 (early development)
+- **Package Version**: released on NuGet, breaking changes are fine when justified but need user approval
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
 
 ## Key Dependencies

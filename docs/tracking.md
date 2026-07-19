@@ -118,7 +118,7 @@ Only a direct property access on the lambda parameter is accepted (`x => x.First
 
 **Dormancy and revival**: you may subscribe before the subject is attached to a context that has the `PropertyChangeInterceptor`. The subscription is valid but dormant (no deliveries) until the subject is attached, and it revives automatically when the subject is re-attached. A subscription installed on an already attached subject is live immediately.
 
-**Delivery guarantee**: a write that commits after the subscription's install is always delivered. A write that committed before the install may not be, so read the property after subscribing to observe that earlier state. A write that races the install may be delivered with `OldValue` equal to `NewValue`. The same guarantee applies to all three channels: per-property subscriptions, `CreatePropertyChangeQueueSubscription`, and `GetPropertyChangeObservable` all resolve their consumers after the commit, so a subscription whose creating call returned before the write commits receives it regardless of channel.
+**Delivery guarantee**: a write that commits after the subscribing call returned is always delivered while the subscription stays live and no earlier synchronous observer of the same write throws. A write that committed before may not be, so read the property after subscribing to observe that earlier state. A write that races the subscribe may be delivered with `OldValue` equal to `NewValue`. The same guarantee applies to all three channels: per-property subscriptions, `CreatePropertyChangeQueueSubscription`, and `GetPropertyChangeObservable` all resolve their consumers after the commit.
 
 **Ownership and lifetime**: `Subscribe` and `SubscribeToProperty` return an `IDisposable`, and disposing it is mandatory. Dispose stops future deliveries (one already in flight may still invoke the observer after `Dispose` returns) and releases the subscription. A dropped, undisposed handle keeps the observer receiving changes while the subject stays alive, and it also degrades the whole process permanently: the count that gates the idle write fast path is decremented only by `Dispose` (there is no finalizer), so one leaked subscription keeps every write in the process on the slower listener-check path for the process lifetime. The subject and its subscriptions are still collected together once nothing references the subject, but the fast path does not recover. A retained handle pins the subject, and an observer that captures the subject pins it too.
 
@@ -126,9 +126,9 @@ Only a direct property access on the lambda parameter is accepted (`x => x.First
 
 Notification dispatch starts on the writing thread, outside the subject lock, and shares one contract. The per-property listeners and the queue run inline there; `GetPropertyChangeObservable()` pushes there too but reschedules its subscribers onto its scheduler by default (unless you pass `ImmediateScheduler.Instance`).
 
-- **Ordering**: under concurrent writes to the same property, notifications may arrive out of commit order. If you need the current value, re-read the property rather than relying on the delivered new value.
+- **Ordering**: under concurrent writes to the same property, notifications may arrive out of commit order. If you need the current value, re-read the property rather than relying on the delivered new value. `OldValue` is the value the setter observed when it started, not necessarily the value immediately preceding the commit, so under concurrency delivered old and new pairs may not chain; the racing-subscription case is the exception and delivers the final value as both old and new.
 - **Per-property observers are not serialized**: an `IPropertyChangeObserver` or `PropertyChangeCallback` may be invoked concurrently on multiple threads and must be thread-safe, fast, non-blocking, and must not throw. Wrap failing work in a try-catch internally. (The Rx observable is serialized through `Subject.Synchronize()`; the queue is single-consumer per subscription.)
-- **A throwing synchronous Rx observer suppresses listener delivery**: the Rx observable is notified before the per-property listeners on each write, so a synchronous Rx observer that throws propagates out of the write and the per-property listeners do not run for that write. Keep synchronous Rx observers exception-free.
+- **A throwing synchronous Rx observer suppresses listener delivery**: the Rx observable is notified before the per-property listeners on each write, so a synchronous Rx observer that throws propagates out of the write and the per-property listeners do not run for that write. Keep synchronous Rx observers exception-free. The exception surfaces from the setter after the value was committed and nothing is rolled back; the property keeps the new value. For scheduler-based Rx observers, delivery means the change was accepted by the channel, not that the callback has already run.
 - **Transactions replay on commit**: with `WithTransactions()`, writes captured inside a transaction do not notify during capture. They replay through the interceptor on commit and notifications fire then. If the transaction is rolled back (disposed without commit), the changes are discarded, no notifications fire, and the property keeps its pre-transaction value. If a best-effort commit partially applies and then reverts, listeners observe the apply-and-revert pair, so a consumer such as a watchdog or dirty flag must not treat the revert as a user change.
 
 ## Property Value Equality Check
@@ -528,7 +528,15 @@ This is primarily used internally by the derived property change detection syste
 - **Enqueue (producer side)**: Fully thread-safe. Can be called concurrently from multiple threads without any synchronization.
 - **TryDequeue (consumer side)**: Designed for single-threaded consumption per subscription. Each subscription must have only one consumer thread calling `TryDequeue`.
 - **Multiple Subscriptions**: Each subscription is independent with its own isolated queue. Different subscriptions can be consumed by different threads concurrently.
-- **Guarantees**: The implementation is deadlock-free, never loses updates, and ensures all enqueued items are processed before disposal completes.
+- **Guarantees**: The implementation is deadlock-free and never loses an enqueued item.
+
+**Queue contract**:
+
+- The queue is unbounded with no backpressure or overflow policy; a slow consumer causes unbounded memory growth.
+- Disposal and completion return immediately. They wake a waiting consumer and stop future enqueues, but do not wait for buffered items; the consumer may still drain them afterwards (`TryDequeue` returns the remaining items, then `false`).
+- An enqueue already in flight on a writer thread may finish after `Dispose` returns.
+- Cancellation takes priority over buffered items: `TryDequeue` checks the token before dequeuing, so a cancelled call returns `false` even when items are available.
+- Independent queue subscriptions may observe different relative orderings under concurrent writes.
 
 **Change Sources**: Use the `SetValueFromSource()` extension method to apply a value coming from an external source:
 

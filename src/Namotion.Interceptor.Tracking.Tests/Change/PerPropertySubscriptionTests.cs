@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -75,7 +76,7 @@ public class PerPropertySubscriptionTests
     }
 
     [Fact]
-    public void WhenObserverOrCallbackIsNull_ThenSubscribeThrowsAndCountStaysZero()
+    public void WhenAnySubscribeArgumentIsNull_ThenThrowsAndCountStaysZero()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
@@ -89,6 +90,8 @@ public class PerPropertySubscriptionTests
         Assert.Throws<ArgumentNullException>(() => property.Subscribe((PropertyChangeCallback)null!));
         Assert.Throws<ArgumentNullException>(() => person.SubscribeToProperty(x => x.FirstName, (IPropertyChangeObserver)null!));
         Assert.Throws<ArgumentNullException>(() => person.SubscribeToProperty(x => x.FirstName, (PropertyChangeCallback)null!));
+        Assert.Throws<ArgumentNullException>(() => ((Person)null!).SubscribeToProperty(x => x.FirstName, (in SubjectPropertyChange _) => { }));
+        Assert.Throws<ArgumentNullException>(() => person.SubscribeToProperty((Expression<Func<Person, string?>>)null!, (in SubjectPropertyChange _) => { }));
         Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
     }
 
