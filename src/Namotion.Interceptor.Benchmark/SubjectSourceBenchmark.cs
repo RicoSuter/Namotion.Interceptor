@@ -98,7 +98,8 @@ public class SubjectSourceBenchmark
                 0,
                 i);
 
-            queue.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
+            // The stub next models the terminal, which sets IsWritten when the value is stored.
+            queue.WriteProperty(ref context, (ref PropertyWriteContext<int> c) => c.IsWritten = true);
         }
 
         _source.Wait();
