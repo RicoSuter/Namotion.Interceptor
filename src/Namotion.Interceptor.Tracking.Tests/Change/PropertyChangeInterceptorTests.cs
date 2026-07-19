@@ -315,6 +315,45 @@ public class PropertyChangeInterceptorTests
     }
 
     [Fact]
+    public void WhenDisposedWithBufferedItems_ThenConsumerDrainsThemBeforeFalse()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var subscription = context.CreatePropertyChangeQueueSubscription();
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        // Act
+        subscription.Dispose();
+
+        // Assert: buffered items stay drainable after disposal, then the queue reports completion.
+        Assert.True(subscription.TryDequeue(out var first, CancellationToken.None));
+        Assert.Equal(nameof(Person.FirstName), first.Property.Name);
+        Assert.True(subscription.TryDequeue(out var second, CancellationToken.None));
+        Assert.Equal(nameof(Person.LastName), second.Property.Name);
+        Assert.False(subscription.TryDequeue(out _, CancellationToken.None));
+    }
+
+    [Fact]
+    public void WhenTokenAlreadyCancelled_ThenTryDequeueReturnsFalseEvenWithBufferedItems()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        person.FirstName = "John";
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        // Act & Assert: cancellation takes priority over buffered items (documented contract);
+        // the item remains available to a non-cancelled call.
+        Assert.False(subscription.TryDequeue(out _, cancellation.Token));
+        Assert.True(subscription.TryDequeue(out var change, CancellationToken.None));
+        Assert.Equal("John", change.GetNewValue<string?>());
+    }
+
+    [Fact]
     public void WhenMultiplePropertiesChanged_ThenAllChangesAreDequeuedInOrder()
     {
         // Arrange
