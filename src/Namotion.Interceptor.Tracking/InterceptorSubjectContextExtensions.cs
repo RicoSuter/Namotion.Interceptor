@@ -116,12 +116,8 @@ public static class InterceptorSubjectContextExtensions
 
     /// <summary>
     /// Creates a pull-based queue subscription over the property change interceptor registered in the context.
-    /// Under concurrent writes to the same property, changes may be enqueued out of commit order because
-    /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
-    /// than relying on the delivered new value.
-    /// A write that commits after this method returns is always delivered; a write that committed before
-    /// may not be, and reading the property after subscribing observes that earlier state; a write that
-    /// raced the subscription may be delivered with OldValue equal to NewValue.
+    /// Same ordering caveat and delivery contract as <see cref="GetPropertyChangeObservable"/>, with the
+    /// guarantee anchored to this method returning.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The queue subscription.</returns>

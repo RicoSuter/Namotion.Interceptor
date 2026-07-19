@@ -23,8 +23,7 @@ public static class PropertyChangeSubscriptionExtensions
     /// </remarks>
     public static IDisposable Subscribe(this PropertyReference property, IPropertyChangeObserver observer)
     {
-        // Reject before install: a null observer would install a silent never-firing subscription
-        // that still opens the process-wide gate (dispatch skips null observers).
+        // A null observer would install a silent never-firing subscription that still opens the process-wide gate.
         ArgumentNullException.ThrowIfNull(observer);
 
         var metadata = property.Metadata; // throws InvalidOperationException when the name is not a known property
@@ -41,8 +40,7 @@ public static class PropertyChangeSubscriptionExtensions
     /// <summary>Delegate overload of <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>.</summary>
     public static IDisposable Subscribe(this PropertyReference property, PropertyChangeCallback callback)
     {
-        // Reject here: a null callback wrapped in DelegateObserver would throw NullReferenceException
-        // on an unrelated writer thread at dispatch time.
+        // A null callback wrapped in DelegateObserver would fail on a writer thread at dispatch time.
         ArgumentNullException.ThrowIfNull(callback);
         return property.Subscribe(new DelegateObserver(callback));
     }
@@ -53,15 +51,8 @@ public static class PropertyChangeSubscriptionExtensions
     /// the lambda parameter is accepted; chained, captured, static, field, and method selectors throw.
     /// </summary>
     /// <remarks>
-    /// Disposing the returned handle is mandatory: the subject holds a strong reference, so a dropped
-    /// handle keeps the observer alive and permanently disables the process-wide idle write fast path.
-    /// Dispatches already in flight may still invoke the observer after Dispose returns.
-    /// Under concurrent writes to the same property, notifications may arrive out of commit order because
-    /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
-    /// than relying on the delivered new value.
-    /// A write that commits after this subscription is installed is always delivered; a write that committed
-    /// before the install may not be, and reading the property after subscribing observes that earlier state;
-    /// a write that raced the install may be delivered with OldValue equal to NewValue.
+    /// Same ownership, concurrency, and delivery contract as
+    /// <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>.
     /// </remarks>
     public static IDisposable SubscribeToProperty<TSubject, TValue>(
         this TSubject subject,
@@ -80,8 +71,7 @@ public static class PropertyChangeSubscriptionExtensions
         PropertyChangeCallback callback)
         where TSubject : IInterceptorSubject
     {
-        // Same rationale as the PropertyReference callback overload: wrapping first would bypass
-        // the observer null guard and fail at dispatch time on a writer thread.
+        // Wrapping first would bypass the observer null guard and fail on a writer thread at dispatch time.
         ArgumentNullException.ThrowIfNull(callback);
         return subject.SubscribeToProperty(propertySelector, new DelegateObserver(callback));
     }

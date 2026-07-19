@@ -54,10 +54,9 @@ internal sealed class PropertyChangeSubscription : IDisposable
                 // the same array instance (EqualityComparer<object?>.Default = reference equality for arrays).
                 if (data.TryUpdate(key, updated, current))
                 {
-                    // Subscriber-side Dekker half: the publication must be globally visible before
-                    // the caller's post-subscribe property reads. The count increment fences before
-                    // the install, not after it, and a dictionary bucket-lock release is not a full
-                    // fence. Mirrors CreateQueueSubscription.
+                    // Subscriber-side Dekker half: the publication must be visible before the
+                    // caller's post-subscribe reads (the increment fences before the install, and
+                    // a bucket-lock release is not a full fence). Mirrors CreateQueueSubscription.
                     Interlocked.MemoryBarrier();
                     return subscription;
                 }
@@ -113,8 +112,7 @@ internal sealed class PropertyChangeSubscription : IDisposable
 
             if (current.Length == 1)
             {
-                // Remove the whole entry with a compare-and-remove (reference equality on the array value).
-                // TryRemovePropertyData removes (Name, key) only if the stored value reference-equals current.
+                // Compare-and-remove: drops the entry only if it still reference-equals current.
                 if (new PropertyReference(subject, propertyName).TryRemovePropertyData(ListenersKey, current))
                 {
                     return;

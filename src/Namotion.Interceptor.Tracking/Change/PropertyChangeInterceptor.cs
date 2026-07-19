@@ -11,7 +11,6 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// (see <see cref="InterceptorSubjectContextExtensions.GetPropertyChangeObservable"/>), a
 /// high-performance pull queue (see <see cref="InterceptorSubjectContextExtensions.CreatePropertyChangeQueueSubscription"/>),
 /// and synchronous per-property subscriptions (see <see cref="PropertyChangeSubscriptionExtensions"/>).
-/// Replaces the former PropertyChangeObservable and PropertyChangeQueue.
 /// </summary>
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
 public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChange>, IWriteInterceptor, IDisposable
@@ -43,7 +42,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         public required ISubject<SubjectPropertyChange>? SyncSubject { get; init; }          // null = no observers
     }
 
-    // Called under _modificationLock. Publishes null when both channels are empty.
+    // Called under _modificationLock.
     private void PublishState(PropertyChangeQueueSubscription[] queueSubscriptions, ISubject<SubjectPropertyChange>? syncSubject)
     {
         _state = queueSubscriptions.Length == 0 && syncSubject is null
@@ -87,8 +86,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     public IDisposable Subscribe(IObserver<SubjectPropertyChange> observer)
     {
-        // Validate before publishing state: Rx would throw AFTER the consumer count was
-        // published, with no handle to dispose, leaving the gate permanently open.
+        // Validate first: a later throw would leave the consumer count published with no handle to dispose.
         ArgumentNullException.ThrowIfNull(observer);
 
         IDisposable inner;
@@ -104,21 +102,17 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
                 _syncSubject = Subject.Synchronize(_subject);
             }
 
-            // Join BEFORE publishing state: the join's CAS-install into the subject's observer
-            // array precedes the volatile _state publish in program order, so a writer that
-            // observes the published state also observes the join (OnNext volatile-reads the
-            // observer array); moving the join after the publish reopens the missed-write window
-            // for a first observer racing a writer. Joining the raw subject under the lock is safe
-            // only because this subject is never completed, errored, or disposed, so Subscribe is
-            // a pure CAS and never invokes user code. The Synchronize wrapper gates OnNext only;
-            // its Subscribe forwards to this same subject.
+            // Join BEFORE publishing state: the join's CAS-install precedes the volatile _state
+            // publish in program order, so a writer that observes the state also observes the
+            // join; joining after the publish reopens the missed-write window. Safe under the
+            // lock only because this subject is never completed, errored, or disposed (Subscribe
+            // is then a pure CAS); the Synchronize wrapper gates OnNext only.
             inner = _subject.Subscribe(observer);
 
             _observableConsumerCount++;
             if (_observableConsumerCount == 1)
             {
-                // Only the 0 to 1 transition changes the state; further consumers share the
-                // already-published sync subject (mirrors RemoveObservableConsumer's 1 to 0).
+                // Mirrors RemoveObservableConsumer's 1 to 0; later consumers share the published subject.
                 PublishState(_state?.QueueSubscriptions ?? [], ActiveSyncSubject);
             }
         }
@@ -180,9 +174,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         // the shared write context so outer instances skip.
         var listeners = ResolveListeners(ref context);
 
-        // Channel state is re-read post-commit so a subscription installed while this write was
-        // in flight is still delivered; a full fence already ran post-commit on this thread
-        // (in ResolveListeners here or in an inner aggregated instance).
+        // Re-read post-commit so a subscription installed mid-write is delivered; a full fence
+        // already ran on this thread (ResolveListeners here or in an inner aggregated instance).
         var state = _state;
         var subscriptions = state?.QueueSubscriptions ?? [];
         var syncSubject = state?.SyncSubject;
@@ -217,10 +210,9 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     }
 
     /// <summary>
-    /// Idle-entry path: the pre-commit gate saw no consumers, so no old value was captured. A
-    /// per-property listener, queue subscription, or first observer installed while the write was
-    /// in flight is still delivered, with the final value as both old and new (documented caveat).
-    /// Non-inlined so the idle fast path stays small.
+    /// Idle-entry path: the gate saw no consumers, so no old value was captured. A listener or
+    /// channel subscription installed while the write was in flight is still delivered, with the
+    /// final value as both old and new (documented caveat). Non-inlined to keep the fast path small.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void DispatchLateConsumers<TProperty>(ref PropertyWriteContext<TProperty> context)
