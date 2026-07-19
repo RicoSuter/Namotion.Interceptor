@@ -98,6 +98,8 @@ public class LateHandler : IWriteInterceptor { }
 
 - Services are partitioned into three groups: `[RunsFirst]` → Middle → `[RunsLast]`
 - Within each group, `[RunsBefore]` and `[RunsAfter]` define the topological order
+- A reference to a type with multiple registered instances binds against every instance, for example when a context aggregates fallback contexts that each register the same service type
+- Instances of the same type keep their registration order relative to each other
 - Without ordering attributes, registration order is preserved
 - Missing dependency types are silently ignored (supports optional dependencies)
 - Circular dependencies throw `InvalidOperationException`
