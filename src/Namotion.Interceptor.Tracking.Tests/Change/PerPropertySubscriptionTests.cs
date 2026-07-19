@@ -83,9 +83,12 @@ public class PerPropertySubscriptionTests
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
         // Act & Assert: rejected before install, so no silent never-firing subscription and no
-        // permanently opened idle gate.
+        // permanently opened idle gate. The typed callback overload wraps before delegating, so
+        // it needs its own guard and its own assertion here.
         Assert.Throws<ArgumentNullException>(() => property.Subscribe((IPropertyChangeObserver)null!));
         Assert.Throws<ArgumentNullException>(() => property.Subscribe((PropertyChangeCallback)null!));
+        Assert.Throws<ArgumentNullException>(() => person.SubscribeToProperty(x => x.FirstName, (IPropertyChangeObserver)null!));
+        Assert.Throws<ArgumentNullException>(() => person.SubscribeToProperty(x => x.FirstName, (PropertyChangeCallback)null!));
         Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
     }
 

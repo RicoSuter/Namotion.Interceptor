@@ -80,6 +80,9 @@ public static class PropertyChangeSubscriptionExtensions
         PropertyChangeCallback callback)
         where TSubject : IInterceptorSubject
     {
+        // Same rationale as the PropertyReference callback overload: wrapping first would bypass
+        // the observer null guard and fail at dispatch time on a writer thread.
+        ArgumentNullException.ThrowIfNull(callback);
         return subject.SubscribeToProperty(propertySelector, new DelegateObserver(callback));
     }
 

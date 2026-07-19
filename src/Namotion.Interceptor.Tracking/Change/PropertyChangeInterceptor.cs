@@ -7,9 +7,10 @@ using Namotion.Interceptor.Tracking.Transactions;
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
-/// Single write interceptor that delivers property changes through two channels: an Rx observable
-/// (see <see cref="InterceptorSubjectContextExtensions.GetPropertyChangeObservable"/>) and a
-/// high-performance pull queue (see <see cref="InterceptorSubjectContextExtensions.CreatePropertyChangeQueueSubscription"/>).
+/// Single write interceptor that delivers property changes through three channels: an Rx observable
+/// (see <see cref="InterceptorSubjectContextExtensions.GetPropertyChangeObservable"/>), a
+/// high-performance pull queue (see <see cref="InterceptorSubjectContextExtensions.CreatePropertyChangeQueueSubscription"/>),
+/// and synchronous per-property subscriptions (see <see cref="PropertyChangeSubscriptionExtensions"/>).
 /// Replaces the former PropertyChangeObservable and PropertyChangeQueue.
 /// </summary>
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
