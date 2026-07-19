@@ -38,6 +38,24 @@ public class SubjectRegistryExtensionsTests
     }
 
     [Fact]
+    public void WhenExpressionIsRootedAtCapturedVariable_ThenNullIsReturned()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var person = new Person(context);
+        var other = new Person(context) { FirstName = "Other" };
+
+        // Act: the chain starts at a captured variable, not the lambda parameter.
+        var registeredSubjectProperty = person.TryGetRegisteredProperty(_ => other.FirstName);
+
+        // Assert
+        Assert.Null(registeredSubjectProperty);
+    }
+
+    [Fact]
     public void WhenExpressionSelectsValueTypedLeafAtRoot_ThenPropertyIsFound()
     {
         // Arrange

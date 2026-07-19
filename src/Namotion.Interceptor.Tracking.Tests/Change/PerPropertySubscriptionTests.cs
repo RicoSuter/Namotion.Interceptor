@@ -75,6 +75,21 @@ public class PerPropertySubscriptionTests
     }
 
     [Fact]
+    public void WhenObserverOrCallbackIsNull_ThenSubscribeThrowsAndCountStaysZero()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+
+        // Act & Assert: rejected before install, so no silent never-firing subscription and no
+        // permanently opened idle gate.
+        Assert.Throws<ArgumentNullException>(() => property.Subscribe((IPropertyChangeObserver)null!));
+        Assert.Throws<ArgumentNullException>(() => property.Subscribe((PropertyChangeCallback)null!));
+        Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
+    }
+
+    [Fact]
     public void WhenReservedDataKeyHoldsForeignValue_ThenSubscribeThrowsInsteadOfSpinning()
     {
         // Arrange: occupy the reserved listeners key with a foreign value.

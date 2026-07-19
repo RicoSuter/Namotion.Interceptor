@@ -17,10 +17,10 @@ internal static class PropertyChangeSubscriptions
     // runtimes) and NOT Interlocked.Read: Interlocked.Read is CompareExchange(ref, 0, 0), an RMW
     // that dirties the cache line and contends across writer cores on every write. The write path's
     // post-commit re-check gets its StoreLoad ordering from an explicit Interlocked.MemoryBarrier()
-    // BEFORE calling this (core-local, no shared-line write); the Dekker pairing with
-    // IncrementSubscriptionCount-then-install is documented in the spec's Fast-path rules.
+    // BEFORE calling this (core-local, no shared-line write); it is the read side of the Dekker
+    // pairing with IncrementSubscriptionCount-then-install in PropertyChangeSubscription.Create.
     internal static long ReadSubscriptionCount() => Volatile.Read(ref _subscriptionCount);
 
-    // Test-only reset hook (see the serialized test collection in Task 4).
+    // Test-only reset hook (used by the serialized per-property test collection).
     internal static void ResetForTests() => Interlocked.Exchange(ref _subscriptionCount, 0);
 }

@@ -88,8 +88,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         lock (_modificationLock)
         {
             // Intentionally NOT gated on _disposed. Interceptor disposal tears down the queue channel
-            // only; the observable channel is unaffected (spec: existing observers keep receiving and
-            // new observers may still subscribe after Dispose). Only CreateQueueSubscription throws.
+            // only; the observable channel is unaffected (contract: existing observers keep receiving
+            // and new observers may still subscribe after Dispose). Only CreateQueueSubscription throws.
 
             if (_subject is null)
             {
@@ -99,7 +99,12 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
             _observableConsumerCount++;
             syncSubject = _syncSubject!;
-            PublishState(_state?.QueueSubscriptions ?? [], ActiveSyncSubject);
+            if (_observableConsumerCount == 1)
+            {
+                // Only the 0 to 1 transition changes the state; further consumers share the
+                // already-published sync subject (mirrors RemoveObservableConsumer's 1 to 0).
+                PublishState(_state?.QueueSubscriptions ?? [], ActiveSyncSubject);
+            }
         }
 
         // Joining outside the lock: a write may OnNext before this observer joins (treated as
@@ -140,8 +145,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         // Pre-commit gate decides only whether the old value must be captured; listener
-        // RESOLUTION is post-commit, so an install racing this write is never missed
-        // (spec: Post-commit listener resolution / the Dekker pair).
+        // RESOLUTION is post-commit (see ResolveListeners), so an install racing this
+        // write is never missed.
         if (_state is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
         {
             next(ref context);

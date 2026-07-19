@@ -13,7 +13,7 @@ public static class PropertyChangeSubscriptionExtensions
     /// <remarks>
     /// Disposing the returned handle is mandatory: the subject holds a strong reference, so a dropped
     /// handle keeps the observer alive and permanently disables the process-wide idle write fast path.
-    /// A dispatch already in flight may invoke the observer once more after Dispose returns.
+    /// Dispatches already in flight may still invoke the observer after Dispose returns.
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value.
@@ -23,6 +23,10 @@ public static class PropertyChangeSubscriptionExtensions
     /// </remarks>
     public static IDisposable Subscribe(this PropertyReference property, IPropertyChangeObserver observer)
     {
+        // Reject before install: a null observer would install a silent never-firing subscription
+        // that still opens the process-wide gate (dispatch skips null observers).
+        ArgumentNullException.ThrowIfNull(observer);
+
         var metadata = property.Metadata; // throws InvalidOperationException when the name is not a known property
         if (!(metadata.IsIntercepted || metadata.IsDerived))
         {
@@ -37,6 +41,9 @@ public static class PropertyChangeSubscriptionExtensions
     /// <summary>Delegate overload of <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>.</summary>
     public static IDisposable Subscribe(this PropertyReference property, PropertyChangeCallback callback)
     {
+        // Reject here: a null callback wrapped in DelegateObserver would throw NullReferenceException
+        // on an unrelated writer thread at dispatch time.
+        ArgumentNullException.ThrowIfNull(callback);
         return property.Subscribe(new DelegateObserver(callback));
     }
 
@@ -48,7 +55,7 @@ public static class PropertyChangeSubscriptionExtensions
     /// <remarks>
     /// Disposing the returned handle is mandatory: the subject holds a strong reference, so a dropped
     /// handle keeps the observer alive and permanently disables the process-wide idle write fast path.
-    /// A dispatch already in flight may invoke the observer once more after Dispose returns.
+    /// Dispatches already in flight may still invoke the observer after Dispose returns.
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value.

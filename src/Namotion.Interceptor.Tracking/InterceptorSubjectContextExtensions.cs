@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Tracking;
 public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
-    /// Registers full property tracking including equality checks, context inheritance, derived property change detection, and property changed observable.
+    /// Registers full property tracking including equality checks, context inheritance, derived property change detection, and property change subscriptions (observable, queue, and per-property).
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
@@ -90,7 +90,7 @@ public static class InterceptorSubjectContextExtensions
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value. An observer subscribed while a write is already in flight
-    /// may not receive that write when it is the first consumer; read the current state after subscribing.
+    /// may not receive that write; read the current state after subscribing.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).
@@ -117,7 +117,7 @@ public static class InterceptorSubjectContextExtensions
     /// Under concurrent writes to the same property, changes may be enqueued out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value. A subscription created while a write is already in flight
-    /// may not receive that write when it is the first consumer; read the current state after subscribing.
+    /// may not receive that write; read the current state after subscribing.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The queue subscription.</returns>
