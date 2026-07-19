@@ -53,15 +53,21 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     internal PropertyChangeQueueSubscription CreateQueueSubscription()
     {
+        PropertyChangeQueueSubscription subscription;
         lock (_modificationLock)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            var subscription = new PropertyChangeQueueSubscription(this);
+            subscription = new PropertyChangeQueueSubscription(this);
             var current = _state?.QueueSubscriptions ?? [];
             PublishState(CopyOnWriteArray.Add(current, subscription), ActiveSyncSubject);
-            return subscription;
         }
+
+        // Subscriber-side Dekker half: the state publish must be globally visible before the
+        // caller's post-create property reads (a lock exit alone is only a release). Pairs with
+        // the write path's post-commit fence and state re-read.
+        Interlocked.MemoryBarrier();
+        return subscription;
     }
 
     internal void RemoveQueueSubscription(PropertyChangeQueueSubscription subscription)
@@ -98,8 +104,20 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
                 _syncSubject = Subject.Synchronize(_subject);
             }
 
-            _observableConsumerCount++;
             syncSubject = _syncSubject!;
+        }
+
+        // Join BEFORE publishing state: the join's CAS-install into the subject's observer array
+        // precedes the volatile _state publish in program order, so a writer that observes the
+        // published state also observes the join (OnNext volatile-reads the observer array).
+        // Moving the join after the publish reopens the missed-write window for a first observer
+        // racing a writer. The Subject.Synchronize gate covers only OnNext, not Subscribe, so it
+        // provides no ordering here; joining outside the lock is robustness against Rx internals.
+        var inner = syncSubject.Subscribe(observer);
+
+        lock (_modificationLock)
+        {
+            _observableConsumerCount++;
             if (_observableConsumerCount == 1)
             {
                 // Only the 0 to 1 transition changes the state; further consumers share the
@@ -108,10 +126,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             }
         }
 
-        // Joining outside the lock: a write may OnNext before this observer joins (treated as
-        // committed before install). A write already past the idle gate may be missed entirely
-        // when this is the first consumer (documented channel caveat).
-        var inner = syncSubject.Subscribe(observer);
+        // Subscriber-side Dekker half (see CreateQueueSubscription).
+        Interlocked.MemoryBarrier();
         return new ObservableSubscription(this, inner);
     }
 
@@ -151,7 +167,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         if (_state is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
         {
             next(ref context);
-            DispatchLateListeners(ref context);
+            DispatchLateConsumers(ref context);
             return;
         }
 
@@ -205,11 +221,12 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     /// <summary>
     /// Idle-entry path: the pre-commit gate saw no consumers, so no old value was captured. A
-    /// listener installed while the write was in flight is still delivered, with the final value
-    /// as both old and new (documented caveat). Non-inlined so the idle fast path stays small.
+    /// per-property listener, queue subscription, or first observer installed while the write was
+    /// in flight is still delivered, with the final value as both old and new (documented caveat).
+    /// Non-inlined so the idle fast path stays small.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void DispatchLateListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
+    private void DispatchLateConsumers<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
         if (!context.IsWritten)
         {
@@ -217,7 +234,12 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         }
 
         var listeners = ResolveListeners(ref context);
-        if (listeners is null)
+
+        // Channel state re-read behind the fence (ResolveListeners fenced on this thread, or an
+        // inner aggregated instance did): pairs with the fence after the channel install.
+        var state = _state;
+
+        if (state is null && listeners is null)
         {
             return;
         }
@@ -231,7 +253,21 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             finalValue,
             finalValue);
 
-        PropertyChangeSubscription.Dispatch(listeners, in change);
+        if (state is not null)
+        {
+            var subscriptions = state.QueueSubscriptions;
+            for (var i = 0; i < subscriptions.Length; i++)
+            {
+                subscriptions[i].Enqueue(in change);
+            }
+
+            state.SyncSubject?.OnNext(change);
+        }
+
+        if (listeners is not null)
+        {
+            PropertyChangeSubscription.Dispatch(listeners, in change);
+        }
     }
 
     // Post-commit listener resolution, shared by both entry paths. The dedup flag is per-write

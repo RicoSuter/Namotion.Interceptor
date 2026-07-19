@@ -217,6 +217,40 @@ public class PropertyChangeInterceptorTests
     }
 
     [Fact]
+    public async Task WhenSecondObserverSubscribedWhileWriteInFlight_ThenBothObserversReceiveTheChange()
+    {
+        // Arrange: an existing observer keeps the dispatch state active; the blocker parks the
+        // writer after the pre-commit work and before the commit.
+        var blocker = new BlockingWriteInterceptor();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        context.WithService(() => blocker);
+        var person = new Person(context);
+        SubjectPropertyChange? first = null;
+        SubjectPropertyChange? second = null;
+        using var existing = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => first = change);
+
+        var writer = Task.Run(() => person.FirstName = "John");
+        Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
+
+        // Act: a second observer joins mid-write (the join happens before the state publish), then
+        // the commit is released.
+        using var late = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => second = change);
+        blocker.ProceedWithCommit.Set();
+        await writer.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert: the write committed after the second Subscribe returned, so both observers
+        // receive it, with the old value properly captured (active path).
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Equal("John", second.Value.GetNewValue<string?>());
+        Assert.Null(second.Value.GetOldValue<string?>());
+    }
+
+    [Fact]
     public void WhenNullObserverSubscribed_ThenThrowsAndInterceptorStaysIdle()
     {
         // Arrange

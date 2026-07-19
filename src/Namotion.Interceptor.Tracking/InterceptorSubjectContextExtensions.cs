@@ -89,8 +89,10 @@ public static class InterceptorSubjectContextExtensions
     /// Gets the property changed observable which is registered in the context.
     /// Under concurrent writes to the same property, notifications may arrive out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
-    /// than relying on the delivered new value. An observer subscribed while a write is already in flight
-    /// may not receive that write; read the current state after subscribing.
+    /// than relying on the delivered new value.
+    /// A write that commits after Subscribe returns is always delivered; a write that committed before
+    /// may not be, and reading the property after subscribing observes that earlier state; a write that
+    /// raced the subscribe may be delivered with OldValue equal to NewValue.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).
@@ -116,8 +118,10 @@ public static class InterceptorSubjectContextExtensions
     /// Creates a pull-based queue subscription over the property change interceptor registered in the context.
     /// Under concurrent writes to the same property, changes may be enqueued out of commit order because
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
-    /// than relying on the delivered new value. A subscription created while a write is already in flight
-    /// may not receive that write; read the current state after subscribing.
+    /// than relying on the delivered new value.
+    /// A write that commits after this method returns is always delivered; a write that committed before
+    /// may not be, and reading the property after subscribing observes that earlier state; a write that
+    /// raced the subscription may be delivered with OldValue equal to NewValue.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The queue subscription.</returns>
