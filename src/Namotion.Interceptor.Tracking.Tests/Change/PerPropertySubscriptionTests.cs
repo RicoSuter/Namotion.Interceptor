@@ -111,16 +111,16 @@ public class PerPropertySubscriptionTests
     }
 
     [Fact]
-    public async Task WhenSubscriptionInstalledWhileWriteInFlight_ThenWriteDeliversWithOldValueEqualToNewValue()
+    public async Task WhenSubscriptionInstalledWhileWriteInFlight_ThenWriteDeliversStartingAndFinalValues()
     {
         // Arrange: the blocker sits AFTER PropertyChangeInterceptor in the chain, so the writer
-        // passes the idle pre-commit gate (count zero, no old value captured), then parks before
-        // the commit. Pins post-commit listener resolution and the DispatchLateListeners caveat.
+        // passes the idle pre-commit gate (count zero, no local old-value snapshot), then parks
+        // before the commit. Pins post-commit listener resolution and late delivery.
         var blocker = new BlockingWriteInterceptor();
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         context.WithService(() => blocker);
         var person = new Person(context);
-        var received = new List<(string OldValue, string NewValue)>();
+        var received = new List<(string? OldValue, string? NewValue)>();
 
         var writer = Task.Run(() => person.FirstName = "John");
         Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
@@ -128,15 +128,15 @@ public class PerPropertySubscriptionTests
         // Act: install while the write is in flight (post-gate, pre-commit), then release the commit.
         using var subscription = new PropertyReference(person, nameof(Person.FirstName))
             .Subscribe((in SubjectPropertyChange change) =>
-                received.Add((change.GetOldValue<string>(), change.GetNewValue<string>())));
+                received.Add((change.GetOldValue<string?>(), change.GetNewValue<string?>())));
         blocker.ProceedWithCommit.Set();
         await writer.WaitAsync(TimeSpan.FromSeconds(10));
 
-        // Assert: the racing write was delivered (commit happened after the install); the idle-entry
-        // path could not capture the pre-write value, so OldValue equals NewValue (documented caveat).
+        // Assert: the racing write was delivered (commit happened after the install), including the
+        // starting value retained in the write context.
         var change = Assert.Single(received);
         Assert.Equal("John", change.NewValue);
-        Assert.Equal("John", change.OldValue);
+        Assert.Null(change.OldValue);
     }
 
     [Fact]

@@ -95,9 +95,10 @@ public static class InterceptorSubjectContextExtensions
     /// than relying on the delivered new value.
     /// A write that commits after Subscribe returns is always delivered while the subscription stays live
     /// and no earlier synchronous observer of the same write throws; a write that committed before may not
-    /// be, and reading the property after subscribing observes that earlier state; a write that raced the
-    /// subscribe may be delivered with OldValue equal to NewValue. For a scheduler-based observer,
-    /// delivered means accepted by the channel, not that the callback has already run.
+    /// be, and reading the property after subscribing observes that earlier state. OldValue is the value
+    /// the setter observed when it started, including when the subscription raced the write. For a
+    /// scheduler-based observer, delivered means accepted by the channel, not that the callback has
+    /// already run.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).

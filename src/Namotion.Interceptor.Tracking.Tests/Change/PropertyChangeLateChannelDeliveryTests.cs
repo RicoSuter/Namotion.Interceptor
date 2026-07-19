@@ -12,10 +12,10 @@ public class PropertyChangeLateChannelDeliveryTests
     public PropertyChangeLateChannelDeliveryTests() => PropertyChangeSubscriptions.ResetForTests();
 
     [Fact]
-    public async Task WhenQueueSubscriptionCreatedWhileIdleWriteInFlight_ThenChangeIsDeliveredWithOldValueEqualToNewValue()
+    public async Task WhenQueueSubscriptionCreatedWhileIdleWriteInFlight_ThenChangeIncludesStartingValue()
     {
-        // Arrange: no consumers exist, so the writer passes the idle gate (no old value captured),
-        // then parks before the commit.
+        // Arrange: no consumers exist, so the writer passes the idle gate without taking a local
+        // old-value snapshot, then parks before the commit.
         var blocker = new BlockingWriteInterceptor();
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         context.WithService(() => blocker);
@@ -29,11 +29,11 @@ public class PropertyChangeLateChannelDeliveryTests
         blocker.ProceedWithCommit.Set();
         await writer.WaitAsync(TimeSpan.FromSeconds(10));
 
-        // Assert: the write committed after the subscription was created, so it is delivered; the
-        // idle entry could not capture the pre-write value, so OldValue equals NewValue.
+        // Assert: the write committed after the subscription was created, so it is delivered with
+        // the starting value retained in the write context.
         Assert.True(subscription.TryDequeue(out var change, new CancellationTokenSource(1000).Token));
         Assert.Equal("John", change.GetNewValue<string?>());
-        Assert.Equal("John", change.GetOldValue<string?>());
+        Assert.Null(change.GetOldValue<string?>());
     }
 
     [Fact]
@@ -56,9 +56,9 @@ public class PropertyChangeLateChannelDeliveryTests
         blocker.ProceedWithCommit.Set();
         await writer.WaitAsync(TimeSpan.FromSeconds(10));
 
-        // Assert: delivered with the documented OldValue equals NewValue caveat.
+        // Assert: delivered with the starting value retained in the write context.
         Assert.NotNull(captured);
         Assert.Equal("John", captured.Value.GetNewValue<string?>());
-        Assert.Equal("John", captured.Value.GetOldValue<string?>());
+        Assert.Null(captured.Value.GetOldValue<string?>());
     }
 }

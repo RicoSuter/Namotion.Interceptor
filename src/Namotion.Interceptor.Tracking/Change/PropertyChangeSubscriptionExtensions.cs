@@ -19,8 +19,8 @@ public static class PropertyChangeSubscriptionExtensions
     /// than relying on the delivered new value.
     /// A write that commits after Subscribe returns is always delivered while the subscription stays live
     /// and no earlier synchronous observer of the same write throws; a write that committed before may not
-    /// be, and reading the property after subscribing observes that earlier state; a write that raced the
-    /// subscribe may be delivered with OldValue equal to NewValue.
+    /// be, and reading the property after subscribing observes that earlier state. OldValue is the value
+    /// the setter observed when it started, including when the subscription raced the write.
     /// </remarks>
     public static IDisposable Subscribe(this PropertyReference property, IPropertyChangeObserver observer)
     {

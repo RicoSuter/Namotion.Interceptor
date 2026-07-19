@@ -144,9 +144,9 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        // Pre-commit gate decides only whether the old value must be captured; listener
-        // RESOLUTION is post-commit (see ResolveListeners), so an install racing this
-        // write is never missed.
+        // Pre-commit gate decides only whether the old value needs a local snapshot before the
+        // inner chain; listener RESOLUTION is post-commit (see ResolveListeners), so an install
+        // racing this write is never missed. The idle path retains CurrentValue in the context.
         if (_state is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
         {
             next(ref context);
@@ -202,9 +202,9 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     }
 
     /// <summary>
-    /// Idle-entry path: the gate saw no consumers, so no old value was captured. A listener or
-    /// channel subscription installed while the write was in flight is still delivered, with the
-    /// final value as both old and new (documented caveat). Non-inlined to keep the fast path small.
+    /// Idle-entry path: the gate saw no consumers, so no local old-value snapshot was taken. A
+    /// listener or channel subscription installed while the write was in flight is still delivered,
+    /// using the starting value retained in the context. Non-inlined to keep the fast path small.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void DispatchLateConsumers<TProperty>(ref PropertyWriteContext<TProperty> context)
@@ -231,7 +231,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             context.Origin,
             context.WriteTimestampForPublishing,
             SubjectChangeContext.Current.ReceivedTimestamp,
-            finalValue,
+            context.CurrentValue,
             finalValue);
 
         if (state is not null)
