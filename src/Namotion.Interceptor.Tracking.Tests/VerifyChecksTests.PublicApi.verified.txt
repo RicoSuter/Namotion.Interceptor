@@ -28,10 +28,9 @@ namespace Namotion.Interceptor.Tracking.Change
     public delegate void PropertyChangeCallback(in Namotion.Interceptor.Tracking.Change.SubjectPropertyChange change);
     [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Transactions.SubjectTransactionInterceptor)})]
-    public sealed class PropertyChangeInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, System.IDisposable, System.IObservable<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>
+    public sealed class PropertyChangeInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, System.IObservable<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>
     {
         public PropertyChangeInterceptor() { }
-        public void Dispose() { }
         public System.IDisposable Subscribe(System.IObserver<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> observer) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }

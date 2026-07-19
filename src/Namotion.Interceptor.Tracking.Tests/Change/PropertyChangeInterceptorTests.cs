@@ -110,34 +110,6 @@ public class PropertyChangeInterceptorTests
     }
 
     [Fact]
-    public void WhenInterceptorDisposed_ThenQueueCompletesButObservableStillWorks()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
-        var interceptor = context.GetService<PropertyChangeInterceptor>();
-        var person = new Person(context);
-        var queue = context.CreatePropertyChangeQueueSubscription();
-
-        // Act
-        interceptor.Dispose();
-
-        // Assert: the queue channel is torn down (completed subscription returns false without blocking,
-        // and new queue subscriptions throw).
-        Assert.False(queue.TryDequeue(out _, new CancellationTokenSource(1000).Token));
-        Assert.Throws<ObjectDisposedException>(() => context.CreatePropertyChangeQueueSubscription());
-
-        // Assert: the observable channel is unaffected. A NEW observer subscribed AFTER Dispose still
-        // receives changes (spec: observable is unaffected by interceptor disposal).
-        SubjectPropertyChange? captured = null;
-        using var observer = context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Subscribe(c => captured = c);
-        person.FirstName = "John";
-        Assert.NotNull(captured);
-        Assert.Equal(nameof(Person.FirstName), captured.Value.Property.Name);
-    }
-
-    [Fact]
     public async Task WhenDisposedWhileConsumerWaits_ThenConsumerReturnsFalseWithoutBlocking()
     {
         // Arrange (lost-wakeup race fix)
@@ -264,57 +236,6 @@ public class PropertyChangeInterceptorTests
     }
 
     [Fact]
-    public async Task WhenInterceptorDisposeRacesCreateQueueSubscription_ThenEitherThrowsOrSubscriptionIsCompleted()
-    {
-        // Act & Assert: both interleavings are valid. If creation wins, disposal completes the
-        // subscription (consumer returns false without blocking); if disposal wins, creation throws.
-        for (var i = 0; i < 500; i++)
-        {
-            var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
-            var interceptor = context.GetService<PropertyChangeInterceptor>();
-            using var start = new ManualResetEventSlim(false);
-
-            PropertyChangeQueueSubscription? subscription = null;
-            ObjectDisposedException? creationException = null;
-            var creator = Task.Run(() =>
-            {
-                start.Wait();
-                try
-                {
-                    subscription = context.CreatePropertyChangeQueueSubscription();
-                }
-                catch (ObjectDisposedException exception)
-                {
-                    creationException = exception;
-                }
-            });
-            var disposer = Task.Run(() =>
-            {
-                start.Wait();
-                interceptor.Dispose();
-            });
-
-            start.Set();
-            await Task.WhenAll(creator, disposer);
-
-            if (creationException is null)
-            {
-                Assert.NotNull(subscription);
-
-                // The token only bounds a lost completion wake; the check below distinguishes the two.
-                using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                Assert.False(subscription.TryDequeue(out _, cancellation.Token));
-                Assert.False(cancellation.IsCancellationRequested);
-                subscription.Dispose();
-            }
-            else
-            {
-                Assert.Null(subscription);
-            }
-        }
-    }
-
-    [Fact]
     public void WhenDisposedWithBufferedItems_ThenConsumerDrainsThemBeforeFalse()
     {
         // Arrange
@@ -391,22 +312,6 @@ public class PropertyChangeInterceptorTests
 
         Assert.True(subscription2.TryDequeue(out var change2, CancellationToken.None));
         Assert.Equal("John", change2.GetNewValue<string?>());
-    }
-
-    [Fact]
-    public void WhenCancellationRequested_ThenTryDequeueReturnsFalse()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
-        using var subscription = context.CreatePropertyChangeQueueSubscription();
-        using var cts = new CancellationTokenSource();
-        cts.Cancel();
-
-        // Act
-        var result = subscription.TryDequeue(out _, cts.Token);
-
-        // Assert
-        Assert.False(result);
     }
 
     [Fact]

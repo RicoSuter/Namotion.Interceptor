@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// and synchronous per-property subscriptions (see <see cref="PropertyChangeSubscriptionExtensions"/>).
 /// </summary>
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
-public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChange>, IWriteInterceptor, IDisposable
+public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChange>, IWriteInterceptor
 {
     private readonly Lock _modificationLock = new();
 
@@ -24,8 +24,6 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     private Subject<SubjectPropertyChange>? _subject;
     private ISubject<SubjectPropertyChange>? _syncSubject;
     private int _observableConsumerCount;
-
-    private bool _disposed;
 
     // White-box test hook: true when neither channel has consumers. The idle write fast path
     // additionally requires the process-wide subscription count to be zero.
@@ -55,8 +53,6 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         PropertyChangeQueueSubscription subscription;
         lock (_modificationLock)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-
             subscription = new PropertyChangeQueueSubscription(this);
             var current = _state?.QueueSubscriptions ?? [];
             PublishState(CopyOnWriteArray.Add(current, subscription), ActiveSyncSubject);
@@ -92,10 +88,6 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         IDisposable inner;
         lock (_modificationLock)
         {
-            // Intentionally NOT gated on _disposed. Interceptor disposal tears down the queue channel
-            // only; the observable channel is unaffected (contract: existing observers keep receiving
-            // and new observers may still subscribe after Dispose). Only CreateQueueSubscription throws.
-
             if (_subject is null)
             {
                 _subject = new Subject<SubjectPropertyChange>();
@@ -290,31 +282,5 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         return property.Subject.Data.TryGetValue((property.Name, PropertyChangeSubscription.ListenersKey), out var value)
             ? value as PropertyChangeSubscription[]
             : null;
-    }
-
-    /// <summary>
-    /// Tears down the queue channel only: existing queue subscriptions are completed (buffered
-    /// items stay drainable) and creating new ones throws. The observable channel and per-property
-    /// subscriptions keep working, including observers subscribed after disposal.
-    /// </summary>
-    public void Dispose()
-    {
-        PropertyChangeQueueSubscription[] toComplete;
-        lock (_modificationLock)
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-            toComplete = _state?.QueueSubscriptions ?? [];
-            PublishState([], ActiveSyncSubject); // preserve observable channel, drop queue
-        }
-
-        foreach (var subscription in toComplete)
-        {
-            subscription.Complete();
-        }
     }
 }

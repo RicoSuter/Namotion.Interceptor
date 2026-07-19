@@ -11,8 +11,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 public sealed class PropertyChangeQueueSubscription : IDisposable
 {
-    // Cleared on completion and disposal (doubles as the one-shot dispose flag) so a retained
-    // handle does not pin the interceptor and its other consumers.
+    // Cleared on disposal (doubles as the one-shot dispose flag) so a retained handle does not
+    // pin the interceptor and its other consumers.
     private PropertyChangeInterceptor? _interceptor;
 
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
@@ -38,16 +38,6 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
 
         _queue.Enqueue(item); // copy happens here into the queue
         _signal.Set(); // wake consumer (idempotent if already set)
-    }
-
-    /// <summary>
-    /// Completes the subscription without unsubscribing from the interceptor (interceptor-side teardown).
-    /// </summary>
-    internal void Complete()
-    {
-        _completed = true;
-        _signal.Set();
-        Interlocked.Exchange(ref _interceptor, null);
     }
 
     /// <summary>
@@ -115,7 +105,7 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
         var owner = Interlocked.Exchange(ref _interceptor, null);
         if (owner is null)
         {
-            return; // already disposed, or completed by the interceptor
+            return; // one-shot
         }
 
         _completed = true;

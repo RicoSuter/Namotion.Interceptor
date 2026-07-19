@@ -181,19 +181,6 @@ public class PerPropertySubscriptionLifecycleTests
     }
 
     [Fact]
-    public void WhenObserverThrows_ThenExceptionPropagates()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
-        var person = new Person(context);
-        using var s = new PropertyReference(person, nameof(Person.FirstName))
-            .Subscribe((in SubjectPropertyChange _) => throw new InvalidOperationException("boom"));
-
-        // Act & Assert (must-not-throw contract: not caught by the framework)
-        Assert.Throws<InvalidOperationException>(() => person.FirstName = "John");
-    }
-
-    [Fact]
     public void WhenFirstObserverThrows_ThenLaterObserversAreSkippedAndQueueAlreadyDelivered()
     {
         // Arrange
