@@ -2,6 +2,7 @@ using System.Reactive.Subjects;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -12,7 +13,14 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// high-performance pull queue (see <see cref="InterceptorSubjectContextExtensions.CreatePropertyChangeQueueSubscription"/>),
 /// and synchronous per-property subscriptions (see <see cref="PropertyChangeSubscriptionExtensions"/>).
 /// </summary>
+// RunsBefore orders the way IN, but everything this interceptor publishes happens after next(),
+// on the unwind, where the outer interceptor runs LAST. So running before the lifecycle
+// interceptor means dispatching AFTER attach/detach reconciliation: a consumer sees the new
+// child attached, context-inherited and registered, and writes it makes to that child are
+// themselves tracked. Without the edge the order falls to registration index, and dispatch
+// announces a child that is still dormant.
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
+[RunsBefore(typeof(LifecycleInterceptor))]
 public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChange>, IWriteInterceptor
 {
     private readonly Lock _modificationLock = new();

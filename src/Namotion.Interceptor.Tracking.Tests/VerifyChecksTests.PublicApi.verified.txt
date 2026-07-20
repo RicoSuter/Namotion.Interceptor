@@ -6,6 +6,8 @@
 namespace Namotion.Interceptor.Tracking.Change
 {
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
+            typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor)})]
+    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
     public class DerivedPropertyChangeHandler : Namotion.Interceptor.Interceptors.IReadInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
@@ -28,6 +30,8 @@ namespace Namotion.Interceptor.Tracking.Change
     public delegate void PropertyChangeCallback(in Namotion.Interceptor.Tracking.Change.SubjectPropertyChange change);
     [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Transactions.SubjectTransactionInterceptor)})]
+    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
+            typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
     public sealed class PropertyChangeInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, System.IObservable<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>
     {
         public PropertyChangeInterceptor() { }

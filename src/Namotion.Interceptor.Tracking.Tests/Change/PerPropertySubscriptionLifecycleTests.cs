@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -345,6 +346,130 @@ public class PerPropertySubscriptionLifecycleTests
         {
             handle.Dispose();
         }
+    }
+
+    [Fact]
+    public void WhenSubjectAssigned_ThenNewChildIsAlreadyAttachedAtCallbackTime()
+    {
+        // Arrange: dispatch runs on the unwind AFTER lifecycle reconciliation
+        // ([RunsBefore(LifecycleInterceptor)]), so a synchronous consumer must observe the new
+        // child fully attached: context inherited and registered.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new Person(context);
+        var child = new Person(); // no context yet
+        bool? childHadInterceptor = null;
+        bool? childWasRegistered = null;
+        using var subscription = new PropertyReference(root, nameof(Person.Mother))
+            .Subscribe((in SubjectPropertyChange change) =>
+            {
+                var newChild = change.GetNewValue<Person?>();
+                childHadInterceptor = newChild is not null &&
+                    ((IInterceptorSubject)newChild).Context.TryGetService<PropertyChangeInterceptor>() is not null;
+                childWasRegistered = newChild?.TryGetRegisteredSubject() is not null;
+            });
+
+        // Act
+        root.Mother = child;
+
+        // Assert
+        Assert.True(childHadInterceptor);
+        Assert.True(childWasRegistered);
+    }
+
+    [Fact]
+    public void WhenCallbackWritesToTheNewlyAssignedChild_ThenThatWriteIsAlsoDelivered()
+    {
+        // Arrange: the react-to-appearance pattern. Before the ordering was pinned, the child was
+        // still dormant during this callback, so the write below reached the zero-interceptor
+        // terminal and was silently never delivered (the value was stored, no notification).
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new Person(context);
+        var child = new Person();
+        var childHits = 0;
+        using var childSubscription = new PropertyReference(child, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange _) => childHits++);
+        using var rootSubscription = new PropertyReference(root, nameof(Person.Mother))
+            .Subscribe((in SubjectPropertyChange change) =>
+            {
+                var newChild = change.GetNewValue<Person?>();
+                if (newChild is not null)
+                {
+                    newChild.FirstName = "set-on-appearance";
+                }
+            });
+
+        // Act
+        root.Mother = child;
+
+        // Assert: the callback's write to the freshly attached child is tracked like any other.
+        Assert.Equal(1, childHits);
+        Assert.Equal("set-on-appearance", child.FirstName);
+    }
+
+    [Fact]
+    public void WhenCallbackWritesToTheDepartingChild_ThenThatWriteIsNotTracked()
+    {
+        // Arrange: the mirror of the attach case, pinned as intended behavior. Dispatch runs after
+        // reconciliation, so a removed subject is already detached when consumers are told; writes
+        // to it are untracked, which is the point (it is no longer part of the graph).
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new Person(context);
+        var child = new Person();
+        root.Mother = child;
+
+        var childHits = 0;
+        using var childSubscription = new PropertyReference(child, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange _) => childHits++);
+        using var rootSubscription = new PropertyReference(root, nameof(Person.Mother))
+            .Subscribe((in SubjectPropertyChange change) =>
+            {
+                var departing = change.GetOldValue<Person?>();
+                if (departing is not null)
+                {
+                    departing.FirstName = "set-on-departure";
+                }
+            });
+
+        // Act
+        root.Mother = null;
+
+        // Assert: the value is stored on the detached subject but no notification is delivered.
+        Assert.Equal(0, childHits);
+        Assert.Equal("set-on-departure", child.FirstName);
+        Assert.Null(child.TryGetRegisteredSubject());
+    }
+
+    [Fact]
+    public void WhenAggregatedContextsAssignSubject_ThenNewChildIsAttachedAtCallbackTime()
+    {
+        // Arrange: the ordering edge must bind to every LifecycleInterceptor instance, not just
+        // one, when a context aggregates a fallback context that also registers tracking.
+        var parentContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var childContext = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        childContext.AddFallbackContext(parentContext);
+        var root = new Person(childContext);
+        var child = new Person();
+        var childHits = 0;
+        using var childSubscription = new PropertyReference(child, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange _) => childHits++);
+        using var subscription = new PropertyReference(root, nameof(Person.Mother))
+            .Subscribe((in SubjectPropertyChange change) =>
+            {
+                var newChild = change.GetNewValue<Person?>();
+                if (newChild is not null)
+                {
+                    newChild.FirstName = "set-on-appearance";
+                }
+            });
+
+        // Act
+        root.Mother = child;
+
+        // Assert: attachment happened before dispatch even with two aggregated interceptor and
+        // lifecycle instances, so the callback's write to the child is tracked. Asserted through
+        // delivery rather than service lookup, because aggregation resolves two instances.
+        Assert.Equal(1, childHits);
+        Assert.Equal("set-on-appearance", child.FirstName);
     }
 
     [Fact]
