@@ -14,13 +14,24 @@ public interface IReadInterceptor
     /// <param name="context">The read context containing the property reference.</param>
     /// <param name="next">The next interceptor in the chain to call.</param>
     /// <returns>The property value.</returns>
-    TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next);
+    TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next);
 }
 
-public delegate TProperty ReadInterceptionDelegate<out TProperty>(ref PropertyReadContext context);
+public delegate TProperty ReadInterceptionDelegate<TProperty>(ref PropertyReadContext<TProperty> context);
 
-public readonly struct PropertyReadContext
+/// <summary>
+/// Context for a property read operation.
+/// <typeparamref name="TProperty"/> is a hint. It may be <c>object</c> when values are
+/// boxed through non-generic paths. Use <c>Property.Metadata.Type</c> for the actual
+/// declared property type.
+/// </summary>
+public struct PropertyReadContext<TProperty>
 {
+    // The terminal read function for this call. Threaded through the per-call context (which already
+    // flows by ref to the end of the chain) instead of a ThreadStatic on the shared chain instance:
+    // per-call state belongs on the per-call context, which is also robust against reentrant reads.
+    internal Func<IInterceptorSubject, TProperty>? Terminal;
+
     /// <summary>
     /// Gets the property to read a value from.
     /// </summary>

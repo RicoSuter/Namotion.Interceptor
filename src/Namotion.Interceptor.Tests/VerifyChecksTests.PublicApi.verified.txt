@@ -70,7 +70,7 @@ namespace Namotion.Interceptor
         bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context);
         void AddService<TService>(TService service);
         object? ExecuteInterceptedInvoke(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod);
-        TProperty ExecuteInterceptedRead<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext context, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue);
+        TProperty ExecuteInterceptedRead<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue);
         void ExecuteInterceptedWrite<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue);
         System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>();
         bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context);
@@ -87,7 +87,7 @@ namespace Namotion.Interceptor
         public virtual bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public void AddService<TService>(TService service) { }
         public object? ExecuteInterceptedInvoke(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod) { }
-        public TProperty ExecuteInterceptedRead<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext context, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        public TProperty ExecuteInterceptedRead<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         public void ExecuteInterceptedWrite<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
         public System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>() { }
         protected bool HasFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
@@ -192,7 +192,7 @@ namespace Namotion.Interceptor.Interceptors
     }
     public interface IReadInterceptor
     {
-        TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next);
+        TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next);
     }
     public interface IWriteInterceptor
     {
@@ -215,7 +215,7 @@ namespace Namotion.Interceptor.Interceptors
         public object?[] Parameters { get; }
         public Namotion.Interceptor.IInterceptorSubject Subject { get; }
     }
-    public readonly struct PropertyReadContext
+    public struct PropertyReadContext<TProperty>
     {
         public PropertyReadContext(Namotion.Interceptor.PropertyReference property) { }
         public Namotion.Interceptor.PropertyReference Property { get; }
@@ -231,6 +231,6 @@ namespace Namotion.Interceptor.Interceptors
         public System.DateTimeOffset? WriteTimestamp { get; }
         public TProperty GetFinalValue() { }
     }
-    public delegate TProperty ReadInterceptionDelegate<out TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext context);
+    public delegate TProperty ReadInterceptionDelegate<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context);
     public delegate void WriteInterceptionDelegate<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context);
 }

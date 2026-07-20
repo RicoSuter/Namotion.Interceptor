@@ -29,7 +29,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
     /// <inheritdoc />
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
+    public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
     {
         // Fast path: Skip transaction check when no transaction is active (avoids AsyncLocal read)
         if (!SubjectTransaction.HasActiveTransaction)

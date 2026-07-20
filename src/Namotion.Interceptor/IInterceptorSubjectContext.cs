@@ -47,7 +47,7 @@ public interface IInterceptorSubjectContext
     /// <param name="context">The property read context containing metadata about the operation.</param>
     /// <param name="readValue">The delegate to read the actual property value.</param>
     /// <returns>The property value, potentially modified by interceptors.</returns>
-    TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> readValue);
+    TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> readValue);
 
     /// <summary>
     /// Executes a property write operation through the interceptor chain.

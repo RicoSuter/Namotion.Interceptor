@@ -166,7 +166,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> readValue)
+    public TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> readValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
