@@ -13,6 +13,10 @@ public class PerPropertySubscriptionConventionsTests
         "SubscribeToPath",
         "IPropertyChangeObserver",
         "PropertyChangeCallback",
+        // The low-level PropertyReference.Subscribe overloads taking an inline callback name none
+        // of the types above, so match the lambda form itself (both `in` spellings).
+        ".Subscribe((in ",
+        ".Subscribe(static (in ",
     ];
 
     [Fact]

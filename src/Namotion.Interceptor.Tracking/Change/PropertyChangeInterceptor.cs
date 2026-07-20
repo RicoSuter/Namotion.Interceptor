@@ -151,9 +151,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        // Pre-commit gate decides only whether the old value needs a local snapshot before the
-        // inner chain; listener RESOLUTION is post-commit (see ResolveListeners), so an install
-        // racing this write is never missed. The idle path retains CurrentValue in the context.
+        // Pre-commit gate only selects the dispatch path; listener RESOLUTION is post-commit
+        // (see ResolveListeners), so an install racing this write is never missed.
         if (_dispatchState is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
         {
             next(ref context);
@@ -161,7 +160,6 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             return;
         }
 
-        var oldValue = context.CurrentValue;
         next(ref context);
 
         if (!context.IsWritten)
@@ -189,7 +187,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             context.Origin,
             context.WriteTimestampForPublishing,
             SubjectChangeContext.Current.ReceivedTimestamp,
-            oldValue,
+            context.CurrentValue,
             context.GetFinalValue());
 
         for (var i = 0; i < subscriptions.Length; i++)
@@ -206,9 +204,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     }
 
     /// <summary>
-    /// Idle-entry path: the gate saw no consumers, so no local old-value snapshot was taken. A
-    /// listener or channel subscription installed while the write was in flight is still delivered,
-    /// using the starting value retained in the context. Non-inlined to keep the fast path small.
+    /// Idle-entry path: the gate saw no consumers, but a listener or channel subscription installed
+    /// while the write was in flight is still delivered. Non-inlined to keep the fast path small.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void DispatchLateConsumers<TProperty>(ref PropertyWriteContext<TProperty> context)

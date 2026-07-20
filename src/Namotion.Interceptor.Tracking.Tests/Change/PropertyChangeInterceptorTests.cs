@@ -413,4 +413,25 @@ public class PropertyChangeInterceptorTests
         subscription.Dispose();
         Assert.False(subscription.TryDequeue(out _, CancellationToken.None));
     }
+
+    [Fact]
+    public void WhenDisposedConcurrentlyFromManyThreads_ThenDisposeIsOneShotAndGateCloses()
+    {
+        // Arrange (atomic-dispose race fix): Dispose claims the owner with a single
+        // Interlocked.Exchange, so only one caller may run the teardown even when many race.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var interceptor = context.GetService<PropertyChangeInterceptor>();
+        var subscription = context.CreatePropertyChangeQueueSubscription();
+        Assert.False(interceptor.IsIdle);
+
+        // Act: dispose from many threads at once.
+        Parallel.For(0, 64, _ => subscription.Dispose());
+
+        // Assert: no thread threw and the channel returned to idle. This pins the observable
+        // contract (idempotent, no exceptions under a dispose storm) rather than the one-shot
+        // mechanism itself: RemoveQueueSubscription is idempotent, so a non-atomic dispose would
+        // also pass here. Kept as a regression guard against Dispose throwing or leaving state.
+        Assert.True(interceptor.IsIdle);
+        Assert.False(subscription.TryDequeue(out _, CancellationToken.None));
+    }
 }

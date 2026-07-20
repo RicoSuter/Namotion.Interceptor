@@ -98,6 +98,12 @@ public class PerPropertySubscriptionLifecycleTests
         root.Mother = null;
         child.FirstName = "C";
         Assert.Equal(1, hits);
+
+        // Act 4: re-attach -> the same subscription revives (it follows the subject instance,
+        // not a graph path, and was never removed from Subject.Data by the detach).
+        root.Mother = child;
+        child.FirstName = "D";
+        Assert.Equal(2, hits);
     }
 
     [Fact]
@@ -490,6 +496,39 @@ public class PerPropertySubscriptionLifecycleTests
 
         // Assert: nothing was stored and nothing was published. Disposing first makes TryDequeue
         // non-blocking: it would drain a wrongly delivered item and returns false on an empty queue.
+        queue.Dispose();
+        Assert.Null(person.FirstName);
+        Assert.Equal(0, hits);
+        Assert.False(queue.TryDequeue(out _, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenIdleWriteIsVetoedAndConsumersInstallMidWrite_ThenNothingIsPublished()
+    {
+        // Arrange: no consumers exist when the write starts, so it takes the idle fast path and
+        // publication is decided by DispatchLateConsumers. The blocking interceptor parks the
+        // writer past that gate; the veto interceptor sits deeper still and never calls next,
+        // so IsWritten stays false. Registration order puts blocking before veto.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var blocking = new BlockingWriteInterceptor();
+        context.WithService(() => blocking);
+        context.WithService(() => new VetoWriteInterceptor());
+        var person = new Person(context);
+        var hits = 0;
+
+        // Act: start the write, install both consumers while it is parked, then release it.
+        var writer = Task.Run(() => person.FirstName = "John");
+        Assert.True(blocking.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
+
+        using var listener = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange _) => hits++);
+        var queue = context.CreatePropertyChangeQueueSubscription();
+
+        blocking.ProceedWithCommit.Set();
+        await writer.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert: the mid-write install is normally owed the change, but a vetoed write stored
+        // nothing, so the idle-entry path must publish nothing to either channel.
         queue.Dispose();
         Assert.Null(person.FirstName);
         Assert.Equal(0, hits);
