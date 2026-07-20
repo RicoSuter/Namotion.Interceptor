@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Tracking;
 public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
-    /// Registers full property tracking including equality checks, context inheritance, derived property change detection, and property changed observable.
+    /// Registers full property tracking including equality checks, context inheritance, derived property change detection, and property change subscriptions (observable, queue, and per-property).
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
@@ -20,8 +20,7 @@ public static class InterceptorSubjectContextExtensions
         return context
             .WithEqualityCheck()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable()
-            .WithPropertyChangeQueue()
+            .WithPropertyChangeSubscriptions()
             .WithContextInheritance();
     }
 
@@ -38,7 +37,7 @@ public static class InterceptorSubjectContextExtensions
 
     /// <summary>
     /// Registers an interceptor that checks if the new value is different from the current value and only calls inner interceptors when the property has changed.
-    /// Uses EqualityComparer.Default for value types or strings and does nothing for reference types.
+    /// Uses <c>EqualityComparer&lt;T&gt;.Default</c> for all property types, including reference types.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
@@ -74,18 +73,33 @@ public static class InterceptorSubjectContextExtensions
     }
 
     /// <summary>
-    /// Registers the property changed observable which can be retrieved using subject.GetPropertyChangeObservable().
+    /// Registers the property change interceptor, enabling both the Rx observable
+    /// (<see cref="GetPropertyChangeObservable"/>) and the high-performance queue
+    /// (<see cref="CreatePropertyChangeQueueSubscription"/>) channels, and per-property subscriptions.
+    /// By itself, the interceptor does not suppress writes of equal values. Combine with
+    /// <see cref="WithEqualityCheck"/> (or use
+    /// <see cref="WithFullPropertyTracking"/>) to suppress values that compare equal according to
+    /// <c>EqualityComparer&lt;T&gt;.Default</c>.
     /// </summary>
-    /// <param name="context">The collection.</param>
-    /// <returns>The collection.</returns>
-    public static IInterceptorSubjectContext WithPropertyChangeObservable(this IInterceptorSubjectContext context)
+    /// <param name="context">The context.</param>
+    /// <returns>The context.</returns>
+    public static IInterceptorSubjectContext WithPropertyChangeSubscriptions(this IInterceptorSubjectContext context)
     {
-        return context
-            .WithService(() => new PropertyChangeObservable());
+        context.TryAddService(() => new PropertyChangeInterceptor(), _ => true);
+        return context;
     }
 
     /// <summary>
     /// Gets the property changed observable which is registered in the context.
+    /// Under concurrent writes to the same property, notifications may arrive out of commit order because
+    /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
+    /// than relying on the delivered new value.
+    /// Provided the downstream interceptor chain returns normally after the commit, a write that commits
+    /// after Subscribe returns is always delivered while the subscription stays live and no earlier
+    /// synchronous observer of the same write throws. A write that committed before may not be, and reading
+    /// the property after subscribing observes that earlier state. OldValue is the value the setter observed
+    /// when it started, including when the subscription raced the write. For a scheduler-based observer,
+    /// delivered means accepted by the channel, not that the callback has already run.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).
@@ -93,10 +107,12 @@ public static class InterceptorSubjectContextExtensions
     /// <returns>The observable.</returns>
     public static IObservable<SubjectPropertyChange> GetPropertyChangeObservable(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
     {
+        // The interceptor is already a synchronized multicast observable, so every observer goes
+        // through its guaranteed subscribe path directly; AsObservable only hides the concrete
+        // implementation type from consumers.
         var observable = context
-            .GetService<PropertyChangeObservable>()
-            .Publish()
-            .RefCount(); // single upstream subscription (shared)
+            .GetService<PropertyChangeInterceptor>()
+            .AsObservable();
 
         if (scheduler == ImmediateScheduler.Instance)
         {
@@ -108,27 +124,17 @@ public static class InterceptorSubjectContextExtensions
     }
 
     /// <summary>
-    /// Registers the property changed observable which can be retrieved using subject.GetPropertyChangeObservable().
-    /// </summary>
-    /// <param name="context">The collection.</param>
-    /// <returns>The collection.</returns>
-    public static IInterceptorSubjectContext WithPropertyChangeQueue(this IInterceptorSubjectContext context)
-    {
-        return context
-            .WithService(() => new PropertyChangeQueue());
-    }
-
-    /// <summary>
-    /// Gets the property changed observable which is registered in the context.
+    /// Creates a pull-based queue subscription over the property change interceptor registered in the context.
+    /// Same ordering caveat and delivery contract as <see cref="GetPropertyChangeObservable"/>, with the
+    /// guarantee anchored to this method returning.
     /// </summary>
     /// <param name="context">The context.</param>
-    /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).</param>
-    /// <returns>The observable.</returns>
-    public static PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
+    /// <returns>The queue subscription.</returns>
+    public static PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this IInterceptorSubjectContext context)
     {
         return context
-            .GetService<PropertyChangeQueue>()
-            .Subscribe();
+            .GetService<PropertyChangeInterceptor>()
+            .CreateQueueSubscription();
     }
 
     /// <summary>

@@ -33,7 +33,7 @@ public class WebSocketEchoSuppressionTests
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithPropertyChangeQueue();
+            .WithPropertyChangeSubscriptions();
 
         var subject = new TestRoot(context) { Name = "Initial" };
 

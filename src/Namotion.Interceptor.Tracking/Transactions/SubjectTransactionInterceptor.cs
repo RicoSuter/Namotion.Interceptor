@@ -11,8 +11,6 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Also manages the per-context transaction lock for serialized transactions.
 /// </summary>
 [RunsBefore(typeof(DerivedPropertyChangeHandler))]
-[RunsBefore(typeof(PropertyChangeObservable))]
-[RunsBefore(typeof(PropertyChangeQueue))]
 public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInterceptor
 {
     private readonly SemaphoreSlim _exclusiveTransactionLock = new(1, 1);

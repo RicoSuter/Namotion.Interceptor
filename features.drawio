@@ -38,7 +38,7 @@
         <mxCell id="d9BL-mROPcZ20sLbiVwK-14" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="&lt;div&gt;&lt;b&gt;Assign parents&lt;/b&gt;&lt;/div&gt;WithParents()" vertex="1">
           <mxGeometry height="60" width="145" x="680" y="425" as="geometry" />
         </mxCell>
-        <mxCell id="d9BL-mROPcZ20sLbiVwK-16" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;div&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;&lt;b&gt;Observable changes&lt;/b&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;background-color: transparent;&quot;&gt;WithPropertyChangeObservable&lt;/span&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;()&lt;/span&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Subscribe to observable via&amp;nbsp;GetPropertyChangeObservable()&lt;/div&gt;" vertex="1">
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-16" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;div&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;&lt;b&gt;Observable changes&lt;/b&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;background-color: transparent;&quot;&gt;WithPropertyChangeSubscriptions&lt;/span&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;()&lt;/span&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Subscribe to observable via&amp;nbsp;GetPropertyChangeObservable()&lt;/div&gt;" vertex="1">
           <mxGeometry height="110" width="240" x="480" y="-250" as="geometry" />
         </mxCell>
         <mxCell id="d9BL-mROPcZ20sLbiVwK-19" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="&lt;div&gt;&lt;b&gt;Record property getter accesses&lt;/b&gt;&lt;/div&gt;WithReadPropertyRecorder()" vertex="1">
@@ -95,7 +95,7 @@
         <mxCell id="fullTracking-5" edge="1" parent="1" source="fullTracking-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" target="d9BL-mROPcZ20sLbiVwK-12">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="changeQueue-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;div&gt;&lt;b&gt;Queue-based changes&lt;/b&gt;&lt;/div&gt;WithPropertyChangeQueue()" vertex="1">
+        <mxCell id="changeQueue-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;div&gt;&lt;b&gt;Queue-based changes&lt;/b&gt;&lt;/div&gt;WithPropertyChangeSubscriptions()" vertex="1">
           <mxGeometry height="60" width="210" x="215" y="-220" as="geometry" />
         </mxCell>
         <mxCell id="fullTracking-6" edge="1" parent="1" source="fullTracking-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;exitX=0.164;exitY=0.02;exitDx=0;exitDy=0;exitPerimeter=0;" target="changeQueue-1">

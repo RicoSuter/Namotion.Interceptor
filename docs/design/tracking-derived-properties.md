@@ -26,6 +26,8 @@ Derived properties can also be added at runtime via `RegisteredSubject.AddDerive
 
 `DerivedPropertyChangeHandler` is annotated with `[RunsBefore(typeof(LifecycleInterceptor))]`. This ensures `AttachProperty` runs before lifecycle handlers, so derived property dependencies are recorded and the initial value is cached before other handlers see the property.
 
+It also carries `[RunsBefore(typeof(PropertyChangeInterceptor))]`, which places the cascade recalculation after that interceptor has dispatched, so a triggering write is announced before the derived recalculations it causes. This only changes the resolved order under aggregated contexts, where instances of both types would otherwise interleave.
+
 ## Components
 
 The system consists of five internal types, all in `Namotion.Interceptor.Tracking.Change`:

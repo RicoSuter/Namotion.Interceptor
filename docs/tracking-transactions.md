@@ -522,9 +522,8 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected: o
 
 1. **Always use `using` blocks** - Ensures proper disposal even on exceptions
 2. **Keep transactions short** - Long transactions hold pending changes in memory
-3. **Register transactions before notifications** - Call `WithTransactions()` before `WithPropertyChangeObservable()`
-4. **Handle exceptions from CommitAsync** - Commits can fail partially
-5. **Don't share transactions across threads** - Each async context should have its own transaction
+3. **Handle exceptions from CommitAsync** - Commits can fail partially
+4. **Don't share transactions across threads** - Each async context should have its own transaction
 
 ## API Reference
 

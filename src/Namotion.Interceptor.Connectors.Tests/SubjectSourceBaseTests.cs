@@ -65,7 +65,7 @@ public class SubjectSourceBaseTests
     public async Task WhenPropertyChangeIsTriggered_ThenWriteToSourceAsyncIsCalled()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -94,7 +94,7 @@ public class SubjectSourceBaseTests
         var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Bar");
 
-        propertyChangedChannel.WriteProperty(ref writeContext, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext, (ref c) => c.IsWritten = true);
 
         await AsyncTestHelpers.WaitUntilAsync(() => changes != null,
             message: "Expected WriteChangesAsync to be called");
@@ -111,7 +111,7 @@ public class SubjectSourceBaseTests
     public async Task WhenWriteChangesThrowsException_ThenErrorIsLoggedAndServiceContinues()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -137,7 +137,7 @@ public class SubjectSourceBaseTests
 
         var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Test");
-        propertyChangedChannel.WriteProperty(ref writeContext, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext, (ref c) => c.IsWritten = true);
 
         // Wait for the write to be attempted
         await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -151,7 +151,7 @@ public class SubjectSourceBaseTests
     public async Task WhenWriteChangesThrowsOperationCanceled_ThenServiceStops()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -177,7 +177,7 @@ public class SubjectSourceBaseTests
 
         var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Test");
-        propertyChangedChannel.WriteProperty(ref writeContext, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext, (ref c) => c.IsWritten = true);
 
         // Wait for the write to be attempted
         await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -191,7 +191,7 @@ public class SubjectSourceBaseTests
     public async Task WhenFlushFails_ThenChangesAreEnqueued()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -228,7 +228,7 @@ public class SubjectSourceBaseTests
         // First change - will fail and be queued
         var writeContext1 = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "First");
-        propertyChangedChannel.WriteProperty(ref writeContext1, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext1, (ref c) => c.IsWritten = true);
 
         // Wait for first write to be attempted before triggering second
         await firstCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -236,7 +236,7 @@ public class SubjectSourceBaseTests
         // Second change - will succeed and flush the queued item
         var writeContext2 = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), "First", "Second");
-        propertyChangedChannel.WriteProperty(ref writeContext2, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext2, (ref c) => c.IsWritten = true);
 
         await secondCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await source.StopAsync(CancellationToken.None);
@@ -249,7 +249,7 @@ public class SubjectSourceBaseTests
     public async Task WhenWriteChangesInBatchesThrowsOperationCanceled_ThenExceptionPropagates()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -275,7 +275,7 @@ public class SubjectSourceBaseTests
 
         var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Test");
-        propertyChangedChannel.WriteProperty(ref writeContext, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext, (ref c) => c.IsWritten = true);
 
         await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await source.StopAsync(CancellationToken.None);
@@ -288,7 +288,7 @@ public class SubjectSourceBaseTests
     public async Task WhenWriteChangesInBatchesThrowsException_ThenChangesAreEnqueued()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -324,14 +324,14 @@ public class SubjectSourceBaseTests
         // First change fails, second triggers retry
         var writeContext1 = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "First");
-        propertyChangedChannel.WriteProperty(ref writeContext1, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext1, (ref c) => c.IsWritten = true);
 
         // Wait for first write to be attempted before triggering second
         await firstCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         var writeContext2 = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), "First", "Second");
-        propertyChangedChannel.WriteProperty(ref writeContext2, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext2, (ref c) => c.IsWritten = true);
 
         await secondCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await source.StopAsync(CancellationToken.None);
@@ -344,7 +344,7 @@ public class SubjectSourceBaseTests
     public async Task WhenWriteReturnsFailureResult_ThenFailedChangesAreEnqueuedAndRetried()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangeQueue();
+        var propertyChangedChannel = new PropertyChangeInterceptor();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
@@ -389,13 +389,13 @@ public class SubjectSourceBaseTests
         // First change - will return WriteResult.Failure, should be enqueued for retry
         var writeContext1 = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "FailedValue");
-        propertyChangedChannel.WriteProperty(ref writeContext1, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext1, (ref c) => c.IsWritten = true);
         await firstCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         // Second change - triggers retry queue flush (retrying first), then writes second
         var writeContext2 = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), "FailedValue", "SecondValue");
-        propertyChangedChannel.WriteProperty(ref writeContext2, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext2, (ref c) => c.IsWritten = true);
 
         // Wait for retry flush + new write (3 total calls)
         await thirdCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
