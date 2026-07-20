@@ -86,7 +86,20 @@ while (subscription.TryDequeue(out var change, cancellationToken))
 1. Zero-allocation value storage: Primitive types (int, decimal, bool, etc.) and small structs are stored inline without boxing
 2. Lock-free queuing: Uses `ConcurrentQueue<T>` for non-blocking writes and low-overhead consumer wake-ups
 3. Efficient signaling: `ManualResetEventSlim` is used to wake the consumer without busy-waiting
-4. Single-reader optimization: Designed for efficient single-consumer scenarios
+
+**Queue semantics and threading:**
+
+- Enqueue is fully thread-safe and needs no synchronization; `TryDequeue` is single-consumer, so each subscription must be drained by one thread.
+- Each subscription owns an isolated queue, so different subscriptions can be consumed concurrently.
+- Independent subscriptions may observe different relative orderings under concurrent writes: dispatch enqueues to each subscription in turn on the writing thread, so two writers can interleave differently per subscription. There is no order that all subscriptions agree on.
+- The implementation is deadlock-free and never loses an enqueued item.
+- The queue is unbounded with no backpressure or overflow policy, so a slow consumer causes unbounded memory growth.
+- Disposal returns immediately: it wakes a waiting consumer and stops future enqueues but does not wait for buffered items, which the consumer may still drain (`TryDequeue` returns the remaining items, then `false`). An enqueue already in flight may finish after `Dispose` returns.
+- Cancellation takes priority over buffered items: `TryDequeue` checks the token before dequeuing, so a cancelled call returns `false` even when items are available.
+
+**Queue limitations:**
+- `TryDequeue` is synchronous and blocks a consumer thread until an item arrives, cancellation is requested, or the subscription is disposed. Continuously draining several subscriptions therefore costs one blocked consumer thread per subscription while they are idle, whereas the observable multiplexes all its subscribers onto the dispatch thread and its scheduler.
+- There is no asynchronous consumer API: `TryDequeue` returns the change through an `out` parameter, so it cannot be awaited.
 
 **Queue use cases:**
 - Source synchronization (MQTT, OPC UA, databases)
@@ -124,8 +137,9 @@ Only a direct property access on the lambda parameter is accepted (`x => x.First
 
 ### Concurrency and Delivery
 
-Notifications dispatch after lifecycle reconciliation: at callback time the subject graph and registry already reflect the write (barring a concurrent overwrite or a concurrent detach of the parent), so a subject assigned to a property is attached and writes a consumer makes to it are themselves tracked. The reverse holds for removals: a departing subject is already detached, so writes to it from a callback are stored but not tracked, which is intended (it is no longer part of the graph). Two further consequences: an `ILifecycleHandler` that throws during reconciliation suppresses the notification for that write even though the value was committed (handlers are required to be exception-free), and a handler that writes properties while attaching emits those changes before the structural change that introduced the subject. Dispatch starts on the writing thread, outside the subject lock, and shares one contract. The per-property listeners and the queue run inline there; `GetPropertyChangeObservable()` pushes there too but reschedules its subscribers onto its scheduler by default (unless you pass `ImmediateScheduler.Instance`).
+Dispatch starts on the writing thread, outside the subject lock, and shares one contract. The per-property listeners and the queue run inline there; `GetPropertyChangeObservable()` pushes there too but reschedules its subscribers onto its scheduler by default (unless you pass `ImmediateScheduler.Instance`).
 
+- **Lifecycle runs first** (with `WithLifecycle()`, included in `WithFullPropertyTracking()`): for subject-typed writes, notifications dispatch after attach/detach reconciliation, so at callback time the subject graph and registry already reflect the write (barring a concurrent overwrite or a concurrent detach of the parent). A subject assigned to a property is attached, and writes a consumer makes to it are themselves tracked. Removals are the reverse: the departing subject is already detached, so writes to it from a callback are stored but not tracked, which is intended. One consequence for custom handlers: an `ILifecycleHandler` that writes properties while attaching emits those changes before the structural change that introduced the subject.
 - **Ordering**: under concurrent writes to the same property, notifications may arrive out of commit order. If you need the current value, re-read the property rather than relying on the delivered new value. `OldValue` is the value the setter observed when it started, including when the subscription raced the write. It is not necessarily the value immediately preceding the commit, so under concurrency delivered old and new pairs may not chain.
 - **Per-property observers are not serialized**: an `IPropertyChangeObserver` or `PropertyChangeCallback` may be invoked concurrently on multiple threads and must be thread-safe, fast, non-blocking, and must not throw. Wrap failing work in a try-catch internally. (The Rx observable is serialized through `Subject.Synchronize()`; the queue is single-consumer per subscription.)
 - **Throwing synchronous observers suppress later deliveries**: each interceptor dispatches its queue first, then its Rx observable, then any per-property listeners it resolved. With aggregated contexts, the innermost interceptor resolves the per-property listeners, so they may run before outer contexts' queue and Rx channels. An exception from any synchronous observer propagates out of the write and prevents later deliveries in that order; queue items already enqueued remain available. Keep synchronous observers exception-free. The exception surfaces from the setter after the value was committed and nothing is rolled back; the property keeps the new value. For scheduler-based Rx observers, delivery means the change was accepted by the channel, not that the callback has already run.
@@ -520,23 +534,7 @@ var accessedProperties = scope.GetPropertiesAndDispose();
 
 This is primarily used internally by the derived property change detection system but can also be used for custom scenarios.
 
-## Thread Safety and Synchronization
-
-**Observable**: Thread-safe through `Subject.Synchronize()`, but observers may receive events on different threads.
-
-**Queue Threading Model**:
-- **Enqueue (producer side)**: Fully thread-safe. Can be called concurrently from multiple threads without any synchronization.
-- **TryDequeue (consumer side)**: Designed for single-threaded consumption per subscription. Each subscription must have only one consumer thread calling `TryDequeue`.
-- **Multiple Subscriptions**: Each subscription is independent with its own isolated queue. Different subscriptions can be consumed by different threads concurrently.
-- **Guarantees**: The implementation is deadlock-free and never loses an enqueued item.
-
-**Queue contract**:
-
-- The queue is unbounded with no backpressure or overflow policy; a slow consumer causes unbounded memory growth.
-- Disposal returns immediately. It wakes a waiting consumer and stops future enqueues, but does not wait for buffered items; the consumer may still drain them afterwards (`TryDequeue` returns the remaining items, then `false`).
-- An enqueue already in flight on a writer thread may finish after `Dispose` returns.
-- Cancellation takes priority over buffered items: `TryDequeue` checks the token before dequeuing, so a cancelled call returns `false` even when items are available.
-- Independent queue subscriptions may observe different relative orderings under concurrent writes.
+## Change Origin and Timestamps
 
 **Change Sources**: Use the `SetValueFromSource()` extension method to apply a value coming from an external source:
 
