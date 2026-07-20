@@ -1,0 +1,306 @@
+# Expression-Based Path Subscriptions
+
+Status: design approved in dialogue, revised after independent adversarial review, spec pending user review
+Date: 2026-07-18
+Target package: `Namotion.Interceptor.Tracking` (no Registry dependency)
+Depends on: the per-property subscription primitive, implemented and merged into this branch: `PropertyChangeInterceptor` (queue and observable channels), `PropertyChangeSubscription` with `Subscribe`/`SubscribeToProperty` extensions, `WithPropertyChangeSubscriptions()` registration, and the post-commit consumer resolution with the Dekker fence pair this design requires (implemented in `PropertyChangeInterceptor.WriteProperty`, `ResolveListeners`, and `DispatchLateConsumers`; the commits-after-subscribe delivery guarantee is documented in `docs/tracking.md` under Per-Property Subscriptions and meanwhile covers all three channels). Additionally required from the base branch: dispatch-after-lifecycle ordering (`PropertyChangeInterceptor` declares `[RunsBefore(typeof(LifecycleInterceptor))]`), so that at dispatch time a newly assigned child subject is already attached, context-inherited, and notifying (see Mechanism). The primitive's own design spec was removed from the branch after implementation and lives in git history. This feature composes that surface and adds no core API.
+
+## Overview
+
+Add a path subscription API that observes "the value at `x.Foo.Bar[3].Baz`" as the path itself changes over time: `Foo` may be null at first and appear later, `Bar` may be replaced with a collection where index 3 holds a different subject, and the leaf value changes. The subscriber always observes the current state of the path (resolved with a value, or unresolved) and receives an event for every observable transition, each carrying the real property write that caused it.
+
+The per-property primitive deliberately binds to a concrete subject instance and rejects chained selectors. This feature is the deferred composition that the primitive's spec names as out of scope: decompose a chained expression into segments, chain one per-property subscription per segment, and re-subscribe the suffix whenever an intermediate segment changes.
+
+## Motivation
+
+Consumers such as UI bindings, automation rules, and connector mappings care about a location in the object graph, not a fixed instance. Today they must either subscribe to the context-wide firehose and re-resolve on every change (O(all writes) per watcher, exactly the cost the per-property primitive eliminates) or hand-roll fragile re-subscription logic. A path subscription provides this as a first-class, allocation-conscious building block.
+
+## Approach decision
+
+Two mechanisms were considered:
+
+1. Chain of per-property subscriptions (chosen). Subscribe to each segment along the currently resolved path. When a segment fires, dispose the subscriptions below it and rebuild only that suffix. Cost is O(path depth) per subscription plus retrack work only on structural changes, which are rare relative to leaf writes.
+2. Firehose plus re-resolve (rejected). Subscribe to the context-wide change stream and re-resolve the path on every change anywhere. O(all writes) per watcher; strictly worse.
+
+A load-bearing fact makes mechanism 1 complete: the library has no in-place tracked collections (no `INotifyCollectionChanged` or `ObservableCollection` in product code). Collections change only by property reassignment, so every structural change, including "items moved in a collection", is a property write on a segment-holding property. Per-property subscriptions on the segments therefore capture all structural change; no lifecycle or registry coupling is needed.
+
+Paths are expression-based, not string-based. This buys compile-time type safety and refactor safety, typed indices, a typed leaf value, and zero coupling to the connector `IPathProvider` machinery. A string-path variant can compose later at the Registry or connector level (see the future extensions block).
+
+## Design
+
+### Public surface
+
+```csharp
+public static SubjectPathSubscription<TValue> SubscribeToPath<TSubject, TValue>(
+    this TSubject subject,
+    Expression<Func<TSubject, TValue>> path,             // x => x.Foo.Bar[3].Baz
+    SubjectPathChangeCallback<TValue> callback)
+    where TSubject : IInterceptorSubject;
+
+public static SubjectPathSubscription<TValue> SubscribeToPath<TSubject, TValue>(
+    this TSubject subject,
+    Expression<Func<TSubject, TValue>> path,
+    ISubjectPathChangeObserver<TValue> observer)          // zero-closure variant, mirrors the primitive
+    where TSubject : IInterceptorSubject;
+
+public delegate void SubjectPathChangeCallback<TValue>(in SubjectPathChange<TValue> change);
+
+public interface ISubjectPathChangeObserver<TValue>
+{
+    void OnChange(in SubjectPathChange<TValue> change);
+}
+
+public enum SubjectPathChangeKind
+{
+    ValueChange,   // the current resolved leaf itself was written and the chain was intact; Cause is that leaf write
+    PathChange     // the observed state changed for any other reason (structural write, or a
+                   // revalidation triggered by an off-path write after dormant divergence)
+}
+
+public readonly struct SubjectPathValue<TValue>           // one observed state of the path
+{
+    public bool IsResolved { get; }                       // every segment reachable; the leaf property exists
+    public TValue? Value { get; }                         // the leaf's value; default when not resolved
+    public bool TryGetValue([MaybeNull] out TValue value); // false when unresolved; true with a null value
+                                                           // for a resolved null leaf (hence MaybeNull)
+    public TValue GetValueOrDefault();
+    public TValue GetValueOrDefault(TValue fallback);
+}
+
+public readonly struct SubjectPathChange<TValue>
+{
+    public SubjectPathChangeKind Kind { get; }
+    public SubjectPathValue<TValue> Old { get; }          // observed state before this event
+    public SubjectPathValue<TValue> New { get; }          // observed state now
+    public SubjectPropertyChange Cause { get; }           // the real write that triggered this event
+}
+
+public sealed class SubjectPathSubscription<TValue> : IDisposable
+{
+    public SubjectPathValue<TValue> Current { get; }      // computed on demand, never cached
+    public void Dispose();
+}
+```
+
+Vocabulary: "resolved" means all intermediate segments are non-null and indices are in range, so the leaf property exists; its value may itself be null. The attach/detach words are deliberately not used for path state because they already mean graph membership in this codebase (lifecycle). The two concepts diverge: a subject moved elsewhere in the graph stays attached while the watched path becomes unresolved, and the dormancy story (below) uses attach/detach in its existing lifecycle sense.
+
+### No initial callback; `Current` serves the initial state
+
+`SubscribeToPath` delivers no event at subscribe time. Every delivered event corresponds to exactly one real property write and carries it as `Cause`. Consumers seed from `Current`:
+
+- UI: render from `Current`, re-render on each callback.
+- Automation: edge-detect with `!change.Old.IsResolved && change.New.IsResolved`; no false "became available" trigger at subscribe time.
+- Connector: explicit initial sync, then deltas.
+
+Documented seam: subscribe-then-read-`Current` is not atomic with the event stream. A write may fire the callback before the consumer reads `Current`. Since every event carries the full `Old` to `New` transition and `Current` is authoritative "now", both consumer patterns reconcile; this needs a doc line, not machinery.
+
+### Expression rules (validated at subscribe, clear errors)
+
+Accepted segments, chained directly from the lambda parameter:
+
+- Property access (`.Foo`) where the property's static type implements `IInterceptorSubject` (intermediate) or is any type (leaf).
+- Collection index (`.Bar[3]`) with an `int` index into a subject collection property.
+- Dictionary index (`.Items["key"]`) with a key into a subject dictionary property.
+
+Rules:
+
+- Index argument expressions (constants or captured variables) are evaluated exactly once at subscribe time. `[3]` is a fixed position; `[i]` does not re-read `i` later. Tracking a specific instance regardless of position is the per-property primitive's job, not this feature's.
+- Member accesses must be properties (`PropertyInfo`), matching the primitive's strictness; fields are rejected.
+- Intermediate segments must be subject-typed properties (the static type implements `IInterceptorSubject`, including interfaces that extend it) or indexed accesses into subject collection/dictionary properties whose element type implements `IInterceptorSubject` (static validation).
+- Every segment, intermediate and leaf, is validated by the primitive's rule against the runtime subject during walks: the property must satisfy `IsIntercepted || IsDerived`. Derived segments (a `[Derived]` leaf, or a `[Derived]` intermediate that picks a child subject) are accepted and carry the same documented prerequisite: they fire only when the subject's context has derived-change detection. Properties declared on interfaces resolve by name against the runtime subject, the same cross-type resolution the primitive uses. Interface default implementations are subscribable only when marked `[Derived]`: the generator emits them with `IsIntercepted == false`, so a plain interface default never enters the write chain and fails the segment rule.
+- Rejected with clear errors: casts (other than the compiler's boxing `Convert` on the leaf, which is unwrapped), method calls other than single-argument indexer `get_Item` (multi-argument indexers such as `m.Grid[1, 2]` are rejected), captured-object chains (`m => other.Speed`), static members, fields, any index whose subscribe-time evaluation yields a null dictionary key (constant or captured variable) or a negative collection index, and a path ending in an indexed element (`x => x.Items[3]` with no trailing property; listed under future extensions).
+- A single-segment path (`x => x.Foo`) is accepted for uniformity; the docs note that `SubscribeToProperty` is the lighter choice there.
+
+Note on indexer shapes in expression trees: the C# compiler produces `ArrayIndex` binary nodes for single-dimensional array access and `get_Item` calls for list and dictionary access; the decomposer accepts these shapes and nothing else (`IndexExpression` never appears in compiler-generated lambdas).
+
+Collection type coverage relative to `docs/subject-guidelines.md` (documented in the new docs section):
+
+- Indexable in expression paths: `T[]`, `List<T>`, `IList<T>`, `IReadOnlyList<T>`, `ImmutableArray<T>`, `Dictionary<TKey, TValue>`, `IDictionary<TKey, TValue>`, `IReadOnlyDictionary<TKey, TValue>` (any key type; the key is part of the typed indexer).
+- Not indexable at compile time: `IEnumerable<T>`, `ICollection<T>`, `IReadOnlyCollection<T>` have no indexer, so a path expression through them does not compile; this is a C# limitation, not a runtime rejection.
+- Unsupported: `ArrayList` and `Hashtable`, whose `object`-typed indexers require a cast that the expression rules reject. These weakly typed collections remain valid subject property types per the guidelines; they just cannot appear as path segments.
+
+### Mechanism: segment chain over the per-property primitive
+
+The tracker decomposes the expression into an ordered segment list and maintains one per-property primitive subscription per segment on the currently resolved subject: `Foo` on the root, `Bar` on `Foo`'s subject, `Baz` on the subject at `Bar[3]`. Value reads during walks go through the intercepted getters, with two constant-factor requirements from the adversarial performance review (both benchmark-gated): (1) the chain state caches each segment's resolved getter delegate (refreshed on retrack), so the steady-state walk is invoke-cached-getter plus reference-compare against the cached next subject, falling back to fresh by-name resolution only on mismatch, which is exactly the divergence signal; (2) the leaf is read through a typed compiled accessor (a `Func<IInterceptorSubject, TValue>` built from the runtime-resolved `PropertyInfo` at subscribe or retrack time, cached per declaring type, property name, and `TValue`; precedent: `SubjectLookup`'s compiled-delegate caches), because the metadata getter returns `object` and would box every value-typed leaf on every event. Cross-type by-name resolution semantics are unchanged; the accessor is built from the same runtime-resolved metadata the walk validates. Shape checks use `SubjectPropertyTypeExtensions`. No Registry types are referenced.
+
+Every processed callback, leaf or intermediate, revalidates the path: event computation performs a fresh bounds-checked walk from the root (the same walk `Current` uses), which yields the observed state AND validates the subscribed chain in one pass. If the walk resolves different subjects than the chain is subscribed to (possible only after a divergence created while dormant, see Dormancy), the tracker retracks from the first divergence (subscribe-before-read, as below) before computing the event. The retrack's reads then supersede the initial walk: `New` and the resolved chain come from the values read after each new segment subscription was installed, never from the pre-retrack walk. This matters because a write landing between the initial walk's read and the install can dispatch to nobody (its listener lookup may precede the install); sourcing `New` from the pre-retrack walk would omit that write with no later callback guaranteed, reopening the missed-write window on the divergence path. In the intact-chain case the walk's values are safe as `New`: every segment is already subscribed, so any write the walk misses is guaranteed a follow-up callback by the primitive's post-commit resolution. This is what makes a callback from a subject that silently left the path heal the chain instead of delivering off-path state; the slot-identity guard alone cannot catch that case, because a never-rebuilt chain's stale observer IS the current observer for its position.
+
+Kind determination, after revalidation: `ValueChange` when the chain was intact and the triggering write's property is the current resolved leaf; `PathChange` for everything else that changes the observed state (structural writes, and revalidations triggered by off-path writes). Both are subject to transition suppression (below).
+
+Rebuild order is subscribe-before-read, per segment, under the tracker lock: for each segment below the change, first subscribe that segment's property on the resolved subject, then read the property value (indexing into it where applicable) to resolve the next subject. Correctness rests on two halves. First, the primitive's post-commit listener resolution (added for exactly this design; implemented in `PropertyChangeInterceptor` via `ResolveListeners` behind a full fence, documented in `docs/tracking.md` as the delivery guarantee): any write that commits after a subscription's install is delivered. Second, the subscribe-before-read order: a write racing the just-subscribed segment either commits before the tracker's read (the read sees the new value and the walk continues on the true graph) or commits after the install (the primitive then guarantees dispatch, which serializes on the tracker lock into a fresh retrack). Together the chain can never keep watching a subject the graph has already left, as long as the departing write was observed (dispatched through interception); a change that bypassed interception while dormant persists until the next delivered callback heals it (see Dormancy). The reverse order (read values first, subscribe afterwards) leaves a window where a replacement of an already-read segment goes undispatched, detaching the chain from the graph until the next write to that same property; tests pin the racing interleavings, including the writer-lookup-before-install, commit-after-read variant that tracker-lock serialization alone cannot close. The same discipline applies to the initial subscribe-time build.
+
+Third prerequisite, provided by the primitive's interceptor ordering (base branch): dispatch runs after lifecycle reconciliation. The tracker's retrack executes inside dispatch, so any subject it resolves was already attached and context-inherited by the lifecycle pass of the same write. A freshly assigned child is therefore notifying before the suffix is subscribed and read, and a write to it from the subscription's own callback (the react-to-appearance automation pattern) enters the interception chain normally. Without this ordering the child would be dormant during the retrack and the callback, and such writes would bypass interception with no later callback guaranteed; found by external review, fixed base-side by ordering `PropertyChangeInterceptor` before `LifecycleInterceptor`.
+
+Stale-callback guard: retrack disposes suffix subscriptions, but the primitive documents a bounded trailing invocation for in-flight dispatches. Staleness is checked by slot identity under the tracker lock: each segment observer records its segment position, and a callback is processed only when the firing observer is still the current subscription object recorded for that position. A chain-wide generation counter compared for equality is explicitly wrong: suffix rebuilds do not recreate upper-segment observers, so surviving segments would carry old generations and their next legitimate callback would be ignored, permanently freezing the subscription; it also misbehaves when the same subject and property appear at two positions of a cyclic path. Slot identity handles both.
+
+Index walks are bounds-checked and never throw. `SubjectLookup.FindSubjectInCollection` is not sufficient as-is: its `IList` fast path indexes unguarded and throws for `List<T>` (`ArgumentOutOfRangeException`), arrays (`IndexOutOfRangeException`), and boxed `ImmutableArray<T>` (including `InvalidOperationException` for a default instance). The tracker uses a lenient internal variant that checks `Count` (and `ImmutableArray` default-ness) before any indexer access and treats out-of-range, missing key, a wrong-shaped value in the slot, and a default `ImmutableArray` as unresolved. Dictionary lookups already return null for missing keys on both fast and fallback paths.
+
+Walk failures resolve to unresolved rather than throwing into a writer's write chain: a runtime subject whose segment property is missing or fails the `IsIntercepted || IsDerived` check, any getter that throws during a walk (derived getters may throw; the derived machinery already treats that as an anticipated condition), and a leaf whose runtime value is not assignable to `TValue` (possible via `new`-hiding of a same-named property across types, or dynamic subjects) all mark the path unresolved from that segment; no `InvalidCastException` escapes into the writer's chain. After such a walk the tracker is consistent: the prefix stays subscribed, the suffix is torn down.
+
+### Observed-state model and transition suppression
+
+Publication is gated on `IsWritten`: a write vetoed by an inner interceptor (the equality check, an `OnChanging` cancel) stores nothing and publishes nothing, so every delivered `Cause` is a committed write.
+
+The wrapper reports observed state, the `Cause` reports the raw write. At event computation time, under the tracker lock:
+
+- `New` is the result of the fresh validating walk from the root (or unresolved); after a divergent retrack it comes from the retrack's subscribe-before-read reads, which supersede the initial walk (see Mechanism). It is not copied from the causing write's payload.
+- `Old` is the tracker's last observed state. The last observed state is seeded from the subscribe-time walk (so the first delivered event's `Old` reflects the state at subscribe, and no false unresolved-to-resolved edge can fire on first delivery) and advances when the event is computed, before the callback runs, so the chained-transition invariant survives a throwing callback.
+- An event is suppressed when `Old` equals `New`: same resolvedness and equal values, using `EqualityComparer<TValue>.Default` (the comparer `PropertyValueEqualityCheckHandler` actually uses; for subject-typed leaves without `Equals` overrides this is reference equality).
+
+Note on `WithEqualityCheck`: replacing an intermediate subject with an instance that compares equal via `EqualityComparer<T>.Default` (a subject type overriding `Equals`) is suppressed entirely by the equality handler, which does not invoke the rest of the chain, so the terminal field write never happens and the property keeps the old instance. There is no divergence for the tracker to handle: chain, graph, and `Current` all continue to agree on the old instance. The silent drop of such replacements is a property of `WithEqualityCheck` and of subjects overriding `Equals`, not of path subscriptions.
+
+Consequences, all deliberate:
+
+- Chained transitions hold per subscription: event N+1's `Old` equals event N's `New`.
+- Racing leaf writers whose dispatches arrive out of commit order (the primitive's documented behavior) coalesce: the first delivery re-reads the latest value, the second is suppressed as a no-op. The raw per-write old/new values remain available on `Cause` for consumers that need them.
+- Structural churn that lands in an identical spot (a collection reorder that leaves the same subject at the index, with an equal leaf value) is suppressed.
+- A path subscription is a current-value observer, not a write log. Consumers that need every write use the queue or observable channels.
+
+### Delivery contract
+
+Retrack and event computation are serialized per subscription under a small per-tracker lock. User callbacks run outside that lock through an exclusive-drain queue: an event is computed (validating walk, retrack on divergence, suppression check, last-observed advance) and appended under the lock; the appending thread becomes the drainer if none is active and invokes callbacks one at a time with the lock released, re-acquiring it per dequeue. The queue is a plain `Queue<T>` guarded by the tracker lock (steady-state allocation-free), and the uncontended case takes a direct-dispatch fast path: when the queue is empty and no drainer is active, the computing thread marks itself drainer, releases the lock, and invokes the callback with the stack-local event, skipping the enqueue and dequeue copies of the large event struct; it then re-acquires the lock to drain anything that raced in and to clear the flag. Total order and re-entrancy flattening are unchanged (a nested write finds the drainer active and enqueues). Running user code under the tracker lock is explicitly rejected: with one lock per subscription, a callback on path A that writes a segment of path B while B's callback writes a segment of A is a textbook lock-ordering deadlock, exactly the hazard the primitive's design avoids by never dispatching under a lock.
+
+- Per subscription, deliveries are totally ordered and chained as above; the drain queue preserves the order events were computed in.
+- The delivering thread is whichever writer is currently draining, usually the writing thread itself.
+- Racing structural changes may coalesce; intermediate states can be skipped.
+- Quiescent consistency, twice scoped: once OBSERVED writes settle, the last event's `New` and `Current` agree with the real graph. Excluded are (1) throwing callbacks (next point) and (2) a divergence created while dormant with no later delivered callback, which persists indefinitely (see Dormancy). Convergence of the event stream there requires a subsequent delivered callback, or disposing and re-subscribing (a `Refresh()` hook is a listed future extension). Reading `Current` does not heal the subscription; it is side-effect free and simply remains accurate despite the divergence.
+- Callback contract is the primitive's, verbatim: fast, non-blocking, must not throw. A throwing callback propagates to the drainer and abandons the current drain; already-queued events remain queued and are delivered when the next event is computed (the next write). The queue and drain flag stay consistent, but events stranded by a throwing callback are delivered late or, if no further writes occur, not at all; this is why the quiescent-consistency guarantee excludes throwing callbacks, and a test pins the late-delivery behavior.
+- Writer cost model: retrack work (suffix disposal, an O(suffix depth) subscribe-and-read walk with getter invocations) runs inline on the writing thread, and concurrent writers to watched segments of the same subscription serialize on that subscription's tracker lock. A structural write to a property watched by N path subscriptions pays N rebuild costs inline. Leaf writes pay one lock acquisition, one validating walk (O(depth) getter reads), and the callback; the walk is paid whether the event is delivered or suppressed, because the walk is what produces `New` for the suppression comparison (suppression skips only the queue append and the callback). Writes to properties that are not a segment of any path subscription pay only the primitive's active-lookup state (a nonzero process-wide count means old-value capture, the post-commit state re-read, and one `Data` probe miss on every write), the same overhead N bare per-property subscriptions already impose; the path layer adds nothing further there. This is the accepted cost of synchronous delivery; consumers needing to decouple hand off to their own `Channel`, as with the primitive.
+- Re-entrancy: a callback that writes a path segment enqueues the nested event, which is delivered by the same drainer after the current callback returns. Nesting is flattened rather than inline; ordering stays total.
+- Getter invocations during walks happen under the tracker lock (precedent: `LifecycleInterceptor` invokes property getters under its own lock during reconciliation); getters are expected to be side-effect-free, the same expectation the lifecycle and derived machinery already place on them.
+- Cross-subscription ordering is not guaranteed; each subscription is independent.
+
+`Current` performs a fresh, lock-free walk from the root along the decomposed segments (bounds-checked, never throwing), independent of the tracker's subscription chain. It is side-effect free: it neither retracks the chain nor updates the tracker's last observed state. Healing is the event path's job; keeping reads pure means a UI read (a Blazor render, a debugger watch) can never trigger subscription churn or lock acquisition. This is what makes the dormancy guarantee below true: even while events are dormant and the chain is stale, `Current` reflects the real graph. Cost is O(depth) getter reads per access. `Current` racing concurrent writes is best-effort, the same re-read contract as everywhere else in Tracking.
+
+### Cause and provenance
+
+`Cause` is supplementary provenance, never something the consumer must decode:
+
+- `Kind` says whether the leaf or the structure moved; the `Old`/`New` flags distinguish break (resolved to unresolved), heal (unresolved to resolved), and re-resolve (resolved to resolved with a changed observed value; the leaf identity usually changed, but a racing leaf write folded into the fresh read can also produce this shape).
+- `Cause.Origin` is the origin of the triggering write, verbatim. It is deliberately NOT provenance for `New`: callbacks can arrive out of commit order and `New` is a fresh walk, so a delayed FromSource callback can carry a `New` that a later Local write produced, and the Local write's own callback is then suppressed as a no-op. Consumers that need per-write origin fidelity, such as connector echo suppression, must use the per-property primitive or the queue channel, which deliver each write's own payload; a path subscription is a current-value observer.
+- `Cause.Property` names the written property that triggered the event; for a `PathChange` its old/new values are that property's values (for example the old and new collection references). After a divergence created while dormant, the trigger can be a write to a subject that had already left the path (the revalidation that heals the chain, see Mechanism); `Cause` then names that off-path property.
+- Timestamps flow from the causing write via the existing `SubjectChangeContext` stamping; nothing new is needed.
+
+### Ownership and lifetime
+
+The subject on which `SubscribeToPath` is called owns the path subscription. Concretely, the first-segment registration lands in the root subject's `Data` (that is how the primitive stores registrations), and the handle owns the tracker, which owns the suffix segment handles stored in each segment subject's `Data`.
+
+- `Dispose()` on the handle is a one-shot transition that tears down all segment subscriptions and clears references. Events already computed and queued but not yet delivered are dropped. After dispose, `Current` returns the unresolved default (graceful for racing readers; no `ObjectDisposedException` is thrown into a UI read). Self-dispose from inside a callback is explicitly supported (the unsubscribe-on-first-event pattern): the drainer detects disposal and stops delivering further queued events.
+- Fire-and-forget collection requires the handle and all subjects of the current chain to be unreachable; the chain then forms a rootless cycle collected together, as for the primitive. Any externally rooted chain subject (for example a child subject also held by a cache) pins its segment subscription and through it the tracker, the root, and the rest of the chain, until the handle is disposed or a retrack moves the chain off that subject. This is the primitive's forgotten-handler caveat multiplied across the chain; dispose the handle when consumers retain references.
+- A subject moved off the path has its segment subscription disposed during the retrack that the move itself triggers, so there are no stale pins in steady state. A structural move that happens while a segment is dormant leaves that segment's stale subscription (and its pin) in place until the next callback delivered to any still-subscribed segment (including the stale branch itself, which triggers the revalidating retrack), or handle disposal (documented, see Dormancy).
+- Each segment subscription increments the primitive's process-wide subscription count (`PropertyChangeSubscriptions`), so an active path subscription keeps the per-write listener lookup active, exactly as N individual per-property subscriptions would.
+
+### Dormancy (inherited from the primitive)
+
+A segment fires only while its subject is attached to a context with a `PropertyChangeInterceptor`. Structural changes made while a segment's subject is dormant are not observed at the time they happen. The chain re-syncs at the next callback delivered to ANY still-subscribed segment subscription, wherever that subject now lives: because every processed callback revalidates via the fresh walk (see Mechanism), even a write to a stale suffix subject that silently left the path triggers a retrack from the first divergence instead of delivering off-path state. Until such a callback (or handle disposal), the divergence persists silently. `Current` is always computed fresh, so reads never go stale even while events are dormant. Subscribing before the root is first attached is valid; the subscription is dormant until attach. Assigning a previously detached subject into a watched path is NOT a dormancy case: dispatch-after-lifecycle ordering means the subject is attached and notifying before the structural callback and retrack run. Dormancy covers writes that happen while a subject is genuinely outside every notifying context. This is the primitive's documented dormancy caveat in path form and is documented, not solved with machinery (a `Refresh()` re-sync hook is listed under future extensions).
+
+Functional prerequisite, documented prominently: multi-segment paths require context inheritance. `WithPropertyChangeSubscriptions()` alone registers only the interceptor; without `ContextInheritanceHandler` (registered by `WithContextInheritance()` and bundled by `WithFullPropertyTracking()`), a child subject assigned into the graph never inherits the root's context, so its writes bypass interception forever: segment 0 fires, every deeper segment is silently inert, `Current` still works, and nothing errors. For the primitive this is a user-controlled dormancy edge; for paths, whose purpose is observing subjects that appear dynamically, it is a prerequisite. `docs/tracking.md` and the `SubscribeToPath` XML docs must state: use `WithFullPropertyTracking()` (or at least `WithPropertyChangeSubscriptions()` plus `WithContextInheritance()`) for paths spanning more than one subject. A test pins the bare-subscriptions configuration as inert below the root.
+
+### Transactions (inherited from the primitive)
+
+Staged writes deliver at commit replay, on the committing thread; the tracker retracks and delivers there. Rollback replays inverse writes through the full chain, so a path subscriber can observe apply-and-revert transition pairs, which converge back to the pre-transaction observed state (documented; suppression removes only exact no-op deliveries, not the pair).
+
+### Package placement and files
+
+`Namotion.Interceptor.Tracking`, new folder `Paths/` (namespace `Namotion.Interceptor.Tracking.Paths`), next to but separate from `Change/`. The feature compiles with no `Namotion.Interceptor.Registry` reference. New public surface (all listed under Public surface above) is added to the Tracking public API snapshot; the core snapshot is unchanged.
+
+Delivery shape: one release-safe pull request containing the full feature (public surface, tracker, tests, benchmarks, docs), landing after the primitive's per-property subscription pull request. No public API lands ahead of its consumers, and the pull request is safe to release on its own.
+
+## Testing and verification
+
+Naming per repo convention (`When<Condition>_Then<ExpectedBehavior>`), Arrange/Act/Assert comments. All tests creating subscriptions run inside the same non-parallel collection discipline the primitive's tests use (the process-wide subscription count is shared static state; `PropertyChangeSubscriptions.ResetForTests()` normalizes it).
+
+Resolution and transitions:
+
+- Initial `Current` for a resolved path, an unresolved path (null intermediate), and an out-of-range index.
+- Out-of-range indices are unresolved, never a throw, specifically on the `IList` fast-path types where the naive lookup throws: `List<T>`, `T[]`, `ImmutableArray<T>`, and a default (uninitialized) `ImmutableArray<T>`.
+- Leaf write delivers `ValueChange` with chained `Old`/`New` and the leaf write as `Cause`.
+- Heal: assigning the null intermediate delivers `PathChange` (unresolved to resolved) with the fresh leaf value and the intermediate write as `Cause`.
+- Break: nulling an intermediate delivers `PathChange` (resolved to unresolved) with the last observed value as `Old`.
+- Collection replacement that moves a different subject to the watched index delivers `PathChange` (resolved to resolved) with both values.
+- Collection replacement that leaves the same subject and an equal leaf value at the index is suppressed.
+- Dictionary-key segments behave the same for add, replace, and remove of the key, including a non-string key type.
+- A retrack rebuilds only the suffix below the changed segment (white-box: upper segment subscriptions are untouched).
+- Single-segment path degenerates correctly.
+
+No stale subscriptions (the chain invariant). After every observed structural change, the multiset of segment listeners installed across subjects matches exactly the current resolved chain's segments, nothing more (a subject appearing at two positions of a cyclic path holds two listeners; a divergence created while dormant persists until the next delivered callback heals it, see Dormancy):
+
+- Replacing an intermediate subject disposes the old suffix's listener entries: the replaced subject and everything below it hold no listener afterwards (white-box `Data` assertion against the `ni.pcl` key), and the process-wide subscription count equals the current chain length.
+- A write to a subject that was moved off the path delivers nothing (the old chain is truly unsubscribed, not just filtered).
+- A write to the newly resolved leaf delivers (the new chain is truly subscribed), for every transition kind: heal, re-resolve via collection replacement, re-resolve via dictionary key replacement.
+- Breaking the path (null intermediate, index out of range, key removed) disposes the entire suffix below the break; only the still-resolvable prefix keeps listeners.
+- Repeated structural churn (replace, break, heal in a loop) never grows the process-wide subscription count beyond the current chain length (leak check).
+
+Property type matrix (per `docs/subject-guidelines.md`). One test per shape, covering both the walk and the retrack:
+
+- Scalar leaves: value type (`int`, `double`), string, nullable value type (`int?`), nullable reference (`string?`, where null is a resolved value distinct from unresolved).
+- Subject-reference leaf (`TValue` is itself a subject type; transition suppression uses reference equality).
+- Subject reference intermediate (`.Foo`), including a nullable subject property.
+- Subject collection intermediates: `T[]`, `List<T>`, `IReadOnlyList<T>`, `ImmutableArray<T>`.
+- Subject dictionary intermediates: `Dictionary<string, T>`, `IReadOnlyDictionary<string, T>`, and one non-string key type.
+- Interface-typed intermediate (property whose static type is an interface extending `IInterceptorSubject`).
+- `[Derived]` interface default property as leaf (plain interface defaults are rejected; see expression rules).
+- Derived leaf and derived subject-typed intermediate (with derived-change detection present; inert without it).
+- Deep mixed path combining reference, collection, and dictionary segments in one expression.
+
+Expression validation:
+
+- Unknown member, field selector, cast, method call, captured-object chain, static member, non-subject intermediate, non-intercepted non-derived leaf, multi-argument indexer, null dictionary key (constant or captured variable evaluating to null), negative collection index, path ending in an indexed element, plain (non-derived) interface default property: all throw clear errors at subscribe.
+- Index arguments are evaluated once: mutating a captured index variable after subscribe has no effect.
+- Derived leaf: accepted; fires with derived-change detection present; inert without it (documented prerequisite).
+
+Concurrency and lifecycle:
+
+- Concurrent leaf writes and structural writes: serialized delivery, chained transitions, quiescent consistency (stress test converges to the true graph state).
+- Missed-write window: a structural write racing a retrack between a suffix segment's subscribe and its read is never lost, in both interleavings: writer lookup after the install (closed by tracker-lock serialization) and writer lookup before the install with commit after the tracker's read (closed by the primitive's post-commit resolution). Orchestrated interleaving tests; the primitive-side half is additionally pinned by the primitive plan's install-during-write test.
+- Trailing invocation from a disposed suffix subscription is ignored; a legitimate callback from a surviving upper segment after a suffix rebuild is NOT ignored (pins the slot-identity guard against the generation-counter mistake).
+- Cyclic path (the same subject and property at two segment positions, for example `x => x.Child.Child.Name` on a self-referencing graph): one write dispatches to the listener array snapshot in install order; the upper segment's observer fires first and its retrack disposes the lower segment's subscription, whose in-snapshot dispatch is then skipped by the primitive's cleared-observer guard. Delivery is exactly once per write, and the multiset chain invariant holds after the retrack.
+- Re-entrancy: a callback writing a path segment enqueues the nested event, which delivers after the current callback returns (flattened, totally ordered, no deadlock).
+- Cross-path callbacks: subscription A's callback writes a segment of path B and vice versa, concurrently; no deadlock (pins callbacks running outside the tracker lock).
+- A throwing callback propagates and abandons the drain; stranded queued events deliver on the next write, with intact chained transitions (last observed state advanced before the callback ran).
+- A getter that throws during a walk makes the path unresolved from that segment instead of propagating into the writer's chain.
+- A leaf whose runtime value is not assignable to `TValue` resolves as unresolved, never an `InvalidCastException` in the writer's chain.
+- Bare `WithPropertyChangeSubscriptions()` context (no context inheritance): a multi-segment path is inert below the root (pins the documented prerequisite); with `WithFullPropertyTracking()` the same scenario delivers.
+- Dispose: queued undelivered events are dropped; `Current` returns the unresolved default after dispose; self-dispose from inside a callback stops further deliveries without deadlock or exception.
+- Dispose stops delivery, tears down all segment `Data` entries, and returns the process-wide subscription count to zero; double dispose is a no-op.
+- Fire-and-forget: dropped root plus dropped handle is collectable (GC test, as for the primitive).
+- Dormancy: no delivery while the root is detached; delivery resumes on re-attach; a structural change made while dormant is missed at the time it happens and the chain re-syncs on the next delivered callback (pins the documented caveat); `Current` stays fresh throughout.
+- Dormant-divergence heal via the stale branch: replace an intermediate while dormant, move the old suffix subject into another attached, notifying context, then write the old subject's leaf property. The subscription must NOT deliver the off-path value: the revalidating walk detects the divergence, retracks onto the true path, and delivers a `PathChange` reflecting the true observed state (or suppresses if unchanged). Afterwards, writes to the new suffix deliver and writes to the old subject no longer do (its subscription was disposed by the retrack).
+- Divergent-retrack freshness: orchestrate a write to the new suffix that commits between the validating walk's read and the retrack's subscription install; the delivered `New` (or an immediately following event) reflects that write (pins that `New` comes from the retrack's subscribe-before-read reads, not the pre-retrack walk).
+- Newly assigned child (dispatch-after-lifecycle prerequisite): a callback reacting to the structural change writes a property of the just-assigned, previously context-free child; the write is intercepted and delivered as its own event. A concurrent writer to the new suffix during the assignment settles per quiescent consistency (no permanently missed write).
+- Transactions: commit replay delivers; rollback delivers the apply-and-revert pair and converges.
+- Callback exceptions propagate (documented must-not-throw, not swallowed).
+- `Cause` correctness: kind, triggering property, and origin passthrough (`Cause.Origin` equals the triggering write's origin verbatim).
+- Origin-is-not-provenance limitation (pins the documented contract): orchestrate a FromSource write whose dispatch is delayed past a Local write's commit; the single delivered event carries the Local value as `New` under `Cause.Origin` FromSource, and the Local write's own callback is suppressed. The test documents that consumers needing per-write origin fidelity must use the primitive or queue channel.
+
+Performance (benchmark-gated):
+
+- New benchmarks in `Namotion.Interceptor.Benchmark` (for example `SubjectPathSubscriptionBenchmark.cs`, annotated `[MemoryDiagnoser]`):
+  - Leaf-write delivery through a path subscription versus a bare per-property listener on the same property; the delta is the tracker lock, the validating walk, and the drain queue. Run at two depths (for example 1 and 4) to expose the walk's O(depth) scaling, and include the hot-leaf worst case: repeated writes to one watched leaf, where every processed callback pays the walk even when delivery is suppressed. The `[MemoryDiagnoser]` gate: leaf delivery must be allocation-free on the path side for inline-sized value types and strings (the typed leaf accessor requirement; the metadata getter would box).
+  - A structural write triggering a suffix retrack at a representative depth (for example a four-segment path), measuring the inline writer cost (suffix disposal plus the subscribe-and-read walk) and its allocations.
+- Escalation path if the validating walk ever measures as a problem at realistic depths, in order of preference: first amortized validation (validate one ancestor link per leaf event, round-robin), O(1) reads per event, bounding off-path deliveries after a dormant divergence to at most depth events instead of unbounded; then leaf-only validation on value events (structural events still validate), which trades away dormant-divergence healing on leaf writes entirely and must be documented as a consistency carve-out. Not taken preemptively; the benchmark decides.
+- Global overhead: path subscriptions are ordinary per-property listeners composed by the tracker (no additional interceptor, no new hot-path state), so the process-wide cost they impose on unwatched writes is exactly the primitive's active-lookup state, measured by the primitive's listener-elsewhere benchmark gate; when no subscription exists anywhere, writes are covered by the idle gate. The path layer itself adds cost only to watched segments.
+- Benchmark pull requests are gated through the repository's requires-benchmark label workflow.
+
+Docs:
+
+- New section in `docs/tracking.md`: path subscriptions, observed-state model, delivery contract, dormancy and the context-inheritance prerequisite, ownership, transaction visibility.
+- Cost model, stated so consumers can judge the price before adopting the feature. Wording, roughly: "While at least one per-property or path subscription exists anywhere in the process, every write pays the primitive's active-lookup state (old-value capture, a post-commit re-check, and one dictionary probe on the written subject, roughly 10 to 20 ns); beyond that, writes outside any watched path pay nothing. A write to a watched segment additionally pays, inline on the writing thread, a short per-subscription lock, a validating walk along the path (one intercepted property read per segment; with full tracking each read includes the derived-tracking read hook), and your callback; structural changes additionally pay the re-subscription of the segments below the change. A [Derived] segment's getter executes on every processed event of the subscription; keep derived segments off hot paths."
+- Thread marshaling note for UI consumers: callbacks run on writer (or draining) threads, never a UI thread; Blazor and other UI consumers must marshal (for example `InvokeAsync`) before touching component state.
+- That section ends with a final info block titled "Future extensions" listing the items below, so readers see what is intentionally not built yet.
+
+## Future extensions (out of scope now; mirror as the final info block in docs/tracking.md)
+
+- Prefix sharing: many subscriptions under a common prefix (for example 100 watchers below `Foo.Bar`) currently each hold their own segment chain; a shared prefix tree is a pure optimization once real workloads show it matters.
+- String-path subscriptions: compose this primitive at the Registry or connector level with `IPathProvider` parsing for externally supplied paths (OPC UA node addresses, MQTT topics).
+- Cast support in selectors (`x => ((Car)x.Vehicle).Speed`).
+- Paths ending in an indexed element (`x => x.Items[3]` with no trailing property), observing which value sits at a position.
+- In-place collection mutation tracking (`INotifyCollectionChanged`); today all collections change by reassignment, which the design relies on.
+- Asynchronous delivery; consumers hand off to their own `Channel`, as with the primitive.
+- `Refresh()` on the handle: an explicit re-sync hook for the dormancy edge and for tests.
+
+## Open questions
+
+Resolved 2026-07-18: the missed-write window is closed by amending the primitive (option 1 of the previously blocking question), and the amendment is now implemented and settled on this branch. `PropertyChangeInterceptor.WriteProperty` resolves listeners after `next` behind `Interlocked.MemoryBarrier()`, the aggregation flag (`ArePropertyObserversNotified`) is set during unwind, and the idle fast path re-checks post-commit (`DispatchLateConsumers`, with the documented `OldValue` equal to `NewValue` caveat for a write that raced the install); the guarantee has since been extended to the queue and observable channels as well. The tracker's subscribe-before-read discipline plus that guarantee close both racing interleavings; no verification re-read loop is needed. No blocking decisions remain.
+
+Naming is settled as specified (`SubscribeToPath`, `SubjectPathSubscription<TValue>`, `SubjectPathValue<TValue>`, `SubjectPathChange<TValue>`, `SubjectPathChangeKind`, `IsResolved`); remaining bikeshed (folder name, observer interface name) settles during implementation.
