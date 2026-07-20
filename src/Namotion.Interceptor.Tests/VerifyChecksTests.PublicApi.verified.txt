@@ -208,7 +208,7 @@ namespace Namotion.Interceptor.Interceptors
         public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
     }
     public delegate object? InvokeMethodInterceptionDelegate(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context);
-    public readonly struct MethodInvocationContext
+    public struct MethodInvocationContext
     {
         public MethodInvocationContext(Namotion.Interceptor.IInterceptorSubject subject, string methodName, object?[] parameters) { }
         public string MethodName { get; }
