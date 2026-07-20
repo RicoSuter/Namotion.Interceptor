@@ -39,6 +39,11 @@ public struct PropertyWriteContext<TProperty>
     // trigger's already-resolved value.
     private long _writeTimestamp;
 
+    // The terminal write action for this call. Threaded through the per-call context (which already
+    // flows by ref to the end of the chain) instead of a ThreadStatic on the shared chain instance:
+    // per-call state belongs on the per-call context, which is also robust against reentrant writes.
+    internal Action<IInterceptorSubject, TProperty>? Terminal;
+
     /// <summary>
     /// Gets the property to write a value to.
     /// </summary>
