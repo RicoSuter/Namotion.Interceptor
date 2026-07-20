@@ -36,7 +36,7 @@ public class SubjectTransactionTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
-            .WithPropertyChangeObservable();
+            .WithPropertyChangeSubscriptions();
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>

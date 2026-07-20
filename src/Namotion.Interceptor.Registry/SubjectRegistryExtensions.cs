@@ -146,7 +146,8 @@ public static class SubjectRegistryExtensions
     /// type via <see cref="IInterceptorSubject"/>. Pure member-access hops are resolved through the registry
     /// (null-safe, no compilation); segments that contain an index, dictionary key or method call are compiled
     /// and evaluated against the actual object graph. Returns <see langword="null"/> when the expression is not
-    /// a member-access chain, a member hop is <see langword="null"/> at any depth, or the property is not
+    /// a member-access chain rooted at the lambda parameter (a selector on a captured variable returns
+    /// <see langword="null"/>), a member hop is <see langword="null"/> at any depth, or the property is not
     /// registered.
     /// </summary>
     /// <param name="subject">The subject with the property.</param>
