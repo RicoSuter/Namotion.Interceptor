@@ -99,11 +99,22 @@ internal static class PathExpressionDecomposer
     {
         if (member.Member is not PropertyInfo property)
         {
-            throw member.Member is FieldInfo
-                ? Invalid(parameter,
-                    $"'{member.Member.Name}' is a field, not a property; only property access is supported.")
-                : Invalid(parameter,
-                    $"the path member '{member.Member.Name}' is not a property.");
+            if (member.Member is FieldInfo)
+            {
+                // Closure captures compile to a field access on a ConstantExpression holding the
+                // display-class instance, so the path does not start from the lambda parameter, for
+                // example x => other.Name. Any other field access is a genuine (rejected) field
+                // selector, whether on the parameter (x.PlainField) or reached through it
+                // (x.Child.PlainField).
+                throw member.Expression is ConstantExpression
+                    ? Invalid(parameter,
+                        $"the path does not start from the lambda parameter; the captured object '{member.Member.Name}' cannot be used, for example x => other.Name.")
+                    : Invalid(parameter,
+                        $"'{member.Member.Name}' is a field, not a property; only property access is supported.");
+            }
+
+            throw Invalid(parameter,
+                $"the path member '{member.Member.Name}' is not a property.");
         }
 
         if (member.Expression is null)
@@ -124,6 +135,15 @@ internal static class PathExpressionDecomposer
 
     private static Expression ConsumeIndexer(MethodCallExpression call, List<PathSegment> segments, ParameterExpression parameter)
     {
+        // Multi-dimensional array access (x.Grid[1, 2]) compiles to a synthesized Get(int, int, ...)
+        // method call rather than a get_Item indexer; name the receiver and the shape explicitly.
+        if (call.Object?.Type.IsArray == true && call.Method.Name == "Get")
+        {
+            throw Invalid(parameter,
+                $"the multi-dimensional array indexer on '{DescribeReceiver(call.Object)}' is not supported; " +
+                "only single-argument indexers on single-dimensional collections are allowed.");
+        }
+
         if (call.Method.Name != "get_Item")
         {
             throw Invalid(parameter,

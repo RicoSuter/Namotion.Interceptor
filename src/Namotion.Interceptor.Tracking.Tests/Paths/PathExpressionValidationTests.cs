@@ -106,4 +106,53 @@ public class PathExpressionValidationTests
         // A numeric narrowing (int -> short) is a user cast, not a sanctioned boxing/widening convert.
         Assert.Throws<ArgumentException>(() => Decompose(x => (short)x.Index));
     }
+
+    [Fact]
+    public void WhenMultiArgumentIndexer_ThenThrows()
+    {
+        // Act & Assert
+        // x.Grid[1, 2] on a Node[,] compiles to a synthesized Get(int, int) call, not a single-argument indexer.
+        var exception = Assert.Throws<ArgumentException>(() =>
+            PathExpressionDecomposer.Decompose<GridHolder, string>(x => x.Grid[1, 2].Name));
+        Assert.Contains("multi-dimensional", exception.Message);
+    }
+
+    [Fact]
+    public void WhenNestedIndexerReceiverIsAnotherIndexer_ThenThrows()
+    {
+        // Act & Assert
+        // The outer [2] is applied to x.Rows[1], whose receiver is another indexer rather than a property.
+        Assert.Throws<ArgumentException>(() =>
+            PathExpressionDecomposer.Decompose<GridHolder, string>(x => x.Rows[1][2].Name));
+    }
+
+    [Fact]
+    public void WhenNonSubjectIntermediate_ThenThrows()
+    {
+        // Act & Assert: Number is an int, cannot be an intermediate.
+        Assert.Throws<ArgumentException>(() =>
+            PathExpressionDecomposer.Decompose<GridHolder, int>(x => x.Number.GetHashCode()));
+    }
+
+    [Fact]
+    public void WhenCapturedObjectChain_ThenThrows()
+    {
+        // Arrange
+        var other = new Node();
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() =>
+            PathExpressionDecomposer.Decompose<Node, string>(x => other.Name));
+        Assert.Contains("captured object", exception.Message);
+    }
+
+    [Fact]
+    public void WhenNestedFieldSelector_ThenThrows()
+    {
+        // Act & Assert
+        // PlainField is reached through the parameter (x.Child), so it must report a field selector,
+        // not a captured-object chain. The null-forgiving x.Child! avoids CS8602 (warning-as-error).
+        var exception = Assert.Throws<ArgumentException>(() => Decompose(x => x.Child!.PlainField));
+        Assert.Contains("field", exception.Message);
+    }
 }

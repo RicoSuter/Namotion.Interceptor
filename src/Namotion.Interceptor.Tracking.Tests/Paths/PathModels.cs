@@ -15,3 +15,13 @@ public partial class Node
     public int PlainField;                 // not a property
     public int Index { get; set; }         // used to build an invalid index-arg expression
 }
+
+[InterceptorSubject]
+public partial class GridHolder
+{
+    public GridHolder() { Grid = new Node[0, 0]; Rows = []; }
+
+    public partial Node[,] Grid { get; set; }           // multi-dimensional indexer
+    public partial List<List<Node>> Rows { get; set; }  // nested indexer receiver
+    public partial int Number { get; set; }             // non-subject intermediate target
+}
