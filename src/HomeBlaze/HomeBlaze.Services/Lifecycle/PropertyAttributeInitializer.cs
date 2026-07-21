@@ -1,6 +1,8 @@
+using System.Linq;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -82,6 +84,32 @@ public class PropertyAttributeInitializer : IPropertyLifecycleHandler
             }
         }
 
+        // Fail closed on the [State] + secret [Configuration] conflict: a secret must never be
+        // exposed as state, so skip the State registration and leave the property usable as secret
+        // configuration. This replaces a throw that aborted attach and, from the hosted root loader,
+        // could stop the whole host (see #384 for making lifecycle handler failures recoverable).
+        // The warning is best-effort (only if host logging was made available to the context, see
+        // RootManager) and wrapped, so a disposed or faulting logging provider cannot re-abort attach.
+        if (hasState && configurationAttribute is { IsSecret: true })
+        {
+            var subject = property.Parent.Subject;
+            try
+            {
+                subject.Context.GetServices<ILoggerFactory>().FirstOrDefault()?
+                    .CreateLogger(typeof(PropertyAttributeInitializer).FullName!)
+                    .LogWarning(
+                        "Property '{Property}' on '{Subject}' has both [State] and [Configuration(IsSecret = true)]; " +
+                        "the [State] attribute is ignored because secret configuration must not be exposed as state.",
+                        property.Name, subject.GetType().Name);
+            }
+            catch
+            {
+                // Logging is diagnostics only; never let it reintroduce the fatal attach failure.
+            }
+
+            return;
+        }
+
         if (hasState && property.TryGetAttribute(KnownAttributes.State) is null)
         {
             var stateMetadata = new StateMetadata
@@ -95,14 +123,6 @@ public class PropertyAttributeInitializer : IPropertyLifecycleHandler
             };
             property.AddAttribute(KnownAttributes.State, typeof(StateMetadata),
                 _ => stateMetadata, null);
-        }
-
-        if (hasState && configurationAttribute is { IsSecret: true })
-        {
-            throw new InvalidOperationException(
-                $"Property '{property.Name}' on '{property.Parent.Subject.GetType().Name}' " +
-                $"has both [State] and [Configuration(IsSecret = true)]. " +
-                $"Secret configuration properties must not be exposed as state.");
         }
     }
 }
