@@ -43,14 +43,14 @@ public class PropertyChangeSubscriptionsBenchmark
     [GlobalSetup(Target = nameof(WriteIdle))]
     public void SetupIdle()
     {
-        _car = CreateCar();
+        _car = CreateCarInFreshContext();
     }
 
     // queue-only active: a single pull-queue subscription with a background consumer draining it.
     [GlobalSetup(Target = nameof(WriteWithQueueConsumer))]
     public void SetupQueueOnly()
     {
-        _car = CreateCar();
+        _car = CreateCarInFreshContext();
         _queueSubscription = _context.CreatePropertyChangeQueueSubscription();
         StartQueueDrain(_queueSubscription);
     }
@@ -59,7 +59,7 @@ public class PropertyChangeSubscriptionsBenchmark
     [GlobalSetup(Target = nameof(WriteWithObservableConsumer))]
     public void SetupObservableOnly()
     {
-        _car = CreateCar();
+        _car = CreateCarInFreshContext();
         _observableSubscription = _context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(_ => { });
@@ -69,7 +69,7 @@ public class PropertyChangeSubscriptionsBenchmark
     [GlobalSetup(Target = nameof(WriteWithQueueAndObservableConsumers))]
     public void SetupBoth()
     {
-        _car = CreateCar();
+        _car = CreateCarInFreshContext();
         _queueSubscription = _context.CreatePropertyChangeQueueSubscription();
         StartQueueDrain(_queueSubscription);
         _observableSubscription = _context
@@ -81,7 +81,7 @@ public class PropertyChangeSubscriptionsBenchmark
     [GlobalSetup(Target = nameof(WriteWithListenerOnSameProperty))]
     public void SetupListenerOnWrittenProperty()
     {
-        _car = CreateCar();
+        _car = CreateCarInFreshContext();
         _perPropertySubscription = _car.SubscribeToProperty(x => x.Name, (in SubjectPropertyChange _) => { });
     }
 
@@ -90,7 +90,7 @@ public class PropertyChangeSubscriptionsBenchmark
     [GlobalSetup(Target = nameof(WriteWithListenerOnOtherProperty))]
     public void SetupListenerElsewhere()
     {
-        _car = CreateCar();
+        _car = CreateCarInFreshContext();
         _perPropertySubscription = new PropertyReference(_car, nameof(Car.Name_MaxLength_Unit))
             .Subscribe((in SubjectPropertyChange _) => { });
     }
@@ -100,7 +100,7 @@ public class PropertyChangeSubscriptionsBenchmark
     [GlobalSetup(Target = nameof(WriteAfterObservableFullyUnsubscribed))]
     public void SetupObservableThenUnsubscribed()
     {
-        _car = CreateCar();
+        _car = CreateCarInFreshContext();
         var subscription = _context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(_ => { });
@@ -112,7 +112,7 @@ public class PropertyChangeSubscriptionsBenchmark
     [GlobalSetup(Target = nameof(WriteObservableOnlyBoxed))]
     public void SetupObservableOnlyBoxed()
     {
-        _car = CreateCar();
+        _car = CreateCarInFreshContext();
         _boxedValue = new[] { _car };
         _observableSubscription = _context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -124,7 +124,7 @@ public class PropertyChangeSubscriptionsBenchmark
     [GlobalSetup(Target = nameof(WriteBothActiveBoxed))]
     public void SetupBothBoxed()
     {
-        _car = CreateCar();
+        _car = CreateCarInFreshContext();
         _boxedValue = new[] { _car };
         _queueSubscription = _context.CreatePropertyChangeQueueSubscription();
         StartQueueDrain(_queueSubscription);
@@ -199,7 +199,9 @@ public class PropertyChangeSubscriptionsBenchmark
         _queueSubscription?.Dispose();
     }
 
-    private Car CreateCar()
+    // Establishes a fresh _context as a side effect and returns a subject bound to it; the name
+    // signals that the field is (re)assigned, not just that a Car is constructed.
+    private Car CreateCarInFreshContext()
     {
         _context = InterceptorSubjectContext
             .Create()
@@ -217,6 +219,8 @@ public class PropertyChangeSubscriptionsBenchmark
         var cancellationToken = _drainCancellation.Token;
         _drainThread = new Thread(() =>
         {
+            // TryDequeue observes cancellation as its first action and returns false, so the loop
+            // exits on Cancel() even while producers keep feeding the queue.
             while (subscription.TryDequeue(out _, cancellationToken))
             {
             }
