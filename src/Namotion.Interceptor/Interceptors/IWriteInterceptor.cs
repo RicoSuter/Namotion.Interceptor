@@ -198,9 +198,14 @@ public struct PropertyWriteContext<TProperty>
     /// Must only be used after the 'next()' call in the write interceptor.
     /// </summary>
     /// <returns>The property value.</returns>
-    public TProperty GetFinalValue() => Property.Metadata.IsDerived ?
-        (TProperty)Property.Metadata.GetValue?.Invoke(Property.Subject)! :
-        NewValue;
+    public TProperty GetFinalValue()
+    {
+        var property = Property;
+        var metadata = property.Metadata;
+        return metadata.IsDerived
+            ? (TProperty)metadata.GetValue?.Invoke(property.Subject)!
+            : NewValue;
+    }
 
     /// <summary>
     /// Finalizes <see cref="Origin"/> at the terminal write (right after <see cref="IsWritten"/>

@@ -16,13 +16,12 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
 
     public string Name { get; }
 
-    // Resolved on each access rather than cached: PropertyReference is a value type copied all over
-    // the codebase (contexts, change events, dictionary keys, many 'in' parameters), so an embedded
-    // SubjectPropertyMetadata? cache would bloat every copy 5x (16 to 80 bytes) and force the struct
-    // to be mutable (defeating readonly-struct and adding defensive copies at every 'in' site), while
-    // the cache almost never survives the very copies that dominate its usage. The metadata dictionary
-    // is a static per-type table, so the lookup is cheap; per-operation dedup, where it pays, belongs
-    // on the by-ref context that actually persists.
+    /// <summary>
+    /// Looks up the property metadata in the subject's property table on each access; the result is not
+    /// cached, because PropertyReference is a value type copied throughout the codebase and an embedded
+    /// cache would bloat every copy and force the struct to be mutable (see the readonly-struct
+    /// declaration). The lookup is cheap, but hoist it to a local if you read it more than once in a hot path.
+    /// </summary>
     public SubjectPropertyMetadata Metadata =>
         Subject.Properties.TryGetValue(Name, out var metadata) ? metadata :
             throw new InvalidOperationException(
