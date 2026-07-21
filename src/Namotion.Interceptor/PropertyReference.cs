@@ -2,11 +2,9 @@
 
 namespace Namotion.Interceptor;
 
-public struct PropertyReference : IEquatable<PropertyReference>
+public readonly struct PropertyReference : IEquatable<PropertyReference>
 {
     public static readonly PropertyReferenceComparer Comparer = new();
-
-    private SubjectPropertyMetadata? _metadata = null;
 
     public PropertyReference(IInterceptorSubject subject, string name)
     {
@@ -18,24 +16,18 @@ public struct PropertyReference : IEquatable<PropertyReference>
 
     public string Name { get; }
 
-    public SubjectPropertyMetadata Metadata
-    {
-        get
-        {
-            if (_metadata is not null)
-            {
-                return _metadata.Value;
-            }
-
-            _metadata = Subject.Properties
-                .TryGetValue(Name, out var metadata) ? metadata :
-                throw new InvalidOperationException(
-                    $"No metadata found for property '{Name}' on {Subject.GetType().Name}. " +
-                    $"Available properties ({Subject.Properties.Count}): [{string.Join(", ", Subject.Properties.Keys)}]");
-
-            return _metadata!.Value;
-        }
-    }
+    // Resolved on each access rather than cached: PropertyReference is a value type copied all over
+    // the codebase (contexts, change events, dictionary keys, many 'in' parameters), so an embedded
+    // SubjectPropertyMetadata? cache would bloat every copy 5x (16 to 80 bytes) and force the struct
+    // to be mutable (defeating readonly-struct and adding defensive copies at every 'in' site), while
+    // the cache almost never survives the very copies that dominate its usage. The metadata dictionary
+    // is a static per-type table, so the lookup is cheap; per-operation dedup, where it pays, belongs
+    // on the by-ref context that actually persists.
+    public SubjectPropertyMetadata Metadata =>
+        Subject.Properties.TryGetValue(Name, out var metadata) ? metadata :
+            throw new InvalidOperationException(
+                $"No metadata found for property '{Name}' on {Subject.GetType().Name}. " +
+                $"Available properties ({Subject.Properties.Count}): [{string.Join(", ", Subject.Properties.Keys)}]");
 
     public void SetPropertyData(string key, object? value)
     {
