@@ -402,7 +402,7 @@ The server broadcasts every update to **all** connected clients, including the c
 
 - **Sequence number consistency**: Every client must see the same monotonic sequence progression. Skipping an update for the originator would create a gap, triggering a false reconnection.
 - **Implicit acknowledgment**: The echo acts as a server-side ACK that the client's update was applied.
-- **No correctness issue**: The client applies inbound updates with `SubjectChangeContext.WithSource(this)`, so echoed values are deduplicated by the change tracking layer and do not trigger outbound writes or loops.
+- **No correctness issue**: The client applies inbound updates with `ChangeOrigin.FromSource(this)`, so echoed values are deduplicated by the change tracking layer and do not trigger outbound writes or loops.
 
 ### Conflict Resolution
 

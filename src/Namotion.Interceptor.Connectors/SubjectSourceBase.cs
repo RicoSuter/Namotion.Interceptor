@@ -78,14 +78,14 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // A missing PropertyChangeQueue means the source can capture no writes: a configuration error,
+        // A missing PropertyChangeInterceptor means the source can capture no writes: a configuration error,
         // so fail fast with an actionable message instead of running silently inert. Detect it precisely
         // (null-check, not catch-all) so unrelated subscription failures surface with their own diagnosis.
-        if (_context.TryGetService<PropertyChangeQueue>() is null)
+        if (_context.TryGetService<PropertyChangeInterceptor>() is null)
         {
             throw new InvalidOperationException(
-                "Cannot start source: no PropertyChangeQueue is registered in the interceptor context. " +
-                "Add WithPropertyChangeQueue() or WithFullPropertyTracking() to the context configuration.");
+                "Cannot start source: no PropertyChangeInterceptor is registered in the interceptor context. " +
+                "Add WithPropertyChangeSubscriptions() or WithFullPropertyTracking() to the context configuration.");
         }
 
         // Source-lifetime capture: one subscription for the whole source, so writes are captured
@@ -212,7 +212,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         List<SubjectPropertyChange>? owned = null;
         while (subscription.TryDequeueImmediate(out var change))
         {
-            if (change.Source == this)
+            if (ReferenceEquals(change.Origin.Source, this))
             {
                 continue; // this source's own applies (inbound / source-tagged)
             }

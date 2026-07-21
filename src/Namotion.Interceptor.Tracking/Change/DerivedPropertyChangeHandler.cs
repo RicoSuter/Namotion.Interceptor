@@ -18,6 +18,11 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// See docs/design/tracking-derived-properties.md for full concurrency analysis.
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
+// Outer of the change interceptor so the cascade recalculation runs after that interceptor has
+// dispatched: a triggering write is announced before the derived recalculations it causes. Only
+// load-bearing under aggregation, where instances would otherwise interleave and one context's
+// cascade could be announced before another's dispatch of the triggering write.
+[RunsBefore(typeof(PropertyChangeInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
@@ -354,13 +359,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        using (SubjectChangeContext.WithSource(null))
-        {
-            // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
-            // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
-            // not need a WithChangedTimestamp scope active to share the time with the dependent).
-            derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
-        }
+        // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
+        // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
+        // not need a WithChangedTimestamp scope active to share the time with the dependent).
+        derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {

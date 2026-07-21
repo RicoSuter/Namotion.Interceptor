@@ -21,7 +21,7 @@ public class SubjectUpdateReadOnlyTypesTests
     public void WhenImmutableArrayItemAdded_ThenInsertOperationIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new ReadOnlyTypesTestNode { Name = "Item1" };
         var node = new ReadOnlyTypesTestNode(context)
         {
@@ -52,7 +52,7 @@ public class SubjectUpdateReadOnlyTypesTests
     public void WhenIReadOnlyListItemRemoved_ThenRemoveOperationIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new ReadOnlyTypesTestNode { Name = "Item1" };
         var item2 = new ReadOnlyTypesTestNode { Name = "Item2" };
         var node = new ReadOnlyTypesTestNode(context)
@@ -83,7 +83,7 @@ public class SubjectUpdateReadOnlyTypesTests
     public void WhenIReadOnlyDictionaryKeyAdded_ThenInsertOperationIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new ReadOnlyTypesTestNode { Name = "Item1" };
         var node = new ReadOnlyTypesTestNode(context)
         {
@@ -118,7 +118,7 @@ public class SubjectUpdateReadOnlyTypesTests
     public void WhenIReadOnlyDictionaryItemPropertyChanged_ThenSparseUpdateByKeyIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new ReadOnlyTypesTestNode { Name = "Item1" };
         var item2 = new ReadOnlyTypesTestNode { Name = "Item2" };
         var node = new ReadOnlyTypesTestNode(context)
@@ -201,7 +201,7 @@ public class SubjectUpdateReadOnlyTypesTests
 
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
-        target.ApplySubjectUpdate(update, null);
+        target.ApplySubjectUpdate(update, null, ChangeOrigin.Local);
 
         // Assert: target.ReadOnlyLookup contains the expected entries.
         Assert.Equal(2, target.ReadOnlyLookup.Count);

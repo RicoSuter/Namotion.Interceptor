@@ -16,14 +16,14 @@ public class SubjectPropertyChangeWithSourceTests
         var changedTimestamp = DateTimeOffset.UtcNow;
         var receivedTimestamp = changedTimestamp.AddMilliseconds(5);
         var change = SubjectPropertyChange.Create(
-            property, source: null, changedTimestamp, receivedTimestamp, "Old", "New");
+            property, origin: ChangeOrigin.Local, changedTimestamp, receivedTimestamp, "Old", "New");
         var source = new object();
 
         // Act
-        var marked = change.WithSource(source);
+        var marked = change.WithOrigin(ChangeOrigin.FromSource(source));
 
         // Assert
-        Assert.Same(source, marked.Source);
+        Assert.Same(source, marked.Origin.Source);
         Assert.Equal(property, marked.Property);
         Assert.Equal(changedTimestamp, marked.ChangedTimestamp);
         Assert.Equal(receivedTimestamp, marked.ReceivedTimestamp);
@@ -39,14 +39,14 @@ public class SubjectPropertyChangeWithSourceTests
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var change = SubjectPropertyChange.Create(
-            property, source: null, DateTimeOffset.UtcNow, receivedTimestamp: null, 1, 2);
+            property, origin: ChangeOrigin.Local, DateTimeOffset.UtcNow, receivedTimestamp: null, 1, 2);
         var source = new object();
 
         // Act
-        var marked = change.WithSource(source);
+        var marked = change.WithOrigin(ChangeOrigin.FromSource(source));
 
         // Assert
-        Assert.Same(source, marked.Source);
+        Assert.Same(source, marked.Origin.Source);
         Assert.Null(marked.ReceivedTimestamp);
         Assert.Equal(1, marked.GetOldValue<int>());
         Assert.Equal(2, marked.GetNewValue<int>());

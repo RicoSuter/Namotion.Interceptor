@@ -18,23 +18,6 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 /// </summary>
 public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 {
-    // Drains until the sentinel arrives (excluded from the result); throws TimeoutException after 10s.
-    private static List<SubjectPropertyChange> DrainUntil(
-        PropertyChangeQueueSubscription subscription, Func<SubjectPropertyChange, bool> isSentinel)
-    {
-        var changes = new List<SubjectPropertyChange>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (subscription.TryDequeue(out var change, timeout.Token))
-        {
-            if (isSentinel(change))
-            {
-                return changes;
-            }
-            changes.Add(change);
-        }
-        throw new TimeoutException("Sentinel notification was not received within 10 seconds.");
-    }
-
     private static List<SubjectPropertyChange> DrainUntilSentinelProperty(
         PropertyChangeQueueSubscription subscription, string sentinelPropertyName)
     {
@@ -73,8 +56,8 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 
         Assert.Single(firstNameChanges);
         Assert.Single(lastNameChanges);
-        Assert.Same(sourceMock.Object, firstNameChanges[0].Source);
-        Assert.Null(lastNameChanges[0].Source);
+        Assert.Same(sourceMock.Object, firstNameChanges[0].Origin.Source);
+        Assert.Null(lastNameChanges[0].Origin.Source);
     }
 
     [Fact]
@@ -118,7 +101,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         // Assert: both the forward apply and the rollback revert carry the source identity.
         var propertyAChanges = changes.Where(c => c.Property.Name == nameof(ThrowingDevice.PropertyA)).ToList();
         Assert.Equal(2, propertyAChanges.Count);
-        Assert.All(propertyAChanges, change => Assert.Same(sourceMock.Object, change.Source));
+        Assert.All(propertyAChanges, change => Assert.Same(sourceMock.Object, change.Origin.Source));
         Assert.True(propertyAChanges[0].GetNewValue<bool>());   // forward apply: true
         Assert.False(propertyAChanges[1].GetNewValue<bool>());  // rollback revert: false
     }
@@ -156,12 +139,12 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
 
         Assert.Single(firstNameChanges);
         Assert.Single(lastNameChanges);
-        Assert.Same(sourceA.Object, firstNameChanges[0].Source);
-        Assert.Same(sourceB.Object, lastNameChanges[0].Source);
+        Assert.Same(sourceA.Object, firstNameChanges[0].Origin.Source);
+        Assert.Same(sourceB.Object, lastNameChanges[0].Origin.Source);
     }
 
     [Fact]
-    public async Task WhenCommitAppliedChangeTriggersCascade_ThenCascadeInheritsSourceScope()
+    public async Task WhenCommitAppliedChangeTriggersCascade_ThenCascadePublishesLocalSource()
     {
         // Arrange
         var context = CreateContext();
@@ -206,12 +189,14 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         // Primary change carries the source.
         Assert.Single(primaryChanges);
         Assert.Equal(5, primaryChanges[0].GetNewValue<int>());
-        Assert.Same(sourceMock.Object, primaryChanges[0].Source);
+        Assert.Same(sourceMock.Object, primaryChanges[0].Origin.Source);
 
-        // Secondary change (the cascade) also carries the source, inheriting the scope.
+        // Secondary change (the hook cascade) is a locally computed value: the one-shot pending
+        // origin stamps only the Primary write it targets, so nested cascade writes publish with a
+        // null (Local) source and are not echo-suppressed for the bound source.
         Assert.Single(secondaryChanges);
         Assert.Equal(10, secondaryChanges[0].GetNewValue<int>());
-        Assert.Same(sourceMock.Object, secondaryChanges[0].Source);
+        Assert.Null(secondaryChanges[0].Origin.Source);
 
         // Only Primary was submitted to the source; the cascade was not in the pending set.
         // writtenBatches is populated: the synchronous mock completed inside CommitAsync.
@@ -221,7 +206,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WhenInboundSourceValueTriggersCascade_ThenCascadeInheritsSourceScope()
+    public async Task WhenInboundSourceValueTriggersCascade_ThenCascadePublishesLocalSource()
     {
         // Arrange
         var context = CreateContext();
@@ -252,12 +237,14 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         // Primary change carries the inbound source.
         Assert.Single(primaryChanges);
         Assert.Equal(7, primaryChanges[0].GetNewValue<int>());
-        Assert.Same(sourceMock.Object, primaryChanges[0].Source);
+        Assert.Same(sourceMock.Object, primaryChanges[0].Origin.Source);
 
-        // Secondary change (the cascade) also carries the inbound source, inheriting the scope.
+        // Secondary change (the hook cascade) is a locally computed value: the one-shot pending
+        // origin stamps only the Primary write it targets, so nested cascade writes publish with a
+        // null (Local) source and are not echo-suppressed for the bound source.
         Assert.Single(secondaryChanges);
         Assert.Equal(14, secondaryChanges[0].GetNewValue<int>());
-        Assert.Same(sourceMock.Object, secondaryChanges[0].Source);
+        Assert.Null(secondaryChanges[0].Origin.Source);
     }
 
     [Fact]
@@ -298,18 +285,18 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         var changes = DrainUntilSentinelProperty(subscription, nameof(Person.LastName));
 
         // Assert 1: the FullName recalculation notification carries a null source even though the
-        // triggering apply ran under the confirming source scope. DerivedPropertyChangeHandler
-        // publishes recalculations under an explicit WithSource(null) scope: a derived value is
-        // computed locally and no source confirmed it. Consequence: derived recalculations are
-        // never echo-suppressed, so a source-bound derived property still gets pushed.
+        // triggering apply ran under the confirming source scope. The recalculation is a nested
+        // write that never consumes the one-shot pending origin, so a derived value is computed
+        // locally and no source confirmed it. Consequence: derived recalculations are never
+        // echo-suppressed, so a source-bound derived property still gets pushed.
         var fullNameChanges = changes.Where(c => c.Property.Name == nameof(Person.FullName)).ToList();
         Assert.Single(fullNameChanges);
-        Assert.Null(fullNameChanges[0].Source);
+        Assert.Null(fullNameChanges[0].Origin.Source);
 
         // Assert 2 (sanity): FirstName change also carries the source.
         var firstNameChanges = changes.Where(c => c.Property.Name == nameof(Person.FirstName)).ToList();
         Assert.Single(firstNameChanges);
-        Assert.Same(sourceMock.Object, firstNameChanges[0].Source);
+        Assert.Same(sourceMock.Object, firstNameChanges[0].Origin.Source);
 
         // Assert 3: stage 1 (source write) contained exactly one batch with exactly one change
         // for FirstName; the derived FullName recalculation is never submitted to the source.
@@ -329,7 +316,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
 
         // The server-side processor uses a fresh, unique object as its source identity so the
-        // echo filter (change.Source == _source) never matches the committed change's source.
+        // echo filter (change.Origin.Source == _source) never matches the committed change's source.
         var serverSource = new object();
         var serverReceived = new List<SubjectPropertyChange>();
 
@@ -385,7 +372,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         lock (serverReceived)
         {
             var change = serverReceived.First(c => c.Property.Name == nameof(Person.FirstName));
-            Assert.Same(sourceMock.Object, change.Source);
+            Assert.Same(sourceMock.Object, change.Origin.Source);
         }
     }
 
@@ -422,7 +409,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         // Assert: the accepted change was applied and its notification carries the accepting source.
         var firstNameChanges = changes.Where(c => c.Property.Name == nameof(Person.FirstName)).ToList();
         Assert.Single(firstNameChanges);
-        Assert.Same(sourceMock.Object, firstNameChanges[0].Source);
+        Assert.Same(sourceMock.Object, firstNameChanges[0].Origin.Source);
         Assert.Equal("John", person.FirstName);
 
         // The rejected change was neither applied nor notified, and the commit reported partial success.
@@ -473,8 +460,8 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         var lastNameChanges = personChanges.Where(c => c.Property.Name == nameof(Person.LastName)).ToList();
         Assert.Single(firstNameChanges);
         Assert.Single(lastNameChanges);
-        Assert.Same(sourceA.Object, firstNameChanges[0].Source);
-        Assert.Same(sourceB.Object, lastNameChanges[0].Source);
+        Assert.Same(sourceA.Object, firstNameChanges[0].Origin.Source);
+        Assert.Same(sourceB.Object, lastNameChanges[0].Origin.Source);
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
 

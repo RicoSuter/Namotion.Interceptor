@@ -66,7 +66,7 @@ This ensures:
 - Updates are applied in the correct order relative to the initial state
 - Stale queued writes don't overwrite newer source values
 
-Local writes made while the source is connecting are captured too, not only inbound updates: the outbound change subscription is created before `StartListeningAsync`, so a connect-window write survives instead of falling into a gap. When draining starts it reconciles to the model's current value, the same source-wins policy as the retry re-apply above (the last two rows of [Write Consistency Guarantees](#write-consistency-guarantees) below give both outcomes). A same-property write races the initial-state load, so its winner is timing-dependent: write after the connection has settled (post-connect writes are always sent), or use source transactions, when you need a deterministic result.
+Local writes made while the source is connecting are captured too, not only inbound updates: the outbound change subscription is created once for the whole source lifetime (before the retry loop), so a connect-window or reconnect-delay write survives instead of falling into a gap. Selection is by change origin (see [Change notification source semantics](#change-notification-source-semantics) below): only `Local` writes to source-owned properties are parked, while the source's own `FromSource` and `Confirmed` applies (inbound updates and initial-state loads via `SetValueFromSource`) are skipped, so an inbound value is never echoed back. When draining starts it reconciles to the model's current value, the same source-wins policy as the retry re-apply above (the last two rows of [Write Consistency Guarantees](#write-consistency-guarantees) below give both outcomes). A same-property write races the initial-state load, so its winner is timing-dependent: write after the connection has settled (post-connect writes are always sent), or use source transactions, when you need a deterministic result.
 
 ### Write Consistency Guarantees
 
@@ -109,12 +109,13 @@ Choose based on your consistency requirements: local-first for responsiveness, t
 
 #### Change notification source semantics
 
-The `Source` of a change notification identifies the system that confirmed the value: inbound updates carry the source they came from, source-bound changes committed through a source transaction carry their owning source, and purely local writes carry `null`. The outbound change queue skips changes whose source is the target source itself, so a committed value is written to its source exactly once, by the commit.
+The `Origin` of a change notification is typed (`ChangeOrigin`): `FromSource` when an inbound update stored exactly the value the source sent, `Confirmed` when a source transaction commit stored the value the source acknowledged, and `Local` for everything else. A change carries a source only when its stored value is exactly the value that source sent or confirmed. The outbound change queue skips changes whose origin source is the target source itself, so a committed value is written to its source exactly once, by the commit.
 
-Writes that happen as a consequence of a source-scoped apply differ by kind:
+Origin is stamped per write at the apply call (`SetValueFromSource`, `ApplySubjectUpdate` with a `FromSource` origin, transaction commit replay). Nothing inherits it: hook cascades, `INotifyPropertyChanged` handler write-backs, derived property recalculations, and lifecycle handler writes are all `Local` and therefore flow to bound sources like any local write. When an `OnChanging` hook or a write interceptor changes the incoming value during a stamped write, the stored value no longer equals the sent value and the write publishes as `Local`, so corrections flow back to the source. Transforms must be projections (idempotent, like clamping); reference-typed values must be reassigned, not mutated in place, to be detected.
 
-- **Cascade writes** from `OnChanging`/`OnChanged` handlers inherit the source scope and are not pushed back to that source, for inbound updates and transactional commits alike. If a cascade-computed value must reach the source, write it explicitly or do not source-bind the cascade target.
-- **Derived property recalculations** always publish with a `null` source (the local model computed the value, no source confirmed it) and are therefore still pushed to a bound source, whatever triggered the recalculation.
+Provenance-aware validators receive the origin via `PropertyValidationContext` and can treat source values as authoritative while strictly validating local input.
+
+A write's origin moves through a lifecycle: it starts as a pending stamp set by the apply call (`SetValueFromSource`, `ApplySubjectUpdate`), becomes the attempted origin carried by the write while interceptors and validators run (this is what `PropertyValidationContext.Origin` exposes), and is finalized at the actual write, where a stamped origin whose stored value does not equal the sent value is demoted to `Local`; published changes always carry the finalized origin.
 
 ### Write Retry Queue
 
@@ -167,6 +168,8 @@ ExecuteAsync
       ├── new ChangeQueueProcessor()       ← connected phase; reuses the source-lifetime subscription
       └── ProcessAsync()                   ← drains changes, calls your WriteChangesAsync
 ```
+
+"Owned writes" are `Local`-origin changes to properties bound to this source; the source's own `FromSource` and `Confirmed` applies are skipped at drain and in the connected phase, so inbound values are not echoed back (see [Change notification source semantics](#change-notification-source-semantics)).
 
 #### ISubjectSource Interface
 

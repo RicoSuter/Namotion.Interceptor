@@ -90,12 +90,12 @@ public static class SubjectRegistryExtensions
     /// <param name="subject">The subject with the property.</param>
     /// <param name="propertyName">The property name to find.</param>
     /// <param name="registry">The optional registry, otherwise the registry is resolved dynamically.</param>
-    /// <returns>The registered property.</returns>
+    /// <returns>The registered property, or <see langword="null"/> when the context has no registry or the property is not registered.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName, ISubjectRegistry? registry = null)
     {
-        registry ??= subject.Context.GetService<ISubjectRegistry>();
-        return registry
+        registry ??= subject.Context.TryGetService<ISubjectRegistry>();
+        return registry?
             .TryGetRegisteredSubject(subject)?
             .TryGetProperty(propertyName);
     }
@@ -141,40 +141,77 @@ public static class SubjectRegistryExtensions
     }
     
     /// <summary>
-    /// Gets a registered property from an expression.
+    /// Gets the registered property selected by a member-access expression (e.g. <c>x =&gt; x.Child.Value</c>).
+    /// Unwraps boxing conversions (so value-typed members work) and resolves intermediate subjects of any
+    /// type via <see cref="IInterceptorSubject"/>. Pure member-access hops are resolved through the registry
+    /// (null-safe, no compilation); segments that contain an index, dictionary key or method call are compiled
+    /// and evaluated against the actual object graph. Returns <see langword="null"/> when the expression is not
+    /// a member-access chain rooted at the lambda parameter (a selector on a captured variable returns
+    /// <see langword="null"/>), a member hop is <see langword="null"/> at any depth, or the property is not
+    /// registered.
     /// </summary>
     /// <param name="subject">The subject with the property.</param>
     /// <param name="propertyExpression">The property expression to find.</param>
     /// <typeparam name="T">The subject type to allow properly typed expression.</typeparam>
-    /// <returns>The registered property.</returns>
-    public static RegisteredSubjectProperty? TryGetRegisteredProperty<T>(this T subject, Expression<Func<T, object?>> propertyExpression)
+    /// <typeparam name="TValue">The selected property value type.</typeparam>
+    /// <returns>The registered property, or <see langword="null"/>.</returns>
+    public static RegisteredSubjectProperty? TryGetRegisteredProperty<T, TValue>(
+        this T subject, Expression<Func<T, TValue>> propertyExpression)
         where T : IInterceptorSubject
     {
-        var actualSubject = subject;
+        var parameter = propertyExpression.Parameters[0];
+        var body = propertyExpression.Body;
 
-        var bodyMemberExpression = propertyExpression.Body as MemberExpression;
-        var parentExpression = bodyMemberExpression?.Expression;
-        if (parentExpression is not null)
+        // Unwrap boxing conversions (e.g. Expression<Func<T, object?>> over a value-typed member).
+        while (body is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } unary)
         {
-            // Extract the parameter from the original lambda expression
-            var originalParameter = propertyExpression.Parameters[0];
-
-            // Create a new lambda using the same parameter
-            var compiledParent = Expression
-                .Lambda<Func<T, object?>>(parentExpression, originalParameter)
-                .Compile()
-                .Invoke(subject);
-            
-            actualSubject = (T?)compiledParent;
+            body = unary.Operand;
         }
 
-        if (actualSubject is not null)
+        if (body is not MemberExpression memberExpression)
         {
-            var propertyName = bodyMemberExpression?.Member.Name;
-            return propertyName is not null ? actualSubject.TryGetRegisteredProperty(propertyName) : null;
+            return null;
         }
 
-        return null;
+        var parentSubject = ResolveSubject(memberExpression.Expression, subject, parameter);
+        return parentSubject?.TryGetRegisteredProperty(memberExpression.Member.Name);
+
+        // Resolves the subject an intermediate expression evaluates to. Member-access hops are walked
+        // through the registry (null-safe, no compilation). Any other node - array/list index, dictionary
+        // key or method call - is compiled and invoked once against the root to read the actual graph value.
+        static IInterceptorSubject? ResolveSubject(Expression? expression, T root, ParameterExpression rootParameter)
+            => expression switch
+            {
+                null => null,
+                ParameterExpression => root,
+                MemberExpression member => ResolveSubject(member.Expression, root, rootParameter)?
+                    .TryGetRegisteredProperty(member.Member.Name)?
+                    .GetValue() as IInterceptorSubject,
+                _ => TryEvaluate(expression, root, rootParameter),
+            };
+
+        // Compiles and invokes a non-member segment (index, dictionary key or method call) against the real
+        // object graph. Navigation misses - a null subject before the index, an out-of-range index or a
+        // missing dictionary key - return null to match the null-safe member-access path. Other exception
+        // types propagate unchanged.
+        static IInterceptorSubject? TryEvaluate(Expression expression, T root, ParameterExpression rootParameter)
+        {
+            try
+            {
+                return Expression
+                    .Lambda<Func<T, object?>>(Expression.Convert(expression, typeof(object)), rootParameter)
+                    .Compile()
+                    .Invoke(root) as IInterceptorSubject;
+            }
+            catch (Exception exception) when (exception
+                is NullReferenceException
+                or IndexOutOfRangeException
+                or ArgumentOutOfRangeException
+                or KeyNotFoundException)
+            {
+                return null;
+            }
+        }
     }
 
     /// <summary>

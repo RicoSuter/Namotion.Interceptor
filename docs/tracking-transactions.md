@@ -242,7 +242,7 @@ When `WithSourceTransactions()` is configured, commits execute in two stages:
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-Stage 2 applies source-bound changes marked with the source that accepted them in stage 1, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior. Value-transforming write interceptors are not supported with source transactions: the source would receive the stage 1 value while the local model applies the transformed one.
+Stage 2 applies source-bound changes marked with a `Confirmed` origin carrying the source that accepted them in stage 1, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior. Value-transforming write interceptors are not supported with source transactions: the source would receive the stage 1 value while the local model applies the transformed one.
 
 Stage 1 is performed by an `ITransactionWriter`; the built-in `SourceTransactionWriter` is registered by `WithSourceTransactions()`. Replacing it is an advanced scenario, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer).
 
@@ -522,9 +522,8 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected: o
 
 1. **Always use `using` blocks** - Ensures proper disposal even on exceptions
 2. **Keep transactions short** - Long transactions hold pending changes in memory
-3. **Register transactions before notifications** - Call `WithTransactions()` before `WithPropertyChangeObservable()`
-4. **Handle exceptions from CommitAsync** - Commits can fail partially
-5. **Don't share transactions across threads** - Each async context should have its own transaction
+3. **Handle exceptions from CommitAsync** - Commits can fail partially
+4. **Don't share transactions across threads** - Each async context should have its own transaction
 
 ## API Reference
 
@@ -621,7 +620,7 @@ Rollback operations can also fail. If revert fails, `SubjectTransactionException
 
 Most applications use the built-in `SourceTransactionWriter` registered by `WithSourceTransactions()` and never implement `ITransactionWriter`. A custom writer replaces stage 1 of the commit flow (registered as an `ITransactionWriter` service on the context) and is only needed when source writes require protocol-specific orchestration the built-in writer cannot provide.
 
-A custom writer must follow the in-place marking contract documented in the xml docs of `ITransactionWriter.WriteToSourcesAsync`. Moving or replacing a snapshot slot silently corrupts the local apply; not marking accepted slots is harmless but keeps the legacy double write (the apply notifications carry no source and are pushed to the source again). While developing a writer, enable the runtime contract validation:
+A custom writer must follow the in-place marking contract documented in the xml docs of `ITransactionWriter.WriteToSourcesAsync`. Moving or replacing a snapshot slot silently corrupts the local apply; not marking accepted slots is harmless but keeps the legacy double write (the apply notifications publish without a `Confirmed` origin and are pushed to the source again). While developing a writer, enable the runtime contract validation:
 
 ```csharp
 SubjectTransaction.ValidateWriterContract = true;

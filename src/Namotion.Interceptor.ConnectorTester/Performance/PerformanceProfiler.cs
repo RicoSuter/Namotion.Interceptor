@@ -82,7 +82,7 @@ public class PerformanceProfiler : IHostedService, IDisposable
 
             lock (_syncLock)
             {
-                if (change.Source == null)
+                if (change.Origin.Source == null)
                 {
                     _totalPublishedChanges++;
                     continue;

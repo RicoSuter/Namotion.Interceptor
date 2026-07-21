@@ -40,6 +40,20 @@ namespace Namotion.Interceptor.Attributes
 }
 namespace Namotion.Interceptor
 {
+    public readonly struct ChangeOrigin
+    {
+        public Namotion.Interceptor.ChangeOriginKind Kind { get; }
+        public object? Source { get; }
+        public static Namotion.Interceptor.ChangeOrigin Local { get; }
+        public static Namotion.Interceptor.ChangeOrigin Confirmed(object source) { }
+        public static Namotion.Interceptor.ChangeOrigin FromSource(object source) { }
+    }
+    public enum ChangeOriginKind : byte
+    {
+        Local = 0,
+        FromSource = 1,
+        Confirmed = 2,
+    }
     public interface IInterceptorSubject
     {
         Namotion.Interceptor.IInterceptorSubjectContext Context { get; }
@@ -133,13 +147,11 @@ namespace Namotion.Interceptor
     }
     public readonly struct SubjectChangeContext
     {
-        public readonly object? Source;
         public System.DateTimeOffset? ReceivedTimestamp { get; }
         public static Namotion.Interceptor.SubjectChangeContext Current { get; }
         public static System.Func<System.DateTimeOffset> GetTimestampFunction { get; set; }
         public static Namotion.Interceptor.SubjectChangeContext.SubjectChangeContextScope WithChangedTimestamp(System.DateTimeOffset? changed) { }
-        public static Namotion.Interceptor.SubjectChangeContext.SubjectChangeContextScope WithSource(object? source) { }
-        public static Namotion.Interceptor.SubjectChangeContext.SubjectChangeContextScope WithState(object? source, System.DateTimeOffset? changed, System.DateTimeOffset? received) { }
+        public static Namotion.Interceptor.SubjectChangeContext.SubjectChangeContextScope WithTimestamps(System.DateTimeOffset? changed, System.DateTimeOffset? received) { }
         public readonly ref struct SubjectChangeContextScope
         {
             public void Dispose() { }
@@ -214,6 +226,7 @@ namespace Namotion.Interceptor.Interceptors
         public TProperty CurrentValue { get; }
         public bool IsWritten { get; set; }
         public TProperty NewValue { get; set; }
+        public Namotion.Interceptor.ChangeOrigin Origin { get; }
         public Namotion.Interceptor.PropertyReference Property { get; }
         public System.DateTimeOffset? WriteTimestamp { get; }
         public TProperty GetFinalValue() { }

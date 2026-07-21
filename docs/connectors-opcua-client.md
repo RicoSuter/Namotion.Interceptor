@@ -91,7 +91,7 @@ builder.Services.AddOpcUaSubjectClientSource(
         DefaultSamplingInterval = 0,      // 0 = exception-based (immediate), null = server decides
         DefaultPublishingInterval = 100,
         DefaultQueueSize = 10,
-        MaximumItemsPerSubscription = 1000,
+        MaxItemsPerSubscription = 1000,
 
         // Data change filter (null = use OPC UA library defaults)
         DefaultDataChangeTrigger = null,  // StatusValue (report on value change)
@@ -100,7 +100,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 
         // Performance tuning
         BufferTime = TimeSpan.FromMilliseconds(10),
-        RetryTime = TimeSpan.FromSeconds(1)
+        RetryTime = TimeSpan.FromSeconds(10)   // delay between reconnect attempts
     });
 ```
 
@@ -151,7 +151,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `SubscriptionKeepAliveCount` | 10 | Keep-alive count for subscriptions |
 | `SubscriptionLifetimeCount` | 100 | Lifetime count (must be >= 3x keep-alive count) |
 | `SubscriptionPriority` | 0 | Subscription priority (0 = server default) |
-| `SubscriptionMaximumNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
+| `SubscriptionMaxNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
 | `MinPublishRequestCount` | 3 | Minimum outstanding publish requests |
 | `SubscriptionSequentialPublishing` | false | Process messages in order (reduces throughput) |
 
@@ -177,7 +177,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `MaximumReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
+| `MaxReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
 
 ## Security
 
@@ -422,7 +422,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 
 ### Auto-Healing of Failed Monitored Items
 
-The library automatically retries failed subscription items that may succeed later, such as when server resources become available.
+The library retries failed subscription items that may succeed later (for example when server resources free up), bounded so a persistently failing item escalates rather than retrying forever.
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -434,14 +434,17 @@ builder.Services.AddOpcUaSubjectClientSource(
     });
 ```
 
-**Smart retry logic:**
-- Retries transient errors: `BadTooManyMonitoredItems`, `BadOutOfService`, `BadMonitoringModeUnsupported`
-- Skips permanent errors: `BadNodeIdUnknown`
-- Health checks run at configurable intervals (minimum: 5 seconds)
-- Items that permanently don't support subscriptions automatically fall back to polling
+**Retry and escalation logic:**
+- Retries transient errors (for example `BadTooManyMonitoredItems`, `BadOutOfService`) for up to three consecutive health checks (roughly 15 seconds at the default interval), so a genuinely transient failure recovers on its own.
+- If an item keeps failing past that bound and `EnablePollingFallback` is enabled (the default), it escalates to polling rather than retrying the subscription forever.
+- With polling disabled there is nothing better to escalate to, so the item keeps being retried and recovers on its own once the node returns; it is never dropped.
+- Nodes that do not support subscriptions (`BadNotSupported`, `BadMonitoredItemFilterUnsupported`) fall back to polling immediately when enabled.
+- Skips permanent design-time errors (`BadNodeIdUnknown`, `BadAttributeIdInvalid`, `BadIndexRangeInvalid`).
+- Reconnect re-attempts a real subscription for every item, so escalation to polling is not permanent.
+- Health checks run at configurable intervals (minimum: 1 second, default: 5 seconds).
 
 **Configuration validation:**
-- `SubscriptionHealthCheckInterval` minimum of 5 seconds enforced
+- `SubscriptionHealthCheckInterval` minimum of 1 second enforced
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
@@ -470,7 +473,7 @@ When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts t
 
 If the SDK handler cannot transfer subscriptions (e.g., server restarted and old subscriptions are gone), or if it returns the same session object ("preserved session"), the client abandons the session entirely:
 
-1. `OnReconnectComplete` calls `AbandonCurrentSession()` (session nulled, transport killed)
+1. `OnReconnectComplete` calls `AbandonCurrentSession()` (session nulled, transport killed, and incoming notifications buffered so stale values from the abandoned subscription are not applied during the gap before manual reconnection)
 2. The health check loop detects the dead session and triggers manual reconnection
 3. Manual reconnection creates a fresh session, new subscriptions, and performs a full state read
 4. Full consistency is restored
@@ -709,13 +712,14 @@ By default (`SubscriptionSequentialPublishing = false`), subscription callbacks 
 
 For most use cases (sensor values, status updates), this is acceptable since you typically want the latest value. If your application requires strict ordering guarantees, set `SubscriptionSequentialPublishing = true` to process all subscription messages sequentially at the cost of reduced throughput.
 
-To prevent feedback loops when external sources update properties, use `SubjectChangeContext.WithSource()` to mark the change source:
+To prevent feedback loops when external sources update properties, apply inbound values with the `SetValueFromSource()` extension method, which stamps the write with a `FromSource` origin (source marking is per write, not through an ambient scope):
 
 ```csharp
-using (SubjectChangeContext.WithSource(opcUaSource))
-{
-    subject.Temperature = newValue;
-}
+propertyReference.SetValueFromSource(
+    source: opcUaSource,
+    changedTimestamp: sourceTimestamp,
+    receivedTimestamp: DateTimeOffset.Now,
+    valueFromSource: newValue);
 ```
 
 ## Lifecycle

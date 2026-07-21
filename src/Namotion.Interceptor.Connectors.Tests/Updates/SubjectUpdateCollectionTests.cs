@@ -17,7 +17,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenItemInsertedAtEnd_ThenInsertOperationIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1] };
 
@@ -38,7 +38,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenItemInsertedAtBeginning_ThenInsertOperationIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child2 = new CycleTestNode { Name = "Child2" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child2] };
 
@@ -59,7 +59,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenItemRemoved_ThenRemoveOperationIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var child2 = new CycleTestNode { Name = "Child2" };
         var child3 = new CycleTestNode { Name = "Child3" };
@@ -81,7 +81,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenItemMoved_ThenMoveOperationWithoutItemDataIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var child2 = new CycleTestNode { Name = "Child2" };
         var child3 = new CycleTestNode { Name = "Child3" };
@@ -103,7 +103,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenItemPropertyChanged_ThenSparseUpdateByFinalIndexIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var child2 = new CycleTestNode { Name = "Child2" };
         var child3 = new CycleTestNode { Name = "Child3" };
@@ -125,7 +125,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenMultipleItemsHavePropertyChanges_ThenSparseUpdatesAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var child2 = new CycleTestNode { Name = "Child2" };
         var child3 = new CycleTestNode { Name = "Child3" };
@@ -155,7 +155,7 @@ public class SubjectUpdateCollectionTests
     public void WhenManyCollectionItemsHavePropertyChanges_ThenAllAreReferencedInParentCollection()
     {
         // Arrange - create a collection with many items (simulates the benchmark scenario)
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var items = Enumerable.Range(0, 100).Select(i => new CycleTestNode { Name = $"Child{i}" }).ToList();
         var node = new CycleTestNode(context) { Name = "Root", Items = items };
 
@@ -192,7 +192,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenRemoveAndInsertCombined_ThenBothOperationsAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var child2 = new CycleTestNode { Name = "Child2" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2] };
@@ -214,7 +214,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenMoveWithPropertyUpdate_ThenMoveOperationAndSparseUpdateAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var child2 = new CycleTestNode { Name = "Child2" };
         var child3 = new CycleTestNode { Name = "Child3" };
@@ -237,7 +237,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenInsertWithPropertyUpdateOnExisting_ThenBothTypesAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1] };
 
@@ -259,7 +259,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenCollectionBecomesEmpty_ThenRemoveOperationsAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var child2 = new CycleTestNode { Name = "Child2" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2] };
@@ -280,7 +280,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenCollectionPopulatedFromEmpty_ThenInsertOperationsAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var node = new CycleTestNode(context) { Name = "Root", Items = [] };
 
         var changes = new List<SubjectPropertyChange>();
@@ -317,7 +317,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenEmptyCollectionRemainsEmpty_ThenNoOperationsAreCreated()
     {
         // Arrange - both old and new collections are empty
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var node = new CycleTestNode(context) { Name = "Root", Items = [] };
 
         var changes = new List<SubjectPropertyChange>();
@@ -336,7 +336,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenSingleItemCollectionPropertyChanges_ThenSparseUpdateIsCreated()
     {
         // Arrange - collection with exactly one item
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child = new CycleTestNode { Name = "OnlyChild" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child] };
 
@@ -356,7 +356,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenSingleItemRemoved_ThenRemoveOperationAtIndexZero()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child = new CycleTestNode { Name = "OnlyChild" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child] };
 
@@ -376,7 +376,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenFirstItemPropertyChanges_ThenSparseUpdateAtIndexZero()
     {
         // Arrange - test boundary condition at index 0
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "First" };
         var child2 = new CycleTestNode { Name = "Second" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2] };
@@ -397,7 +397,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenFirstItemRemoved_ThenRemoveAtIndexZero()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "First" };
         var child2 = new CycleTestNode { Name = "Second" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2] };
@@ -418,7 +418,7 @@ public class SubjectUpdateCollectionTests
     public async Task WhenInsertAtIndexZero_ThenInsertOperationAtZero()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Existing" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1] };
 
@@ -439,7 +439,7 @@ public class SubjectUpdateCollectionTests
     public void WhenRemoveAndMoveCombined_ThenMoveIndicesAccountForRemovals()
     {
         // Arrange: [A, B, C] where we'll remove A and reorder B,C to C,B
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var childA = new CycleTestNode { Name = "ChildA" };
         var childB = new CycleTestNode { Name = "ChildB" };
         var childC = new CycleTestNode { Name = "ChildC" };
@@ -480,7 +480,7 @@ public class SubjectUpdateCollectionTests
     public void WhenRemoveAndMoveCombined_ThenApplyProducesCorrectResult()
     {
         // Arrange: Create source with [A, B, C]
-        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var childA = new CycleTestNode { Name = "ChildA" };
         var childB = new CycleTestNode { Name = "ChildB" };
         var childC = new CycleTestNode { Name = "ChildC" };
@@ -501,7 +501,7 @@ public class SubjectUpdateCollectionTests
         var target = new CycleTestNode(targetContext) { Name = "Root", Items = [targetA, targetB, targetC] };
 
         // Apply update
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert - target should have [C, B] (by name, since these are different instances)
         Assert.Equal(2, target.Items.Count);
@@ -513,7 +513,7 @@ public class SubjectUpdateCollectionTests
     public void WhenMultipleRemovesAndMove_ThenIndicesAccountForAllRemovals()
     {
         // Arrange: [A, B, C, D, E] -> remove A and C, reorder remaining to [E, B, D]
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var childA = new CycleTestNode { Name = "A" };
         var childB = new CycleTestNode { Name = "B" };
         var childC = new CycleTestNode { Name = "C" };
@@ -543,7 +543,7 @@ public class SubjectUpdateCollectionTests
             ]
         };
 
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(3, target.Items.Count);
@@ -576,7 +576,7 @@ public class SubjectUpdateCollectionTests
     public void WhenCollectionSetToNull_ThenPartialUpdateHasValueKindWithNull()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1] };
 
@@ -600,7 +600,7 @@ public class SubjectUpdateCollectionTests
     public void WhenNullCollectionApplied_ThenTargetCollectionBecomesNull()
     {
         // Arrange - create source with null collection
-        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [child1] };
 
@@ -615,7 +615,7 @@ public class SubjectUpdateCollectionTests
         var target = new CycleTestNode(targetContext) { Name = "Root", Items = [new CycleTestNode { Name = "Child1" }] };
 
         // Act
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Null(target.Items);

@@ -181,7 +181,7 @@ public class ChangeQueueProcessor : IDisposable
                     queuedBeforeStart--;
                 }
 
-                if (change.Source == _source)
+                if (ReferenceEquals(change.Origin.Source, _source))
                 {
                     continue;
                 }
