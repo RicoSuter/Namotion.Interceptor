@@ -125,7 +125,7 @@ Validation boundary (three tiers): static expression-shape defects (casts, non-i
 
 Collection type coverage relative to `docs/subject-guidelines.md` (documented in the new docs section):
 
-- Indexable in expression paths: `T[]`, `List<T>`, `IList<T>`, `IReadOnlyList<T>`, `ImmutableArray<T>`, `Dictionary<TKey, TValue>`, `IDictionary<TKey, TValue>`, `IReadOnlyDictionary<TKey, TValue>` (any key type; the key is part of the typed indexer). This indexable set must be reconciled with the supported-collection list in `docs/subject-guidelines.md` during implementation; the guidelines currently omit `IList<T>` and `IDictionary<TKey, TValue>`, so either the guidelines or this set is adjusted so they agree.
+- Indexable in expression paths: `T[]`, `List<T>`, `IList<T>`, `IReadOnlyList<T>`, `ImmutableArray<T>`, `Dictionary<TKey, TValue>`, `IDictionary<TKey, TValue>`, `IReadOnlyDictionary<TKey, TValue>` (any key type; the key is part of the typed indexer). All of these are supported subject collection or dictionary types per `docs/subject-guidelines.md`; `IList<T>` is not listed there explicitly but is covered by the listed `ICollection<T>` (which is supported as a property type, though `ICollection<T>` itself is not indexable in a path).
 - Not indexable at compile time: `IEnumerable<T>`, `ICollection<T>`, `IReadOnlyCollection<T>` have no indexer, so a path expression through them does not compile; this is a C# limitation, not a runtime rejection.
 - Unsupported: `ArrayList` and `Hashtable`, whose `object`-typed indexers require a cast that the expression rules reject. These weakly typed collections remain valid subject property types per the guidelines; they just cannot appear as path segments.
 
