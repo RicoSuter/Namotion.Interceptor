@@ -47,6 +47,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
 
     private readonly PropertyChangeQueueSubscription _subscription;
+    private readonly bool _ownsSubscription;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeQueueProcessor"/> class.
@@ -86,6 +87,7 @@ public class ChangeQueueProcessor : IDisposable
         try
         {
             _subscription = context.CreatePropertyChangeQueueSubscription();
+            _ownsSubscription = true;
         }
         catch
         {
@@ -96,12 +98,43 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     /// <summary>
+    /// Initializes the processor with an externally owned subscription. The caller keeps ownership:
+    /// <see cref="Dispose"/> does not dispose the subscription. Use this when the subscription must
+    /// outlive the processor, for example a source-lifetime subscription reused across reconnects.
+    /// </summary>
+    internal ChangeQueueProcessor(
+        object? source,
+        PropertyChangeQueueSubscription subscription,
+        Func<PropertyReference, bool> propertyFilter,
+        Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
+        TimeSpan? bufferTime,
+        int? maxQueueDepth,
+        ILogger logger)
+    {
+        _source = source;
+        _propertyFilter = propertyFilter;
+        _writeHandler = writeHandler;
+        _logger = logger;
+        _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+        _maxQueueDepth = maxQueueDepth;
+        _subscription = subscription;
+        _ownsSubscription = false;
+    }
+
+    /// <summary>
     /// Processes changes from the queue until cancellation is requested.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
+        // Snapshot of changes already queued at drain start. Any the model has moved past are
+        // dropped at dequeue (see IsSuperseded). This is inert for source connectors: SubjectSourceBase
+        // already drains and reconciles connect/reconnect-window writes into the retry queue before
+        // ProcessAsync runs, so only current values remain here. It stays live for servers, which create
+        // the processor before publishing. Removing this now-source-inert path is a deferred cleanup.
+        var queuedBeforeStart = _subscription.Count;
+
         using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -142,12 +175,23 @@ public class ChangeQueueProcessor : IDisposable
 
             while (_subscription.TryDequeue(out var change, linkedTokenSource.Token))
             {
+                var wasQueuedBeforeStart = queuedBeforeStart > 0;
+                if (wasQueuedBeforeStart)
+                {
+                    queuedBeforeStart--;
+                }
+
                 if (ReferenceEquals(change.Origin.Source, _source))
                 {
                     continue;
                 }
 
                 if (!_propertyFilter(change.Property))
+                {
+                    continue;
+                }
+
+                if (wasQueuedBeforeStart && IsSuperseded(in change))
                 {
                     continue;
                 }
@@ -186,6 +230,30 @@ public class ChangeQueueProcessor : IDisposable
         {
             try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
             await flushTask.ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// True when a change captured before processing started no longer matches the
+    /// property's current model value because the initial state load or a later write
+    /// overwrote it; sending it would push a stale value back to the source. Fails
+    /// open: when the current value cannot be read, the change is sent rather than lost.
+    /// </summary>
+    private static bool IsSuperseded(in SubjectPropertyChange change)
+    {
+        var getValue = change.Property.Metadata.GetValue;
+        if (getValue is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return !Equals(getValue(change.Property.Subject), change.GetNewValue<object?>());
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -316,7 +384,10 @@ public class ChangeQueueProcessor : IDisposable
             return;
         }
 
-        _subscription.Dispose();
+        if (_ownsSubscription)
+        {
+            _subscription.Dispose();
+        }
 
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
         if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)

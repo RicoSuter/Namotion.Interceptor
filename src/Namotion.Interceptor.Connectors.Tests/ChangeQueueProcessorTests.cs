@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
@@ -327,6 +328,174 @@ public class ChangeQueueProcessorTests
         // Cleanup
         await cancellation.CancelAsync();
         await processing;
+    }
+
+    [Fact]
+    public async Task WhenChangeQueuedBeforeProcessingIsSuperseded_ThenOnlyCurrentValueIsWritten()
+    {
+        // Arrange: changes queued before ProcessAsync starts were captured while the
+        // source was still connecting. Such a change whose value the model has since
+        // moved past must be dropped instead of pushed back to the source.
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var receivedValues = new ConcurrentQueue<string?>();
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedValues.Enqueue(change.GetNewValue<string>());
+                }
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        // Act: both writes are queued before processing starts; the second supersedes the first.
+        subject.FirstName = "superseded";
+        subject.FirstName = "current";
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedValues.Contains("current"),
+            message: "The current value should be written");
+
+        // Assert: the immediate path delivers in order, so once "current" arrived,
+        // "superseded" can no longer show up later.
+        Assert.DoesNotContain("superseded", receivedValues);
+
+        // Cleanup
+        await cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Fact]
+    public async Task WhenSteadyStateChangesCarryOldTimestamps_ThenEveryChangeIsWritten()
+    {
+        // Arrange: steady-state changes may carry application-provided timestamps far in
+        // the past (device source timestamps, WithChangedTimestamp scopes). Connect-time
+        // classification is positional, not timestamp-based, so such changes must never
+        // be staleness-checked or dropped, even when the model has already moved on.
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var receivedValues = new ConcurrentQueue<string>();
+        var firstWriteReceived = new TaskCompletionSource();
+        var allowFurtherWrites = new TaskCompletionSource();
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: async (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedValues.Enqueue(change.GetNewValue<string>()!);
+                }
+                firstWriteReceived.TrySetResult();
+                await allowFurtherWrites.Task;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        var oldTimestamp = DateTimeOffset.UtcNow.AddMinutes(-5);
+
+        // Act: the first write blocks the consumer inside the write handler...
+        using (SubjectChangeContext.WithChangedTimestamp(oldTimestamp))
+        {
+            subject.FirstName = "v1";
+        }
+        await firstWriteReceived.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // ...so these two queue up as steady-state while the model moves on to "v3".
+        // A timestamp-based classification would wrongly drop "v2" as superseded.
+        using (SubjectChangeContext.WithChangedTimestamp(oldTimestamp))
+        {
+            subject.FirstName = "v2";
+            subject.FirstName = "v3";
+        }
+        allowFurtherWrites.TrySetResult();
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedValues.Count == 3,
+            message: "All three changes should be written on the immediate path");
+
+        // Assert
+        Assert.Equal(["v1", "v2", "v3"], receivedValues.ToArray());
+
+        // Cleanup
+        await cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Fact]
+    public void WhenConstructedWithExternalSubscription_ThenDisposeDoesNotDisposeIt()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        var processor = new ChangeQueueProcessor(
+            source: null,
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMilliseconds(50),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        // Act
+        processor.Dispose();
+
+        // Assert - the externally owned subscription is still capturing (not disposed/completed)
+        subject.FirstName = "still-capturing";
+        Assert.True(subscription.TryDequeueImmediate(out var change));
+        Assert.Equal("still-capturing", change.GetNewValue<string?>());
+    }
+
+    [Fact]
+    public void WhenDrainingImmediately_ThenReturnsQueuedItemsThenFalse()
+    {
+        // Arrange
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        subject.FirstName = "A";
+        subject.FirstName = "B";
+
+        // Act
+        var drained = new List<string?>();
+        while (subscription.TryDequeueImmediate(out var change))
+        {
+            drained.Add(change.GetNewValue<string?>());
+        }
+
+        // Assert
+        Assert.Equal(["A", "B"], drained);
+        Assert.False(subscription.TryDequeueImmediate(out _));
     }
 
     private static void EnqueueChange(

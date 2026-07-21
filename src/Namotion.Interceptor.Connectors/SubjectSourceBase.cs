@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -39,6 +40,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
 
+        // The retry queue also carries writes captured while (re)connecting. With size 0 it is
+        // disabled, and those connect/reconnect-window writes are dropped rather than reconciled.
         if (writeRetryQueueSize > 0)
         {
             WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
@@ -75,28 +78,55 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // A missing PropertyChangeInterceptor means the source can capture no writes: a configuration error,
+        // so fail fast with an actionable message instead of running silently inert. Detect it precisely
+        // (null-check, not catch-all) so unrelated subscription failures surface with their own diagnosis.
+        if (_context.TryGetService<PropertyChangeInterceptor>() is null)
+        {
+            throw new InvalidOperationException(
+                "Cannot start source: no PropertyChangeInterceptor is registered in the interceptor context. " +
+                "Add WithPropertyChangeSubscriptions() or WithFullPropertyTracking() to the context configuration.");
+        }
+
+        // Source-lifetime capture: one subscription for the whole source, so writes are captured
+        // continuously (including during the retry delay) and never fall into a no-subscription gap.
+        using var subscription = _context.CreatePropertyChangeQueueSubscription();
+
+        var firstAttempt = true;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                if (!firstAttempt)
+                {
+                    await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
+                }
+                firstAttempt = false;
+
+                // Park writes captured since the previous attempt (retry delay + any failed attempt).
+                // This also caps memory across repeated failed attempts.
+                DrainOwnedWritesToRetryQueue(subscription);
+
                 _propertyWriter.StartBuffering();
                 await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
                 await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
 
+                // Park connect-window writes captured during listen/load.
+                DrainOwnedWritesToRetryQueue(subscription);
+
+                // Single reconcile point: restore (source unchanged), send (already current), drop (diverged).
+                await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
+
+                // Connected phase reuses the source-lifetime subscription and does not own it.
                 using var processor = new ChangeQueueProcessor(
                     this,
-                    _context,
+                    subscription,
                     propertyReference => propertyReference.TryGetSource(out var source) && source == this,
                     WriteChangesViaRetryQueueAsync,
                     _bufferTime,
                     maxQueueDepth: null,
                     logger: _logger);
-
-                // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
-                // re-apply queued changes locally if the source hasn't changed the property.
-                // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
-                ReapplyRetryQueue();
 
                 await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
             }
@@ -107,14 +137,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to listen for changes in source.");
-                try
-                {
-                    await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
+                // The next iteration delays before reconnecting, with the subscription still capturing.
             }
         }
     }
@@ -175,7 +198,40 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         }
     }
 
-    private void ReapplyRetryQueue()
+    private void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
+    {
+        // No retry queue: still drain the subscription to empty it, but there is nothing to reconcile.
+        if (WriteRetryQueue is null)
+        {
+            while (subscription.TryDequeueImmediate(out _))
+            {
+            }
+            return;
+        }
+
+        List<SubjectPropertyChange>? owned = null;
+        while (subscription.TryDequeueImmediate(out var change))
+        {
+            if (ReferenceEquals(change.Origin.Source, this))
+            {
+                continue; // this source's own applies (inbound / source-tagged)
+            }
+
+            if (!(change.Property.TryGetSource(out var source) && source == this))
+            {
+                continue; // not owned by this source
+            }
+
+            (owned ??= []).Add(change);
+        }
+
+        if (owned is not null)
+        {
+            WriteRetryQueue.Enqueue(owned.ToArray());
+        }
+    }
+
+    private async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
     {
         var retryChanges = WriteRetryQueue?.DrainForLocalReapply();
         if (retryChanges is null || retryChanges.Length == 0)
@@ -183,49 +239,63 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
             return;
         }
 
-        var applied = 0;
+        var restored = 0;
+        var sent = 0;
         var dropped = 0;
         var failed = 0;
+        List<SubjectPropertyChange>? toSend = null;
+
         foreach (var change in retryChanges)
         {
             try
             {
                 var property = change.Property;
                 var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
-                var oldValue = change.GetOldValue<object>();
 
-                if (Equals(currentValue, oldValue))
+                if (Equals(currentValue, change.GetNewValue<object?>()))
                 {
-                    // Server hasn't changed this property - re-apply client's change locally.
-                    // The interceptor chain fires, ChangeQueueProcessor captures the change, and sends it to the source.
-                    property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object>());
-                    applied++;
+                    // Already the current model value: the source has not received it, so send it.
+                    (toSend ??= []).Add(change);
+                    sent++;
+                }
+                else if (Equals(currentValue, change.GetOldValue<object?>()))
+                {
+                    // Source still at the baseline the write was based on: restore locally. The
+                    // connected phase captures and sends the re-applied write.
+                    property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object?>());
+                    restored++;
                 }
                 else
                 {
+                    // Source diverged from the baseline: source wins.
                     dropped++;
                 }
             }
             catch (Exception exception)
             {
                 _logger.LogWarning(exception,
-                    "Failed to re-apply retry queue change for property '{PropertyName}', dropping.",
+                    "Failed to reconcile retry queue change for property '{PropertyName}', dropping.",
                     change.Property.Name);
                 failed++;
             }
         }
 
+        if (toSend is not null)
+        {
+            WriteRetryQueue!.Enqueue(toSend.ToArray());
+            await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+        }
+
         if (dropped > 0 || failed > 0)
         {
             _logger.LogWarning(
-                "Retry queue optimistic re-apply: {Applied} re-applied, {Dropped} dropped (source wins), {Failed} failed.",
-                applied, dropped, failed);
+                "Retry queue reconcile: {Restored} restored, {Sent} sent, {Dropped} dropped (source wins), {Failed} failed.",
+                restored, sent, dropped, failed);
         }
-        else if (applied > 0)
+        else if (restored > 0 || sent > 0)
         {
             _logger.LogInformation(
-                "Retry queue optimistic re-apply: {Applied} changes re-applied.",
-                applied);
+                "Retry queue reconcile: {Restored} restored, {Sent} sent.", restored, sent);
         }
     }
 
