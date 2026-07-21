@@ -9,6 +9,7 @@
 #   pwsh scripts/benchmark.ps1 -Short               # Quick benchmark (fewer iterations)
 #   pwsh scripts/benchmark.ps1 -LocalOnly           # Run on current branch only (no comparison)
 #   pwsh scripts/benchmark.ps1 -LaunchCount 3       # Run 3 process launches per benchmark (more stable)
+#   pwsh scripts/benchmark.ps1 -MemoryRandomization:$false  # Disable heap-layout randomization (on by default)
 #   pwsh scripts/benchmark.ps1 -BaseBranch performance/foo  # Compare against a non-master base
 #   pwsh scripts/benchmark.ps1 -Filter "*Write*" -Stash -Short
 #
@@ -20,6 +21,7 @@ param(
     [switch]$Short,
     [switch]$LocalOnly,
     [int]$LaunchCount = 1,
+    [bool]$MemoryRandomization = $true,
     [string]$BaseBranch = "master"
 )
 
@@ -31,6 +33,10 @@ $ErrorActionPreference = "Stop"
 $ExtraArgs = @()
 if ($Short) { $ExtraArgs += "--job"; $ExtraArgs += "short" }
 if ($LaunchCount -gt 1) { $ExtraArgs += "--launchCount"; $ExtraArgs += "$LaunchCount" }
+# On by default: randomizes the managed heap layout between iterations so a single lucky/unlucky
+# layout cannot bias the comparison (this is a decision tool). Disable with -MemoryRandomization:$false
+# for a faster, layout-fixed run. Note: it does not randomize JIT code placement.
+if ($MemoryRandomization) { $ExtraArgs += "--memoryRandomization" }
 
 # ============ HELPER FUNCTIONS ============
 
