@@ -151,6 +151,362 @@ public class PathConcurrencyTests
         }
     }
 
+    [Fact]
+    public async Task WhenLeafWriteFollowsRetrackInstall_ThenListenerLookupFindsItAndDelivers()
+    {
+        // Arrange: interleaving (a). The structural retrack installs the suffix listener FIRST; the racing
+        // leaf write then runs entirely after the install, so its post-commit listener lookup finds the
+        // installed listener (serialized after the install by the tracker lock).
+        var (root, targetLeaf, blocking) = BuildRetrackRaceGraph();
+        var deliveredLock = new object();
+        var delivered = new List<SubjectPathChange<string?>>();
+        using var subscription = root.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
+        {
+            lock (deliveredLock)
+            {
+                delivered.Add(change);
+            }
+        });
+
+        blocking.ProceedWithCommit.Reset();
+        blocking.EnteredInnerChain.Reset();
+
+        // Act: retrack first (installs the leaf listener, reads "Old", delivers the path change), then the
+        // racing write parked on a worker thread; releasing it commits after the install.
+        root.Father = targetLeaf;
+
+        var writer = Task.Run(() => targetLeaf.FirstName = "New");
+        Assert.True(blocking.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)), "the racing write never entered the inner chain");
+        blocking.ProceedWithCommit.Set();
+        await writer.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert: quiescent consistency. The settled graph, Current and the last delivered New all agree on
+        // the racing value; it was never silently dropped.
+        SubjectPathChange<string?>[] observed;
+        lock (deliveredLock)
+        {
+            observed = delivered.ToArray();
+        }
+
+        Assert.Equal("New", targetLeaf.FirstName);
+        Assert.Equal("New", subscription.Current.GetValueOrDefault());
+        Assert.NotEmpty(observed);
+        Assert.Equal("New", observed[^1].New.GetValueOrDefault());
+    }
+
+    [Fact]
+    public async Task WhenLeafWriteEntersBeforeRetrackInstallAndCommitsAfterRead_ThenPostCommitResolutionDeliversIt()
+    {
+        // Arrange: interleaving (b). The racing leaf write passes the pre-commit gate and parks BEFORE the
+        // retrack installs the suffix listener, then commits AFTER the tracker's read. Only the primitive's
+        // post-commit listener resolution can close this window; a lost write would fail the settled-state
+        // assertion below.
+        var (root, targetLeaf, blocking) = BuildRetrackRaceGraph();
+        var deliveredLock = new object();
+        var delivered = new List<SubjectPathChange<string?>>();
+        using var subscription = root.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
+        {
+            lock (deliveredLock)
+            {
+                delivered.Add(change);
+            }
+        });
+
+        blocking.ProceedWithCommit.Reset();
+        blocking.EnteredInnerChain.Reset();
+
+        // Act: the racing write enters the chain (past the pre-commit gate) and parks pre-commit, before the
+        // install.
+        var writer = Task.Run(() => targetLeaf.FirstName = "New");
+        Assert.True(blocking.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)), "the racing write never entered the inner chain");
+
+        // The structural retrack runs on the unblocked root context while the writer is parked: it installs
+        // the leaf listener and reads the pre-race value ("Old"); the racing "New" has not committed yet.
+        root.Father = targetLeaf;
+
+        // Release the parked writer: it commits "New" after the retrack's read, and post-commit listener
+        // resolution finds the just-installed listener, so the racing write is delivered, not lost.
+        blocking.ProceedWithCommit.Set();
+        await writer.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        SubjectPathChange<string?>[] observed;
+        lock (deliveredLock)
+        {
+            observed = delivered.ToArray();
+        }
+
+        Assert.Equal("New", targetLeaf.FirstName);
+        Assert.Equal("New", subscription.Current.GetValueOrDefault());
+        Assert.NotEmpty(observed);
+        Assert.Equal("New", observed[^1].New.GetValueOrDefault());
+    }
+
+    [Fact]
+    public async Task WhenLeafWriteRacesInitialSubscribeBuild_ThenLateDispatchDeliversItToTheFreshBuild()
+    {
+        // Arrange: a single context carrying the blocking interceptor. Arrange-time writes proceed (gate
+        // open); the gate is then armed so the racing write can be parked while SubscribeToPath builds the
+        // chain. This pins the subscribe-before-read guarantee for the FIRST build, not only retracks.
+        var blocking = new BlockingWriteInterceptor();
+        blocking.ProceedWithCommit.Set();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithService(() => blocking);
+        var father = new Person(context) { FirstName = "Joe" };
+        var person = new Person(context) { Father = father };
+
+        blocking.ProceedWithCommit.Reset();
+        blocking.EnteredInnerChain.Reset();
+
+        var deliveredLock = new object();
+        var delivered = new List<SubjectPathChange<string?>>();
+
+        // Act: the racing leaf write parks pre-commit. At gate-read time no subscription exists, so it takes
+        // the idle-entry path, whose late dispatch must still reach a listener installed while it is in flight.
+        var writer = Task.Run(() => father.FirstName = "Jon");
+        Assert.True(blocking.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)), "the racing write never entered the inner chain");
+
+        // The initial subscribe-time build installs the leaf listener and seeds from a read that sees "Joe"
+        // (the racing write has not committed). SubscribeToPath performs no write, so it is not blocked.
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
+        {
+            lock (deliveredLock)
+            {
+                delivered.Add(change);
+            }
+        });
+
+        // Release: the write commits "Jon" and its post-commit late dispatch resolves the freshly installed
+        // listener, so the write racing the initial build is delivered, not lost.
+        blocking.ProceedWithCommit.Set();
+        await writer.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        SubjectPathChange<string?>[] observed;
+        lock (deliveredLock)
+        {
+            observed = delivered.ToArray();
+        }
+
+        Assert.Equal("Jon", father.FirstName);
+        Assert.Equal("Jon", subscription.Current.GetValueOrDefault());
+        Assert.NotEmpty(observed);
+        Assert.Equal("Jon", observed[^1].New.GetValueOrDefault());
+    }
+
+    [Fact]
+    public void WhenCyclicPathStructuralWriteFansOutToTwoListeners_ThenDeliveredExactlyOnceAndChainInvariantHolds()
+    {
+        // Arrange: a self-referencing node (node.Child == node) watched through x => x.Child.Child.Name. The
+        // decomposed chain reads Child on node (position 0), Child on node again (position 1) and Name on
+        // node (position 2), so the doubly-appearing subject's Child property carries TWO install-order
+        // listeners and its Name one: the process-wide count equals the chain length (three).
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var node = new Node(context) { Name = "N" };
+        node.Child = node;
+
+        var other = new Node(context) { Name = "Y" };
+        other.Child = other; // the retrack target is itself cyclic, so the rebuilt chain is also length three
+
+        var delivered = new List<SubjectPathChange<string>>();
+        using var subscription = node.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> change) => delivered.Add(change));
+
+        Assert.Equal(3, PropertyChangeSubscriptions.ReadSubscriptionCount());
+        Assert.Equal(2, ListenerCount(node, nameof(Node.Child))); // the doubly-appearing subject holds two listeners
+        Assert.Equal(1, ListenerCount(node, nameof(Node.Name)));
+
+        // Act: one structural write to the doubly-listened property. Dispatch fans out over the install-order
+        // snapshot [position 0, position 1]; position 0 fires first and its retrack (divergence at position 1)
+        // disposes position 1's listener, whose in-snapshot dispatch is then skipped by the primitive's
+        // cleared-observer guard.
+        node.Child = other;
+
+        // Assert: exactly one delivery for the single write, and the rebuilt chain preserves the invariant
+        // (process-wide count equals the new chain length; no listener leaked).
+        var change = Assert.Single(delivered);
+        Assert.Equal("N", change.Old.GetValueOrDefault());
+        Assert.Equal("Y", change.New.GetValueOrDefault());
+        Assert.Equal(3, PropertyChangeSubscriptions.ReadSubscriptionCount());
+        Assert.Equal("Y", subscription.Current.GetValueOrDefault());
+    }
+
+    [Fact]
+    public async Task WhenCallbacksCrossWriteEachOthersPathConcurrently_ThenNoDeadlock()
+    {
+        // Arrange: two independent path subscriptions. A's callback writes the leaf of path B and B's
+        // callback writes the leaf of path A. If callbacks ran under the per-subscription lock, the two
+        // cross-writes would form an AB-BA cycle and deadlock; they must run OUTSIDE the lock.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var fatherA = new Person { FirstName = "A0" };
+        var personA = new Person(context) { Father = fatherA };
+        var fatherB = new Person { FirstName = "B0" };
+        var personB = new Person(context) { Father = fatherB };
+
+        var timeout = TimeSpan.FromSeconds(10);
+        using var enteredA = new ManualResetEventSlim(false);
+        using var enteredB = new ManualResetEventSlim(false);
+        var aBarrierDone = 0;
+        var bBarrierDone = 0;
+        var aCrossWrote = 0;
+        var bCrossWrote = 0;
+        Exception? barrierFailure = null;
+
+        using var subscriptionA = personA.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) =>
+        {
+            if (Interlocked.Exchange(ref aBarrierDone, 1) == 0)
+            {
+                enteredA.Set();
+                if (!enteredB.Wait(timeout))
+                {
+                    Volatile.Write(ref barrierFailure, new TimeoutException("path B callback never entered"));
+                    return;
+                }
+            }
+
+            if (Interlocked.Exchange(ref aCrossWrote, 1) == 0)
+            {
+                fatherB.FirstName = "fromA"; // cross-write into path B while (correctly) holding no lock
+            }
+        });
+
+        using var subscriptionB = personB.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) =>
+        {
+            if (Interlocked.Exchange(ref bBarrierDone, 1) == 0)
+            {
+                enteredB.Set();
+                if (!enteredA.Wait(timeout))
+                {
+                    Volatile.Write(ref barrierFailure, new TimeoutException("path A callback never entered"));
+                    return;
+                }
+            }
+
+            if (Interlocked.Exchange(ref bCrossWrote, 1) == 0)
+            {
+                fatherA.FirstName = "fromB"; // cross-write into path A while (correctly) holding no lock
+            }
+        });
+
+        // Act: two threads trigger the two callbacks concurrently. The barrier makes both callbacks
+        // in-flight simultaneously, so a lock held across a callback would surface as an AB-BA deadlock.
+        // The bounded join turns a hang into a fast test failure instead of hanging the suite.
+        var writerA = Task.Run(() => fatherA.FirstName = "goA");
+        var writerB = Task.Run(() => fatherB.FirstName = "goB");
+        await Task.WhenAll(writerA, writerB).WaitAsync(timeout);
+
+        // Assert: no deadlock (reached here within the timeout), neither barrier wait timed out, and both
+        // cross-writes actually ran (so the test is not vacuously satisfied by callbacks never firing).
+        Assert.Null(Volatile.Read(ref barrierFailure));
+        Assert.Equal(1, Volatile.Read(ref aCrossWrote));
+        Assert.Equal(1, Volatile.Read(ref bCrossWrote));
+    }
+
+    [Fact]
+    public async Task WhenManyConcurrentLeafAndStructuralWrites_ThenSubscriptionConvergesToTheGraphState()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var fathers = new[]
+        {
+            new Person { FirstName = "f0" },
+            new Person { FirstName = "f1" },
+            new Person { FirstName = "f2" },
+        };
+        var person = new Person(context) { Father = fathers[0] };
+
+        var lastDeliveredLock = new object();
+        SubjectPathChange<string?>? lastDelivered = null;
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
+        {
+            lock (lastDeliveredLock)
+            {
+                lastDelivered = change;
+            }
+        });
+
+        using var start = new ManualResetEventSlim(false);
+        const int iterations = 2000;
+
+        // Act: a structural writer swaps person.Father among a small set while leaf writers mutate those
+        // fathers' names, all concurrently. The interleaving is nondeterministic; the assertion is on the
+        // settled state only (converge-then-assert).
+        var structural = Task.Run(() =>
+        {
+            start.Wait(TimeSpan.FromSeconds(10));
+            for (var i = 0; i < iterations; i++)
+            {
+                person.Father = fathers[i % fathers.Length];
+            }
+        });
+
+        var leafWriters = new List<Task>();
+        foreach (var father in fathers)
+        {
+            var target = father;
+            leafWriters.Add(Task.Run(() =>
+            {
+                start.Wait(TimeSpan.FromSeconds(10));
+                for (var i = 0; i < iterations; i++)
+                {
+                    target.FirstName = "v" + (i % 8);
+                }
+            }));
+        }
+
+        start.Set();
+        await Task.WhenAll(leafWriters.Append(structural)).WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Settle to a unique final state on a single thread; these writes deliver synchronously.
+        var settleFather = new Person { FirstName = "init" };
+        person.Father = settleFather;
+        settleFather.FirstName = "End";
+
+        // Assert: quiescent consistency. The real graph, the subscription's Current and the last delivered
+        // New all agree on the settled value, and the chain has not leaked listeners.
+        SubjectPathChange<string?>? last;
+        lock (lastDeliveredLock)
+        {
+            last = lastDelivered;
+        }
+
+        Assert.Equal("End", person.Father!.FirstName);
+        Assert.Equal("End", subscription.Current.GetValueOrDefault());
+        Assert.NotNull(last);
+        Assert.Equal("End", last!.Value.New.GetValueOrDefault());
+        Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount()); // Father + current leaf, no leak
+    }
+
+    /// <summary>
+    /// Builds a two-context graph for the retrack missed-write race. The root and its initial leaf live in a
+    /// plain full-tracking context; the retrack target leaf lives in its own context carrying the
+    /// <see cref="BlockingWriteInterceptor"/>, so a write to THAT leaf can be parked pre-commit while the
+    /// (unblocked) structural retrack on the root runs. A keeper reference (root.Mother) attaches the target
+    /// leaf before the race so its context is stable: the retrack's root.Father assignment only bumps the
+    /// target's reference count and adds no fallback context under the parked write.
+    /// </summary>
+    private static (Person Root, Person TargetLeaf, BlockingWriteInterceptor Blocking) BuildRetrackRaceGraph()
+    {
+        var blocking = new BlockingWriteInterceptor();
+        blocking.ProceedWithCommit.Set(); // let arrange-time writes through; reset before the race
+
+        var rootContext = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var targetContext = InterceptorSubjectContext.Create().WithService(() => blocking);
+
+        var root = new Person(rootContext);
+        var initialLeaf = new Person { FirstName = "Joe" };
+        root.Father = initialLeaf; // inherits rootContext
+
+        var targetLeaf = new Person(targetContext) { FirstName = "Old" };
+        root.Mother = targetLeaf; // keeper: attaches targetLeaf, adds rootContext as a stable fallback
+
+        return (root, targetLeaf, blocking);
+    }
+
+    private static int ListenerCount(IInterceptorSubject subject, string propertyName)
+        => new PropertyReference(subject, propertyName).TryGetPropertyData(PropertyChangeSubscription.ListenersKey, out var value)
+            && value is PropertyChangeSubscription[] listeners
+            ? listeners.Length
+            : 0;
+
     /// <summary>
     /// A read interceptor that, exactly once and only after <see cref="Arm"/>, writes a watched leaf while it
     /// is being read. Registered so its write lands DURING the tracker's own event walk, re-entering the path
