@@ -110,7 +110,7 @@ namespace Namotion.Interceptor
     {
         public static System.Attribute[] GetCustomAttributesIncludingInterfaces(this System.Reflection.PropertyInfo property) { }
     }
-    public struct PropertyReference : System.IEquatable<Namotion.Interceptor.PropertyReference>
+    public readonly struct PropertyReference : System.IEquatable<Namotion.Interceptor.PropertyReference>
     {
         public static readonly Namotion.Interceptor.PropertyReference.PropertyReferenceComparer Comparer;
         public PropertyReference(Namotion.Interceptor.IInterceptorSubject subject, string name) { }
