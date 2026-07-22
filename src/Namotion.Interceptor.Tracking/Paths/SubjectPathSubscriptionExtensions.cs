@@ -45,12 +45,16 @@ public static class SubjectPathSubscriptionExtensions
         ISubjectPathChangeObserver<TValue> observer)
         where TSubject : IInterceptorSubject
     {
-        // Installing a chain from inside an active, not-yet-committing transaction would bind it to
-        // speculative staged subjects a rollback could strand; refuse rather than leak.
+        // Installing a chain from inside an active, not-yet-committing transaction would resolve its
+        // intermediates against the transaction's speculative staged subjects and install listeners on them;
+        // a rollback would then strand those listeners on subjects that never became part of the committed
+        // graph. Refuse rather than leak: subscribe before the transaction, or after it commits.
         if (SubjectTransaction.Current is { IsCommitting: false })
         {
             throw new InvalidOperationException(
-                "SubscribeToPath cannot be called inside an active transaction; subscribe before starting the transaction or after it commits.");
+                "SubscribeToPath cannot be called inside an active transaction: the listener chain would bind to " +
+                "the transaction's speculative staged subjects, which a rollback would strand. Subscribe before " +
+                "starting the transaction or after it commits.");
         }
 
         var segments = PathExpressionDecomposer.Decompose(path);
