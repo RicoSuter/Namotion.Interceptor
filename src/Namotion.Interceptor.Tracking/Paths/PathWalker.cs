@@ -102,7 +102,11 @@ internal static class PathWalker
         return SubjectPathValue<TValue>.Unresolved;
     }
 
-    private static IInterceptorSubject? ResolveChild(
+    // Internal (not private) so the tracker's chain build can reuse the exact collection/dictionary/
+    // property resolution used by the walk instead of duplicating it. The walk wraps its own call in a
+    // never-throw boundary; the build's caller wraps this in its own try/catch (a throw means "child
+    // unresolved, stop building the suffix").
+    internal static IInterceptorSubject? ResolveChild(
         IInterceptorSubject current, SubjectPropertyMetadata metadata, PathSegment segment)
     {
         switch (segment.Kind)

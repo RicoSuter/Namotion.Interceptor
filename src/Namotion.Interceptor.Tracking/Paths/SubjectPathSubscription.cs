@@ -1,22 +1,57 @@
 using System;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Paths;
 
 /// <summary>
-/// A live subscription to a decomposed path from a root subject. Exposes the path's current observed
-/// value via a fresh, tracker-lock-free walk and is disposed one-shot. Event delivery and per-segment
-/// teardown are wired in a later phase; this type currently owns only the pure-read surface.
+/// A live subscription to a decomposed path from a root subject. It installs one per-property listener
+/// per resolved segment (a subscribe-before-read chain) so a write to any watched link is observed, and
+/// exposes the path's current observed value via a fresh, tracker-lock-free walk. Disposal is one-shot.
+/// Event computation and delivery are wired in a later phase; this type currently owns the read surface,
+/// the segment listeners, and the slot-identity guard skeleton.
 /// </summary>
 public sealed class SubjectPathSubscription<TValue> : IDisposable
 {
     private readonly IInterceptorSubject _root;
     private readonly PathSegment[] _segments;
-    private volatile bool _disposed;
+    private readonly ISubjectPathChangeObserver<TValue> _observer;
 
-    internal SubjectPathSubscription(IInterceptorSubject root, PathSegment[] segments)
+    private readonly Lock _lock = new();
+
+    // All arrays are indexed by segment position and are mutated only under _lock. _segmentHandles[p] is
+    // the installed listener for position p; _segmentObservers[p] is the CURRENT observer for position p
+    // (the slot-identity record a late callback is matched against); _resolvedSubjects[p] is the subject
+    // segment p is read on. Entries beyond the resolved prefix stay null.
+    private readonly IDisposable?[] _segmentHandles;
+    private readonly PathSegmentObserver?[] _segmentObservers;
+    private readonly IInterceptorSubject?[] _resolvedSubjects;
+
+    // The last observed value, seeded at subscribe time and advanced by delivery (a later phase) so an
+    // event's Old reflects prior observed state rather than a false unresolved starting point.
+    private SubjectPathValue<TValue> _lastObserved;
+
+    private bool _disposed;
+
+    internal SubjectPathSubscription(IInterceptorSubject root, PathSegment[] segments, ISubjectPathChangeObserver<TValue> observer)
     {
         _root = root;
         _segments = segments;
+        _observer = observer;
+
+        var length = segments.Length;
+        _segmentHandles = new IDisposable?[length];
+        _segmentObservers = new PathSegmentObserver?[length];
+        _resolvedSubjects = new IInterceptorSubject?[length];
+
+        lock (_lock)
+        {
+            BuildFrom(0, root);
+
+            // Seed from a fresh walk AFTER the listeners are installed: any write that lands between the
+            // build and this read is already covered by an installed listener, so the seed cannot open a
+            // false unresolved -> resolved edge on the first delivery.
+            _lastObserved = PathWalker.Walk<TValue>(_segments, _root, new IInterceptorSubject?[length]);
+        }
     }
 
     /// <summary>
@@ -29,7 +64,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     {
         get
         {
-            if (_disposed)
+            if (Volatile.Read(ref _disposed))
             {
                 return SubjectPathValue<TValue>.Unresolved;
             }
@@ -45,6 +80,137 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     /// <summary>One-shot dispose: after this returns, <see cref="Current"/> is unresolved.</summary>
     public void Dispose()
     {
-        _disposed = true;
+        lock (_lock)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            Volatile.Write(ref _disposed, true);
+            DisposeSuffix(0);
+        }
+    }
+
+    /// <summary>
+    /// Installs the subscribe-before-read chain from <paramref name="startPosition"/>, walking forward
+    /// from <paramref name="startSubject"/>. For each segment the listener is installed BEFORE the read
+    /// that resolves the next subject, so a write landing in that window is never missed. The build stops
+    /// at the first unresolved intermediate, leaving the suffix (handles/observers/subjects past that
+    /// position) null. Callers must hold <see cref="_lock"/>.
+    /// </summary>
+    private void BuildFrom(int startPosition, IInterceptorSubject startSubject)
+    {
+        var subject = startSubject;
+        for (var position = startPosition; position < _segments.Length; position++)
+        {
+            var segment = _segments[position];
+
+            // Record the current observer for this position (slot identity) and the subject this segment
+            // reads on, then install the listener.
+            var observer = new PathSegmentObserver(this) { Position = position };
+            _segmentObservers[position] = observer;
+            _resolvedSubjects[position] = subject;
+
+            // Subscribe FIRST, then resolve the next subject below: the install must precede the read.
+            _segmentHandles[position] = PropertyChangeSubscription.Create(
+                new PropertyReference(subject, segment.PropertyName), observer);
+
+            if (segment.IsLeaf)
+            {
+                // The leaf is subscribed but resolves no next subject.
+                return;
+            }
+
+            var child = TryResolveChild(subject, segment);
+            if (child is null)
+            {
+                // Unresolved intermediate: stop, leaving the suffix torn down (null).
+                return;
+            }
+
+            subject = child;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the next subject of a non-leaf segment by name against <paramref name="subject"/>. Name
+    /// resolution during the build is non-throwing: a missing or non-subscribable property, or a hostile
+    /// getter/indexer that throws, all resolve to null so the build stops cleanly.
+    /// </summary>
+    private static IInterceptorSubject? TryResolveChild(IInterceptorSubject subject, PathSegment segment)
+    {
+        if (!subject.Properties.TryGetValue(segment.PropertyName, out var metadata))
+        {
+            return null;
+        }
+
+        if (!(metadata.IsIntercepted || metadata.IsDerived))
+        {
+            return null;
+        }
+
+        try
+        {
+            return PathWalker.ResolveChild(subject, metadata, segment);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Tears down the chain from <paramref name="fromPosition"/> onward: disposes and clears each
+    /// listener, its observer, and the subject it was read on. Entries the suffix owned become null so a
+    /// later rebuild (or dispose) starts from a clean tail. Callers must hold <see cref="_lock"/>.
+    /// </summary>
+    private void DisposeSuffix(int fromPosition)
+    {
+        for (var position = fromPosition; position < _segments.Length; position++)
+        {
+            _segmentHandles[position]?.Dispose();
+            _segmentHandles[position] = null;
+            _segmentObservers[position] = null;
+            _resolvedSubjects[position] = null;
+        }
+    }
+
+    /// <summary>
+    /// Entry point for a per-segment listener callback. This phase implements only the guard skeleton:
+    /// under <see cref="_lock"/>, ignore the callback when disposed, then apply the slot-identity guard
+    /// (an observer a rebuild has already replaced at its position is stale and dropped). Event
+    /// computation and delivery are added in a later phase after this guard.
+    /// </summary>
+    private void ProcessSegmentCallback(PathSegmentObserver observer, in SubjectPropertyChange cause)
+    {
+        lock (_lock)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            // Slot identity: a callback whose observer is no longer the current one for its position was
+            // fired by a torn-down listener; drop it rather than acting on a stale chain.
+            if (_segmentObservers[observer.Position] != observer)
+            {
+                return;
+            }
+
+            // Event computation and delivery are wired in a later phase, past this guard.
+        }
+    }
+
+    /// <summary>
+    /// A per-position property listener. Its identity is the slot-identity token
+    /// (<see cref="Position"/>): the subscription matches a callback against the observer currently
+    /// recorded for that position to reject deliveries from a torn-down build.
+    /// </summary>
+    private sealed class PathSegmentObserver(SubjectPathSubscription<TValue> subscription) : IPropertyChangeObserver
+    {
+        public required int Position { get; init; }
+
+        public void OnChange(in SubjectPropertyChange change) => subscription.ProcessSegmentCallback(this, in change);
     }
 }

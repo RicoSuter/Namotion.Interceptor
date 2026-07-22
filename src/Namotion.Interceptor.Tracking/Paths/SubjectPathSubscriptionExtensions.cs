@@ -22,7 +22,7 @@ public static class SubjectPathSubscriptionExtensions
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(callback);
 
-        return Subscribe(subject, path);
+        return Subscribe(subject, path, new DelegateObserver<TValue>(callback));
     }
 
     /// <summary>Observer overload of <see cref="SubscribeToPath{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, SubjectPathChangeCallback{TValue})"/>.</summary>
@@ -36,12 +36,13 @@ public static class SubjectPathSubscriptionExtensions
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(observer);
 
-        return Subscribe(subject, path);
+        return Subscribe(subject, path, observer);
     }
 
     private static SubjectPathSubscription<TValue> Subscribe<TSubject, TValue>(
         TSubject subject,
-        Expression<Func<TSubject, TValue>> path)
+        Expression<Func<TSubject, TValue>> path,
+        ISubjectPathChangeObserver<TValue> observer)
         where TSubject : IInterceptorSubject
     {
         // Installing a chain from inside an active, not-yet-committing transaction would bind it to
@@ -53,6 +54,12 @@ public static class SubjectPathSubscriptionExtensions
         }
 
         var segments = PathExpressionDecomposer.Decompose(path);
-        return new SubjectPathSubscription<TValue>(subject, segments);
+        return new SubjectPathSubscription<TValue>(subject, segments, observer);
+    }
+
+    /// <summary>Wraps a <see cref="SubjectPathChangeCallback{TValue}"/> so the callback and observer entry points share one code path.</summary>
+    private sealed class DelegateObserver<TValue>(SubjectPathChangeCallback<TValue> callback) : ISubjectPathChangeObserver<TValue>
+    {
+        public void OnChange(in SubjectPathChange<TValue> change) => callback(in change);
     }
 }
