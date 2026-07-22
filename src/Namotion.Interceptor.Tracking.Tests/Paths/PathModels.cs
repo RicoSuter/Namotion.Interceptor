@@ -227,3 +227,183 @@ public partial class HostileContainerHolder
 
     public partial HostileList<Node> Items { get; set; }
 }
+
+// --- Property-type matrix models (Task 17) --------------------------------------------------------
+
+// A leaf subject carrying scalar leaves of every tracked shape: int, double, int? (nullable value type)
+// and string. Reached through ScalarHolder.Leaf so a retrack (reassigning the intermediate) moves the
+// observed value.
+[InterceptorSubject]
+public partial class ScalarLeaf
+{
+    public ScalarLeaf() { Text = string.Empty; }
+
+    public partial int Count { get; set; }
+
+    public partial double Ratio { get; set; }
+
+    public partial int? OptionalCount { get; set; }
+
+    public partial string Text { get; set; }
+}
+
+[InterceptorSubject]
+public partial class ScalarHolder
+{
+    public partial ScalarLeaf? Leaf { get; set; }
+}
+
+// An interface-typed intermediate. IsSubjectReferenceType accepts ANY non-enumerable interface (via
+// CanDirectlyHoldSubject), so the static type being an interface is what is exercised here; the runtime
+// value is a concrete subject. The interface deliberately does NOT extend IInterceptorSubject: the source
+// generator treats a base-list interface that extends IInterceptorSubject as a base subject and emits a
+// non-existent .Concat(IInterface.DefaultProperties), so an [InterceptorSubject] class cannot implement
+// such an interface today. The leaf Label is declared here so the path expression compiles and is
+// implemented (intercepted) on the class.
+public interface INamedSubject
+{
+    string Label { get; }
+}
+
+[InterceptorSubject]
+public partial class NamedSubject : INamedSubject
+{
+    public NamedSubject() { Label = string.Empty; }
+
+    public partial string Label { get; set; }
+}
+
+[InterceptorSubject]
+public partial class InterfaceIntermediateHolder
+{
+    public partial INamedSubject? Node { get; set; }
+}
+
+// An interface with both a [Derived] default leaf (subscribable: IsDerived => passes the walk segment
+// rule) and a plain default leaf (neither intercepted nor derived => rejected by the walk as unresolved).
+// DerivedLabel depends on the intercepted Prefix so its value differs per instance on a retrack.
+public interface IDefaultsInterface
+{
+    string Prefix { get; set; }
+
+    [Derived]
+    string DerivedLabel => $"D:{Prefix}";
+
+    string PlainLabel => "plain";
+}
+
+[InterceptorSubject]
+public partial class DefaultsSubject : IDefaultsInterface
+{
+    public DefaultsSubject() { Prefix = string.Empty; }
+
+    public partial string Prefix { get; set; }
+}
+
+// Target is typed as the interface so the default members (DerivedLabel/PlainLabel) are reachable on the
+// path expression: a default interface member is only accessible through the interface, not the class.
+[InterceptorSubject]
+public partial class DefaultsHolder
+{
+    public partial IDefaultsInterface? Target { get; set; }
+}
+
+// Subject collection intermediates typed as List<T> and IList<T> (the array and IReadOnlyList/ImmutableArray
+// shapes are covered by reused Node/Garage models).
+[InterceptorSubject]
+public partial class ListHolder
+{
+    public ListHolder() { ListItems = []; InterfaceListItems = new List<Node>(); }
+
+    public partial List<Node> ListItems { get; set; }
+
+    public partial IList<Node> InterfaceListItems { get; set; }
+}
+
+// Subject dictionary intermediates typed as IDictionary<string,T> and a non-string (int) key dictionary
+// (Dictionary<string,T> and IReadOnlyDictionary<string,T> are covered by reused Node/Garage models).
+[InterceptorSubject]
+public partial class DictionaryHolder
+{
+    public DictionaryHolder() { ByKey = new Dictionary<string, Node>(); ById = new Dictionary<int, Node>(); }
+
+    public partial IDictionary<string, Node> ByKey { get; set; }
+
+    public partial Dictionary<int, Node> ById { get; set; }
+}
+
+// A struct leaf that does NOT implement IEquatable<T>, so the equality comparison boxes (allocation is a
+// Task 20 concern). Here it only pins value correctness of resolution and transition.
+public struct PlainStruct
+{
+    public PlainStruct(int x, int y) { X = x; Y = y; }
+
+    public int X { get; set; }
+
+    public int Y { get; set; }
+}
+
+[InterceptorSubject]
+public partial class StructLeafHolder
+{
+    public partial PlainStruct Value { get; set; }
+}
+
+[InterceptorSubject]
+public partial class StructHolderParent
+{
+    public partial StructLeafHolder? Child { get; set; }
+}
+
+// A case-insensitive dictionary that implements ONLY the generic IDictionary<string,TValue> (neither the
+// non-generic IDictionary nor IReadOnlyDictionary<,>). Its comparer must be honored by the walk's
+// TryGetValue so a lookup of "key" resolves a stored "Key".
+public sealed class CaseInsensitiveDictionary<TValue> : IDictionary<string, TValue>
+{
+    private readonly Dictionary<string, TValue> _inner = new(StringComparer.OrdinalIgnoreCase);
+
+    public TValue this[string key]
+    {
+        get => _inner[key];
+        set => _inner[key] = value;
+    }
+
+    public ICollection<string> Keys => _inner.Keys;
+
+    public ICollection<TValue> Values => _inner.Values;
+
+    public int Count => _inner.Count;
+
+    public bool IsReadOnly => false;
+
+    public void Add(string key, TValue value) => _inner.Add(key, value);
+
+    public void Add(KeyValuePair<string, TValue> item) => _inner.Add(item.Key, item.Value);
+
+    public void Clear() => _inner.Clear();
+
+    public bool Contains(KeyValuePair<string, TValue> item) => _inner.ContainsKey(item.Key);
+
+    public bool ContainsKey(string key) => _inner.ContainsKey(key);
+
+    public void CopyTo(KeyValuePair<string, TValue>[] array, int arrayIndex)
+        => ((ICollection<KeyValuePair<string, TValue>>)_inner).CopyTo(array, arrayIndex);
+
+    public bool Remove(string key) => _inner.Remove(key);
+
+    public bool Remove(KeyValuePair<string, TValue> item) => _inner.Remove(item.Key);
+
+    public bool TryGetValue(string key, out TValue value) => _inner.TryGetValue(key, out value!);
+
+    public IEnumerator<KeyValuePair<string, TValue>> GetEnumerator() => _inner.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => _inner.GetEnumerator();
+}
+
+[InterceptorSubject]
+public partial class CaseInsensitiveHolder
+{
+    public CaseInsensitiveHolder() { ByName = new CaseInsensitiveDictionary<Node>(); }
+
+    public partial IDictionary<string, Node> ByName { get; set; }
+}
