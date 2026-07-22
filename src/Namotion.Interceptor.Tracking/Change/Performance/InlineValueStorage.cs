@@ -29,12 +29,15 @@ internal readonly struct InlineValueStorage
         // reference would be invisible to the GC and could dangle. The write also spans exactly
         // SizeOf(TValue) bytes from offset 0, and the Type field sits at offset 16, so a value
         // larger than MaxSize would overwrite a GC-tracked reference with raw bytes. Callers must
-        // route such types to BoxedValueHolder; this assert makes both invariants self-enforcing.
-        System.Diagnostics.Debug.Assert(
-            typeof(TValue).IsValueType &&
-            !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() &&
-            Unsafe.SizeOf<TValue>() <= MaxSize,
-            $"InlineValueStorage must not store '{typeof(TValue)}': it is a reference type, contains references (which the GC cannot track inside inline storage), or exceeds {MaxSize} bytes (which would overwrite the adjacent type field).");
+        // route such types to BoxedValueHolder. All three checks are JIT-time constants per
+        // instantiation, so for valid types this guard is eliminated entirely (zero cost in every
+        // configuration) while an invalid future caller fails fast instead of corrupting memory.
+        if (!typeof(TValue).IsValueType ||
+            RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() ||
+            Unsafe.SizeOf<TValue>() > MaxSize)
+        {
+            ThrowUnsupportedType<TValue>();
+        }
 
         var storage = new InlineValueStorage();
         Unsafe.AsRef(in storage._storedType) = typeof(TValue);
@@ -107,4 +110,12 @@ internal readonly struct InlineValueStorage
             return value!;
         };
     }
+
+    // Kept out of Create so the (JIT-eliminated) guard does not bloat its inlined body.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowUnsupportedType<TValue>() =>
+        throw new InvalidOperationException(
+            $"InlineValueStorage cannot store '{typeof(TValue)}': it is a reference type, contains " +
+            $"references (which the GC cannot track inside inline storage), or exceeds {MaxSize} bytes " +
+            "(which would overwrite the adjacent type field). Route this type to BoxedValueHolder.");
 }
