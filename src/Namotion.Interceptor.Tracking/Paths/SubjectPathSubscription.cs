@@ -40,6 +40,12 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     private readonly Queue<SubjectPathChange<TValue>> _pending = new();
     private bool _draining;
 
+    // Set (under _lock) by the thread-affine reentrancy guard when a property getter invoked during this
+    // subscription's own event walk writes a watched segment and re-enters ProcessSegmentCallback on the
+    // SAME thread. The in-flight computation loop observes it and re-walks, so the getter's write is picked
+    // up by a fresh event after the current walk finishes instead of corrupting it.
+    private bool _deferredRevalidation;
+
     private bool _disposed;
 
     internal SubjectPathSubscription(IInterceptorSubject root, PathSegment[] segments, ISubjectPathChangeObserver<TValue> observer)
@@ -190,11 +196,28 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     /// Entry point for a per-segment listener callback. All state (the validating walk, a divergent
     /// retrack, the kind decision, the suppression check, the <see cref="_lastObserved"/> advance and the
     /// enqueue/claim-drainer decision) is computed under <see cref="_lock"/>; the observer callbacks are
-    /// then run OUTSIDE the lock by the exclusive drainer. When disposed or when the callback's observer is
-    /// stale (a rebuild has already replaced it at its position), the invocation is dropped.
+    /// then run OUTSIDE the lock by the exclusive drainer. A getter that writes a watched segment during the
+    /// walk re-enters here on the same thread; the thread-affine guard defers it and the computation loops
+    /// until no deferral remains, so a side-effecting getter never deadlocks nor runs a callback under the
+    /// lock. When disposed or when the callback's observer is stale (a rebuild has already replaced it at its
+    /// position), the invocation is dropped.
     /// </summary>
     private void ProcessSegmentCallback(PathSegmentObserver observer, in SubjectPropertyChange cause)
     {
+        // Thread-affine reentrancy guard. If THIS thread already holds _lock we are re-entering our own
+        // computation: a property getter invoked by the event walk below wrote a watched segment of this
+        // same subscription, and that write dispatched synchronously back here. Computing now would run a
+        // nested walk while the outer one is mid-flight (corrupting the outer walk and the _lastObserved
+        // advance) and could even claim the drainer and run a callback while _lock is still held, an AB-BA
+        // hazard. Instead flag a deferred revalidation and return WITHOUT computing; the outer computation
+        // loop re-walks once it finishes, so the getter's write is observed by a fresh event and callbacks
+        // never run under _lock. IsHeldByCurrentThread is a thread-local read, free on the common path.
+        if (_lock.IsHeldByCurrentThread)
+        {
+            _deferredRevalidation = true;
+            return;
+        }
+
         // The uncontended fast path hands the drainer a single stack-local event, skipping the enqueue and
         // dequeue copies of the large change struct. Both live outside the lock so the drain section can read
         // them after the lock is released.
@@ -215,101 +238,145 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
                 return;
             }
 
-            // Fresh validating walk from the root: it recomputes the observed value AND records, per
-            // position, the subject each segment now reads on, which the divergence check compares
-            // against the subscribed chain.
-            var scratch = new IInterceptorSubject?[_segments.Length];
-            var newValue = PathWalker.Walk<TValue>(_segments, _root, scratch);
-
-            // Divergence is the first position where the fresh walk reads on a different subject than the
-            // subscribed chain (reference identity). This one comparison covers every structural case: an
-            // intact chain never diverges; a reassigned intermediate, a heal (null -> subject) and a break
-            // (subject -> null) each first differ at the affected position.
-            var divergencePoint = -1;
-            for (var position = 0; position < _segments.Length; position++)
+            // Deferred-revalidation loop. Each pass computes one event (a validating walk, a divergent
+            // retrack, the kind decision, the suppression check and the _lastObserved advance). A getter
+            // that wrote a watched segment during a pass's walk re-entered via the guard above and set
+            // _deferredRevalidation, so the loop recomputes a fresh event until no deferral remains. Passes
+            // enqueue in order, giving total FIFO delivery; the loop settles fully before any callback runs,
+            // so callbacks never run under _lock. The common (no side-effecting getter) case runs the loop
+            // exactly once. Termination assumes convergence: a getter that writes a fresh, non-suppressed
+            // watched value on EVERY walk would loop here forever holding _lock, but that is a caller
+            // contract violation (getters must be side-effect-free), not a supported case.
+            SubjectPathChange<TValue> firstEvent = default;
+            var hasFirstEvent = false;
+            do
             {
-                if (!ReferenceEquals(scratch[position], _resolvedSubjects[position]))
-                {
-                    divergencePoint = position;
-                    break;
-                }
-            }
+                _deferredRevalidation = false;
 
-            var diverged = divergencePoint >= 0;
-            if (diverged)
-            {
-                // Retrack the suffix below the change: tear down the stale listeners, then reinstall the
-                // subscribe-before-read chain from the new subject. A null divergent subject is a break
-                // (an unresolved intermediate); dispose only, leaving the suffix torn down.
-                var divergentSubject = scratch[divergencePoint];
-                DisposeSuffix(divergencePoint);
-                if (divergentSubject is not null)
-                {
-                    BuildFrom(divergencePoint, divergentSubject);
-                }
+                // Fresh validating walk from the root: it recomputes the observed value AND records, per
+                // position, the subject each segment now reads on, which the divergence check compares
+                // against the subscribed chain.
+                var scratch = new IInterceptorSubject?[_segments.Length];
+                var newValue = PathWalker.Walk<TValue>(_segments, _root, scratch);
 
-                // Recompute from the rebuilt chain: the retrack's reads supersede the initial walk, so a
-                // write that raced the listener install is observed rather than lost.
-                newValue = PathWalker.Walk<TValue>(_segments, _root, new IInterceptorSubject?[_segments.Length]);
-            }
-
-            // ValueChange only when the intact chain's own resolved leaf was the write; any structural
-            // change (divergence) or an unresolved result is a PathChange.
-            var kind = SubjectPathChangeKind.PathChange;
-            if (!diverged && newValue.IsResolved)
-            {
-                var leafSubject = _resolvedSubjects[_segments.Length - 1];
-                var leafName = _segments[_segments.Length - 1].PropertyName;
-                if (leafSubject is not null
-                    && ReferenceEquals(cause.Property.Subject, leafSubject)
-                    && string.Equals(cause.Property.Name, leafName, StringComparison.Ordinal))
+                // Divergence is the first position where the fresh walk reads on a different subject than the
+                // subscribed chain (reference identity). This one comparison covers every structural case: an
+                // intact chain never diverges; a reassigned intermediate, a heal (null -> subject) and a break
+                // (subject -> null) each first differ at the affected position.
+                var divergencePoint = -1;
+                for (var position = 0; position < _segments.Length; position++)
                 {
-                    kind = SubjectPathChangeKind.ValueChange;
-                }
-            }
-
-            if (SubjectPathValue<TValue>.AreEquivalent(_lastObserved, newValue))
-            {
-                // Suppression: an observed state equivalent to the last one (same resolvedness, equal value)
-                // delivers nothing and does not advance the baseline. It must still recover a stranded
-                // backlog when no drainer is active; an active drainer already owns any backlog.
-                if (_draining || _pending.Count == 0)
-                {
-                    return;
+                    if (!ReferenceEquals(scratch[position], _resolvedSubjects[position]))
+                    {
+                        divergencePoint = position;
+                        break;
+                    }
                 }
 
-                _draining = true; // claim the drainer to flush events a prior throwing callback stranded
-            }
-            else
-            {
+                var diverged = divergencePoint >= 0;
+                if (diverged)
+                {
+                    // Retrack the suffix below the change: tear down the stale listeners, then reinstall the
+                    // subscribe-before-read chain from the new subject. A null divergent subject is a break
+                    // (an unresolved intermediate); dispose only, leaving the suffix torn down.
+                    var divergentSubject = scratch[divergencePoint];
+                    DisposeSuffix(divergencePoint);
+                    if (divergentSubject is not null)
+                    {
+                        BuildFrom(divergencePoint, divergentSubject);
+                    }
+
+                    // Recompute from the rebuilt chain: the retrack's reads supersede the initial walk, so a
+                    // write that raced the listener install is observed rather than lost.
+                    newValue = PathWalker.Walk<TValue>(_segments, _root, new IInterceptorSubject?[_segments.Length]);
+                }
+
+                // ValueChange only when the intact chain's own resolved leaf was the write; any structural
+                // change (divergence) or an unresolved result is a PathChange.
+                var kind = SubjectPathChangeKind.PathChange;
+                if (!diverged && newValue.IsResolved)
+                {
+                    var leafSubject = _resolvedSubjects[_segments.Length - 1];
+                    var leafName = _segments[_segments.Length - 1].PropertyName;
+                    if (leafSubject is not null
+                        && ReferenceEquals(cause.Property.Subject, leafSubject)
+                        && string.Equals(cause.Property.Name, leafName, StringComparison.Ordinal))
+                    {
+                        kind = SubjectPathChangeKind.ValueChange;
+                    }
+                }
+
+                if (SubjectPathValue<TValue>.AreEquivalent(_lastObserved, newValue))
+                {
+                    // Suppressed: an observed state equivalent to the last one delivers nothing and does not
+                    // advance the baseline. The pass still counts for the loop because its own walk may have
+                    // set _deferredRevalidation via a getter write.
+                    continue;
+                }
+
                 // Advance BEFORE the callback: a transition chained from the callback then sees the new
                 // baseline, and a throwing callback cannot replay this same transition.
                 var oldObserved = _lastObserved;
                 _lastObserved = newValue;
+
+                // A deferred pass reuses the outer triggering cause (not the getter write that produced this
+                // delta), so Cause/Kind reflect the triggering write while Old/New are the true observed
+                // transition. Only reachable under a getter contract violation, so acceptable, but noted so a
+                // future debugger of the cause fields is not confused.
                 var change = new SubjectPathChange<TValue>(kind, oldObserved, newValue, in cause);
 
-                if (_draining)
+                if (!hasFirstEvent && _pending.Count == 0)
                 {
-                    // A drainer is active (nested or concurrent write): enqueue and let it deliver this after
-                    // the current callback returns. Flattens nesting and preserves total FIFO order.
-                    _pending.Enqueue(change);
-                    return;
-                }
-
-                if (_pending.Count == 0)
-                {
-                    // Uncontended: hand the drainer this event directly, skipping the enqueue/dequeue copies.
-                    _draining = true;
-                    directEvent = change;
-                    hasDirectEvent = true;
+                    // Hold the first event of an uncontended call in a local so the common no-deferral path
+                    // can deliver it without touching the queue (zero copy). A later pass flushes it first.
+                    firstEvent = change;
+                    hasFirstEvent = true;
                 }
                 else
                 {
-                    // A prior throwing callback stranded a backlog; append this event and claim the drainer.
+                    // Second (deferred) event this call, or a prior throwing callback stranded a backlog:
+                    // flush any held first event, then enqueue, so total order is enqueue order.
+                    if (hasFirstEvent)
+                    {
+                        _pending.Enqueue(firstEvent);
+                        hasFirstEvent = false;
+                    }
+
                     _pending.Enqueue(change);
-                    _draining = true;
                 }
             }
+            while (_deferredRevalidation);
+
+            if (_draining)
+            {
+                // A drainer is active (a nested or concurrent write): hand it everything this call produced
+                // and let it deliver after the current callback returns. Flattens nesting, preserves FIFO.
+                if (hasFirstEvent)
+                {
+                    _pending.Enqueue(firstEvent);
+                }
+
+                return;
+            }
+
+            if (!hasFirstEvent && _pending.Count == 0)
+            {
+                // Every pass was suppressed and no prior throwing callback stranded a backlog: nothing to do.
+                return;
+            }
+
+            // Claim the drainer; it runs the callbacks below with _lock released.
+            _draining = true;
+
+            if (hasFirstEvent)
+            {
+                // hasFirstEvent implies _pending was empty when the single event was produced and no later
+                // pass or concurrent producer could enqueue under the held lock, so this is the uncontended
+                // zero-copy fast path: deliver directly without touching the queue.
+                directEvent = firstEvent;
+                hasDirectEvent = true;
+            }
+            // Otherwise multiple events and/or a stranded backlog are already queued; the drain loop delivers.
         }
 
         // Drain section: all observer callbacks run here, OUTSIDE _lock. A callback may re-enter (a nested
