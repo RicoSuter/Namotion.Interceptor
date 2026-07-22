@@ -1,3 +1,6 @@
+using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -679,6 +682,72 @@ public class SubjectPropertyChangeTests
         Assert.Equal(ChangeOriginKind.FromSource, merged.Origin.Kind);
         Assert.Same(source, merged.Origin.Source);
     }
+
+    [Fact]
+    public void Create_WithSmallStructContainingReference_KeepsReferenceAliveForGc()
+    {
+        // Arrange: an 8-byte struct (fits inline storage) that carries an object reference.
+        // The arrange lives in a non-inlined helper so its locals are dead before the collection,
+        // making the retained change the value's only possible GC root.
+        var (change, weakReference) = CreateChangeWithReferenceStruct(_property, _changedTimestamp, _receivedTimestamp);
+
+        // Act
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+        // Assert
+        Assert.True(weakReference.IsAlive,
+            "SubjectPropertyChange must keep references inside stored values alive for the GC.");
+        Assert.Same(weakReference.Target, change.GetOldValue<SmallStructWithReference>().Reference);
+        GC.KeepAlive(change);
+    }
+
+    [Fact]
+    public void Create_WithImmutableArray_KeepsBackingArrayAliveAcrossGc()
+    {
+        // Arrange: ImmutableArray<T> is an 8-byte struct wrapping a T[] reference; after the
+        // property is overwritten, the change may be the backing array's only GC root.
+        var (change, weakBackingArray) = CreateChangeWithImmutableArray(_property, _changedTimestamp, _receivedTimestamp);
+
+        // Act
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+        // Assert - the backing array survives and the value round-trips intact through the
+        // boxed object read (the path collection diffing uses)
+        Assert.True(weakBackingArray.IsAlive,
+            "SubjectPropertyChange must keep the ImmutableArray's backing array alive for the GC.");
+        var oldValue = Assert.IsType<ImmutableArray<string>>(change.GetOldValue<object?>());
+        Assert.Equal(new[] { "a", "b" }, oldValue);
+        GC.KeepAlive(change);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (SubjectPropertyChange Change, WeakReference WeakReference) CreateChangeWithReferenceStruct(
+        PropertyReference property, DateTimeOffset changedTimestamp, DateTimeOffset receivedTimestamp)
+    {
+        var referenced = new object();
+        var change = SubjectPropertyChange.Create(
+            property, origin: ChangeOrigin.Local, changedTimestamp, receivedTimestamp,
+            new SmallStructWithReference(referenced), new SmallStructWithReference(null));
+        return (change, new WeakReference(referenced));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (SubjectPropertyChange Change, WeakReference WeakBackingArray) CreateChangeWithImmutableArray(
+        PropertyReference property, DateTimeOffset changedTimestamp, DateTimeOffset receivedTimestamp)
+    {
+        var oldValue = ImmutableArray.Create("a", "b");
+        var backingArray = ImmutableCollectionsMarshal.AsArray(oldValue)!;
+        var change = SubjectPropertyChange.Create(
+            property, origin: ChangeOrigin.Local, changedTimestamp, receivedTimestamp,
+            oldValue, ImmutableArray.Create("a", "b", "c"));
+        return (change, new WeakReference(backingArray));
+    }
+
+    private readonly record struct SmallStructWithReference(object? Reference);
 
     [Fact]
     public void WhenMeasuringSubjectPropertyChange_ThenSizeStaysWithinOneAlignmentSlotOfMaster()

@@ -48,8 +48,15 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         TValue oldValue,
         TValue newValue)
     {
-        // Fast path: value types that fit inline (primitives, small structs) - ZERO allocations
-        if (typeof(TValue).IsValueType && Unsafe.SizeOf<TValue>() <= InlineValueStorage.MaxSize)
+        // Fast path: value types that fit inline (primitives, small structs) - ZERO allocations.
+        // Must exclude structs containing object references (e.g. ImmutableArray<T>, small structs
+        // with a string field): inline storage writes raw bytes into long fields the GC does not
+        // scan, so a contained reference would be invisible to the GC and the referenced object
+        // could be collected or moved while the change still holds its stale address. All checks
+        // are JIT-time constants, so the guard costs nothing on the primitive fast path.
+        if (typeof(TValue).IsValueType &&
+            !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() &&
+            Unsafe.SizeOf<TValue>() <= InlineValueStorage.MaxSize)
         {
             return new SubjectPropertyChange(
                 property,
