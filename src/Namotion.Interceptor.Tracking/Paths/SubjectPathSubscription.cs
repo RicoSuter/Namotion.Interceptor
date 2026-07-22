@@ -7,8 +7,9 @@ namespace Namotion.Interceptor.Tracking.Paths;
 /// A live subscription to a decomposed path from a root subject. It installs one per-property listener
 /// per resolved segment (a subscribe-before-read chain) so a write to any watched link is observed, and
 /// exposes the path's current observed value via a fresh, tracker-lock-free walk. Disposal is one-shot.
-/// Event computation and delivery are wired in a later phase; this type currently owns the read surface,
-/// the segment listeners, and the slot-identity guard skeleton.
+/// On a watched write it computes the event (a validating walk plus a divergent retrack of the suffix)
+/// and delivers it synchronously via a direct invoke outside the lock; the ordered exclusive-drain queue
+/// that serializes nested and concurrent deliveries is still pending in a later phase.
 /// </summary>
 public sealed class SubjectPathSubscription<TValue> : IDisposable
 {
@@ -26,8 +27,9 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     private readonly PathSegmentObserver?[] _segmentObservers;
     private readonly IInterceptorSubject?[] _resolvedSubjects;
 
-    // The last observed value, seeded at subscribe time and advanced by delivery (a later phase) so an
-    // event's Old reflects prior observed state rather than a false unresolved starting point.
+    // The last observed value, seeded at subscribe time and advanced in ProcessSegmentCallback (before the
+    // observer callback runs) so an event's Old reflects prior observed state rather than a false
+    // unresolved starting point.
     private SubjectPathValue<TValue> _lastObserved;
 
     private bool _disposed;
@@ -177,13 +179,18 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     }
 
     /// <summary>
-    /// Entry point for a per-segment listener callback. This phase implements only the guard skeleton:
-    /// under <see cref="_lock"/>, ignore the callback when disposed, then apply the slot-identity guard
-    /// (an observer a rebuild has already replaced at its position is stale and dropped). Event
-    /// computation and delivery are added in a later phase after this guard.
+    /// Entry point for a per-segment listener callback. All state (the validating walk, a divergent
+    /// retrack, the kind decision, the suppression check and the <see cref="_lastObserved"/> advance) is
+    /// computed under <see cref="_lock"/>; the observer callback is then invoked OUTSIDE the lock. When
+    /// disposed or when the callback's observer is stale (a rebuild has already replaced it at its
+    /// position), the invocation is dropped.
     /// </summary>
     private void ProcessSegmentCallback(PathSegmentObserver observer, in SubjectPropertyChange cause)
     {
+        SubjectPathChangeKind kind;
+        SubjectPathValue<TValue> oldObserved;
+        SubjectPathValue<TValue> newValue;
+
         lock (_lock)
         {
             if (_disposed)
@@ -198,8 +205,77 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
                 return;
             }
 
-            // Event computation and delivery are wired in a later phase, past this guard.
+            // Fresh validating walk from the root: it recomputes the observed value AND records, per
+            // position, the subject each segment now reads on, which the divergence check compares
+            // against the subscribed chain.
+            var scratch = new IInterceptorSubject?[_segments.Length];
+            newValue = PathWalker.Walk<TValue>(_segments, _root, scratch);
+
+            // Divergence is the first position where the fresh walk reads on a different subject than the
+            // subscribed chain (reference identity). This one comparison covers every structural case: an
+            // intact chain never diverges; a reassigned intermediate, a heal (null -> subject) and a break
+            // (subject -> null) each first differ at the affected position.
+            var divergencePoint = -1;
+            for (var position = 0; position < _segments.Length; position++)
+            {
+                if (!ReferenceEquals(scratch[position], _resolvedSubjects[position]))
+                {
+                    divergencePoint = position;
+                    break;
+                }
+            }
+
+            var diverged = divergencePoint >= 0;
+            if (diverged)
+            {
+                // Retrack the suffix below the change: tear down the stale listeners, then reinstall the
+                // subscribe-before-read chain from the new subject. A null divergent subject is a break
+                // (an unresolved intermediate); dispose only, leaving the suffix torn down.
+                var divergentSubject = scratch[divergencePoint];
+                DisposeSuffix(divergencePoint);
+                if (divergentSubject is not null)
+                {
+                    BuildFrom(divergencePoint, divergentSubject);
+                }
+
+                // Recompute from the rebuilt chain: the retrack's reads supersede the initial walk, so a
+                // write that raced the listener install is observed rather than lost.
+                newValue = PathWalker.Walk<TValue>(_segments, _root, new IInterceptorSubject?[_segments.Length]);
+            }
+
+            // ValueChange only when the intact chain's own resolved leaf was the write; any structural
+            // change (divergence) or an unresolved result is a PathChange.
+            kind = SubjectPathChangeKind.PathChange;
+            if (!diverged && newValue.IsResolved)
+            {
+                var leafSubject = _resolvedSubjects[_segments.Length - 1];
+                var leafName = _segments[_segments.Length - 1].PropertyName;
+                if (leafSubject is not null
+                    && ReferenceEquals(cause.Property.Subject, leafSubject)
+                    && string.Equals(cause.Property.Name, leafName, StringComparison.Ordinal))
+                {
+                    kind = SubjectPathChangeKind.ValueChange;
+                }
+            }
+
+            // Suppression: an observed state equivalent to the last one (same resolvedness, equal value)
+            // delivers nothing. Draining a queued backlog on a suppressed event arrives in a later phase.
+            if (SubjectPathValue<TValue>.AreEquivalent(_lastObserved, newValue))
+            {
+                return;
+            }
+
+            // Advance BEFORE the callback: a transition chained from the callback then sees the new
+            // baseline, and a throwing callback cannot replay this same transition.
+            oldObserved = _lastObserved;
+            _lastObserved = newValue;
         }
+
+        // The observer callback runs OUTSIDE _lock: it may re-enter (a nested write), and holding the
+        // lock across it would serialize the graph or deadlock. Ordered exclusive-drain delivery arrives
+        // in a later phase; a direct invoke under the released lock is correct for a single event.
+        var change = new SubjectPathChange<TValue>(kind, oldObserved, newValue, in cause);
+        _observer.OnChange(in change);
     }
 
     /// <summary>

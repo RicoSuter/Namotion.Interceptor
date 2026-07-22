@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Reflection;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Paths;
@@ -37,5 +39,296 @@ public class PathTransitionTests
 
         // Assert: only the resolvable prefix is installed (Father subscribed, FirstName not reached).
         Assert.Equal(1, PropertyChangeSubscriptions.ReadSubscriptionCount());
+    }
+
+    [Fact]
+    public void WhenLeafWritten_ThenValueChangeDeliveredWithChainedValues()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var father = new Person { FirstName = "Joe" };
+        var person = new Person(context) { Father = father };
+        var events = new List<SubjectPathChange<string?>>();
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
+            (in SubjectPathChange<string?> c) => events.Add(c));
+
+        // Act
+        father.FirstName = "Jack";
+
+        // Assert
+        var change = Assert.Single(events);
+        Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
+        Assert.Equal("Joe", change.Old.GetValueOrDefault());
+        Assert.Equal("Jack", change.New.GetValueOrDefault());
+        Assert.Equal(nameof(Person.FirstName), change.Cause.Property.Name);
+    }
+
+    [Fact]
+    public void WhenSingleSegmentLeafWritten_ThenValueChangeDelivered()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context) { FirstName = "Joe" };
+        var events = new List<SubjectPathChange<string?>>();
+        using var subscription = person.SubscribeToPath(x => x.FirstName,
+            (in SubjectPathChange<string?> c) => events.Add(c));
+
+        // Act
+        person.FirstName = "Jack";
+
+        // Assert: a single-segment path degenerates to a plain leaf watch.
+        var change = Assert.Single(events);
+        Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
+        Assert.Equal("Joe", change.Old.GetValueOrDefault());
+        Assert.Equal("Jack", change.New.GetValueOrDefault());
+    }
+
+    [Fact]
+    public void WhenNullIntermediateAssigned_ThenHealDeliversPathChange()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context); // Father null
+        SubjectPathChange<string?>? last = null;
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
+            (in SubjectPathChange<string?> c) => last = c);
+
+        // Act
+        person.Father = new Person { FirstName = "Joe" };
+
+        // Assert
+        Assert.NotNull(last);
+        Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
+        Assert.False(last.Value.Old.IsResolved);
+        Assert.True(last.Value.New.IsResolved);
+        Assert.Equal("Joe", last.Value.New.GetValueOrDefault());
+        Assert.Equal(nameof(Person.Father), last.Value.Cause.Property.Name);
+    }
+
+    [Fact]
+    public void WhenResolvedIntermediateNulled_ThenBreakDeliversPathChange()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
+        SubjectPathChange<string?>? last = null;
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
+            (in SubjectPathChange<string?> c) => last = c);
+
+        // Act
+        person.Father = null;
+
+        // Assert: resolved -> unresolved, with the last observed value as Old.
+        Assert.NotNull(last);
+        Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
+        Assert.True(last.Value.Old.IsResolved);
+        Assert.Equal("Joe", last.Value.Old.GetValueOrDefault());
+        Assert.False(last.Value.New.IsResolved);
+        Assert.Equal(nameof(Person.Father), last.Value.Cause.Property.Name);
+    }
+
+    [Fact]
+    public void WhenIntermediateReassignedToDifferentSubject_ThenPathChangeWithNewLeaf()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
+        SubjectPathChange<string?>? last = null;
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
+            (in SubjectPathChange<string?> c) => last = c);
+
+        // Act
+        person.Father = new Person { FirstName = "Jack" };
+
+        // Assert: a reassigned intermediate diverges at the child position, so the leaf below is retracked.
+        Assert.NotNull(last);
+        Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
+        Assert.Equal("Joe", last.Value.Old.GetValueOrDefault());
+        Assert.Equal("Jack", last.Value.New.GetValueOrDefault());
+        Assert.Equal(nameof(Person.Father), last.Value.Cause.Property.Name);
+    }
+
+    [Fact]
+    public void WhenIntermediateReassignedToSubjectWithEqualLeaf_ThenSuppressedButChainStaysLive()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
+        var events = new List<SubjectPathChange<string?>>();
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
+            (in SubjectPathChange<string?> c) => events.Add(c));
+
+        // Act: divergent retrack, but the retracked leaf value equals the last observed one.
+        var newFather = new Person { FirstName = "Joe" };
+        person.Father = newFather;
+
+        // Assert: nothing delivered for the equal-value transition.
+        Assert.Empty(events);
+
+        // Act: a real write to the retracked leaf must still deliver, proving the chain rebuilt live.
+        newFather.FirstName = "Jack";
+
+        // Assert
+        var change = Assert.Single(events);
+        Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
+        Assert.Equal("Joe", change.Old.GetValueOrDefault());
+        Assert.Equal("Jack", change.New.GetValueOrDefault());
+    }
+
+    [Fact]
+    public void WhenCollectionReplacedMovingDifferentSubjectToIndex_ThenPathChangeWithBothValues()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var childA = new Person { FirstName = "Amy" };
+        var childB = new Person { FirstName = "Bob" };
+        var person = new Person(context) { Children = [childA] };
+        SubjectPathChange<string?>? last = null;
+        using var subscription = person.SubscribeToPath(x => x.Children[0].FirstName,
+            (in SubjectPathChange<string?> c) => last = c);
+
+        // Act
+        person.Children = [childB];
+
+        // Assert
+        Assert.NotNull(last);
+        Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
+        Assert.Equal("Amy", last.Value.Old.GetValueOrDefault());
+        Assert.Equal("Bob", last.Value.New.GetValueOrDefault());
+    }
+
+    [Fact]
+    public void WhenCollectionReplacedLeavingSameSubjectAndEqualLeaf_ThenSuppressedButChainStaysLive()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var childA = new Person { FirstName = "Amy" };
+        var person = new Person(context) { Children = [childA] };
+        var events = new List<SubjectPathChange<string?>>();
+        using var subscription = person.SubscribeToPath(x => x.Children[0].FirstName,
+            (in SubjectPathChange<string?> c) => events.Add(c));
+
+        // Act: a fresh array holding the same child at the same index; the watched value is unchanged.
+        person.Children = new[] { childA };
+
+        // Assert: nothing delivered for the equal-value transition.
+        Assert.Empty(events);
+
+        // Act: a real write to the watched leaf must still deliver, proving the chain stayed live.
+        childA.FirstName = "Ann";
+
+        // Assert
+        var change = Assert.Single(events);
+        Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
+        Assert.Equal("Amy", change.Old.GetValueOrDefault());
+        Assert.Equal("Ann", change.New.GetValueOrDefault());
+    }
+
+    [Fact]
+    public void WhenDictionaryKeyAdded_ThenHealDeliversPathChange()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var node = new Node(context); // ByName empty: "key" unresolved.
+        SubjectPathChange<string>? last = null;
+        using var subscription = node.SubscribeToPath(x => x.ByName["key"].Name,
+            (in SubjectPathChange<string> c) => last = c);
+
+        // Act
+        node.ByName = new Dictionary<string, Node> { ["key"] = new Node { Name = "Value" } };
+
+        // Assert
+        Assert.NotNull(last);
+        Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
+        Assert.False(last.Value.Old.IsResolved);
+        Assert.True(last.Value.New.IsResolved);
+        Assert.Equal("Value", last.Value.New.GetValueOrDefault());
+    }
+
+    [Fact]
+    public void WhenDictionaryKeyReplaced_ThenPathChangeWithBothValues()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var node = new Node(context) { ByName = new Dictionary<string, Node> { ["key"] = new Node { Name = "First" } } };
+        SubjectPathChange<string>? last = null;
+        using var subscription = node.SubscribeToPath(x => x.ByName["key"].Name,
+            (in SubjectPathChange<string> c) => last = c);
+
+        // Act
+        node.ByName = new Dictionary<string, Node> { ["key"] = new Node { Name = "Second" } };
+
+        // Assert
+        Assert.NotNull(last);
+        Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
+        Assert.Equal("First", last.Value.Old.GetValueOrDefault());
+        Assert.Equal("Second", last.Value.New.GetValueOrDefault());
+    }
+
+    [Fact]
+    public void WhenDictionaryKeyRemoved_ThenBreakDeliversPathChange()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var node = new Node(context) { ByName = new Dictionary<string, Node> { ["key"] = new Node { Name = "First" } } };
+        SubjectPathChange<string>? last = null;
+        using var subscription = node.SubscribeToPath(x => x.ByName["key"].Name,
+            (in SubjectPathChange<string> c) => last = c);
+
+        // Act
+        node.ByName = new Dictionary<string, Node>(); // key gone
+
+        // Assert
+        Assert.NotNull(last);
+        Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
+        Assert.True(last.Value.Old.IsResolved);
+        Assert.Equal("First", last.Value.Old.GetValueOrDefault());
+        Assert.False(last.Value.New.IsResolved);
+    }
+
+    [Fact]
+    public void WhenPresentDictionaryKeyValueBecomesNull_ThenBreakDeliversPathChange()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var node = new Node(context) { ByName = new Dictionary<string, Node> { ["key"] = new Node { Name = "First" } } };
+        SubjectPathChange<string>? last = null;
+        using var subscription = node.SubscribeToPath(x => x.ByName["key"].Name,
+            (in SubjectPathChange<string> c) => last = c);
+
+        // Act: the key stays present but its value is null, so the leaf is unreachable.
+        node.ByName = new Dictionary<string, Node> { ["key"] = null! };
+
+        // Assert
+        Assert.NotNull(last);
+        Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
+        Assert.True(last.Value.Old.IsResolved);
+        Assert.False(last.Value.New.IsResolved);
+    }
+
+    [Fact]
+    public void WhenCollectionRetracked_ThenOnlySuffixBelowChangeIsRebuilt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var childA = new Person { FirstName = "Amy" };
+        var childB = new Person { FirstName = "Bob" };
+        var person = new Person(context) { Children = [childA] };
+        using var subscription = person.SubscribeToPath(x => x.Children[0].FirstName, (in SubjectPathChange<string?> _) => { });
+
+        var handlesField = typeof(SubjectPathSubscription<string?>)
+            .GetField("_segmentHandles", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var handles = (IDisposable?[])handlesField.GetValue(subscription)!;
+        var upperBefore = handles[0];
+        var leafBefore = handles[1];
+
+        // Act: the divergence is at the leaf's subject, so only the leaf listener is torn down and rebuilt.
+        person.Children = [childB];
+
+        // Assert
+        var handlesAfter = (IDisposable?[])handlesField.GetValue(subscription)!;
+        Assert.Same(upperBefore, handlesAfter[0]);   // the segment above the change is untouched
+        Assert.NotSame(leafBefore, handlesAfter[1]); // the leaf below the change was rebuilt
+        Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount()); // net listener count preserved
     }
 }
