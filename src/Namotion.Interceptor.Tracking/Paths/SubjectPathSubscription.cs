@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Paths;
@@ -8,8 +9,9 @@ namespace Namotion.Interceptor.Tracking.Paths;
 /// per resolved segment (a subscribe-before-read chain) so a write to any watched link is observed, and
 /// exposes the path's current observed value via a fresh, tracker-lock-free walk. Disposal is one-shot.
 /// On a watched write it computes the event (a validating walk plus a divergent retrack of the suffix)
-/// and delivers it synchronously via a direct invoke outside the lock; the ordered exclusive-drain queue
-/// that serializes nested and concurrent deliveries is still pending in a later phase.
+/// under the lock, then delivers it through an ordered exclusive-drain queue: one drainer at a time runs
+/// callbacks outside the lock, so nested and concurrent writes enqueue and are delivered in FIFO order
+/// after the current callback returns (flattened, never inline).
 /// </summary>
 public sealed class SubjectPathSubscription<TValue> : IDisposable
 {
@@ -31,6 +33,12 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     // observer callback runs) so an event's Old reflects prior observed state rather than a false
     // unresolved starting point.
     private SubjectPathValue<TValue> _lastObserved;
+
+    // Ordered exclusive-drain delivery, both guarded by _lock. At most one thread is the drainer
+    // (_draining); every other computed event enqueues into _pending, and the drainer delivers them
+    // FIFO with the lock released. This flattens nested/concurrent writes and preserves total order.
+    private readonly Queue<SubjectPathChange<TValue>> _pending = new();
+    private bool _draining;
 
     private bool _disposed;
 
@@ -180,16 +188,18 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 
     /// <summary>
     /// Entry point for a per-segment listener callback. All state (the validating walk, a divergent
-    /// retrack, the kind decision, the suppression check and the <see cref="_lastObserved"/> advance) is
-    /// computed under <see cref="_lock"/>; the observer callback is then invoked OUTSIDE the lock. When
-    /// disposed or when the callback's observer is stale (a rebuild has already replaced it at its
-    /// position), the invocation is dropped.
+    /// retrack, the kind decision, the suppression check, the <see cref="_lastObserved"/> advance and the
+    /// enqueue/claim-drainer decision) is computed under <see cref="_lock"/>; the observer callbacks are
+    /// then run OUTSIDE the lock by the exclusive drainer. When disposed or when the callback's observer is
+    /// stale (a rebuild has already replaced it at its position), the invocation is dropped.
     /// </summary>
     private void ProcessSegmentCallback(PathSegmentObserver observer, in SubjectPropertyChange cause)
     {
-        SubjectPathChangeKind kind;
-        SubjectPathValue<TValue> oldObserved;
-        SubjectPathValue<TValue> newValue;
+        // The uncontended fast path hands the drainer a single stack-local event, skipping the enqueue and
+        // dequeue copies of the large change struct. Both live outside the lock so the drain section can read
+        // them after the lock is released.
+        SubjectPathChange<TValue> directEvent = default;
+        var hasDirectEvent = false;
 
         lock (_lock)
         {
@@ -209,7 +219,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
             // position, the subject each segment now reads on, which the divergence check compares
             // against the subscribed chain.
             var scratch = new IInterceptorSubject?[_segments.Length];
-            newValue = PathWalker.Walk<TValue>(_segments, _root, scratch);
+            var newValue = PathWalker.Walk<TValue>(_segments, _root, scratch);
 
             // Divergence is the first position where the fresh walk reads on a different subject than the
             // subscribed chain (reference identity). This one comparison covers every structural case: an
@@ -245,7 +255,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 
             // ValueChange only when the intact chain's own resolved leaf was the write; any structural
             // change (divergence) or an unresolved result is a PathChange.
-            kind = SubjectPathChangeKind.PathChange;
+            var kind = SubjectPathChangeKind.PathChange;
             if (!diverged && newValue.IsResolved)
             {
                 var leafSubject = _resolvedSubjects[_segments.Length - 1];
@@ -258,24 +268,91 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
                 }
             }
 
-            // Suppression: an observed state equivalent to the last one (same resolvedness, equal value)
-            // delivers nothing. Draining a queued backlog on a suppressed event arrives in a later phase.
             if (SubjectPathValue<TValue>.AreEquivalent(_lastObserved, newValue))
             {
-                return;
-            }
+                // Suppression: an observed state equivalent to the last one (same resolvedness, equal value)
+                // delivers nothing and does not advance the baseline. It must still recover a stranded
+                // backlog when no drainer is active; an active drainer already owns any backlog.
+                if (_draining || _pending.Count == 0)
+                {
+                    return;
+                }
 
-            // Advance BEFORE the callback: a transition chained from the callback then sees the new
-            // baseline, and a throwing callback cannot replay this same transition.
-            oldObserved = _lastObserved;
-            _lastObserved = newValue;
+                _draining = true; // claim the drainer to flush events a prior throwing callback stranded
+            }
+            else
+            {
+                // Advance BEFORE the callback: a transition chained from the callback then sees the new
+                // baseline, and a throwing callback cannot replay this same transition.
+                var oldObserved = _lastObserved;
+                _lastObserved = newValue;
+                var change = new SubjectPathChange<TValue>(kind, oldObserved, newValue, in cause);
+
+                if (_draining)
+                {
+                    // A drainer is active (nested or concurrent write): enqueue and let it deliver this after
+                    // the current callback returns. Flattens nesting and preserves total FIFO order.
+                    _pending.Enqueue(change);
+                    return;
+                }
+
+                if (_pending.Count == 0)
+                {
+                    // Uncontended: hand the drainer this event directly, skipping the enqueue/dequeue copies.
+                    _draining = true;
+                    directEvent = change;
+                    hasDirectEvent = true;
+                }
+                else
+                {
+                    // A prior throwing callback stranded a backlog; append this event and claim the drainer.
+                    _pending.Enqueue(change);
+                    _draining = true;
+                }
+            }
         }
 
-        // The observer callback runs OUTSIDE _lock: it may re-enter (a nested write), and holding the
-        // lock across it would serialize the graph or deadlock. Ordered exclusive-drain delivery arrives
-        // in a later phase; a direct invoke under the released lock is correct for a single event.
-        var change = new SubjectPathChange<TValue>(kind, oldObserved, newValue, in cause);
-        _observer.OnChange(in change);
+        // Drain section: all observer callbacks run here, OUTSIDE _lock. A callback may re-enter (a nested
+        // write); holding the lock across it would serialize the graph or deadlock.
+        try
+        {
+            if (hasDirectEvent)
+            {
+                _observer.OnChange(in directEvent);
+            }
+
+            while (true)
+            {
+                SubjectPathChange<TValue> next;
+                lock (_lock)
+                {
+                    // Atomic empty-check and drainer clear: a write enqueuing just as the drainer exits is
+                    // either seen here (dequeued and delivered) or finds _draining false under the lock and
+                    // becomes the next drainer. Neither loses the event nor lets two threads drain at once.
+                    if (_pending.Count == 0)
+                    {
+                        _draining = false;
+                        return;
+                    }
+
+                    next = _pending.Dequeue();
+                }
+
+                _observer.OnChange(in next);
+            }
+        }
+        catch
+        {
+            // A throwing callback abandons the drain. Reset the drainer flag (leaving _pending intact) so the
+            // next computed event can claim the drainer and deliver the stranded backlog; without this reset
+            // _draining stays true forever and every later event strands permanently.
+            lock (_lock)
+            {
+                _draining = false;
+            }
+
+            throw;
+        }
     }
 
     /// <summary>

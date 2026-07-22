@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using Namotion.Interceptor.Tracking;
@@ -330,5 +331,44 @@ public class PathTransitionTests
         Assert.Same(upperBefore, handlesAfter[0]);   // the segment above the change is untouched
         Assert.NotSame(leafBefore, handlesAfter[1]); // the leaf below the change was rebuilt
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount()); // net listener count preserved
+    }
+
+    [Fact]
+    public void WhenBacklogStrandedByThrow_ThenSuppressedWriteStillDrainsIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var father = new Person { FirstName = "Joe" };
+        var person = new Person(context) { Father = father };
+
+        var delivered = new List<SubjectPathChange<string?>>();
+        var nestedWriteDone = false;
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
+        {
+            delivered.Add(change);
+            if (change.New.GetValueOrDefault() == "Jack")
+            {
+                if (!nestedWriteDone)
+                {
+                    nestedWriteDone = true;
+                    father.FirstName = "Zed"; // enqueues Jack->Zed into the drain
+                }
+
+                throw new InvalidOperationException("boom");
+            }
+        });
+
+        // Act: the throwing callback strands the queued Jack->Zed event (drain abandoned, drainer flag reset).
+        Assert.Throws<InvalidOperationException>(() => father.FirstName = "Jack");
+        Assert.Single(delivered); // Joe->Jack delivered; Jack->Zed stranded
+
+        // Act: a write whose observed transition is SUPPRESSED (Old == New) must still drain the backlog. A
+        // new father carrying the same leaf value "Zed" retracks but the observed value equals the baseline.
+        person.Father = new Person { FirstName = "Zed" };
+
+        // Assert: the suppressed write delivered nothing of its own but recovered the stranded backlog.
+        Assert.Equal(2, delivered.Count);
+        Assert.Equal("Jack", delivered[1].Old.GetValueOrDefault());
+        Assert.Equal("Zed", delivered[1].New.GetValueOrDefault());
     }
 }
