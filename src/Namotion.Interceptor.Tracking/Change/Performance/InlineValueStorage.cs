@@ -25,6 +25,17 @@ internal readonly struct InlineValueStorage
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static InlineValueStorage Create<TValue>(TValue value)
     {
+        // Memory-safety invariants: no contained references (the long fields below are not GC-scanned,
+        // so a hidden reference could dangle) and SizeOf <= MaxSize (a larger write would overwrite the
+        // GC-tracked Type field at offset 16). Such types belong in BoxedValueHolder. The checks fold
+        // to JIT constants: valid types pay nothing, an invalid caller fails fast in every configuration.
+        if (!typeof(TValue).IsValueType ||
+            RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() ||
+            Unsafe.SizeOf<TValue>() > MaxSize)
+        {
+            ThrowUnsupportedType<TValue>();
+        }
+
         var storage = new InlineValueStorage();
         Unsafe.AsRef(in storage._storedType) = typeof(TValue);
         Unsafe.WriteUnaligned(ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in storage._valueData0)), value);
@@ -96,4 +107,12 @@ internal readonly struct InlineValueStorage
             return value!;
         };
     }
+
+    // Kept out of Create so the (JIT-eliminated) guard does not bloat its inlined body.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowUnsupportedType<TValue>() =>
+        throw new InvalidOperationException(
+            $"InlineValueStorage cannot store '{typeof(TValue)}': it is a reference type, contains " +
+            $"references (which the GC cannot track inside inline storage), or exceeds {MaxSize} bytes " +
+            "(which would overwrite the adjacent type field). Route this type to BoxedValueHolder.");
 }
