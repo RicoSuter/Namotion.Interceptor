@@ -1,11 +1,10 @@
 using System.Collections.Immutable;
-using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor;
 
 /// <summary>
-/// The central context for managing services and intercepting property/method access on interceptor subjects.
-/// Provides service registration, retrieval, and execution of intercepted operations through middleware chains.
+/// The central context for interceptor subjects: service registration, retrieval, and fallback-context
+/// composition. Execution of intercepted operations is an internal concern of the implementation.
 /// </summary>
 public interface IInterceptorSubjectContext
 {

@@ -25,10 +25,12 @@ internal readonly struct InlineValueStorage
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static InlineValueStorage Create<TValue>(TValue value)
     {
-        // Memory-safety invariants: no contained references (the long fields below are not GC-scanned,
-        // so a hidden reference could dangle) and SizeOf <= MaxSize (a larger write would overwrite the
-        // GC-tracked Type field at offset 16). Such types belong in BoxedValueHolder. The checks fold
-        // to JIT constants: valid types pay nothing, an invalid caller fails fast in every configuration.
+        // Memory-safety invariants: no references, neither TValue itself nor contained ones (the long
+        // fields below are not GC-scanned, so a hidden reference could dangle), and SizeOf <= MaxSize
+        // (a larger write would overwrite the GC-tracked Type field at offset 16). Such types belong in
+        // BoxedValueHolder. The IsValueType leg is redundant with IsReferenceOrContainsReferences and
+        // kept for symmetry with the caller's predicate. All checks fold to JIT constants: valid types
+        // pay nothing, an invalid caller fails fast in every configuration.
         if (!typeof(TValue).IsValueType ||
             RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() ||
             Unsafe.SizeOf<TValue>() > MaxSize)
