@@ -41,33 +41,6 @@ public interface IInterceptorSubjectContext
     ImmutableArray<TInterface> GetServices<TInterface>();
 
     /// <summary>
-    /// Executes a property read operation through the interceptor chain.
-    /// </summary>
-    /// <typeparam name="TProperty">A hint for the property type (may be <c>object</c> when boxed).</typeparam>
-    /// <param name="context">The property read context containing metadata about the operation.</param>
-    /// <param name="readValue">The delegate to read the actual property value.</param>
-    /// <returns>The property value, potentially modified by interceptors.</returns>
-    TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> readValue);
-
-    /// <summary>
-    /// Executes a property write operation through the interceptor chain.
-    /// </summary>
-    /// <typeparam name="TProperty">A hint for the property type (may be <c>object</c> when boxed).</typeparam>
-    /// <param name="context">The property write context containing metadata and the new value.</param>
-    /// <param name="writeValue">The delegate to write the actual property value.</param>
-    void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue);
-
-    /// <summary>
-    /// Executes a method invocation through the interceptor chain.
-    /// </summary>
-    /// <param name="context">The method invocation context containing metadata about the operation.</param>
-    /// <param name="invokeMethod">The delegate to invoke the actual method.</param>
-    /// <returns>The method return value, potentially modified by interceptors.</returns>
-    object? ExecuteInterceptedInvoke(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> invokeMethod);
-
-    // TODO: Remove Execute* methods here (not needed in the interface)
-    
-    /// <summary>
     /// Adds a fallback context for service resolution.
     /// Services not found in this context will be looked up in fallback contexts.
     /// </summary>

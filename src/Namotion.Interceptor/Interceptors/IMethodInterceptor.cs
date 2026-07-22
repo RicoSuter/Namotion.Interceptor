@@ -26,7 +26,9 @@ public struct MethodInvocationContext
     // survives the by-value interceptor hops (each copy inherits the field) to reach the terminal.
     internal Func<IInterceptorSubject, object?[], object?>? Terminal;
 
-    public MethodInvocationContext(IInterceptorSubject subject, string methodName, object?[] parameters)
+    // Internal so every meaningfully constructed context comes from the library's execution entry
+    // points, which always thread the per-call chain state (such as the terminal) through it.
+    internal MethodInvocationContext(IInterceptorSubject subject, string methodName, object?[] parameters)
     {
         Subject = subject;
         MethodName = methodName;

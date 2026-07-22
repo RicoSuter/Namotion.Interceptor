@@ -39,7 +39,9 @@ public struct PropertyReadContext<TProperty>
     /// </summary>
     public PropertyReference Property { get; }
 
-    public PropertyReadContext(PropertyReference property)
+    // Internal so every meaningfully constructed context comes from the library's execution entry
+    // points, which always thread the per-call chain state (such as the terminal) through it.
+    internal PropertyReadContext(PropertyReference property)
     {
         Property = property;
     }

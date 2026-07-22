@@ -92,8 +92,10 @@ public struct PropertyWriteContext<TProperty>
     /// origin stamp for this property (see <see cref="PendingOrigin"/>). Any direct construction
     /// (tests, benchmarks, not just the interceptor chain) drains the pending stamp for the
     /// matching property; a caller newing up a context by hand takes on that consumption.
+    /// Internal so every meaningfully constructed context comes from the library's execution
+    /// entry points, which always thread the per-call chain state (such as the terminal) through it.
     /// </summary>
-    public PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
+    internal PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Property = property;
         CurrentValue = currentValue;

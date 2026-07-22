@@ -166,7 +166,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> readValue)
+    internal TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> readValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
@@ -180,7 +180,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
+    internal void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
@@ -195,7 +195,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public object? ExecuteInterceptedInvoke(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> invokeMethod)
+    internal object? ExecuteInterceptedInvoke(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
