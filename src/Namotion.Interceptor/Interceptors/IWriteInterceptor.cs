@@ -14,7 +14,9 @@ public interface IWriteInterceptor
     /// values are boxed through non-generic paths (e.g., <c>SetPropertyValueWithInterception</c>).
     /// Use <c>context.Property.Metadata.Type</c> for the actual declared property type.</typeparam>
     /// <param name="context">The write context containing the property reference and values.</param>
-    /// <param name="next">The next interceptor in the chain to call.</param>
+    /// <param name="next">The next interceptor in the chain to call. Always forward the context you
+    /// received; a freshly constructed context loses the per-call state the chain threads through it
+    /// (including the terminal write operation).</param>
     void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next);
 }
 
@@ -42,6 +44,11 @@ public struct PropertyWriteContext<TProperty>
     // Set by the first PropertyChangeInterceptor instance that resolves this write's per-property
     // observers (whether or not any were found), so outer aggregated instances skip resolution.
     internal bool ArePropertyObserversResolved;
+
+    // The terminal write action for this call. Threaded through the per-call context (which already
+    // flows by ref to the end of the chain) instead of a ThreadStatic on the shared chain instance:
+    // per-call state belongs on the per-call context, which is also robust against reentrant writes.
+    internal Action<IInterceptorSubject, TProperty>? Terminal;
 
     /// <summary>
     /// Gets the property to write a value to.
@@ -85,8 +92,10 @@ public struct PropertyWriteContext<TProperty>
     /// origin stamp for this property (see <see cref="PendingOrigin"/>). Any direct construction
     /// (tests, benchmarks, not just the interceptor chain) drains the pending stamp for the
     /// matching property; a caller newing up a context by hand takes on that consumption.
+    /// Internal so every meaningfully constructed context comes from the library's execution
+    /// entry points, which always thread the per-call chain state (such as the terminal) through it.
     /// </summary>
-    public PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
+    internal PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Property = property;
         CurrentValue = currentValue;
