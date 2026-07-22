@@ -14,7 +14,9 @@ public interface IWriteInterceptor
     /// values are boxed through non-generic paths (e.g., <c>SetPropertyValueWithInterception</c>).
     /// Use <c>context.Property.Metadata.Type</c> for the actual declared property type.</typeparam>
     /// <param name="context">The write context containing the property reference and values.</param>
-    /// <param name="next">The next interceptor in the chain to call.</param>
+    /// <param name="next">The next interceptor in the chain to call. Always forward the context you
+    /// received; a freshly constructed context loses the per-call state the chain threads through it
+    /// (including the terminal write operation).</param>
     void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next);
 }
 

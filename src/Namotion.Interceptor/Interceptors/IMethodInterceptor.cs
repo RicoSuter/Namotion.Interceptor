@@ -2,6 +2,11 @@ namespace Namotion.Interceptor.Interceptors;
 
 public interface IMethodInterceptor
 {
+    /// <summary>
+    /// Intercepts a method invocation. Always forward the context you received to
+    /// <paramref name="next"/>; a freshly constructed context loses the per-call state the chain
+    /// threads through it (including the terminal invocation).
+    /// </summary>
     object? InvokeMethod(MethodInvocationContext context, InvokeMethodInterceptionDelegate next);
 }
 

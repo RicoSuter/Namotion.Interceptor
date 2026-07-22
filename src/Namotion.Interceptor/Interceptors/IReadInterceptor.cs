@@ -12,7 +12,9 @@ public interface IReadInterceptor
     /// values are boxed through non-generic paths. Use <c>context.Property.Metadata.Type</c>
     /// for the actual declared property type.</typeparam>
     /// <param name="context">The read context containing the property reference.</param>
-    /// <param name="next">The next interceptor in the chain to call.</param>
+    /// <param name="next">The next interceptor in the chain to call. Always forward the context you
+    /// received; a freshly constructed context loses the per-call state the chain threads through it
+    /// (including the terminal read operation).</param>
     /// <returns>The property value.</returns>
     TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next);
 }
