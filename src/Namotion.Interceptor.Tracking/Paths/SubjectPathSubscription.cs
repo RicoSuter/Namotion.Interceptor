@@ -61,12 +61,25 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 
         lock (_lock)
         {
-            BuildFrom(0, root);
+            try
+            {
+                BuildFrom(0, root);
 
-            // Seed from a fresh walk AFTER the listeners are installed: any write that lands between the
-            // build and this read is already covered by an installed listener, so the seed cannot open a
-            // false unresolved -> resolved edge on the first delivery.
-            _lastObserved = PathWalker.Walk<TValue>(_segments, _root, new IInterceptorSubject?[length]);
+                // Seed from a fresh walk AFTER the listeners are installed: any write that lands between the
+                // build and this read is already covered by an installed listener, so the seed cannot open a
+                // false unresolved -> resolved edge on the first delivery.
+                _lastObserved = PathWalker.Walk<TValue>(_segments, _root, new IInterceptorSubject?[length]);
+            }
+            catch
+            {
+                // Teardown on throw: BuildFrom only throws on a reserved-key contract violation
+                // (PropertyChangeSubscription.Create raising InvalidOperationException for a foreign ni.pcl
+                // value; name resolution during the build is non-throwing, and the seed walk never throws).
+                // Dispose the segment handles already installed so the process-wide count is rolled back
+                // before the exception propagates and no partial subscription escapes to the caller.
+                DisposeSuffix(0);
+                throw;
+            }
         }
     }
 
@@ -93,7 +106,13 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
         }
     }
 
-    /// <summary>One-shot dispose: after this returns, <see cref="Current"/> is unresolved.</summary>
+    /// <summary>
+    /// One-shot dispose: tears down every installed segment listener (returning the process-wide count to
+    /// zero), drops any queued-but-undelivered events, and marks the subscription disposed. Idempotent and
+    /// never throws; after it returns <see cref="Current"/> is unresolved. A callback already dispatched
+    /// outside the lock may run to completion, but the drain loop observes the disposed flag and starts no
+    /// new delivery, so post-dispose delivery is bounded.
+    /// </summary>
     public void Dispose()
     {
         lock (_lock)
@@ -105,6 +124,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 
             Volatile.Write(ref _disposed, true);
             DisposeSuffix(0);
+            _pending.Clear();
         }
     }
 
@@ -396,7 +416,10 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
                     // Atomic empty-check and drainer clear: a write enqueuing just as the drainer exits is
                     // either seen here (dequeued and delivered) or finds _draining false under the lock and
                     // becomes the next drainer. Neither loses the event nor lets two threads drain at once.
-                    if (_pending.Count == 0)
+                    // The disposed check bounds post-dispose delivery: once disposal is observed the drainer
+                    // starts no new delivery and drops the remaining backlog (Dispose already cleared
+                    // _pending), so at most the one callback already dispatched outside the lock completes.
+                    if (_disposed || _pending.Count == 0)
                     {
                         _draining = false;
                         return;
