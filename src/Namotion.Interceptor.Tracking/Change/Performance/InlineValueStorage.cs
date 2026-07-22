@@ -26,11 +26,15 @@ internal readonly struct InlineValueStorage
     public static InlineValueStorage Create<TValue>(TValue value)
     {
         // The raw bytes below land in long fields the GC does not scan, so a contained object
-        // reference would be invisible to the GC and could dangle. Callers must route such types
-        // to BoxedValueHolder; this assert makes the invariant self-enforcing for future callers.
+        // reference would be invisible to the GC and could dangle. The write also spans exactly
+        // SizeOf(TValue) bytes from offset 0, and the Type field sits at offset 16, so a value
+        // larger than MaxSize would overwrite a GC-tracked reference with raw bytes. Callers must
+        // route such types to BoxedValueHolder; this assert makes both invariants self-enforcing.
         System.Diagnostics.Debug.Assert(
-            typeof(TValue).IsValueType && !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>(),
-            $"InlineValueStorage must not store '{typeof(TValue)}': it is a reference type or contains references, which the GC cannot track inside inline storage.");
+            typeof(TValue).IsValueType &&
+            !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() &&
+            Unsafe.SizeOf<TValue>() <= MaxSize,
+            $"InlineValueStorage must not store '{typeof(TValue)}': it is a reference type, contains references (which the GC cannot track inside inline storage), or exceeds {MaxSize} bytes (which would overwrite the adjacent type field).");
 
         var storage = new InlineValueStorage();
         Unsafe.AsRef(in storage._storedType) = typeof(TValue);
