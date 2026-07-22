@@ -25,6 +25,13 @@ internal readonly struct InlineValueStorage
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static InlineValueStorage Create<TValue>(TValue value)
     {
+        // The raw bytes below land in long fields the GC does not scan, so a contained object
+        // reference would be invisible to the GC and could dangle. Callers must route such types
+        // to BoxedValueHolder; this assert makes the invariant self-enforcing for future callers.
+        System.Diagnostics.Debug.Assert(
+            typeof(TValue).IsValueType && !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>(),
+            $"InlineValueStorage must not store '{typeof(TValue)}': it is a reference type or contains references, which the GC cannot track inside inline storage.");
+
         var storage = new InlineValueStorage();
         Unsafe.AsRef(in storage._storedType) = typeof(TValue);
         Unsafe.WriteUnaligned(ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in storage._valueData0)), value);
