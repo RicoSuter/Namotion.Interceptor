@@ -1,4 +1,5 @@
 ﻿@using HomeBlaze.Components.Abstractions.Pages
+@using HomeBlaze.Host.Components.TimeZones
 
 @inherits LayoutComponentBase
 
@@ -16,6 +17,7 @@
 
 <CascadingValue Value="@_isDarkMode" Name="IsDarkMode">
     <MudLayout>
+        <TimeZoneInitializer />
         <MudAppBar Elevation="1">
             <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
                            OnClick="@(_ => DrawerToggle())"/>
@@ -38,6 +40,7 @@
                            Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
                            OnClick="@DeveloperMode.Toggle"
                            title="Toggle Developer Mode"/>
+            <TimeZoneSelector />
             <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"/>
             <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
         </MudAppBar>

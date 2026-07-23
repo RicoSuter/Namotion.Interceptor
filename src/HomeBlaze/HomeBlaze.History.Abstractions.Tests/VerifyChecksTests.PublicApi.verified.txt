@@ -1,0 +1,85 @@
+﻿[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.History.Abstractions
+{
+    public static class BucketAlignment
+    {
+        public static System.DateTimeOffset BucketStart(System.DateTimeOffset ts, System.TimeSpan bucket) { }
+    }
+    public class HistoryAggregationNotSupportedException : System.Exception
+    {
+        public HistoryAggregationNotSupportedException(string aggregation, System.Collections.Generic.IReadOnlySet<string> available) { }
+        public string Aggregation { get; }
+        public System.Collections.Generic.IReadOnlySet<string> Available { get; }
+    }
+    public static class HistoryAggregations
+    {
+        public const string Count = "Count";
+        public const string First = "First";
+        public const string Last = "Last";
+        public const string Maximum = "Maximum";
+        public const string Minimum = "Minimum";
+        public const string SampleAverage = "SampleAverage";
+        public const string StandardDeviation = "StandardDeviation";
+        public const string Sum = "Sum";
+        public const string TimeWeightedAverage = "TimeWeightedAverage";
+        public static readonly System.Collections.Immutable.ImmutableArray<string> All;
+        public static readonly System.Collections.Generic.IReadOnlySet<string> AlwaysAvailable;
+    }
+    public static class HistoryColumns
+    {
+        public static HomeBlaze.History.Abstractions.ValueColumn GetValueColumnFor(System.Type propertyType) { }
+        public static bool IsUlongProperty(System.Type propertyType) { }
+    }
+    public readonly struct HistoryCoverage : System.IEquatable<HomeBlaze.History.Abstractions.HistoryCoverage>
+    {
+        public HistoryCoverage(System.DateTimeOffset From, System.DateTimeOffset To) { }
+        public System.DateTimeOffset From { get; init; }
+        public System.DateTimeOffset To { get; init; }
+        public bool Contains(HomeBlaze.History.Abstractions.HistoryCoverage other) { }
+        public bool Overlaps(HomeBlaze.History.Abstractions.HistoryCoverage other) { }
+    }
+    public static class HistoryEligibility
+    {
+        public static bool HasHistory(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static bool IsRecordableType(System.Type type) { }
+    }
+    public class HistoryPoint : System.IEquatable<HomeBlaze.History.Abstractions.HistoryPoint>
+    {
+        public HistoryPoint(System.DateTimeOffset Timestamp, double? Number, System.Text.Json.JsonElement? Json) { }
+        public System.Text.Json.JsonElement? Json { get; init; }
+        public double? Number { get; init; }
+        public System.DateTimeOffset Timestamp { get; init; }
+    }
+    public class HistoryQuery : System.IEquatable<HomeBlaze.History.Abstractions.HistoryQuery>
+    {
+        public HistoryQuery(string PropertyPath, System.DateTimeOffset From, System.DateTimeOffset To, System.TimeSpan? Bucket = default, string Aggregation = "Last", int MaxPoints = 10000, HomeBlaze.History.Abstractions.HistoryPoint? CarrySeed = null) { }
+        public string Aggregation { get; init; }
+        public System.TimeSpan? Bucket { get; init; }
+        public HomeBlaze.History.Abstractions.HistoryPoint? CarrySeed { get; init; }
+        public System.DateTimeOffset From { get; init; }
+        public int MaxPoints { get; init; }
+        public string PropertyPath { get; init; }
+        public System.DateTimeOffset To { get; init; }
+    }
+    public class HistorySeries : System.IEquatable<HomeBlaze.History.Abstractions.HistorySeries>
+    {
+        public HistorySeries(string PropertyPath, System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryPoint> Points, bool Truncated) { }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryPoint> Points { get; init; }
+        public string PropertyPath { get; init; }
+        public bool Truncated { get; init; }
+    }
+    public interface IHistoryStore
+    {
+        HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }
+        int Priority { get; }
+        System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
+        System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryAsync(HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken);
+    }
+    public enum ValueColumn
+    {
+        Long = 0,
+        Double = 1,
+        Json = 2,
+    }
+}

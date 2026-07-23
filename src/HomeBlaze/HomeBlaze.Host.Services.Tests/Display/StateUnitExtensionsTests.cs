@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Host.Services.Display;
+using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -121,6 +122,45 @@ public class StateUnitExtensionsTests
 
         // Assert
         Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WhenDateTimeOffsetAndTimeZoneResolved_ThenFormatsInThatZone()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+        var timeZone = new TimeZoneDisplayService();
+        timeZone.SetResolved(
+            TimeZonePreference.Specific("Test+2"),
+            TimeZoneInfo.CreateCustomTimeZone("Test+2", TimeSpan.FromHours(2), "Test +2", "Test +2"));
+        var value = new DateTimeOffset(2026, 6, 26, 10, 0, 0, TimeSpan.Zero);
+
+        // Act
+        var result = property.GetPropertyDisplayValue(value, timeZone);
+
+        // Assert
+        Assert.Contains("+02:00", result);
+    }
+
+    [Fact]
+    public void WhenDateTimeOffsetAndTimeZoneUnresolved_ThenShowsPlaceholder()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+        var timeZone = new TimeZoneDisplayService();
+        var value = new DateTimeOffset(2026, 6, 26, 10, 0, 0, TimeSpan.Zero);
+
+        // Act
+        var result = property.GetPropertyDisplayValue(value, timeZone);
+
+        // Assert
+        Assert.Equal(timeZone.Placeholder, result);
     }
 }
 
