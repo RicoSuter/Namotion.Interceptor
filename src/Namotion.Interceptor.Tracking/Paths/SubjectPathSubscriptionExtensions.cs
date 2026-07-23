@@ -12,6 +12,9 @@ public static class SubjectPathSubscriptionExtensions
     /// handle exposes the path's current value via <see cref="SubjectPathSubscription{TValue}.Current"/>
     /// and must be disposed to release the subscription.
     /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="subject"/>, <paramref name="path"/>, or <paramref name="callback"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a supported path expression (for example a cast, a field selector, a captured-object chain, a multi-argument indexer, the identity path, or a path ending in an index). A segment that is merely invalid at runtime (missing, or non-intercepted and non-derived) does not throw; the path resolves as unresolved instead.</exception>
+    /// <exception cref="InvalidOperationException">Called while an active, not-yet-committing transaction is on the current flow.</exception>
     public static SubjectPathSubscription<TValue> SubscribeToPath<TSubject, TValue>(
         this TSubject subject,
         Expression<Func<TSubject, TValue>> path,
@@ -26,6 +29,9 @@ public static class SubjectPathSubscriptionExtensions
     }
 
     /// <summary>Observer overload of <see cref="SubscribeToPath{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, SubjectPathChangeCallback{TValue})"/>.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="subject"/>, <paramref name="path"/>, or <paramref name="observer"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a supported path expression. A segment that is merely invalid at runtime does not throw; the path resolves as unresolved instead.</exception>
+    /// <exception cref="InvalidOperationException">Called while an active, not-yet-committing transaction is on the current flow.</exception>
     public static SubjectPathSubscription<TValue> SubscribeToPath<TSubject, TValue>(
         this TSubject subject,
         Expression<Func<TSubject, TValue>> path,
