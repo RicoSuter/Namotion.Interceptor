@@ -139,6 +139,15 @@ Only a direct property access on the lambda parameter is accepted (`x => x.First
 
 When you care about a location in the object graph rather than a fixed instance, subscribe to a path. `SubscribeToPath` observes "the value at `x.Engine.PrimarySensor.Temperature`" as the path itself changes over time: `Engine` may be null at first and appear later, `PrimarySensor` may be replaced with a different subject, and the leaf value changes. Internally it is a chain of per-property subscriptions, one per segment, that re-subscribes the suffix on a structural change, so its cost is O(path depth) per delivery plus retrack work only on structural changes.
 
+It differs from a per-property subscription in both what it watches and what it guarantees:
+
+| | Per-property (`SubscribeToProperty`) | Path (`SubscribeToPath`) |
+|---|---|---|
+| Observes | a fixed instance and property | a location in the graph as it reshapes |
+| Delivery | every committed write | a current-value observer, so racing and no-op writes coalesce |
+| Event payload | the write's exact old and new value and origin | an observed-state transition (`Old`/`New`); `New` is a fresh re-read, not a specific write's value |
+| Use when | you need every write or per-write origin fidelity (a write log, via the queue or observable channels) | you care about the value at a location as intermediates appear, move, or vanish |
+
 Two overloads mirror the per-property primitive, one taking a callback and one a zero-closure observer:
 
 ```csharp
@@ -189,7 +198,7 @@ A callback racing the subscribe blocks on `gate` until the seed is applied, and 
 
 **Observed state**: each observed state is a `SubjectPathValue<TValue>` (its members are documented on the type). The point to know is that it is a tri-state: an unresolved path, a resolved leaf with a value, and a resolved leaf whose value is null are all distinct, so `TryGetValue` returns true with a null value only for the resolved-null case.
 
-**Transitions and suppression**: a `SubjectPathChange<TValue>` carries `Kind`, `Old`, `New`, and `Cause` (documented on the type). The contracts to rely on: an event is suppressed when the observed state does not change (`Old` equals `New`), so chained transitions hold (event N+1's `Old` equals event N's `New`) and racing or no-op writes coalesce. A path subscription is a current-value observer, not a write log; consumers that need every write use the queue or observable channels.
+**Transitions and suppression**: a `SubjectPathChange<TValue>` carries `Kind`, `Old`, `New`, and `Cause` (documented on the type). The contracts to rely on: an event is suppressed when the observed state does not change (`Old` equals `New`), so chained transitions hold (event N+1's `Old` equals event N's `New`) and racing or no-op writes coalesce.
 
 **Expression rules**: a path chains property access, collection indices, and dictionary keys directly off the lambda parameter. Malformed shapes throw `ArgumentException` at subscribe with a message naming the problem (the overloads document the exceptions), so they are not enumerated here. The contracts that do not announce themselves are:
 
