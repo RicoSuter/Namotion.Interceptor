@@ -111,6 +111,30 @@ public class OpcUaClientConfiguration
     public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// Gets or sets the safety bound on BrowseNext paging rounds per batched browse
+    /// request (default: 100). Guards against misbehaving servers that return a fresh
+    /// continuation point forever and never terminate paging.
+    /// </summary>
+    /// <remarks>
+    /// This is a per-batch round count, not a per-NodeId page count: with a multi-node
+    /// batch the loop aborts when the slowest-paging NodeId is still going after this
+    /// many rounds, even if no individual NodeId reached its share. For a single-NodeId
+    /// batch the effective per-node reference cap is
+    /// <c>MaxBrowseContinuations * MaxReferencesPerNode</c>; for larger batches the
+    /// effective cap is lower since all paged NodeIds share the round budget. Raise this
+    /// if loads involve deeply paged nodes across many siblings.
+    /// </remarks>
+    public int MaxBrowseContinuations { get; set; } = 100;
+
+    /// <summary>
+    /// Gets or sets the safety bound on attribute-traversal levels when loading the subject
+    /// tree (default: 100). Secondary defense against pathological dynamic-attribute cycles
+    /// under permissive <see cref="ShouldAddDynamicAttribute"/> predicates; the primary
+    /// defense is per-pair deduplication inside the loader.
+    /// </summary>
+    public int MaxAttributeTraversals { get; set; } = 100;
+
+    /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute.
     /// When null (default), uses the OPC UA library default (-1 = server decides).
     /// Set to 0 for exception-based monitoring (immediate reporting on every change).
@@ -529,6 +553,20 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"ReadAfterWriteBuffer must be non-negative, got: {ReadAfterWriteBuffer}",
                 nameof(ReadAfterWriteBuffer));
+        }
+
+        if (MaxBrowseContinuations <= 0)
+        {
+            throw new ArgumentException(
+                $"MaxBrowseContinuations must be positive, got: {MaxBrowseContinuations}",
+                nameof(MaxBrowseContinuations));
+        }
+
+        if (MaxAttributeTraversals <= 0)
+        {
+            throw new ArgumentException(
+                $"MaxAttributeTraversals must be positive, got: {MaxAttributeTraversals}",
+                nameof(MaxAttributeTraversals));
         }
     }
 }

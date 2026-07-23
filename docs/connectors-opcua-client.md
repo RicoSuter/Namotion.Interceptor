@@ -82,7 +82,7 @@ builder.Services.AddOpcUaSubjectClientSource(
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
 
         // Optional
-        RootName = "Machines",
+        RootPath = ["Machines"],
         DefaultNamespaceUri = "http://factory.com/machines",
         ApplicationName = "MyOpcUaClient",
         ReconnectInterval = TimeSpan.FromSeconds(5),
@@ -254,6 +254,37 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 ```
 
 ## Monitoring & Subscriptions
+
+### The subscription pipeline: sampling vs publishing
+
+A subscription delivers data in two stages, governed by two different intervals at two different scopes:
+
+```
+ PLC tag / variable
+      │
+      │  sampling interval     (per monitored item)
+      ▼  server samples the source, applies deadband/trigger
+ per-item queue                (QueueSize, DiscardOldest)
+      │
+      │  publishing interval   (per subscription)
+      ▼  server batches all queued notifications from all items
+    client
+```
+
+- **Sampling interval** (`DefaultSamplingInterval`, per monitored item): how often the *server* reads the underlying source for a new value. Sets data freshness and change resolution.
+- **Publishing interval** (`DefaultPublishingInterval`, per subscription): how often the *server* packages the notifications queued across *all* items in the subscription and sends them in one response. Sets network and batching overhead.
+
+One subscription has a single publishing interval shared by many monitored items, each with its own sampling interval and queue.
+
+**How they combine with queue size.** Between publishes, each item keeps sampling into its queue:
+
+- Sample fast, publish slower, deeper queue (e.g. sampling 100 ms, publishing 1000 ms, `QueueSize = 10`): the server captures every 100 ms change and delivers up to 10 of them in a single round-trip, keeping fidelity while cutting network chatter.
+- Same setup with `QueueSize = 1`: intermediate changes coalesce and you receive only the latest value per publish.
+- Publishing faster than sampling gains nothing; sampling faster than the source changes only wastes server CPU.
+
+**Both are requests, not guarantees.** The client asks for these values; the server *revises* them to what it can honor (it cannot sample faster than its scan cycle) and returns the revised sampling interval, publishing interval, and queue size. This client reads the revised sampling interval back and, for the `SamplingInterval = 0` case, uses it to schedule read-after-writes (see [Read After Write Fallback](#read-after-write-fallback)).
+
+For choosing sampling interval `0` vs `>0` specifically (exception-based vs sampling), see the next section.
 
 ### Sampling vs Exception-Based Monitoring
 
@@ -447,6 +478,23 @@ builder.Services.AddOpcUaSubjectClientSource(
 - `SubscriptionHealthCheckInterval` minimum of 1 second enforced
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
+
+### Initial Load Failure Recovery
+
+When the initial subject load encounters a transient browse failure (e.g., `BadServerHalted` on a single node), the loader rolls back any partial state it produced and lets `SubjectSourceBase` retry from a clean slate after `RetryTime`.
+
+Only structural failures (browse and type resolution) trigger this rollback-and-retry. The initial *value* read is best-effort: a node that returns a transient or not-ready status such as `BadWaitingForInitialData` is skipped and backfilled by the subscription, rather than aborting the load and forcing a reconnect.
+
+**Guarantees on failure:**
+- No source ownership claims are committed
+- No staged sub-subjects leak into the registry
+- Root subject reference properties remain unassigned (no half-loaded sub-graphs)
+- Monitored items from the failed attempt are discarded
+
+**Retry:** the next `StartListeningAsync` attempt runs against a clean state.
+No special caller handling required.
+
+**Partial-deferral trade-off (dynamic properties only):** dynamic property slots added to root during discovery remain as empty slots after failure; they're reused on retry. For statically-typed root subjects (most production usage) no such slots exist and failure leaves root completely unchanged.
 
 ### Connection Loss Recovery
 
@@ -768,7 +816,7 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 | `PollingManager` | Polling fallback for nodes that don't support subscriptions. Includes a circuit breaker. |
 | `ReadAfterWriteManager` | Schedules read-backs after writes for nodes where exception-based monitoring was revised to sampling. |
 | `SubscriptionHealthMonitor` | Retries failed monitored items that may succeed later (transient server errors). |
-| `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. |
+| `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. Staged: queues source claims and root-level value assignments during discovery; commits atomically on success, rolls back staged subjects on failure. |
 | `OpcUaClientDiagnostics` | Read-only public facade that aggregates diagnostics from all internal components. |
 | `ReconnectionMetrics` | Thread-safe counters for reconnection tracking (attempts, successes, failures, abandoned). |
 | `ThroughputCounter` | Lock-free 60-second sliding window rate counter for incoming/outgoing changes per second. |
@@ -780,3 +828,5 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 **Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
 
 **Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. It allocates `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers on demand to avoid exposing internal types.
+
+**Staged load.** `OpcUaSubjectLoader` uses an `OpcUaLoadContext` (per-call, `IDisposable`) that queues source claims and root-level `SetValueFromSource` calls during discovery. On success, `Apply()` commits them atomically (claims first so observers see fully-owned leaves before root attachments). On exception, `Dispose()` walks staged subjects in reverse order and detaches them from their parent contexts, cascading through the lifecycle handler to unregister them from the registry. Combined with `SubjectSourceBase`'s retry policy, this turns transient browse failures into a clean retry rather than permanent partial state. The mechanism is unrelated to `Namotion.Interceptor.Tracking`'s `SubjectTransaction` (which captures property-change scopes for the tracking layer).

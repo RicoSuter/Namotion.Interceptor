@@ -4,6 +4,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Performance;
 using Namotion.Interceptor.Tracking.Change;
@@ -173,6 +174,25 @@ internal class SubscriptionManager : IAsyncDisposable
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             _subscriptions.TryAdd(subscription, 0);
         }
+
+        // A subject can detach while items are still being registered above: its
+        // RemoveItemsForSubject scan runs before the entries exist and removes nothing,
+        // then the registration lands afterwards, leaving stale items that route
+        // notifications into a detached subject. Sweep after registration; a detach
+        // from here on sees the completed registrations and removes normally. This
+        // narrows rather than hermetically closes the window: a notification arriving
+        // between ApplyChanges and this sweep can still write into the detached subject,
+        // which is benign because the subject is unreachable from the model, and closing
+        // it fully would cost a registry lookup on the notification hot path.
+        foreach (var property in _monitoredItems.Values)
+        {
+            var subject = property.Reference.Subject;
+            if (subject.TryGetRegisteredSubject() is null)
+            {
+                RemoveItemsForSubject(subject);
+                _pollingManager?.RemoveItemsForSubject(subject);
+            }
+        }
     }
 
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
@@ -287,7 +307,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 continue;
             }
 
-            var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
+            var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
 
             switch (ClassifyFailedItem(statusCode, pollingEnabled))
             {
@@ -502,7 +522,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
         foreach (var item in subscription.MonitoredItems)
         {
-            if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
+            if (item is { Handle: RegisteredSubjectProperty property, Status.Created: true })
             {
                 var requestedInterval = GetRequestedSamplingInterval(property);
                 var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
@@ -549,7 +569,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 var disposalTimeout = _configuration.SessionDisposalTimeout;
                 try
                 {
-                    await session.RemoveSubscriptionsAsync(subscriptions, default)
+                    await session.RemoveSubscriptionsAsync(subscriptions, CancellationToken.None)
                         .WaitAsync(disposalTimeout).ConfigureAwait(false);
                 }
                 catch (Exception ex)
