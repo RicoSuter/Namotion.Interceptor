@@ -120,11 +120,10 @@ internal static class PathWalker
             {
                 if (segment.IsValueTypedCollection)
                 {
-                    // A value-typed collection segment is a closed ImmutableArray<T>; its single generic
-                    // argument is the element type the indexer accessor is compiled against.
-                    var elementType = segment.PropertyStaticType.GetGenericArguments()[0];
+                    // A value-typed collection segment is a closed ImmutableArray<T>; its element type is
+                    // resolved once at decompose time, so the walk avoids a per-call GetGenericArguments alloc.
                     return PathValueAccessors
-                        .GetImmutableArrayIndexer(current.GetType(), metadata.PropertyInfo!, elementType)(current, segment.CollectionIndex);
+                        .GetImmutableArrayIndexer(current.GetType(), metadata.PropertyInfo!, segment.CollectionElementType!)(current, segment.CollectionIndex);
                 }
 
                 var collection = metadata.GetValue?.Invoke(current);

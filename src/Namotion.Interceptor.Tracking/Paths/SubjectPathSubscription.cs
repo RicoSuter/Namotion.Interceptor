@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -30,6 +31,12 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     private readonly PathSegmentObserver?[] _segmentObservers;
     private readonly IInterceptorSubject?[] _resolvedSubjects;
 
+    // A single reusable walk buffer for the under-lock event computation: the ctor seed walk, every event
+    // walk and every retrack re-walk write into it. All of those run under _lock and never nest (the
+    // reentrancy guard returns without walking), so one buffer is safe. Current does NOT use it: Current is
+    // lock-free and concurrent, so it rents a throwaway buffer from the pool instead.
+    private readonly IInterceptorSubject?[] _scratch;
+
     // The last observed value, seeded at subscribe time and advanced in ProcessSegmentCallback (before the
     // observer callback runs) so an event's Old reflects prior observed state rather than a false
     // unresolved starting point.
@@ -59,6 +66,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
         _segmentHandles = new IDisposable?[length];
         _segmentObservers = new PathSegmentObserver?[length];
         _resolvedSubjects = new IInterceptorSubject?[length];
+        _scratch = new IInterceptorSubject?[length];
 
         lock (_lock)
         {
@@ -68,8 +76,9 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 
                 // Seed from a fresh walk AFTER the listeners are installed: any write that lands between the
                 // build and this read is already covered by an installed listener, so the seed cannot open a
-                // false unresolved -> resolved edge on the first delivery.
-                _lastObserved = PathWalker.Walk<TValue>(_segments, _root, new IInterceptorSubject?[length]);
+                // false unresolved -> resolved edge on the first delivery. Runs under _lock before any
+                // concurrent access, so the reusable _scratch buffer is safe here.
+                _lastObserved = PathWalker.Walk<TValue>(_segments, _root, _scratch);
             }
             catch
             {
@@ -99,11 +108,20 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
                 return SubjectPathValue<TValue>.Unresolved;
             }
 
-            // A fresh per-read buffer: the array holds reference-type subjects, so it cannot be stack
-            // allocated. Allocation-free delivery is a concern of the event path (a later phase), not of
-            // this pure read.
-            var resolvedSubjects = new IInterceptorSubject?[_segments.Length];
-            return PathWalker.Walk<TValue>(_segments, _root, resolvedSubjects);
+            // A per-read buffer rented from the shared pool rather than allocated: the array holds
+            // reference-type subjects, so it cannot be stack allocated, and Current is lock-free and
+            // concurrent, so it cannot share the event path's _scratch. Only Walk's return value is used
+            // (never the buffer contents), so an oversized rented array is fine; it is returned cleared so
+            // no subject reference is retained in the pool.
+            var rented = ArrayPool<IInterceptorSubject?>.Shared.Rent(_segments.Length);
+            try
+            {
+                return PathWalker.Walk<TValue>(_segments, _root, rented);
+            }
+            finally
+            {
+                ArrayPool<IInterceptorSubject?>.Shared.Return(rented, clearArray: true);
+            }
         }
     }
 
@@ -293,8 +311,10 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 
                     // Fresh validating walk from the root: it recomputes the observed value AND records, per
                     // position, the subject each segment now reads on, which the divergence check compares
-                    // against the subscribed chain.
-                    var scratch = new IInterceptorSubject?[_segments.Length];
+                    // against the subscribed chain. Reuses the under-lock _scratch buffer (Walk clears it
+                    // first); every access below runs under _lock, and any divergent subject is captured into
+                    // a local before the retrack re-walk overwrites the buffer.
+                    var scratch = _scratch;
                     var newValue = PathWalker.Walk<TValue>(_segments, _root, scratch);
 
                     // Divergence is the first position where the fresh walk reads on a different subject than the
@@ -325,8 +345,9 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
                         }
 
                         // Recompute from the rebuilt chain: the retrack's reads supersede the initial walk, so a
-                        // write that raced the listener install is observed rather than lost.
-                        newValue = PathWalker.Walk<TValue>(_segments, _root, new IInterceptorSubject?[_segments.Length]);
+                        // write that raced the listener install is observed rather than lost. The captured
+                        // divergentSubject local above is unaffected by reusing scratch for this re-walk.
+                        newValue = PathWalker.Walk<TValue>(_segments, _root, scratch);
                     }
 
                     // ValueChange only when the intact chain's own resolved leaf was the write; any structural

@@ -26,6 +26,9 @@ internal sealed class PathSegment
     // True only when the collection segment's static type is ImmutableArray<T> (a value type that
     // would box through the object-returning metadata getter).
     public bool IsValueTypedCollection { get; init; }
+    // The element type of a value-typed (ImmutableArray<T>) collection segment, resolved once at
+    // decompose time so the walk does not recompute it per call (GetGenericArguments allocates a Type[]).
+    public Type? CollectionElementType { get; init; }
 
     // Valid when Kind == DictionaryKey.
     public object? DictionaryKey { get; init; }

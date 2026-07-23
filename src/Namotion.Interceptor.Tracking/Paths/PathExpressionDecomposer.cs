@@ -223,13 +223,15 @@ internal static class PathExpressionDecomposer
                 throw Invalid(parameter, $"the collection index of '{property.Name}' is negative ({index}).");
             }
 
+            var isValueTypedCollection = IsClosedImmutableArray(receiverType);
             segments.Add(new PathSegment
             {
                 PropertyName = property.Name,
                 Kind = PathSegmentKind.CollectionIndex,
                 PropertyStaticType = receiverType,
                 CollectionIndex = index,
-                IsValueTypedCollection = IsClosedImmutableArray(receiverType)
+                IsValueTypedCollection = isValueTypedCollection,
+                CollectionElementType = isValueTypedCollection ? receiverType.GetGenericArguments()[0] : null
             });
         }
         else
