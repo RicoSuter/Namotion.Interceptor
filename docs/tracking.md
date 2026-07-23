@@ -211,8 +211,6 @@ Operational caveats to know before adopting:
 
 > **Warning**: a `[Derived]` segment's getter executes on every processed event of the subscription; keep derived segments off hot paths. A derived subject-valued intermediate must alias a stable instance: a getter that constructs a fresh instance per read forces a full suffix retrack on every event and leaves that suffix dormant, because the reconstructed subjects are never the instance lifecycle attached.
 
-> **Future extensions** (intentionally not built yet): prefix sharing for many subscriptions under a common prefix; string-path subscriptions composed at the Registry or connector level; dynamic (runtime-named) segments and late-added-property discovery (issue #387); cast support in selectors; paths ending in an indexed element; in-place collection mutation tracking; asynchronous delivery; and a `Refresh()` re-sync hook. See the [design doc](design/tracking-path-subscriptions.md) for details.
-
 ### Concurrency and Delivery
 
 Dispatch starts on the writing thread, outside the subject lock, and shares one contract. The per-property listeners and the queue run inline there; `GetPropertyChangeObservable()` pushes there too but reschedules its subscribers onto its scheduler by default (unless you pass `ImmediateScheduler.Instance`).
