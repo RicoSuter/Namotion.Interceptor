@@ -212,7 +212,7 @@ public class PathCauseTests
 
         public void Arm() => Volatile.Write(ref _armed, 1);
 
-        public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
         {
             if (Volatile.Read(ref _armed) == 1
                 && context.Property.Name == _propertyName

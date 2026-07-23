@@ -1,11 +1,10 @@
 using System.Collections.Immutable;
-using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor;
 
 /// <summary>
-/// The central context for managing services and intercepting property/method access on interceptor subjects.
-/// Provides service registration, retrieval, and execution of intercepted operations through middleware chains.
+/// The central context for interceptor subjects: service registration, retrieval, and fallback-context
+/// composition. Execution of intercepted operations is an internal concern of the implementation.
 /// </summary>
 public interface IInterceptorSubjectContext
 {
@@ -40,33 +39,6 @@ public interface IInterceptorSubjectContext
     /// <returns>An immutable array of all matching services.</returns>
     ImmutableArray<TInterface> GetServices<TInterface>();
 
-    /// <summary>
-    /// Executes a property read operation through the interceptor chain.
-    /// </summary>
-    /// <typeparam name="TProperty">A hint for the property type (may be <c>object</c> when boxed).</typeparam>
-    /// <param name="context">The property read context containing metadata about the operation.</param>
-    /// <param name="readValue">The delegate to read the actual property value.</param>
-    /// <returns>The property value, potentially modified by interceptors.</returns>
-    TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> readValue);
-
-    /// <summary>
-    /// Executes a property write operation through the interceptor chain.
-    /// </summary>
-    /// <typeparam name="TProperty">A hint for the property type (may be <c>object</c> when boxed).</typeparam>
-    /// <param name="context">The property write context containing metadata and the new value.</param>
-    /// <param name="writeValue">The delegate to write the actual property value.</param>
-    void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue);
-
-    /// <summary>
-    /// Executes a method invocation through the interceptor chain.
-    /// </summary>
-    /// <param name="context">The method invocation context containing metadata about the operation.</param>
-    /// <param name="invokeMethod">The delegate to invoke the actual method.</param>
-    /// <returns>The method return value, potentially modified by interceptors.</returns>
-    object? ExecuteInterceptedInvoke(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> invokeMethod);
-
-    // TODO: Remove Execute* methods here (not needed in the interface)
-    
     /// <summary>
     /// Adds a fallback context for service resolution.
     /// Services not found in this context will be looked up in fallback contexts.

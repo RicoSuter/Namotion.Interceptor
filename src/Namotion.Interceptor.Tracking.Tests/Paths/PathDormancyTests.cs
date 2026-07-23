@@ -802,7 +802,7 @@ public class PathDormancyTests
 
         public volatile Thread? ThrowThread;
 
-        public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
         {
             if (ReferenceEquals(context.Property.Subject, _target) && context.Property.Name == _propertyName)
             {

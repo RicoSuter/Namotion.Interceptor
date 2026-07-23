@@ -100,6 +100,7 @@ public static class InterceptorSubjectContextExtensions
     /// the property after subscribing observes that earlier state. OldValue is the value the setter observed
     /// when it started, including when the subscription raced the write. For a scheduler-based observer,
     /// delivered means accepted by the channel, not that the callback has already run.
+    /// A dispatch already in flight may still invoke the observer after its subscription's Dispose returns.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).

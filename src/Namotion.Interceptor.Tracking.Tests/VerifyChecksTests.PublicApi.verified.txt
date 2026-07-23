@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Tracking.Change
         public DerivedPropertyChangeHandler() { }
         public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
         public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
-        public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
+        public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
     public static class DerivedPropertyChangeHandlerExtensions
@@ -257,7 +257,7 @@ namespace Namotion.Interceptor.Tracking.Recorder
     public class ReadPropertyRecorder : Namotion.Interceptor.Interceptors.IReadInterceptor
     {
         public ReadPropertyRecorder() { }
-        public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
+        public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
         public static Namotion.Interceptor.Tracking.Recorder.ReadPropertyRecorderScope Start(System.Collections.Concurrent.ConcurrentDictionary<Namotion.Interceptor.PropertyReference, bool>? properties = null) { }
     }
     public class ReadPropertyRecorderScope : System.IDisposable
@@ -321,7 +321,7 @@ namespace Namotion.Interceptor.Tracking.Transactions
     public sealed class SubjectTransactionInterceptor : Namotion.Interceptor.Interceptors.IReadInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
         public SubjectTransactionInterceptor() { }
-        public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
+        public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
     public readonly struct TransactionAwaitable
