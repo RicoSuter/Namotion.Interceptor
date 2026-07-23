@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using Moq;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Paths;
@@ -269,6 +270,34 @@ public class PathPropertyTypeMatrixTests
     }
 
     [Fact]
+    public void WhenIListImplementationIsGenericOnly_ThenGenericIndexerIsUsed()
+    {
+        // Arrange: a proxy implementing IList<T>, but not non-generic IList. Clear the lifecycle
+        // enumeration calls so only traversal performed while subscribing is measured.
+        var context = FullTracking();
+        var item = new Node { Name = "A" };
+        var items = new Mock<IList<Node>>();
+        items.SetupGet(list => list.Count).Returns(1);
+        items.SetupGet(list => list[0]).Returns(item);
+        items.Setup(list => list.GetEnumerator()).Returns(() => new[] { item }.AsEnumerable().GetEnumerator());
+        items.As<System.Collections.IEnumerable>()
+            .Setup(list => list.GetEnumerator())
+            .Returns(() => new[] { item }.GetEnumerator());
+
+        var holder = new ListHolder(context) { InterfaceListItems = items.Object };
+        items.Invocations.Clear();
+
+        // Act
+        using var subscription = Watch(holder, x => x.InterfaceListItems[0].Name, out _);
+
+        // Assert
+        Assert.False(items.Object is System.Collections.IList);
+        Assert.Equal("A", subscription.Current.GetValueOrDefault());
+        items.VerifyGet(list => list[0], Times.AtLeastOnce);
+        items.Verify(list => list.GetEnumerator(), Times.Never);
+    }
+
+    [Fact]
     public void WhenReadOnlyListCollectionIntermediate_ThenResolvesAndRetrackDelivers()
     {
         // Arrange
@@ -286,6 +315,56 @@ public class PathPropertyTypeMatrixTests
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
         Assert.Equal("A", change.Old.GetValueOrDefault());
         Assert.Equal("B", change.New.GetValueOrDefault());
+    }
+
+    [Fact]
+    public void WhenReadOnlyListImplementationIsGenericOnly_ThenIndexerIsUsedWithoutEnumeration()
+    {
+        // Arrange: assign while enumeration is available so lifecycle attachment can inspect the
+        // collection, then disable enumeration before subscribing. Only direct indexed access remains.
+        var context = FullTracking();
+        var items = new GenericOnlyReadOnlyList<Node>(new Node { Name = "A" });
+        var holder = new GenericOnlyListHolder(context) { Items = items };
+        items.ThrowOnEnumeration = true;
+
+        // Act
+        using var subscription = Watch(holder, x => x.Items[0].Name, out _);
+
+        // Assert
+        Assert.True(subscription.Current.IsResolved);
+        Assert.Equal("A", subscription.Current.GetValueOrDefault());
+    }
+
+    [Fact]
+    public void WhenCollectionExposesNoGenericListInterface_ThenSubscribeIsLenientAndResolves()
+    {
+        // Arrange: the container offers an indexer for the path expression but implements only
+        // IEnumerable<T>, so subscribe-time decomposition finds no generic list interface.
+        var context = FullTracking();
+        var holder = new IndexableEnumerableHolder(context) { Items = new IndexableEnumerable<Node>(new Node { Name = "A" }) };
+
+        // Act: subscribing must not throw; the walk indexes the boxed collection leniently.
+        using var subscription = Watch(holder, x => x.Items[0].Name, out _);
+
+        // Assert
+        Assert.True(subscription.Current.IsResolved);
+        Assert.Equal("A", subscription.Current.GetValueOrDefault());
+    }
+
+    [Fact]
+    public void WhenGenericOnlyReadOnlyListIndexerThrows_ThenPathIsUnresolved()
+    {
+        // Arrange: enumeration remains valid, but the indexed operation represented by the path throws.
+        // Traversal must not bypass that failure by enumerating to the requested position.
+        var context = FullTracking();
+        var items = new GenericOnlyReadOnlyList<Node>(new Node { Name = "A" }) { ThrowOnIndexer = true };
+        var holder = new GenericOnlyListHolder(context) { Items = items };
+
+        // Act
+        using var subscription = Watch(holder, x => x.Items[0].Name, out _);
+
+        // Assert
+        Assert.False(subscription.Current.IsResolved);
     }
 
     [Fact]

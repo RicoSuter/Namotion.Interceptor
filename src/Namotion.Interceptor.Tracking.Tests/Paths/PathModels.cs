@@ -320,6 +320,60 @@ public partial class ListHolder
     public partial IList<Node> InterfaceListItems { get; set; }
 }
 
+// A generic-only read-only list. It deliberately does not implement non-generic IList, so path
+// traversal must invoke IReadOnlyList<T>.Count and the indexer instead of enumerating.
+public sealed class GenericOnlyReadOnlyList<T> : IReadOnlyList<T>
+{
+    private readonly IReadOnlyList<T> _items;
+
+    public GenericOnlyReadOnlyList(params T[] items) => _items = items;
+
+    public bool ThrowOnIndexer { get; set; }
+
+    public bool ThrowOnEnumeration { get; set; }
+
+    public int Count => _items.Count;
+
+    public T this[int index]
+        => ThrowOnIndexer ? throw new InvalidOperationException("indexer boom") : _items[index];
+
+    public IEnumerator<T> GetEnumerator()
+        => ThrowOnEnumeration ? throw new InvalidOperationException("enumeration boom") : _items.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+[InterceptorSubject]
+public partial class GenericOnlyListHolder
+{
+    public GenericOnlyListHolder() { Items = new GenericOnlyReadOnlyList<Node>(); }
+
+    public partial IReadOnlyList<Node> Items { get; set; }
+}
+
+// An indexable container exposing neither IList<> nor IReadOnlyList<> (only IEnumerable<T>), so no
+// compiled indexer can be built and the walk must fall back to lenient enumeration-based indexing.
+public sealed class IndexableEnumerable<T> : IEnumerable<T>
+{
+    private readonly List<T> _items;
+
+    public IndexableEnumerable(params T[] items) => _items = [..items];
+
+    public T this[int index] => _items[index];
+
+    public IEnumerator<T> GetEnumerator() => _items.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+[InterceptorSubject]
+public partial class IndexableEnumerableHolder
+{
+    public IndexableEnumerableHolder() { Items = new IndexableEnumerable<Node>(); }
+
+    public partial IndexableEnumerable<Node> Items { get; set; }
+}
+
 // Subject dictionary intermediates typed as IDictionary<string,T> and a non-string (int) key dictionary
 // (Dictionary<string,T> and IReadOnlyDictionary<string,T> are covered by reused Node/Garage models).
 [InterceptorSubject]

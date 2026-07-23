@@ -30,6 +30,9 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     private readonly IDisposable?[] _segmentHandles;
     private readonly PathSegmentObserver?[] _segmentObservers;
     private readonly IInterceptorSubject?[] _resolvedSubjects;
+    // Immutable subject/accessor pairs used by the hot validating walk. Entries are atomically replaced
+    // for lock-free Current reads and cleared with the same suffix as the corresponding subject/listener.
+    private readonly ResolvedPathSegment<TValue>?[] _resolvedSegments;
 
     // A single reusable walk buffer for the under-lock event computation: the ctor seed walk, every event
     // walk and every retrack re-walk write into it. All of those run under _lock and never nest (the
@@ -66,6 +69,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
         _segmentHandles = new IDisposable?[length];
         _segmentObservers = new PathSegmentObserver?[length];
         _resolvedSubjects = new IInterceptorSubject?[length];
+        _resolvedSegments = new ResolvedPathSegment<TValue>?[length];
         _scratch = new IInterceptorSubject?[length];
 
         lock (_lock)
@@ -78,7 +82,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
                 // build and this read is already covered by an installed listener, so the seed cannot open a
                 // false unresolved -> resolved edge on the first delivery. Runs under _lock before any
                 // concurrent access, so the reusable _scratch buffer is safe here.
-                _lastObserved = PathWalker.Walk<TValue>(_segments, _root, _scratch);
+                _lastObserved = PathWalker.Walk(_segments, _root, _scratch, _resolvedSegments);
             }
             catch
             {
@@ -116,7 +120,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
             var rented = ArrayPool<IInterceptorSubject?>.Shared.Rent(_segments.Length);
             try
             {
-                return PathWalker.Walk<TValue>(_segments, _root, rented);
+                return PathWalker.Walk(_segments, _root, rented, _resolvedSegments);
             }
             finally
             {
@@ -171,13 +175,25 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
             _segmentHandles[position] = PropertyChangeSubscription.Create(
                 new PropertyReference(subject, segment.PropertyName), observer);
 
+            var resolvedSegment = TryResolveSegment(subject, segment);
+            Volatile.Write(ref _resolvedSegments[position], resolvedSegment);
+
             if (segment.IsLeaf)
             {
                 // The leaf is subscribed but resolves no next subject.
                 return;
             }
 
-            var child = TryResolveChild(subject, segment);
+            IInterceptorSubject? child;
+            try
+            {
+                child = resolvedSegment?.ResolveChild(subject, segment);
+            }
+            catch
+            {
+                child = null;
+            }
+
             if (child is null)
             {
                 // Unresolved intermediate: stop, leaving the suffix torn down (null).
@@ -189,30 +205,17 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     }
 
     /// <summary>
-    /// Resolves the next subject of a non-leaf segment by name against <paramref name="subject"/>. Name
-    /// resolution during the build is non-throwing: a missing or non-subscribable property, or a hostile
-    /// getter/indexer that throws, all resolve to null so the build stops cleanly.
+    /// Resolves and caches the segment accessor by name against <paramref name="subject"/>. Name resolution
+    /// and accessor construction are non-throwing: a missing or non-subscribable property returns null.
     /// </summary>
-    private static IInterceptorSubject? TryResolveChild(IInterceptorSubject subject, PathSegment segment)
+    private static ResolvedPathSegment<TValue>? TryResolveSegment(IInterceptorSubject subject, PathSegment segment)
     {
         if (!subject.Properties.TryGetValue(segment.PropertyName, out var metadata))
         {
             return null;
         }
 
-        if (!(metadata.IsIntercepted || metadata.IsDerived))
-        {
-            return null;
-        }
-
-        try
-        {
-            return PathWalker.ResolveChild(subject, metadata, segment);
-        }
-        catch
-        {
-            return null;
-        }
+        return ResolvedPathSegment<TValue>.TryCreate(subject, metadata, segment);
     }
 
     /// <summary>
@@ -228,6 +231,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
             _segmentHandles[position] = null;
             _segmentObservers[position] = null;
             _resolvedSubjects[position] = null;
+            Volatile.Write(ref _resolvedSegments[position], null);
         }
     }
 
@@ -315,7 +319,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
                     // first); every access below runs under _lock, and any divergent subject is captured into
                     // a local before the retrack re-walk overwrites the buffer.
                     var scratch = _scratch;
-                    var newValue = PathWalker.Walk<TValue>(_segments, _root, scratch);
+                    var newValue = PathWalker.Walk(_segments, _root, scratch, _resolvedSegments);
 
                     // Divergence is the first position where the fresh walk reads on a different subject than the
                     // subscribed chain (reference identity). This one comparison covers every structural case: an
@@ -347,7 +351,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
                         // Recompute from the rebuilt chain: the retrack's reads supersede the initial walk, so a
                         // write that raced the listener install is observed rather than lost. The captured
                         // divergentSubject local above is unaffected by reusing scratch for this re-walk.
-                        newValue = PathWalker.Walk<TValue>(_segments, _root, scratch);
+                        newValue = PathWalker.Walk(_segments, _root, scratch, _resolvedSegments);
                     }
 
                     // ValueChange only when the intact chain's own resolved leaf was the write; any structural

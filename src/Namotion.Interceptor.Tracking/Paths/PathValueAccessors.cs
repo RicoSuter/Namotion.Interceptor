@@ -16,6 +16,7 @@ internal static class PathValueAccessors
 {
     private static readonly ConcurrentDictionary<(Type DeclaringType, string PropertyName, Type ValueType), Delegate> LeafAccessorCache = new();
     private static readonly ConcurrentDictionary<(Type DeclaringType, string PropertyName), Func<IInterceptorSubject, int, IInterceptorSubject?>> ImmutableArrayIndexerCache = new();
+    private static readonly ConcurrentDictionary<(Type DeclaringType, string PropertyName, Type InterfaceType), Func<IInterceptorSubject, int, IInterceptorSubject?>> GenericListIndexerCache = new();
     private static readonly ConcurrentDictionary<(Type DeclaringType, string PropertyName), Func<IInterceptorSubject, object, IInterceptorSubject?>> DictionaryLookupCache = new();
     private static readonly ConcurrentDictionary<Type, Func<object, bool>?> ImmutableArrayIsDefaultCache = new();
 
@@ -44,6 +45,20 @@ internal static class PathValueAccessors
             (declaringType, propertyInfo.Name),
             static (_, state) => BuildImmutableArrayIndexer(state.declaringType, state.propertyInfo, state.elementType),
             (declaringType, propertyInfo, elementType));
+
+    /// <summary>
+    /// Gets a delegate that reads a reference-typed generic list property and invokes the declared
+    /// <see cref="IList{T}"/> or <see cref="IReadOnlyList{T}"/> Count and indexer directly. This supports
+    /// generic-only implementations without falling back to enumeration. A throwing Count or indexer
+    /// surfaces to the caller so the enclosing path walk can resolve it as unreachable.
+    /// </summary>
+    public static Func<IInterceptorSubject, int, IInterceptorSubject?> GetGenericListIndexer(
+        Type declaringType, PropertyInfo propertyInfo, Type interfaceType, Type elementType)
+        => GenericListIndexerCache.GetOrAdd(
+            (declaringType, propertyInfo.Name, interfaceType),
+            static (_, state) => BuildGenericListIndexer(
+                state.declaringType, state.propertyInfo, state.interfaceType, state.elementType),
+            (declaringType, propertyInfo, interfaceType, elementType));
 
     /// <summary>
     /// Gets a delegate that reads the dictionary property, casts it to the declared dictionary interface
@@ -134,6 +149,49 @@ internal static class PathValueAccessors
                 element));
 
         return Expression.Lambda<Func<IInterceptorSubject, int, IInterceptorSubject?>>(body, subjectParameter, indexParameter).Compile();
+    }
+
+    private static Func<IInterceptorSubject, int, IInterceptorSubject?> BuildGenericListIndexer(
+        Type declaringType, PropertyInfo propertyInfo, Type interfaceType, Type elementType)
+    {
+        var subjectParameter = Expression.Parameter(typeof(IInterceptorSubject), "subject");
+        var indexParameter = Expression.Parameter(typeof(int), "index");
+        var listVariable = Expression.Variable(interfaceType, "list");
+
+        var readList = Expression.Convert(
+            Expression.Property(Expression.Convert(subjectParameter, declaringType), propertyInfo),
+            interfaceType);
+
+        var interfaceDefinition = interfaceType.GetGenericTypeDefinition();
+        var countInterfaceType = (interfaceDefinition == typeof(IList<>)
+                ? typeof(ICollection<>)
+                : typeof(IReadOnlyCollection<>))
+            .MakeGenericType(elementType);
+
+        var count = Expression.Property(
+            Expression.Convert(listVariable, countInterfaceType),
+            nameof(IReadOnlyCollection<int>.Count));
+        var indexer = interfaceType.GetProperty("Item")!;
+        var element = Expression.TypeAs(
+            Expression.Property(listVariable, indexer, indexParameter),
+            typeof(IInterceptorSubject));
+
+        var isOutOfRange = Expression.OrElse(
+            Expression.ReferenceEqual(listVariable, Expression.Constant(null, interfaceType)),
+            Expression.OrElse(
+                Expression.LessThan(indexParameter, Expression.Constant(0)),
+                Expression.GreaterThanOrEqual(indexParameter, count)));
+
+        var body = Expression.Block(
+            [listVariable],
+            Expression.Assign(listVariable, readList),
+            Expression.Condition(
+                isOutOfRange,
+                Expression.Constant(null, typeof(IInterceptorSubject)),
+                element));
+
+        return Expression.Lambda<Func<IInterceptorSubject, int, IInterceptorSubject?>>(
+            body, subjectParameter, indexParameter).Compile();
     }
 
     private static Func<IInterceptorSubject, object, IInterceptorSubject?> BuildDictionaryLookup(Type declaringType, PropertyInfo propertyInfo, PathSegment segment)

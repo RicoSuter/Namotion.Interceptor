@@ -85,7 +85,7 @@ On divergence, the tracker retracks: `DisposeSuffix(divergencePoint)` tears down
 
 An event is suppressed when the new observed state `AreEquivalent` to `_lastObserved` (same resolvedness, and when both resolved, values equal under `EqualityComparer<TValue>.Default`). `_lastObserved` is seeded from the subscribe-time walk (so the first delivered event's `Old` reflects the state at subscribe and no false unresolved-to-resolved edge fires) and advances **before** the callback runs, so the chained-transition invariant survives a throwing callback and event N+1's `Old` equals event N's `New`.
 
-### Cost model and the deferred getter-cache
+### Cost model and the per-segment accessor cache
 
 Delivery is allocation-free for inline value types and strings, including a path with an `ImmutableArray<T>` intermediate. Three techniques achieve this:
 
@@ -95,7 +95,7 @@ Delivery is allocation-free for inline value types and strings, including a path
 
 The one boxing exception is a non-`IEquatable<T>` struct leaf, which boxes both operands in the `EqualityComparer<TValue>.Default` suppression comparison.
 
-**Honest note on the steady-state walk.** Each delivery re-resolves every segment by name: `Properties.TryGetValue(segment.PropertyName, ...)`, then an accessor-cache lookup keyed by declaring type and name, then the getter invoke. The design's constant-factor requirement (1) envisioned caching each segment's resolved getter delegate in the chain state, so the steady-state walk would be an invoke of the cached getter plus a reference-compare against the cached next subject, falling back to fresh by-name resolution only on mismatch (which is exactly the divergence signal). That cached-getter optimization is **not yet implemented**; it is the deferred, benchmark-gated escalation path. Requirement (2), the typed compiled leaf accessor, is implemented.
+**Per-segment accessor cache.** Each position caches a `ResolvedPathSegment<TValue>`: the immutable `(subject, accessor delegate)` binding for the subject that segment currently reads on, stored in the `_resolvedSegments` array alongside the listener handles. When the cached subject still reference-equals the walked subject, the steady-state walk invokes the cached accessor directly, skipping the per-walk `Properties.TryGetValue` and the accessor-cache lookup; it falls back to fresh by-name resolution only on a subject mismatch, which is exactly the divergence signal. The cache stores only the binding, never a resolved child or leaf value, so a `Property` intermediate keeps the boxed `metadata.GetValue` accessor and every walk still re-reads the live child, leaving divergence detection unchanged. Entries are written under `_lock` during the chain build and retrack, cleared with the same suffix as their listener, and read by the lock-free `Current` through `Volatile`; the entry is immutable, so a stale read simply misses and falls back to by-name. Accessor construction and invocation go through the shared `PathWalker.BuildLeafAccessor`/`BuildChildAccessor`/`ReadLeaf`/`ResolveChild` helpers, so the cached path and the by-name slow path resolve identically. The cache cuts per-delivery and `Current`-read CPU; delivery stays allocation-free, while the rare structural retrack and subscribe/dispose paths allocate the small `ResolvedPathSegment` objects.
 
 ## Concurrency Model
 
@@ -192,4 +192,4 @@ These are intentionally not built yet:
 - **Asynchronous delivery**; consumers hand off to their own `Channel`, as with the primitive.
 - **`Refresh()`** on the handle: an explicit re-sync hook for the dormancy edge and for tests.
 
-If the validating walk ever measures as a problem at realistic depths, the benchmark-gated escalation path is, in order: the cached-getter optimization above; then amortized validation (validate one ancestor link per leaf event, round-robin, bounding off-path deliveries after a dormant divergence to at most depth events); then leaf-only validation on value events (structural events still validate), which trades away dormant-divergence healing on leaf writes and would be documented as a consistency carve-out. None is taken preemptively.
+If the validating walk ever becomes a bottleneck beyond the accessor cache at realistic depths, two further options remain, neither used here: amortized validation (validate one ancestor link per leaf event, round-robin, bounding off-path deliveries after a dormant divergence to at most depth events); and leaf-only validation on value events (structural events still validate), which trades away dormant-divergence healing on leaf writes and would be a documented consistency carve-out.

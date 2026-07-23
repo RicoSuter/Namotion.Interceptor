@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Moq;
 using Namotion.Interceptor.Tracking.Paths;
 using Namotion.Interceptor.Tracking.Tests.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -113,6 +114,33 @@ public class PathAccessorTests
     }
 
     [Fact]
+    public void WhenDynamicReferenceLeafIsNull_ThenLeafIsUnresolved()
+    {
+        // Arrange
+        var (subject, segment) = CreateDynamicNullLeaf(typeof(string));
+
+        // Act
+        var result = PathWalker.Walk<string?>([segment], subject, new IInterceptorSubject?[1]);
+
+        // Assert: the fallback (dynamic, no PropertyInfo) leaf read resolves only an actual TValue;
+        // a null is unresolved. Only the typed leaf path delivers resolved-null.
+        Assert.False(result.IsResolved);
+    }
+
+    [Fact]
+    public void WhenDynamicNullableValueLeafIsNull_ThenLeafIsUnresolved()
+    {
+        // Arrange
+        var (subject, segment) = CreateDynamicNullLeaf(typeof(int?));
+
+        // Act
+        var result = PathWalker.Walk<int?>([segment], subject, new IInterceptorSubject?[1]);
+
+        // Assert
+        Assert.False(result.IsResolved);
+    }
+
+    [Fact]
     public void WhenDictionaryKeyPresent_ThenLookupReturnsValue()
     {
         // Arrange
@@ -155,4 +183,30 @@ public class PathAccessorTests
             DictionaryKeyType = typeof(string),
             DictionaryValueType = typeof(Car),
         };
+
+    private static (IInterceptorSubject Subject, PathSegment Segment) CreateDynamicNullLeaf(Type propertyType)
+    {
+        var metadata = new SubjectPropertyMetadata(
+            "Value",
+            propertyType,
+            [],
+            static _ => null,
+            setValue: null,
+            isIntercepted: true,
+            isDynamic: true);
+
+        var subject = new Mock<IInterceptorSubject>();
+        subject.SetupGet(value => value.Properties).Returns(
+            new Dictionary<string, SubjectPropertyMetadata> { [metadata.Name] = metadata });
+
+        return (
+            subject.Object,
+            new PathSegment
+            {
+                PropertyName = metadata.Name,
+                Kind = PathSegmentKind.Property,
+                PropertyStaticType = propertyType,
+                IsLeaf = true
+            });
+    }
 }

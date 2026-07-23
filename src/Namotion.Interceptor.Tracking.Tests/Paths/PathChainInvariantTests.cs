@@ -315,6 +315,25 @@ public class PathChainInvariantTests
         Assert.False(weakHandle.IsAlive, "the dropped subscription handle must be garbage collected");
     }
 
+    [Fact]
+    public void WhenIntermediateReplaced_ThenCachedAccessorDoesNotRetainOldSubject()
+    {
+        // Arrange & Act: keep the root and subscription alive while replacing the tracked child. The
+        // returned weak reference is the only remaining reference that may point at the old child.
+        var (root, subscription, oldChild) = CreateSubscriptionAndReplaceChild();
+        using (subscription)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            // Assert: suffix disposal clears both listener state and cached segment access state.
+            Assert.False(oldChild.IsAlive, "the replaced child must not be retained by the segment cache");
+            GC.KeepAlive(root);
+            GC.KeepAlive(subscription);
+        }
+    }
+
     // Builds a root and an undisposed path subscription in an isolated scope, using a bare notifications
     // context created here (not passed in) so the whole graph is unreachable once the returned weak
     // references are the only thing pointing at it. Bare subscriptions avoid the lifecycle interceptor's
@@ -328,6 +347,22 @@ public class PathChainInvariantTests
         var handle = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> _) => { });
 
         return (new WeakReference(root), new WeakReference(handle));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (Node Root, SubjectPathSubscription<string> Subscription, WeakReference OldChild)
+        CreateSubscriptionAndReplaceChild()
+    {
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var oldChild = new Node { Name = "old" };
+        var root = new Node(context) { Child = oldChild };
+        var subscription = root.SubscribeToPath(
+            x => x.Child!.Name,
+            (in SubjectPathChange<string> _) => { });
+
+        var weakOldChild = new WeakReference(oldChild);
+        root.Child = new Node { Name = "new" };
+        return (root, subscription, weakOldChild);
     }
 
     private static int ListenerCount(IInterceptorSubject subject, string propertyName)

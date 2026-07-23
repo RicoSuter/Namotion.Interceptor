@@ -224,6 +224,7 @@ internal static class PathExpressionDecomposer
             }
 
             var isValueTypedCollection = IsClosedImmutableArray(receiverType);
+            var (interfaceType, elementType) = ResolveCollectionTypes(receiverType);
             segments.Add(new PathSegment
             {
                 PropertyName = property.Name,
@@ -231,7 +232,8 @@ internal static class PathExpressionDecomposer
                 PropertyStaticType = receiverType,
                 CollectionIndex = index,
                 IsValueTypedCollection = isValueTypedCollection,
-                CollectionElementType = isValueTypedCollection ? receiverType.GetGenericArguments()[0] : null
+                CollectionInterfaceType = isValueTypedCollection ? null : interfaceType,
+                CollectionElementType = elementType
             });
         }
         else
@@ -285,6 +287,39 @@ internal static class PathExpressionDecomposer
         // object, which IsSubjectReferenceType() accepts (object can hold a subject), so such an
         // intermediate passes the check and is resolved by name against the runtime subject instead.
         return typeof(object);
+    }
+
+    private static (Type? interfaceType, Type? elementType) ResolveCollectionTypes(Type collectionType)
+    {
+        if (IsClosedImmutableArray(collectionType))
+        {
+            return (null, collectionType.GenericTypeArguments[0]);
+        }
+
+        if (collectionType.IsArray)
+        {
+            var elementType = collectionType.GetElementType()!;
+            return (typeof(IList<>).MakeGenericType(elementType), elementType);
+        }
+
+        if (collectionType.IsGenericType)
+        {
+            var definition = collectionType.GetGenericTypeDefinition();
+            if (definition == typeof(IList<>) || definition == typeof(IReadOnlyList<>))
+            {
+                return (collectionType, collectionType.GenericTypeArguments[0]);
+            }
+        }
+
+        var listInterface =
+            FindClosedInterface(collectionType, typeof(IList<>)) ??
+            FindClosedInterface(collectionType, typeof(IReadOnlyList<>));
+
+        // No generic list interface: not a subscribe-time error (runtime validity is lenient); both
+        // types stay null so the walk indexes the boxed collection via IndexReferenceCollection.
+        return listInterface is null
+            ? (null, null)
+            : (listInterface, listInterface.GenericTypeArguments[0]);
     }
 
     private static (Type interfaceType, Type keyType, Type valueType) ResolveDictionaryTypes(
