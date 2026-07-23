@@ -189,7 +189,7 @@ A callback racing the subscribe blocks on `gate` until the seed is applied, and 
 
 **Observed state**: each observed state is a `SubjectPathValue<TValue>` (its members are documented on the type). The point to know is that it is a tri-state: an unresolved path, a resolved leaf with a value, and a resolved leaf whose value is null are all distinct, so `TryGetValue` returns true with a null value only for the resolved-null case.
 
-**Transitions and suppression**: a `SubjectPathChange<TValue>` carries `Kind`, `Old`, `New`, and `Cause` (documented on the type). The contracts to rely on: an event is suppressed when `Old` equals `New` under `EqualityComparer<TValue>.Default`, so chained transitions hold (event N+1's `Old` equals event N's `New`) and racing or no-op writes coalesce. A path subscription is a current-value observer, not a write log; consumers that need every write use the queue or observable channels.
+**Transitions and suppression**: a `SubjectPathChange<TValue>` carries `Kind`, `Old`, `New`, and `Cause` (documented on the type). The contracts to rely on: an event is suppressed when the observed state does not change (`Old` equals `New`), so chained transitions hold (event N+1's `Old` equals event N's `New`) and racing or no-op writes coalesce. A path subscription is a current-value observer, not a write log; consumers that need every write use the queue or observable channels.
 
 **Expression rules**: a path chains property access, collection indices, and dictionary keys directly off the lambda parameter. Malformed shapes throw `ArgumentException` at subscribe with a message naming the problem (the overloads document the exceptions), so they are not enumerated here. The contracts that do not announce themselves are:
 
