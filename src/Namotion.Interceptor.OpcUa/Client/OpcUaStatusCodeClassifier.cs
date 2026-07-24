@@ -3,32 +3,40 @@ using Opc.Ua;
 namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
-/// Classifies OPC UA <see cref="StatusCode"/>s as transient (worth retrying) or permanent.
-/// A single shared list backs every callsite, so a code is classified the same way whether
-/// it surfaced from a write or from a subscription.
+/// Classifies OPC UA <see cref="StatusCode"/>s for retry decisions. Two questions are asked at
+/// different callsites, and the access-scoped codes answer them oppositely, so there are two
+/// predicates rather than one shared list.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Permanent means <em>the answer cannot change without a new session</em>, not merely that
-/// re-issuing the request right now returns the same status. Access-scoped codes such as
-/// <c>BadUserAccessDenied</c>, <c>BadNotReadable</c> and <c>BadNotImplemented</c> are therefore
-/// treated as transient: role permissions and the <c>AccessLevel</c> attribute are mutable
-/// server-side, so the same request can start succeeding mid-session. <c>BadSecurityModeInsufficient</c>
-/// is permanent because it is bound to the SecureChannel's <c>MessageSecurityMode</c>, which can
-/// only change by establishing a new channel, and reconnect re-attempts everything anyway.
+/// <see cref="IsTransientError"/> answers <em>can this recover without a new session?</em> It backs
+/// the subscribe and write paths. Access-scoped codes (<c>BadUserAccessDenied</c>,
+/// <c>BadNotReadable</c>, <c>BadNotImplemented</c>) are transient here: role permissions and the
+/// <c>AccessLevel</c> attribute are mutable server-side, so a monitored item can start succeeding
+/// mid-session and must be kept for retry rather than dropped. <c>BadSecurityModeInsufficient</c> is
+/// permanent because it is bound to the SecureChannel's <c>MessageSecurityMode</c>, which can only
+/// change by opening a new channel, and reconnect re-attempts everything anyway.
 /// </para>
 /// <para>
-/// This type only classifies; each caller decides the disposition. Subscription setup acts on it
-/// via <c>FailedMonitoredItemDisposition</c>, where a permanent code drops the monitored item and
-/// forfeits both in-session recovery routes (health-monitor healing and escalation to polling).
-/// The write path currently uses it for diagnostics only: <c>WriteResult.FailedChanges</c> must
-/// stay complete for the retry queue and the transaction writer, so permanently-failed writes are
-/// still requeued (#332).
+/// <see cref="ThrowIfTransientError"/> answers <em>would aborting and reloading now help?</em> It
+/// backs the browse and read paths, where a transient status aborts the load so reconnect retries
+/// and a permanent one is logged and skipped. Here the access-scoped codes are permanent: they
+/// repeat immediately on reload (the session's identity and permissions have not changed), so
+/// throwing would crash-loop the whole load instead of skipping the one unreachable node. That
+/// makes the load-skip set a superset of the session-permanent set by exactly those three codes.
+/// </para>
+/// <para>
+/// The write path uses <see cref="IsTransientError"/> for diagnostics only:
+/// <c>WriteResult.FailedChanges</c> must stay complete for the retry queue and the transaction
+/// writer, so permanently-failed writes are still requeued (#332).
 /// </para>
 /// </remarks>
 internal static class OpcUaStatusCodeClassifier
 {
-    private static readonly HashSet<uint> PermanentCodes =
+    /// <summary>
+    /// Bad statuses that cannot recover without a new session. Used by the subscribe and write paths.
+    /// </summary>
+    private static readonly HashSet<uint> SessionPermanentCodes =
     [
         StatusCodes.BadNodeIdUnknown,
         StatusCodes.BadNodeIdInvalid,
@@ -41,12 +49,52 @@ internal static class OpcUaStatusCodeClassifier
     ];
 
     /// <summary>
-    /// True iff <paramref name="statusCode"/> is a bad status that could succeed on
-    /// retry (e.g. transport glitch, server-side resource exhaustion). Returns false
-    /// for good and uncertain statuses, and for permanent design-time errors.
+    /// Bad statuses where reloading the structure now cannot help, so the browse/read caller skips
+    /// the node instead of aborting the load. Superset of <see cref="SessionPermanentCodes"/> by the
+    /// access-scoped codes, which are deterministic for the current session even though they may
+    /// recover over a longer horizon.
+    /// </summary>
+    private static readonly HashSet<uint> LoadSkipCodes =
+    [
+        .. SessionPermanentCodes,
+        StatusCodes.BadUserAccessDenied,
+        StatusCodes.BadNotReadable,
+        StatusCodes.BadNotImplemented
+    ];
+
+    /// <summary>
+    /// True iff <paramref name="statusCode"/> is a bad status that could recover without a new
+    /// session (e.g. transport glitch, server-side resource exhaustion, a later permission grant).
+    /// Returns false for good and uncertain statuses. Used by the subscribe and write paths.
     /// </summary>
     public static bool IsTransientError(StatusCode statusCode)
     {
-        return StatusCode.IsBad(statusCode) && !PermanentCodes.Contains(statusCode.Code);
+        return StatusCode.IsBad(statusCode) && !SessionPermanentCodes.Contains(statusCode.Code);
     }
+
+    /// <summary>
+    /// Throws <see cref="OpcUaTransientServiceException"/> if <paramref name="statusCode"/> is a bad
+    /// status that a fresh load could clear, so the browse/read caller aborts and lets reconnect
+    /// retry. Statuses that would repeat immediately on reload (permanent design-time and
+    /// access-scoped codes) and non-bad statuses are ignored, so the caller logs and skips the node.
+    /// </summary>
+    public static void ThrowIfTransientError(StatusCode statusCode, string operation, NodeId? nodeId)
+    {
+        if (StatusCode.IsBad(statusCode) && !LoadSkipCodes.Contains(statusCode.Code))
+        {
+            throw new OpcUaTransientServiceException(operation, nodeId, statusCode);
+        }
+    }
+
+    /// <summary>
+    /// True iff the <see cref="ServiceResultException"/> indicates the server rejected
+    /// the batch size rather than the operation itself.
+    /// </summary>
+    public static bool IsBatchTooLarge(ServiceResultException exception) => exception.StatusCode switch
+    {
+        StatusCodes.BadTooManyOperations => true,
+        StatusCodes.BadEncodingLimitsExceeded => true,
+        StatusCodes.BadResponseTooLarge => true,
+        _ => false,
+    };
 }

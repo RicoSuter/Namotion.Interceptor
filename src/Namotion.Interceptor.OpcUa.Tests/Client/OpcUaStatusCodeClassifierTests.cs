@@ -4,10 +4,11 @@ using Opc.Ua;
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 /// <summary>
-/// Tests for the shared OPC UA status code classifier. One permanent list backs every
-/// callsite, so a single classifier covers the write and subscription-health paths.
-/// Verifies that the classifier treats codes consistently regardless of the operation
-/// context they appear in.
+/// Tests for the OPC UA status code classifier. It answers two questions that the access-scoped
+/// codes answer oppositely: <see cref="OpcUaStatusCodeClassifier.IsTransientError"/> (can this
+/// recover without a new session?) backs the subscribe and write paths, and
+/// <see cref="OpcUaStatusCodeClassifier.ThrowIfTransientError"/> (would reloading now help?) backs
+/// the browse and read paths, where access-scoped codes are skipped rather than retried.
 /// </summary>
 public class OpcUaStatusCodeClassifierTests
 {
@@ -20,7 +21,7 @@ public class OpcUaStatusCodeClassifierTests
     [InlineData(StatusCodes.BadSecurityModeInsufficient)]
     [InlineData(StatusCodes.BadNotWritable)]
     [InlineData(StatusCodes.BadWriteNotSupported)]
-    public void WhenStatusIsPermanentBadCode_ThenIsTransientErrorReturnsFalse(uint statusCode)
+    public void WhenStatusIsSessionPermanent_ThenIsTransientErrorReturnsFalse(uint statusCode)
     {
         // Arrange
         var status = new StatusCode(statusCode);
@@ -97,5 +98,45 @@ public class OpcUaStatusCodeClassifierTests
 
         // Act & Assert
         Assert.False(OpcUaStatusCodeClassifier.IsTransientError(status));
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.BadTimeout)]
+    [InlineData(StatusCodes.BadOutOfService)]
+    [InlineData(StatusCodes.BadTooManyMonitoredItems)]
+    [InlineData(StatusCodes.BadServerNotConnected)]
+    public void WhenBrowseStatusCanClearOnReload_ThenThrowIfTransientErrorThrows(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act & Assert
+        var exception = Assert.Throws<OpcUaTransientServiceException>(
+            () => OpcUaStatusCodeClassifier.ThrowIfTransientError(status, "Browse", new NodeId(1)));
+        Assert.Equal("Browse", exception.Operation);
+        Assert.Equal(status, exception.StatusCode);
+    }
+
+    [Theory]
+    // Permanent design-time codes: reloading repeats the failure, so the caller skips the node.
+    [InlineData(StatusCodes.BadNodeIdUnknown)]
+    [InlineData(StatusCodes.BadTypeMismatch)]
+    [InlineData(StatusCodes.BadSecurityModeInsufficient)]
+    // Access-scoped codes: transient over a longer horizon, but deterministic for this session, so
+    // a browse/read reload would crash-loop. They must NOT throw here even though IsTransientError
+    // classifies them transient for the subscribe path.
+    [InlineData(StatusCodes.BadUserAccessDenied)]
+    [InlineData(StatusCodes.BadNotReadable)]
+    [InlineData(StatusCodes.BadNotImplemented)]
+    // Non-bad statuses never throw.
+    [InlineData(StatusCodes.Good)]
+    [InlineData(StatusCodes.Uncertain)]
+    public void WhenBrowseStatusWouldRepeatOnReload_ThenThrowIfTransientErrorDoesNotThrow(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act & Assert (does not throw)
+        OpcUaStatusCodeClassifier.ThrowIfTransientError(status, "Browse", new NodeId(1));
     }
 }

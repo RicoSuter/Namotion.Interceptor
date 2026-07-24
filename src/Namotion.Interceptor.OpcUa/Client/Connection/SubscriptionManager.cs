@@ -4,6 +4,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Performance;
 using Namotion.Interceptor.Tracking.Change;
@@ -36,7 +37,7 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly PollingManager? _pollingManager;
-    private readonly ReadAfterWriteManager? _readAfterWriteManager;
+    private readonly IReadAfterWriteRegistrar? _readAfterWriteManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -50,6 +51,7 @@ internal class SubscriptionManager : IAsyncDisposable
     internal const int MaxHealAttemptsBeforeEscalation = 3;
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
+    private volatile bool _callbacksEnabled; // Gated to false until subscription setup completes
 
     /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
@@ -84,7 +86,7 @@ internal class SubscriptionManager : IAsyncDisposable
         OpcUaSubjectClientSource source,
         SubjectPropertyWriter propertyWriter,
         PollingManager? pollingManager,
-        ReadAfterWriteManager? readAfterWriteManager,
+        IReadAfterWriteRegistrar? readAfterWriteManager,
         OpcUaClientConfiguration configuration,
         ILogger logger)
     {
@@ -101,6 +103,11 @@ internal class SubscriptionManager : IAsyncDisposable
         Session session,
         CancellationToken cancellationToken)
     {
+        // Close the callback gate first so a reconnection re-setup cannot let an in-flight or
+        // newly-entering notification pass on the previous setup's stale-true flag. The gate
+        // reopens only as the final statement, after the detached-subject sweep.
+        _callbacksEnabled = false;
+
         // Clear any existing subscriptions and monitored items from previous session (reconnection scenario).
         // Old subscriptions are orphaned (belong to dead session), so we just need to remove our references.
         foreach (var oldSubscription in _subscriptions.Keys)
@@ -167,17 +174,29 @@ internal class SubscriptionManager : IAsyncDisposable
 
             await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
 
-            // Register properties with ReadAfterWriteManager now that we know revised sampling intervals
-            RegisterPropertiesWithReadAfterWriteManager(subscription);
-
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             _subscriptions.TryAdd(subscription, 0);
         }
+
+        // Sweep before read-after-write registration so a subject that detached during setup
+        // is never registered. Callbacks stay gated until after both the sweep and survivor
+        // registration complete, so no notification can reach a subject during setup.
+        SweepDetachedSubjects();
+
+        RegisterSurvivors(_subscriptions.Keys.SelectMany(s => s.MonitoredItems));
+
+        // Open the gate only after the sweep and survivor registration are complete.
+        _callbacksEnabled = true;
     }
+
+    // Inbound notifications are dropped while shutting down or before the setup gate opens.
+    // OnFastDataChange and the ApplyDataChange test seam share this predicate so the gating
+    // test exercises the same flag the live callback checks.
+    private bool AreCallbacksSuppressed => _shuttingDown || !_callbacksEnabled;
 
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
-        if (_shuttingDown)
+        if (AreCallbacksSuppressed)
         {
             return;
         }
@@ -287,7 +306,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 continue;
             }
 
-            var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
+            var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
 
             switch (ClassifyFailedItem(statusCode, pollingEnabled))
             {
@@ -490,23 +509,44 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Registers all successfully created monitored items with ReadAfterWriteManager.
-    /// Called after ApplyChangesAsync when we know the revised sampling intervals.
+    /// Removes monitored items for every subject that is no longer in the registry.
     /// </summary>
-    private void RegisterPropertiesWithReadAfterWriteManager(Subscription subscription)
+    private void SweepDetachedSubjects()
+    {
+        var swept = new HashSet<IInterceptorSubject>();
+        foreach (var property in _monitoredItems.Values)
+        {
+            var subject = property.Reference.Subject;
+            if (subject.TryGetRegisteredSubject() is null && swept.Add(subject))
+            {
+                RemoveItemsForSubject(subject);
+                _pollingManager?.RemoveItemsForSubject(subject);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Registers read-after-write tracking for monitored items whose subject survived the sweep.
+    /// Only items that are created on the server and still present in <c>_monitoredItems</c>
+    /// (the sweep removed detached subjects' handles) are registered.
+    /// </summary>
+    private void RegisterSurvivors(IEnumerable<MonitoredItem> monitoredItems)
     {
         if (_readAfterWriteManager is null)
         {
             return;
         }
 
-        foreach (var item in subscription.MonitoredItems)
+        foreach (var item in monitoredItems)
         {
-            if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
+            if (item is { Handle: RegisteredSubjectProperty property, Status.Created: true } &&
+                _monitoredItems.ContainsKey(item.ClientHandle))
             {
-                var requestedInterval = GetRequestedSamplingInterval(property);
-                var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
-                _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval);
+                _readAfterWriteManager.RegisterProperty(
+                    item.StartNodeId,
+                    property,
+                    GetRequestedSamplingInterval(property),
+                    TimeSpan.FromMilliseconds(item.Status.SamplingInterval));
             }
         }
     }
@@ -525,9 +565,52 @@ internal class SubscriptionManager : IAsyncDisposable
         return _configuration.DefaultSamplingInterval;
     }
 
+    /// <summary>
+    /// Applies a single data change for the given client handle through the property writer,
+    /// mirroring the per-item logic of OnFastDataChange. No-ops when gated or shutting down,
+    /// and when the handle is not in the monitored items dictionary.
+    /// Intended as a unit-testable seam: it exercises the same gate flag as OnFastDataChange
+    /// without requiring a live OPC UA SDK Subscription.
+    /// </summary>
+    internal void ApplyDataChange(uint clientHandle, DateTimeOffset timestamp, object? value)
+    {
+        if (AreCallbacksSuppressed)
+        {
+            return;
+        }
+
+        if (!_monitoredItems.TryGetValue(clientHandle, out var property))
+        {
+            return;
+        }
+
+        var receivedTimestamp = DateTimeOffset.UtcNow;
+        var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, property);
+        var state = (source: _source, property, timestamp, receivedTimestamp, convertedValue, logger: _logger);
+        _propertyWriter.Write(state, static s =>
+        {
+            try
+            {
+                s.property.SetValueFromSource(s.source, s.timestamp, s.receivedTimestamp, s.convertedValue);
+            }
+            catch (Exception e)
+            {
+                s.logger.LogError(e, "Failed to apply change for property {PropertyName}.", s.property.Name);
+            }
+        });
+    }
+
+    internal bool AreCallbacksEnabledForTesting => _callbacksEnabled;
+    internal void EnableCallbacksForTesting() => _callbacksEnabled = true;
+    internal IDictionary<uint, RegisteredSubjectProperty> MonitoredItemsForTesting => _monitoredItems;
+
+    internal void SweepDetachedSubjectsForTesting() => SweepDetachedSubjects();
+    internal void RegisterSurvivorsForReadAfterWriteForTesting(IEnumerable<MonitoredItem> monitoredItems) => RegisterSurvivors(monitoredItems);
+
     public async ValueTask DisposeAsync()
     {
         _shuttingDown = true;
+        _callbacksEnabled = false;
 
         var subscriptions = _subscriptions.Keys.ToArray();
         _subscriptions.Clear();
@@ -549,7 +632,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 var disposalTimeout = _configuration.SessionDisposalTimeout;
                 try
                 {
-                    await session.RemoveSubscriptionsAsync(subscriptions, default)
+                    await session.RemoveSubscriptionsAsync(subscriptions, CancellationToken.None)
                         .WaitAsync(disposalTimeout).ConfigureAwait(false);
                 }
                 catch (Exception ex)

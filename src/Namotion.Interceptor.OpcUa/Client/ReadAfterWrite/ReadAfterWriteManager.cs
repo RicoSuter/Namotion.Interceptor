@@ -12,7 +12,7 @@ namespace Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 /// Maintains a NodeId-to-property index for O(1) lookups and handles automatic cleanup.
 /// Thread-safe. All state is protected by a single lock for simplicity.
 /// </summary>
-internal sealed class ReadAfterWriteManager : IAsyncDisposable
+internal sealed class ReadAfterWriteManager : IReadAfterWriteRegistrar, IAsyncDisposable
 {
     private readonly Func<ISession?> _sessionProvider;
     private readonly ISubjectSource _source;
