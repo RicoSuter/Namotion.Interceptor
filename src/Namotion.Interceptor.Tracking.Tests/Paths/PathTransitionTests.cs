@@ -317,9 +317,12 @@ public class PathTransitionTests
         var person = new Person(context) { Children = [childA] };
         using var subscription = person.SubscribeToPath(x => x.Children[0].FirstName, (in SubjectPathChange<string?> _) => { });
 
-        var handlesField = typeof(SubjectPathSubscription<string?>)
+        var chain = typeof(SubjectPathSubscription<string?>)
+            .GetField("_chain", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(subscription)!;
+        var handlesField = chain.GetType()
             .GetField("_segmentHandles", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var handles = (IDisposable?[])handlesField.GetValue(subscription)!;
+        var handles = (IDisposable?[])handlesField.GetValue(chain)!;
         var upperBefore = handles[0];
         var leafBefore = handles[1];
 
@@ -327,7 +330,7 @@ public class PathTransitionTests
         person.Children = [childB];
 
         // Assert
-        var handlesAfter = (IDisposable?[])handlesField.GetValue(subscription)!;
+        var handlesAfter = (IDisposable?[])handlesField.GetValue(chain)!;
         Assert.Same(upperBefore, handlesAfter[0]);   // the segment above the change is untouched
         Assert.NotSame(leafBefore, handlesAfter[1]); // the leaf below the change was rebuilt
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount()); // net listener count preserved

@@ -775,10 +775,15 @@ public class PathDormancyTests
         new PropertyReference(subject, propertyName)
             .TryGetPropertyData(PropertyChangeSubscription.ListenersKey, out _);
 
-    private static Array GetSegmentObservers<TValue>(SubjectPathSubscription<TValue> subscription) =>
-        (Array)typeof(SubjectPathSubscription<TValue>)
-            .GetField("_segmentObservers", BindingFlags.NonPublic | BindingFlags.Instance)!
+    private static Array GetSegmentObservers<TValue>(SubjectPathSubscription<TValue> subscription)
+    {
+        var chain = typeof(SubjectPathSubscription<TValue>)
+            .GetField("_chain", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(subscription)!;
+        return (Array)chain.GetType()
+            .GetField("_segmentObservers", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(chain)!;
+    }
 
     // A read interceptor for the slot-identity concurrency test. It parks the FIRST read of one specific
     // property (the retracking walk, holding the subscription lock) so a late writer can capture the still-live
