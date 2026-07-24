@@ -145,7 +145,7 @@ It differs from a per-property subscription in both what it watches and what it 
 |---|---|---|
 | Observes | a fixed instance and property | a location in the graph as it reshapes |
 | Delivery | every committed write | a current-value observer, so racing and no-op writes coalesce |
-| Event payload | the write's exact old and new value and origin | an observed-state transition (`Old`/`New`); `New` is a fresh re-read, not a specific write's value |
+| Event payload | the write's exact old and new value and origin | an observed-state transition (`OldState`/`NewState`); `NewState` is a fresh re-read, not a specific write's value |
 | Use when | you need every write or per-write origin fidelity (a write log, via the queue or observable channels) | you care about the value at a location as intermediates appear, move, or vanish |
 
 Two overloads mirror the per-property primitive, one taking a callback and one a zero-closure observer:
@@ -175,7 +175,7 @@ if (initial.IsResolved)
 
 For a single-segment path (`x => x.Speed`) `SubscribeToProperty` is the lighter choice; `SubscribeToPath` accepts it for uniformity but adds walk and retrack machinery you do not need there.
 
-**Seeding without races**: subscribe-then-read-`Current` is not atomic with the event stream. A write may fire the callback before you read `Current` the first time. Pull consumers (render from `Current`, re-render on every callback) are always safe, since `Current` is authoritative and side-effect free. A caching consumer must not seed with a value captured before a newer callback applied, or it can go permanently stale. Hold one consumer lock across subscription creation, handle assignment, and the initial seed, and re-take it in every callback, reading `Current` at apply time rather than a cached snapshot or the event's `New`:
+**Seeding without races**: subscribe-then-read-`Current` is not atomic with the event stream. A write may fire the callback before you read `Current` the first time. Pull consumers (render from `Current`, re-render on every callback) are always safe, since `Current` is authoritative and side-effect free. A caching consumer must not seed with a value captured before a newer callback applied, or it can go permanently stale. Hold one consumer lock across subscription creation, handle assignment, and the initial seed, and re-take it in every callback, reading `Current` at apply time rather than a cached snapshot or the event's `NewState`:
 
 ```csharp
 lock (gate)
@@ -186,7 +186,7 @@ lock (gate)
         {
             lock (gate)
             {
-                state = subscription.Current; // read Current, never change.New or a cached snapshot
+                state = subscription.Current; // read Current, never change.NewState or a cached snapshot
             }
         });
 
@@ -198,7 +198,7 @@ A callback racing the subscribe blocks on `gate` until the seed is applied, and 
 
 **Observed state**: each observed state is a `SubjectPathValue<TValue>` (its members are documented on the type). The point to know is that it is a tri-state: an unresolved path, a resolved leaf with a value, and a resolved leaf whose value is null are all distinct, so `TryGetValue` returns true with a null value only for the resolved-null case.
 
-**Transitions and suppression**: a `SubjectPathChange<TValue>` carries `Kind`, `Old`, `New`, and `Cause` (documented on the type). The contracts to rely on: an event is suppressed when the observed state does not change (`Old` equals `New`), so chained transitions hold (event N+1's `Old` equals event N's `New`) and racing or no-op writes coalesce.
+**Transitions and suppression**: a `SubjectPathChange<TValue>` carries `Kind`, `OldState`, `NewState`, and `Cause` (documented on the type). The contracts to rely on: an event is suppressed when the observed state does not change (`OldState` equals `NewState`), so chained transitions hold (event N+1's `OldState` equals event N's `NewState`) and racing or no-op writes coalesce.
 
 **Expression rules**: a path chains property access, collection indices, and dictionary keys directly off the lambda parameter. Malformed shapes throw `ArgumentException` at subscribe with a message naming the problem (the overloads document the exceptions), so they are not enumerated here. The contracts that do not announce themselves are:
 

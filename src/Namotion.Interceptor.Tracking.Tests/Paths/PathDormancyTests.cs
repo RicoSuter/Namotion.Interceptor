@@ -62,8 +62,8 @@ public class PathDormancyTests
         // "A2" was missed, so the observer converges rather than replaying every skipped write.
         Assert.Equal(2, events.Count);
         Assert.Equal(SubjectPathChangeKind.ValueChange, events[1].Kind);
-        Assert.Equal("A1", events[1].Old.GetValueOrDefault());
-        Assert.Equal("A3", events[1].New.GetValueOrDefault());
+        Assert.Equal("A1", events[1].OldState.GetValueOrDefault());
+        Assert.Equal("A3", events[1].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -105,15 +105,15 @@ public class PathDormancyTests
         // listener moved off childA onto childC.
         var resync = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.PathChange, resync.Kind);
-        Assert.Equal("A0", resync.Old.GetValueOrDefault());
-        Assert.Equal("C0", resync.New.GetValueOrDefault());
+        Assert.Equal("A0", resync.OldState.GetValueOrDefault());
+        Assert.Equal("C0", resync.NewState.GetValueOrDefault());
         Assert.False(HasListener(childA, nameof(Node.Name)));
         Assert.True(HasListener(childC, nameof(Node.Name)));
 
         // Act & Assert: writes to the new suffix deliver; writes to the (detached, off-path) old subject do not.
         childC.Name = "C1";
         Assert.Equal(2, events.Count);
-        Assert.Equal("C1", events[1].New.GetValueOrDefault());
+        Assert.Equal("C1", events[1].NewState.GetValueOrDefault());
 
         childA.Name = "A9";
         Assert.Equal(2, events.Count);
@@ -154,15 +154,15 @@ public class PathDormancyTests
         // Assert: the delivered value reflects the true observed state (childB.Name), retracked onto childB.
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.PathChange, change.Kind);
-        Assert.Equal("A0", change.Old.GetValueOrDefault());
-        Assert.Equal("B0", change.New.GetValueOrDefault());
+        Assert.Equal("A0", change.OldState.GetValueOrDefault());
+        Assert.Equal("B0", change.NewState.GetValueOrDefault());
         Assert.False(HasListener(childA, nameof(Node.Name))); // retracked off the old subject
         Assert.True(HasListener(childB, nameof(Node.Name)));
 
         // Act & Assert: writes to the new suffix deliver; writes to the old subject do not.
         childB.Name = "B1";
         Assert.Equal(2, events.Count);
-        Assert.Equal("B1", events[1].New.GetValueOrDefault());
+        Assert.Equal("B1", events[1].NewState.GetValueOrDefault());
 
         childA.Name = "A-again";
         Assert.Equal(2, events.Count);
@@ -224,7 +224,7 @@ public class PathDormancyTests
         Assert.Equal("New", targetLeaf.FirstName);
         Assert.Equal("New", subscription.Current.GetValueOrDefault());
         Assert.NotEmpty(observed);
-        Assert.Equal("New", observed[^1].New.GetValueOrDefault());
+        Assert.Equal("New", observed[^1].NewState.GetValueOrDefault());
     }
 
     // --- Scenario 4: context-inheritance prerequisite ------------------------------------------------
@@ -251,7 +251,7 @@ public class PathDormancyTests
         root.Child = childB;
         var structural = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.PathChange, structural.Kind);
-        Assert.Equal("B0", structural.New.GetValueOrDefault());
+        Assert.Equal("B0", structural.NewState.GetValueOrDefault());
 
         // Act & Assert: the new deeper segment is inert too (childB is also context-free).
         childB.Name = "B1";
@@ -277,7 +277,7 @@ public class PathDormancyTests
         // Assert: the same path that was inert under bare subscriptions now delivers.
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
-        Assert.Equal("A1", change.New.GetValueOrDefault());
+        Assert.Equal("A1", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -300,7 +300,7 @@ public class PathDormancyTests
         // Assert: delivery depends only on the child being in a notifying context, whether inherited or its own.
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
-        Assert.Equal("A1", change.New.GetValueOrDefault());
+        Assert.Equal("A1", change.NewState.GetValueOrDefault());
     }
 
     // --- Scenario 5: newly-assigned child (dispatch-after-lifecycle prerequisite) ---------------------
@@ -319,7 +319,7 @@ public class PathDormancyTests
         using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) =>
         {
             events.Add(c);
-            if (c.New.GetValueOrDefault() == "init" && !reacted)
+            if (c.NewState.GetValueOrDefault() == "init" && !reacted)
             {
                 reacted = true;
                 child.Name = "reacted"; // write the freshly attached child from inside the callback
@@ -333,9 +333,9 @@ public class PathDormancyTests
         // callback writes it; that write is intercepted and delivered as its own (flattened) event.
         Assert.Equal(2, events.Count);
         Assert.Equal(SubjectPathChangeKind.PathChange, events[0].Kind);
-        Assert.Equal("init", events[0].New.GetValueOrDefault());
-        Assert.Equal("init", events[1].Old.GetValueOrDefault());
-        Assert.Equal("reacted", events[1].New.GetValueOrDefault());
+        Assert.Equal("init", events[0].NewState.GetValueOrDefault());
+        Assert.Equal("init", events[1].OldState.GetValueOrDefault());
+        Assert.Equal("reacted", events[1].NewState.GetValueOrDefault());
         Assert.Equal("reacted", child.Name);
     }
 
@@ -383,7 +383,7 @@ public class PathDormancyTests
         // Assert: the suffix attaches and heals onto beta with a PathChange to its leaf.
         var heal = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.PathChange, heal.Kind);
-        Assert.Equal("B0", heal.New.GetValueOrDefault());
+        Assert.Equal("B0", heal.NewState.GetValueOrDefault());
         Assert.True(HasListener(holder.Beta, nameof(EqualityNode.Name)));
         Assert.False(HasListener(holder.Alpha, nameof(EqualityNode.Name)));
 
@@ -391,8 +391,8 @@ public class PathDormancyTests
         holder.Beta.Name = "B1";
         Assert.Equal(2, events.Count);
         Assert.Equal(SubjectPathChangeKind.ValueChange, events[1].Kind);
-        Assert.Equal("B0", events[1].Old.GetValueOrDefault());
-        Assert.Equal("B1", events[1].New.GetValueOrDefault());
+        Assert.Equal("B0", events[1].OldState.GetValueOrDefault());
+        Assert.Equal("B1", events[1].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -444,7 +444,7 @@ public class PathDormancyTests
         // Assert
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
-        Assert.Equal("C1", change.New.GetValueOrDefault());
+        Assert.Equal("C1", change.NewState.GetValueOrDefault());
     }
 
     // --- Scenario 7: slot-identity guard --------------------------------------------------------------
@@ -476,7 +476,7 @@ public class PathDormancyTests
         Assert.Same(upper0, observersAfter.GetValue(0));
         Assert.Same(upper1, observersAfter.GetValue(1));
         Assert.NotSame(leaf2, observersAfter.GetValue(2));
-        Assert.Equal("L2v", Assert.Single(events).New.GetValueOrDefault());
+        Assert.Equal("L2v", Assert.Single(events).NewState.GetValueOrDefault());
 
         // Act: a legitimate callback from the SURVIVING upper segment (position 1, M.Child) must not be
         // rejected. A generation-counter guard bumped by the position-2 rebuild would wrongly ignore it.
@@ -485,8 +485,8 @@ public class PathDormancyTests
 
         // Assert
         Assert.Equal(2, events.Count);
-        Assert.Equal("L2v", events[1].Old.GetValueOrDefault());
-        Assert.Equal("L3v", events[1].New.GetValueOrDefault());
+        Assert.Equal("L2v", events[1].OldState.GetValueOrDefault());
+        Assert.Equal("L3v", events[1].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -517,8 +517,8 @@ public class PathDormancyTests
         // Assert: exactly one delivery for the single write, and position 1's observer was replaced, with the
         // chain length preserved (no leak).
         var change = Assert.Single(events);
-        Assert.Equal("N", change.Old.GetValueOrDefault());
-        Assert.Equal("Y", change.New.GetValueOrDefault());
+        Assert.Equal("N", change.OldState.GetValueOrDefault());
+        Assert.Equal("Y", change.NewState.GetValueOrDefault());
         Assert.NotSame(position1Before, GetSegmentObservers(subscription).GetValue(1));
         Assert.Equal(3, PropertyChangeSubscriptions.ReadSubscriptionCount());
     }
@@ -589,8 +589,8 @@ public class PathDormancyTests
         {
             var change = Assert.Single(events);
             Assert.Equal(SubjectPathChangeKind.PathChange, change.Kind);
-            Assert.Equal("old", change.Old.GetValueOrDefault());
-            Assert.Equal("new", change.New.GetValueOrDefault());
+            Assert.Equal("old", change.OldState.GetValueOrDefault());
+            Assert.Equal("new", change.NewState.GetValueOrDefault());
         }
 
         // The chain is intact after the dropped stale invocation.
@@ -657,8 +657,8 @@ public class PathDormancyTests
 
         // Assert: the walk fails and publishes unresolved; the leaf listener is torn off the stale suffix.
         Assert.Equal(2, events.Count);
-        Assert.True(events[1].Old.IsResolved);
-        Assert.False(events[1].New.IsResolved);
+        Assert.True(events[1].OldState.IsResolved);
+        Assert.False(events[1].NewState.IsResolved);
         Assert.False(HasListener(child, nameof(Node.Name)));
 
         // Act: clear the failing condition in place. Current now reflects truth again, but merely clearing
@@ -674,12 +674,12 @@ public class PathDormancyTests
 
         // Assert
         Assert.Equal(3, events.Count);
-        Assert.False(events[2].Old.IsResolved);
-        Assert.Equal("H0", events[2].New.GetValueOrDefault());
+        Assert.False(events[2].OldState.IsResolved);
+        Assert.Equal("H0", events[2].NewState.GetValueOrDefault());
 
         healChild.Name = "H1";
         Assert.Equal(4, events.Count);
-        Assert.Equal("H1", events[3].New.GetValueOrDefault());
+        Assert.Equal("H1", events[3].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -704,8 +704,8 @@ public class PathDormancyTests
 
         // Assert: publishes unresolved and tears the leaf listener off the stale suffix.
         Assert.Equal(2, events.Count);
-        Assert.True(events[1].Old.IsResolved);
-        Assert.False(events[1].New.IsResolved);
+        Assert.True(events[1].OldState.IsResolved);
+        Assert.False(events[1].NewState.IsResolved);
         Assert.False(HasListener(element, nameof(Node.Name)));
 
         // Act: clear in place. Current reflects truth again, but clearing alone does not heal.
@@ -719,12 +719,12 @@ public class PathDormancyTests
 
         // Assert
         Assert.Equal(3, events.Count);
-        Assert.False(events[2].Old.IsResolved);
-        Assert.Equal("E2", events[2].New.GetValueOrDefault());
+        Assert.False(events[2].OldState.IsResolved);
+        Assert.Equal("E2", events[2].NewState.GetValueOrDefault());
 
         element.Name = "E3";
         Assert.Equal(4, events.Count);
-        Assert.Equal("E3", events[3].New.GetValueOrDefault());
+        Assert.Equal("E3", events[3].NewState.GetValueOrDefault());
     }
 
     // --- Scenario 10: traversal-failure carve-outs (non-propagation, hostile container) ---------------

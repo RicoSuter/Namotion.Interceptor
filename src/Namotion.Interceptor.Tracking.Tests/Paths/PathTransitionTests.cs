@@ -59,8 +59,8 @@ public class PathTransitionTests
         // Assert
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
-        Assert.Equal("Joe", change.Old.GetValueOrDefault());
-        Assert.Equal("Jack", change.New.GetValueOrDefault());
+        Assert.Equal("Joe", change.OldState.GetValueOrDefault());
+        Assert.Equal("Jack", change.NewState.GetValueOrDefault());
         Assert.Equal(nameof(Person.FirstName), change.Cause.Property.Name);
     }
 
@@ -80,8 +80,8 @@ public class PathTransitionTests
         // Assert: a single-segment path degenerates to a plain leaf watch.
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
-        Assert.Equal("Joe", change.Old.GetValueOrDefault());
-        Assert.Equal("Jack", change.New.GetValueOrDefault());
+        Assert.Equal("Joe", change.OldState.GetValueOrDefault());
+        Assert.Equal("Jack", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -100,9 +100,9 @@ public class PathTransitionTests
         // Assert
         Assert.NotNull(last);
         Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
-        Assert.False(last.Value.Old.IsResolved);
-        Assert.True(last.Value.New.IsResolved);
-        Assert.Equal("Joe", last.Value.New.GetValueOrDefault());
+        Assert.False(last.Value.OldState.IsResolved);
+        Assert.True(last.Value.NewState.IsResolved);
+        Assert.Equal("Joe", last.Value.NewState.GetValueOrDefault());
         Assert.Equal(nameof(Person.Father), last.Value.Cause.Property.Name);
     }
 
@@ -122,9 +122,9 @@ public class PathTransitionTests
         // Assert: resolved -> unresolved, with the last observed value as Old.
         Assert.NotNull(last);
         Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
-        Assert.True(last.Value.Old.IsResolved);
-        Assert.Equal("Joe", last.Value.Old.GetValueOrDefault());
-        Assert.False(last.Value.New.IsResolved);
+        Assert.True(last.Value.OldState.IsResolved);
+        Assert.Equal("Joe", last.Value.OldState.GetValueOrDefault());
+        Assert.False(last.Value.NewState.IsResolved);
         Assert.Equal(nameof(Person.Father), last.Value.Cause.Property.Name);
     }
 
@@ -144,8 +144,8 @@ public class PathTransitionTests
         // Assert: a reassigned intermediate diverges at the child position, so the leaf below is retracked.
         Assert.NotNull(last);
         Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
-        Assert.Equal("Joe", last.Value.Old.GetValueOrDefault());
-        Assert.Equal("Jack", last.Value.New.GetValueOrDefault());
+        Assert.Equal("Joe", last.Value.OldState.GetValueOrDefault());
+        Assert.Equal("Jack", last.Value.NewState.GetValueOrDefault());
         Assert.Equal(nameof(Person.Father), last.Value.Cause.Property.Name);
     }
 
@@ -172,8 +172,8 @@ public class PathTransitionTests
         // Assert
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
-        Assert.Equal("Joe", change.Old.GetValueOrDefault());
-        Assert.Equal("Jack", change.New.GetValueOrDefault());
+        Assert.Equal("Joe", change.OldState.GetValueOrDefault());
+        Assert.Equal("Jack", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -194,8 +194,8 @@ public class PathTransitionTests
         // Assert
         Assert.NotNull(last);
         Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
-        Assert.Equal("Amy", last.Value.Old.GetValueOrDefault());
-        Assert.Equal("Bob", last.Value.New.GetValueOrDefault());
+        Assert.Equal("Amy", last.Value.OldState.GetValueOrDefault());
+        Assert.Equal("Bob", last.Value.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -221,8 +221,8 @@ public class PathTransitionTests
         // Assert
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
-        Assert.Equal("Amy", change.Old.GetValueOrDefault());
-        Assert.Equal("Ann", change.New.GetValueOrDefault());
+        Assert.Equal("Amy", change.OldState.GetValueOrDefault());
+        Assert.Equal("Ann", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -241,9 +241,9 @@ public class PathTransitionTests
         // Assert
         Assert.NotNull(last);
         Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
-        Assert.False(last.Value.Old.IsResolved);
-        Assert.True(last.Value.New.IsResolved);
-        Assert.Equal("Value", last.Value.New.GetValueOrDefault());
+        Assert.False(last.Value.OldState.IsResolved);
+        Assert.True(last.Value.NewState.IsResolved);
+        Assert.Equal("Value", last.Value.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -262,8 +262,8 @@ public class PathTransitionTests
         // Assert
         Assert.NotNull(last);
         Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
-        Assert.Equal("First", last.Value.Old.GetValueOrDefault());
-        Assert.Equal("Second", last.Value.New.GetValueOrDefault());
+        Assert.Equal("First", last.Value.OldState.GetValueOrDefault());
+        Assert.Equal("Second", last.Value.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -282,9 +282,9 @@ public class PathTransitionTests
         // Assert
         Assert.NotNull(last);
         Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
-        Assert.True(last.Value.Old.IsResolved);
-        Assert.Equal("First", last.Value.Old.GetValueOrDefault());
-        Assert.False(last.Value.New.IsResolved);
+        Assert.True(last.Value.OldState.IsResolved);
+        Assert.Equal("First", last.Value.OldState.GetValueOrDefault());
+        Assert.False(last.Value.NewState.IsResolved);
     }
 
     [Fact]
@@ -303,8 +303,8 @@ public class PathTransitionTests
         // Assert
         Assert.NotNull(last);
         Assert.Equal(SubjectPathChangeKind.PathChange, last!.Value.Kind);
-        Assert.True(last.Value.Old.IsResolved);
-        Assert.False(last.Value.New.IsResolved);
+        Assert.True(last.Value.OldState.IsResolved);
+        Assert.False(last.Value.NewState.IsResolved);
     }
 
     [Fact]
@@ -346,7 +346,7 @@ public class PathTransitionTests
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
         {
             delivered.Add(change);
-            if (change.New.GetValueOrDefault() == "Jack")
+            if (change.NewState.GetValueOrDefault() == "Jack")
             {
                 if (!nestedWriteDone)
                 {
@@ -368,7 +368,7 @@ public class PathTransitionTests
 
         // Assert: the suppressed write delivered nothing of its own but recovered the stranded backlog.
         Assert.Equal(2, delivered.Count);
-        Assert.Equal("Jack", delivered[1].Old.GetValueOrDefault());
-        Assert.Equal("Zed", delivered[1].New.GetValueOrDefault());
+        Assert.Equal("Jack", delivered[1].OldState.GetValueOrDefault());
+        Assert.Equal("Zed", delivered[1].NewState.GetValueOrDefault());
     }
 }

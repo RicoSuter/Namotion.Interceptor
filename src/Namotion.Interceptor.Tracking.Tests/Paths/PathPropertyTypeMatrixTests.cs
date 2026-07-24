@@ -36,8 +36,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal(7, change.Old.GetValueOrDefault());
-        Assert.Equal(42, change.New.GetValueOrDefault());
+        Assert.Equal(7, change.OldState.GetValueOrDefault());
+        Assert.Equal(42, change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -57,8 +57,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal(1.5, change.Old.GetValueOrDefault());
-        Assert.Equal(3.5, change.New.GetValueOrDefault());
+        Assert.Equal(1.5, change.OldState.GetValueOrDefault());
+        Assert.Equal(3.5, change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -78,8 +78,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -99,18 +99,18 @@ public class PathPropertyTypeMatrixTests
 
         // Assert: the null is a RESOLVED value, not the unresolved state.
         var toNull = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal(5, toNull.Old.GetValueOrDefault());
-        Assert.True(toNull.New.IsResolved);
-        Assert.Null(toNull.New.GetValueOrDefault());
+        Assert.Equal(5, toNull.OldState.GetValueOrDefault());
+        Assert.True(toNull.NewState.IsResolved);
+        Assert.Null(toNull.NewState.GetValueOrDefault());
 
         // Act: retrack again to unresolved (intermediate nulled) -> distinct transition delivers.
         holder.Leaf = null;
 
         // Assert
         Assert.Equal(2, events.Count);
-        Assert.True(events[1].Old.IsResolved);
-        Assert.Null(events[1].Old.GetValueOrDefault());
-        Assert.False(events[1].New.IsResolved);
+        Assert.True(events[1].OldState.IsResolved);
+        Assert.Null(events[1].OldState.GetValueOrDefault());
+        Assert.False(events[1].NewState.IsResolved);
     }
 
     [Fact]
@@ -129,9 +129,9 @@ public class PathPropertyTypeMatrixTests
 
         // Assert: resolved-null is a distinct state from unresolved.
         var heal = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.False(heal.Old.IsResolved);
-        Assert.True(heal.New.IsResolved);
-        Assert.Null(heal.New.GetValueOrDefault());
+        Assert.False(heal.OldState.IsResolved);
+        Assert.True(heal.NewState.IsResolved);
+        Assert.Null(heal.NewState.GetValueOrDefault());
         Assert.True(subscription.Current.IsResolved);
         Assert.Null(subscription.Current.GetValueOrDefault());
 
@@ -140,9 +140,9 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         Assert.Equal(2, events.Count);
-        Assert.True(events[1].Old.IsResolved);
-        Assert.Null(events[1].Old.GetValueOrDefault());
-        Assert.False(events[1].New.IsResolved);
+        Assert.True(events[1].OldState.IsResolved);
+        Assert.Null(events[1].OldState.GetValueOrDefault());
+        Assert.False(events[1].NewState.IsResolved);
     }
 
     // --- Subject-reference leaf (TValue is itself a subject type) --------------------------------------
@@ -166,8 +166,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert: a different reference delivers (no Equals override, so EqualityComparer is reference equality).
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Same(grandA, change.Old.GetValueOrDefault());
-        Assert.Same(grandB, change.New.GetValueOrDefault());
+        Assert.Same(grandA, change.OldState.GetValueOrDefault());
+        Assert.Same(grandB, change.NewState.GetValueOrDefault());
 
         // Act: retrack via a fresh intermediate holding the SAME grandchild instance.
         root.Child = new Node { Name = "M3", Child = grandB };
@@ -195,16 +195,16 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("Joe", change.Old.GetValueOrDefault());
-        Assert.Equal("Jack", change.New.GetValueOrDefault());
+        Assert.Equal("Joe", change.OldState.GetValueOrDefault());
+        Assert.Equal("Jack", change.NewState.GetValueOrDefault());
 
         // Act: null the intermediate -> break to unresolved.
         person.Father = null;
 
         // Assert
         Assert.Equal(2, events.Count);
-        Assert.True(events[1].Old.IsResolved);
-        Assert.False(events[1].New.IsResolved);
+        Assert.True(events[1].OldState.IsResolved);
+        Assert.False(events[1].NewState.IsResolved);
     }
 
     // --- Subject collection intermediates -------------------------------------------------------------
@@ -225,8 +225,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -245,8 +245,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -265,8 +265,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -313,8 +313,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -383,8 +383,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal(1.0m, change.Old.GetValueOrDefault());
-        Assert.Equal(2.0m, change.New.GetValueOrDefault());
+        Assert.Equal(1.0m, change.OldState.GetValueOrDefault());
+        Assert.Equal(2.0m, change.NewState.GetValueOrDefault());
     }
 
     // --- Subject dictionary intermediates -------------------------------------------------------------
@@ -405,8 +405,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -425,8 +425,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -445,8 +445,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -465,8 +465,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     // --- Interface-typed intermediate -----------------------------------------------------------------
@@ -488,8 +488,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     // --- Interface default leaves: [Derived] subscribable, plain rejected ------------------------------
@@ -511,8 +511,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("D:A", change.Old.GetValueOrDefault());
-        Assert.Equal("D:B", change.New.GetValueOrDefault());
+        Assert.Equal("D:A", change.OldState.GetValueOrDefault());
+        Assert.Equal("D:B", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -555,8 +555,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var recalc = AssertSingleTransition(events, SubjectPathChangeKind.ValueChange);
-        Assert.Equal("Ann", recalc.Old.GetValueOrDefault());
-        Assert.Equal("Bob", recalc.New.GetValueOrDefault());
+        Assert.Equal("Ann", recalc.OldState.GetValueOrDefault());
+        Assert.Equal("Bob", recalc.NewState.GetValueOrDefault());
 
         // Act: a structural retrack of the intermediate also moves the derived leaf value.
         person.Father = new Person { FirstName = "Cody" };
@@ -564,8 +564,8 @@ public class PathPropertyTypeMatrixTests
         // Assert
         Assert.Equal(2, events.Count);
         Assert.Equal(SubjectPathChangeKind.PathChange, events[1].Kind);
-        Assert.Equal("Bob", events[1].Old.GetValueOrDefault());
-        Assert.Equal("Cody", events[1].New.GetValueOrDefault());
+        Assert.Equal("Bob", events[1].OldState.GetValueOrDefault());
+        Assert.Equal("Cody", events[1].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -607,8 +607,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -662,8 +662,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("L", change.Old.GetValueOrDefault());
-        Assert.Equal("L2", change.New.GetValueOrDefault());
+        Assert.Equal("L", change.OldState.GetValueOrDefault());
+        Assert.Equal("L2", change.NewState.GetValueOrDefault());
     }
 
     // --- Custom-comparer dictionary (case-insensitive, generic-only implementation) --------------------
@@ -689,8 +689,8 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal("A", change.Old.GetValueOrDefault());
-        Assert.Equal("B", change.New.GetValueOrDefault());
+        Assert.Equal("A", change.OldState.GetValueOrDefault());
+        Assert.Equal("B", change.NewState.GetValueOrDefault());
     }
 
     // --- Non-IEquatable struct leaf -------------------------------------------------------------------
@@ -714,9 +714,9 @@ public class PathPropertyTypeMatrixTests
 
         // Assert
         var change = AssertSingleTransition(events, SubjectPathChangeKind.PathChange);
-        Assert.Equal(1, change.Old.GetValueOrDefault().X);
-        Assert.Equal(3, change.New.GetValueOrDefault().X);
-        Assert.Equal(4, change.New.GetValueOrDefault().Y);
+        Assert.Equal(1, change.OldState.GetValueOrDefault().X);
+        Assert.Equal(3, change.NewState.GetValueOrDefault().X);
+        Assert.Equal(4, change.NewState.GetValueOrDefault().Y);
     }
 
     // --- Helpers --------------------------------------------------------------------------------------

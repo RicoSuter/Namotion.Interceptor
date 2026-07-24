@@ -41,7 +41,7 @@ public class PathCauseTests
         Assert.Same(child, change.Cause.Property.Subject);
         Assert.Equal(ChangeOriginKind.Local, change.Cause.Origin.Kind);
         Assert.Null(change.Cause.Origin.Source);
-        Assert.Equal("c1", change.New.GetValueOrDefault());
+        Assert.Equal("c1", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class PathCauseTests
         Assert.Equal(nameof(Node.Child), change.Cause.Property.Name);
         Assert.Same(root, change.Cause.Property.Subject);
         Assert.Equal(ChangeOriginKind.Local, change.Cause.Origin.Kind);
-        Assert.Equal("c2", change.New.GetValueOrDefault());
+        Assert.Equal("c2", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public class PathCauseTests
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
         Assert.Equal(ChangeOriginKind.FromSource, change.Cause.Origin.Kind);
         Assert.Same(source, change.Cause.Origin.Source);
-        Assert.Equal("fromSource", change.New.GetValueOrDefault());
+        Assert.Equal("fromSource", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public class PathCauseTests
         Assert.Equal(nameof(Node.Child), change.Cause.Property.Name);
         Assert.Equal(ChangeOriginKind.FromSource, change.Cause.Origin.Kind);
         Assert.Same(source, change.Cause.Origin.Source);
-        Assert.Equal("c2", change.New.GetValueOrDefault());
+        Assert.Equal("c2", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -185,8 +185,8 @@ public class PathCauseTests
         }
 
         var change = Assert.Single(observed);
-        Assert.Equal("local", change.New.GetValueOrDefault());
-        Assert.NotEqual("fromSource", change.New.GetValueOrDefault());
+        Assert.Equal("local", change.NewState.GetValueOrDefault());
+        Assert.NotEqual("fromSource", change.NewState.GetValueOrDefault());
         Assert.Equal(ChangeOriginKind.FromSource, change.Cause.Origin.Kind);
         Assert.Same(source, change.Cause.Origin.Source);
 

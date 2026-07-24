@@ -73,7 +73,7 @@ public class PathDisposeTests
         var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
         {
             delivered.Add(change);
-            if (change.New.GetValueOrDefault() == "Jack")
+            if (change.NewState.GetValueOrDefault() == "Jack")
             {
                 if (!nestedWriteDone)
                 {
@@ -113,7 +113,7 @@ public class PathDisposeTests
         var nestedWritesDone = false;
         subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
         {
-            var value = change.New.GetValueOrDefault();
+            var value = change.NewState.GetValueOrDefault();
             delivered.Add(value);
             if (value == "Jack" && !nestedWritesDone)
             {

@@ -216,8 +216,8 @@ namespace Namotion.Interceptor.Tracking.Paths
     {
         public Namotion.Interceptor.Tracking.Change.SubjectPropertyChange Cause { get; }
         public Namotion.Interceptor.Tracking.Paths.SubjectPathChangeKind Kind { get; }
-        public Namotion.Interceptor.Tracking.Paths.SubjectPathValue<TValue> New { get; }
-        public Namotion.Interceptor.Tracking.Paths.SubjectPathValue<TValue> Old { get; }
+        public Namotion.Interceptor.Tracking.Paths.SubjectPathValue<TValue> NewState { get; }
+        public Namotion.Interceptor.Tracking.Paths.SubjectPathValue<TValue> OldState { get; }
     }
     public static class SubjectPathSubscriptionExtensions
     {

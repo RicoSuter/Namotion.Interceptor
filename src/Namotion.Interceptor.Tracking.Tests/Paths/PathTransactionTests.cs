@@ -68,8 +68,8 @@ public class PathTransactionTests
         // Assert
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
-        Assert.Equal("Joe", change.Old.GetValueOrDefault());
-        Assert.Equal("Jack", change.New.GetValueOrDefault());
+        Assert.Equal("Joe", change.OldState.GetValueOrDefault());
+        Assert.Equal("Jack", change.NewState.GetValueOrDefault());
     }
 
     // C: a watched leaf write staged in a transaction is not delivered until commit; the commit replay
@@ -97,8 +97,8 @@ public class PathTransactionTests
         // Assert: the commit replay applied the leaf write and delivered the ValueChange.
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
-        Assert.Equal("Joe", change.Old.GetValueOrDefault());
-        Assert.Equal("Jack", change.New.GetValueOrDefault());
+        Assert.Equal("Joe", change.OldState.GetValueOrDefault());
+        Assert.Equal("Jack", change.NewState.GetValueOrDefault());
     }
 
     // D: a watched leaf write staged in a transaction disposed without commit delivers nothing and the model
@@ -151,10 +151,10 @@ public class PathTransactionTests
 
         // Assert: Accept was applied (Original->Applied) then reverted (Applied->Original); model converged.
         Assert.Equal(2, events.Count);
-        Assert.Equal("Original", events[0].Old.GetValueOrDefault());
-        Assert.Equal("Applied", events[0].New.GetValueOrDefault());
-        Assert.Equal("Applied", events[1].Old.GetValueOrDefault());
-        Assert.Equal("Original", events[1].New.GetValueOrDefault());
+        Assert.Equal("Original", events[0].OldState.GetValueOrDefault());
+        Assert.Equal("Applied", events[0].NewState.GetValueOrDefault());
+        Assert.Equal("Applied", events[1].OldState.GetValueOrDefault());
+        Assert.Equal("Original", events[1].NewState.GetValueOrDefault());
         Assert.Equal("Original", node.Accept);
         Assert.Equal("Original", subscription.Current.GetValueOrDefault());
     }
@@ -201,8 +201,8 @@ public class PathTransactionTests
             // The derived write itself is a leaf ValueChange on the committed chain.
             var inTransaction = Assert.Single(events);
             Assert.Equal(SubjectPathChangeKind.ValueChange, inTransaction.Kind);
-            Assert.Equal("A0", inTransaction.Old.GetValueOrDefault());
-            Assert.Equal("A1", inTransaction.New.GetValueOrDefault());
+            Assert.Equal("A0", inTransaction.OldState.GetValueOrDefault());
+            Assert.Equal("A1", inTransaction.NewState.GetValueOrDefault());
         } // rollback: the staged Child=B is discarded
 
         // Assert: no stranding. B never got a listener; the count is unchanged; the chain is still on A.
@@ -218,8 +218,8 @@ public class PathTransactionTests
         // Assert
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.ValueChange, change.Kind);
-        Assert.Equal("A1", change.Old.GetValueOrDefault());
-        Assert.Equal("A2", change.New.GetValueOrDefault());
+        Assert.Equal("A1", change.OldState.GetValueOrDefault());
+        Assert.Equal("A2", change.NewState.GetValueOrDefault());
     }
 
     // G: a callback that throws during commit replay is caught by the transaction apply loop

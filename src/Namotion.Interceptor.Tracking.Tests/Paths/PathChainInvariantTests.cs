@@ -52,8 +52,8 @@ public class PathChainInvariantTests
 
         var change = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.PathChange, change.Kind);
-        Assert.Equal("leaf", change.Old.GetValueOrDefault());
-        Assert.Equal("leaf2", change.New.GetValueOrDefault());
+        Assert.Equal("leaf", change.OldState.GetValueOrDefault());
+        Assert.Equal("leaf2", change.NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public class PathChainInvariantTests
         // Act & Assert: a write to the newly resolved leaf still delivers, proving the new chain is live.
         mid2.Name = "m2b";
         Assert.Equal(afterRetrack + 1, events.Count);
-        Assert.Equal("m2b", events[^1].New.GetValueOrDefault());
+        Assert.Equal("m2b", events[^1].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -113,13 +113,13 @@ public class PathChainInvariantTests
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
         var heal = Assert.Single(events);
         Assert.Equal(SubjectPathChangeKind.PathChange, heal.Kind);
-        Assert.Equal("c0", heal.New.GetValueOrDefault());
+        Assert.Equal("c0", heal.NewState.GetValueOrDefault());
 
         // Act & Assert: the newly resolved leaf is truly subscribed, so its write delivers.
         child.Name = "c1";
         Assert.Equal(2, events.Count);
         Assert.Equal(SubjectPathChangeKind.ValueChange, events[1].Kind);
-        Assert.Equal("c1", events[1].New.GetValueOrDefault());
+        Assert.Equal("c1", events[1].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -143,12 +143,12 @@ public class PathChainInvariantTests
         Assert.Equal(0, ListenerCount(a, nameof(Node.Name)));
         Assert.Equal(1, ListenerCount(b, nameof(Node.Name)));
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
-        Assert.Equal("b0", Assert.Single(events).New.GetValueOrDefault());
+        Assert.Equal("b0", Assert.Single(events).NewState.GetValueOrDefault());
 
         // Act & Assert: the newly resolved leaf delivers.
         b.Name = "b1";
         Assert.Equal(2, events.Count);
-        Assert.Equal("b1", events[1].New.GetValueOrDefault());
+        Assert.Equal("b1", events[1].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -172,12 +172,12 @@ public class PathChainInvariantTests
         Assert.Equal(0, ListenerCount(a, nameof(Node.Name)));
         Assert.Equal(1, ListenerCount(b, nameof(Node.Name)));
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
-        Assert.Equal("b0", Assert.Single(events).New.GetValueOrDefault());
+        Assert.Equal("b0", Assert.Single(events).NewState.GetValueOrDefault());
 
         // Act & Assert: the newly resolved leaf delivers.
         b.Name = "b1";
         Assert.Equal(2, events.Count);
-        Assert.Equal("b1", events[1].New.GetValueOrDefault());
+        Assert.Equal("b1", events[1].NewState.GetValueOrDefault());
     }
 
     [Fact]

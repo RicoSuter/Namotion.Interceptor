@@ -7,24 +7,24 @@ public readonly struct SubjectPathChange<TValue>
 {
     internal SubjectPathChange(
         SubjectPathChangeKind kind,
-        SubjectPathValue<TValue> old,
-        SubjectPathValue<TValue> @new,
+        SubjectPathValue<TValue> oldState,
+        SubjectPathValue<TValue> newState,
         in SubjectPropertyChange cause)
     {
         Kind = kind;
-        Old = old;
-        New = @new;
+        OldState = oldState;
+        NewState = newState;
         Cause = cause;
     }
 
     public SubjectPathChangeKind Kind { get; }
 
-    /// <summary>Observed state before this event.</summary>
-    public SubjectPathValue<TValue> Old { get; }
+    /// <summary>The observed state (which may be unresolved) before this event.</summary>
+    public SubjectPathValue<TValue> OldState { get; }
 
-    /// <summary>Observed state now (a fresh walk, or after a divergent retrack the retrack's reads; never copied from the causing write payload).</summary>
-    public SubjectPathValue<TValue> New { get; }
+    /// <summary>The observed state (which may be unresolved) after this event: a fresh walk, or after a divergent retrack the retrack's reads; never copied from the causing write payload.</summary>
+    public SubjectPathValue<TValue> NewState { get; }
 
-    /// <summary>The real write that triggered this event. <c>Cause.Origin</c> is the trigger's origin verbatim and is deliberately not provenance for <see cref="New"/>.</summary>
+    /// <summary>The real write that triggered this event. <c>Cause.Origin</c> is the trigger's origin verbatim and is deliberately not provenance for <see cref="NewState"/>.</summary>
     public SubjectPropertyChange Cause { get; }
 }

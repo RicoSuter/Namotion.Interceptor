@@ -29,7 +29,7 @@ public class PathConcurrencyTests
         var nestedWriteDone = false;
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
         {
-            var value = change.New.GetValueOrDefault();
+            var value = change.NewState.GetValueOrDefault();
             log.Add("enter:" + value);
             if (!nestedWriteDone)
             {
@@ -61,7 +61,7 @@ public class PathConcurrencyTests
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
         {
             delivered.Add(change);
-            if (change.New.GetValueOrDefault() == "Jack")
+            if (change.NewState.GetValueOrDefault() == "Jack")
             {
                 if (!nestedWriteDone)
                 {
@@ -78,17 +78,17 @@ public class PathConcurrencyTests
 
         // Only the first event was delivered; the nested Jack->Zed stays stranded in the queue.
         Assert.Single(delivered);
-        Assert.Equal("Jack", delivered[0].New.GetValueOrDefault());
+        Assert.Equal("Jack", delivered[0].NewState.GetValueOrDefault());
 
         // Act: a later write recovers the stranded backlog first, then delivers its own event.
         father.FirstName = "Max";
 
-        // Assert: the stranded Jack->Zed drains first, then Zed->Max, with chained transitions (N+1.Old == N.New).
+        // Assert: the stranded Jack->Zed drains first, then Zed->Max, with chained transitions (N+1.OldState == N.NewState).
         Assert.Equal(3, delivered.Count);
-        Assert.Equal("Jack", delivered[1].Old.GetValueOrDefault());
-        Assert.Equal("Zed", delivered[1].New.GetValueOrDefault());
-        Assert.Equal("Zed", delivered[2].Old.GetValueOrDefault());
-        Assert.Equal("Max", delivered[2].New.GetValueOrDefault());
+        Assert.Equal("Jack", delivered[1].OldState.GetValueOrDefault());
+        Assert.Equal("Zed", delivered[1].NewState.GetValueOrDefault());
+        Assert.Equal("Zed", delivered[2].OldState.GetValueOrDefault());
+        Assert.Equal("Max", delivered[2].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -140,14 +140,14 @@ public class PathConcurrencyTests
         Assert.Equal("SideEffect", father.FirstName);
         Assert.Equal("SideEffect", subscription.Current.GetValueOrDefault());
         Assert.NotEmpty(observed);
-        Assert.Equal("SideEffect", observed[^1].New.GetValueOrDefault());
+        Assert.Equal("SideEffect", observed[^1].NewState.GetValueOrDefault());
 
         // Total order: transitions are chained from the seed value (each event's Old is the prior event's
         // New), so the deferred side-effect event is delivered AFTER the triggering event, never inline.
-        Assert.Equal("Joe", observed[0].Old.GetValueOrDefault());
+        Assert.Equal("Joe", observed[0].OldState.GetValueOrDefault());
         for (var i = 1; i < observed.Length; i++)
         {
-            Assert.Equal(observed[i - 1].New.GetValueOrDefault(), observed[i].Old.GetValueOrDefault());
+            Assert.Equal(observed[i - 1].NewState.GetValueOrDefault(), observed[i].OldState.GetValueOrDefault());
         }
     }
 
@@ -191,7 +191,7 @@ public class PathConcurrencyTests
         Assert.Equal("New", targetLeaf.FirstName);
         Assert.Equal("New", subscription.Current.GetValueOrDefault());
         Assert.NotEmpty(observed);
-        Assert.Equal("New", observed[^1].New.GetValueOrDefault());
+        Assert.Equal("New", observed[^1].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -239,7 +239,7 @@ public class PathConcurrencyTests
         Assert.Equal("New", targetLeaf.FirstName);
         Assert.Equal("New", subscription.Current.GetValueOrDefault());
         Assert.NotEmpty(observed);
-        Assert.Equal("New", observed[^1].New.GetValueOrDefault());
+        Assert.Equal("New", observed[^1].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -290,7 +290,7 @@ public class PathConcurrencyTests
         Assert.Equal("Jon", father.FirstName);
         Assert.Equal("Jon", subscription.Current.GetValueOrDefault());
         Assert.NotEmpty(observed);
-        Assert.Equal("Jon", observed[^1].New.GetValueOrDefault());
+        Assert.Equal("Jon", observed[^1].NewState.GetValueOrDefault());
     }
 
     [Fact]
@@ -323,8 +323,8 @@ public class PathConcurrencyTests
         // Assert: exactly one delivery for the single write, and the rebuilt chain preserves the invariant
         // (process-wide count equals the new chain length; no listener leaked).
         var change = Assert.Single(delivered);
-        Assert.Equal("N", change.Old.GetValueOrDefault());
-        Assert.Equal("Y", change.New.GetValueOrDefault());
+        Assert.Equal("N", change.OldState.GetValueOrDefault());
+        Assert.Equal("Y", change.NewState.GetValueOrDefault());
         Assert.Equal(3, PropertyChangeSubscriptions.ReadSubscriptionCount());
         Assert.Equal("Y", subscription.Current.GetValueOrDefault());
     }
@@ -471,7 +471,7 @@ public class PathConcurrencyTests
         Assert.Equal("End", person.Father!.FirstName);
         Assert.Equal("End", subscription.Current.GetValueOrDefault());
         Assert.NotNull(last);
-        Assert.Equal("End", last!.Value.New.GetValueOrDefault());
+        Assert.Equal("End", last!.Value.NewState.GetValueOrDefault());
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount()); // Father + current leaf, no leak
     }
 
