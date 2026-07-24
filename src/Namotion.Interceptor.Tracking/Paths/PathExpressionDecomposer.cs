@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Immutable;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -223,8 +222,8 @@ internal static class PathExpressionDecomposer
                 throw Invalid(parameter, $"the collection index of '{property.Name}' is negative ({index}).");
             }
 
-            var isValueTypedCollection = IsClosedImmutableArray(receiverType);
-            var (interfaceType, elementType) = ResolveCollectionTypes(receiverType);
+            var isValueTypedCollection = PathTypeResolver.IsClosedImmutableArray(receiverType);
+            var (interfaceType, elementType) = PathTypeResolver.ResolveCollectionTypes(receiverType);
             segments.Add(new PathSegment
             {
                 PropertyName = property.Name,
@@ -243,7 +242,7 @@ internal static class PathExpressionDecomposer
                 throw Invalid(parameter, $"the dictionary key of '{property.Name}' evaluated to null.");
             }
 
-            var (interfaceType, keyType, valueType) = ResolveDictionaryTypes(property, receiverType, parameter);
+            var (interfaceType, keyType, valueType) = PathTypeResolver.ResolveDictionaryTypes(property, receiverType, parameter);
             segments.Add(new PathSegment
             {
                 PropertyName = property.Name,
@@ -264,112 +263,11 @@ internal static class PathExpressionDecomposer
         return segment.Kind switch
         {
             PathSegmentKind.Property => segment.PropertyStaticType,
-            PathSegmentKind.CollectionIndex => GetCollectionElementType(segment.PropertyStaticType),
+            PathSegmentKind.CollectionIndex => PathTypeResolver.GetCollectionElementType(segment.PropertyStaticType),
             PathSegmentKind.DictionaryKey => segment.DictionaryValueType!,
             _ => segment.PropertyStaticType
         };
     }
-
-    private static Type GetCollectionElementType(Type collectionType)
-    {
-        if (collectionType.IsArray)
-        {
-            return collectionType.GetElementType()!;
-        }
-
-        var enumerable = FindClosedInterface(collectionType, typeof(IEnumerable<>));
-        if (enumerable is not null)
-        {
-            return enumerable.GenericTypeArguments[0];
-        }
-
-        // A non-generic collection (e.g. ArrayList) exposes no static element type; fall back to
-        // object, which IsSubjectReferenceType() accepts (object can hold a subject), so such an
-        // intermediate passes the check and is resolved by name against the runtime subject instead.
-        return typeof(object);
-    }
-
-    private static (Type? interfaceType, Type? elementType) ResolveCollectionTypes(Type collectionType)
-    {
-        if (IsClosedImmutableArray(collectionType))
-        {
-            return (null, collectionType.GenericTypeArguments[0]);
-        }
-
-        if (collectionType.IsArray)
-        {
-            var elementType = collectionType.GetElementType()!;
-            return (typeof(IList<>).MakeGenericType(elementType), elementType);
-        }
-
-        if (collectionType.IsGenericType)
-        {
-            var definition = collectionType.GetGenericTypeDefinition();
-            if (definition == typeof(IList<>) || definition == typeof(IReadOnlyList<>))
-            {
-                return (collectionType, collectionType.GenericTypeArguments[0]);
-            }
-        }
-
-        var listInterface =
-            FindClosedInterface(collectionType, typeof(IList<>)) ??
-            FindClosedInterface(collectionType, typeof(IReadOnlyList<>));
-
-        // No generic list interface: not a subscribe-time error (runtime validity is lenient); both
-        // types stay null so the walk indexes the boxed collection via IndexReferenceCollection.
-        return listInterface is null
-            ? (null, null)
-            : (listInterface, listInterface.GenericTypeArguments[0]);
-    }
-
-    private static (Type interfaceType, Type keyType, Type valueType) ResolveDictionaryTypes(
-        PropertyInfo property, Type dictionaryType, ParameterExpression parameter)
-    {
-        // Prefer the exact declared interface when the property is typed directly as the dictionary interface.
-        if (dictionaryType.IsGenericType)
-        {
-            var definition = dictionaryType.GetGenericTypeDefinition();
-            if (definition == typeof(IDictionary<,>) || definition == typeof(IReadOnlyDictionary<,>))
-            {
-                var declared = dictionaryType.GenericTypeArguments;
-                return (dictionaryType, declared[0], declared[1]);
-            }
-        }
-
-        var dictionaryInterface =
-            FindClosedInterface(dictionaryType, typeof(IDictionary<,>)) ??
-            FindClosedInterface(dictionaryType, typeof(IReadOnlyDictionary<,>));
-
-        if (dictionaryInterface is null)
-        {
-            throw Invalid(parameter,
-                $"the dictionary property '{property.Name}' of type '{dictionaryType.Name}' does not expose a generic IDictionary<,> or IReadOnlyDictionary<,> interface.");
-        }
-
-        var arguments = dictionaryInterface.GenericTypeArguments;
-        return (dictionaryInterface, arguments[0], arguments[1]);
-    }
-
-    private static Type? FindClosedInterface(Type type, Type genericDefinition)
-    {
-        if (type.IsGenericType && type.GetGenericTypeDefinition() == genericDefinition)
-        {
-            return type;
-        }
-
-        foreach (var candidate in type.GetInterfaces())
-        {
-            if (candidate.IsGenericType && candidate.GetGenericTypeDefinition() == genericDefinition)
-            {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool IsClosedImmutableArray(Type type)
-        => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ImmutableArray<>);
 
     private static bool ReferencesParameter(Expression expression, ParameterExpression parameter)
     {
