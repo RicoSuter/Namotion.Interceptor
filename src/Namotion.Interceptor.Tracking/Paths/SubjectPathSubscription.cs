@@ -19,6 +19,10 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 {
     private readonly Lock _lock = new();
 
+    // Exposed to the split collaborators for their debug-only lock-precondition asserts (compiled out of
+    // Release builds); this type stays the sole owner of the lock.
+    internal bool IsLockHeldByCurrentThread => _lock.IsHeldByCurrentThread;
+
     // The segment chain (installed listeners, per-position observers, resolved subjects and cached
     // accessors) and the exclusive-drain delivery are split into collaborators, but this type stays the
     // SOLE owner of _lock, _disposed, the reentrancy guard, and transaction ordering. Both collaborators

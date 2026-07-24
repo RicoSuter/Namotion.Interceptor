@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 
 namespace Namotion.Interceptor.Tracking.Paths;
@@ -35,10 +36,21 @@ internal sealed class PathDeliveryQueue<TValue>
     }
 
     /// <summary>True when the backlog is empty. Callers must hold the lock.</summary>
-    internal bool IsEmpty => _pending.Count == 0;
+    internal bool IsEmpty
+    {
+        get
+        {
+            Debug.Assert(_lock.IsHeldByCurrentThread, "IsEmpty must be read under the coordinator lock.");
+            return _pending.Count == 0;
+        }
+    }
 
     /// <summary>Appends one computed event to the FIFO backlog. Callers must hold the lock.</summary>
-    internal void Enqueue(in SubjectPathChange<TValue> change) => _pending.Enqueue(change);
+    internal void Enqueue(in SubjectPathChange<TValue> change)
+    {
+        Debug.Assert(_lock.IsHeldByCurrentThread, "Enqueue must be called under the coordinator lock.");
+        _pending.Enqueue(change);
+    }
 
     /// <summary>
     /// Claim-drainer step for a producer that has finished computing. <paramref name="held"/> /
@@ -53,6 +65,8 @@ internal sealed class PathDeliveryQueue<TValue>
         bool hasHeldEvent, in SubjectPathChange<TValue> held,
         out SubjectPathChange<TValue> directEvent, out bool hasDirectEvent)
     {
+        Debug.Assert(_lock.IsHeldByCurrentThread, "TryClaimDrainer must be called under the coordinator lock.");
+
         directEvent = default;
         hasDirectEvent = false;
 
@@ -82,6 +96,7 @@ internal sealed class PathDeliveryQueue<TValue>
             // hasHeldEvent implies _pending was empty when the single event was produced and no later pass or
             // concurrent producer could enqueue under the held lock, so this is the uncontended zero-copy fast
             // path: deliver directly without touching the queue.
+            Debug.Assert(_pending.Count == 0, "the zero-copy fast path requires an empty backlog.");
             directEvent = held;
             hasDirectEvent = true;
         }
@@ -99,6 +114,8 @@ internal sealed class PathDeliveryQueue<TValue>
     /// </summary>
     internal void Drain(bool hasDirectEvent, in SubjectPathChange<TValue> directEvent)
     {
+        Debug.Assert(!_lock.IsHeldByCurrentThread, "Drain must be called with the coordinator lock released.");
+
         try
         {
             if (hasDirectEvent)
@@ -144,5 +161,9 @@ internal sealed class PathDeliveryQueue<TValue>
     }
 
     /// <summary>Drops the queued-but-undelivered backlog. Callers must hold the lock (used by dispose).</summary>
-    internal void Clear() => _pending.Clear();
+    internal void Clear()
+    {
+        Debug.Assert(_lock.IsHeldByCurrentThread, "Clear must be called under the coordinator lock.");
+        _pending.Clear();
+    }
 }

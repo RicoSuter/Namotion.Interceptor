@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -70,6 +71,7 @@ internal sealed class PathSubscriptionChain<TValue>
     /// </summary>
     internal int FindDivergence(IInterceptorSubject?[] walkedSubjects)
     {
+        Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "FindDivergence must be called under the coordinator lock.");
         for (var position = 0; position < _segments.Length; position++)
         {
             if (!ReferenceEquals(walkedSubjects[position], _resolvedSubjects[position]))
@@ -88,6 +90,7 @@ internal sealed class PathSubscriptionChain<TValue>
     /// </summary>
     internal bool IsResolvedLeafWrite(in SubjectPropertyChange cause)
     {
+        Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "IsResolvedLeafWrite must be called under the coordinator lock.");
         var leafSubject = _resolvedSubjects[_segments.Length - 1];
         var leafName = _segments[_segments.Length - 1].PropertyName;
         return leafSubject is not null
@@ -101,7 +104,10 @@ internal sealed class PathSubscriptionChain<TValue>
     /// chain. Callers must hold the lock.
     /// </summary>
     internal bool IsCurrentObserver(PathSegmentObserver<TValue> observer)
-        => _segmentObservers[observer.Position] == observer;
+    {
+        Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "IsCurrentObserver must be called under the coordinator lock.");
+        return _segmentObservers[observer.Position] == observer;
+    }
 
     /// <summary>
     /// Installs the subscribe-before-read chain from <paramref name="startPosition"/>, walking forward from
@@ -112,6 +118,7 @@ internal sealed class PathSubscriptionChain<TValue>
     /// </summary>
     internal void BuildFrom(int startPosition, IInterceptorSubject startSubject)
     {
+        Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "BuildFrom must be called under the coordinator lock.");
         var subject = startSubject;
         for (var position = startPosition; position < _segments.Length; position++)
         {
@@ -177,6 +184,7 @@ internal sealed class PathSubscriptionChain<TValue>
     /// </summary>
     internal void DisposeSuffix(int fromPosition)
     {
+        Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "DisposeSuffix must be called under the coordinator lock.");
         for (var position = fromPosition; position < _segments.Length; position++)
         {
             _segmentHandles[position]?.Dispose();
