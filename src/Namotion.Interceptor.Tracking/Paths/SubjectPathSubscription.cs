@@ -124,10 +124,10 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 
     /// <summary>
     /// One-shot dispose: tears down every installed segment listener (returning the process-wide count to
-    /// zero), drops any queued-but-undelivered events, and marks the subscription disposed. Idempotent and
-    /// never throws; after it returns <see cref="Current"/> is unresolved. A callback already dispatched
-    /// outside the lock may run to completion, but the drain loop observes the disposed flag and starts no
-    /// new delivery, so post-dispose delivery is bounded.
+    /// zero), drops any queued-but-undelivered events, releases the buffered walk references, and marks the
+    /// subscription disposed. Idempotent and never throws; after it returns <see cref="Current"/> is
+    /// unresolved. A callback already dispatched outside the lock may run to completion, but the drain loop
+    /// observes the disposed flag and starts no new delivery, so post-dispose delivery is bounded.
     /// </summary>
     public void Dispose()
     {
@@ -141,6 +141,15 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
             Volatile.Write(ref _disposed, true);
             _chain.DisposeAll();
             _deliveryQueue.Clear();
+
+            // Release what the teardown above leaves behind: the last-walked subjects held in the reusable
+            // scratch buffer (some may already be detached from the graph) and the last observed leaf value.
+            // Both are touched only under _lock, so clearing them here is race-free. The root subject and the
+            // observer callback are intentionally NOT nulled: the caller already owns the root, and the
+            // lock-free Current walk and an in-flight drain (which must run to completion) read them without
+            // the lock, so nulling them would race into a NullReferenceException.
+            Array.Clear(_scratch);
+            _lastObserved = SubjectPathValue<TValue>.Unresolved;
         }
     }
 
@@ -334,8 +343,12 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 
         if (SubjectPathValue<TValue>.AreEquivalent(_lastObserved, newValue))
         {
-            // Suppressed: an observed state equivalent to the last one delivers nothing and does not advance
-            // the baseline.
+            // Suppressed: an observed state equivalent to the last one delivers nothing. The baseline still
+            // advances to the fresh value: a distinct-but-Equals-equal instance (only reachable for a
+            // value-equality TValue) must not leave the baseline pinning the departed instance or later
+            // surface it as a stale OldState. The transition stays unobservable because equivalence is
+            // value-based, so the new baseline is value-equal to the old one.
+            _lastObserved = newValue;
             return false;
         }
 

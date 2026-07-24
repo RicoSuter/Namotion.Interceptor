@@ -177,6 +177,38 @@ public class PathTransitionTests
     }
 
     [Fact]
+    public void WhenSuppressedRetrackToDistinctButEqualLeaf_ThenBaselineAdvancesToNewInstance()
+    {
+        // A retrack whose new leaf value is a DISTINCT instance that is Equals-equal to the last observed
+        // one is suppressed (nothing delivered), but the baseline still advances to the fresh instance so it
+        // neither pins the departed instance nor later surfaces it as a stale OldState.
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
+        var events = new List<SubjectPathChange<string?>>();
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
+            (in SubjectPathChange<string?> c) => events.Add(c), SubjectPathValidation.Full);
+
+        // Act: retrack to a father whose leaf is a distinct string instance equal to the departed "Joe".
+        var distinctButEqual = new string("Joe".ToCharArray());
+        Assert.False(ReferenceEquals("Joe", distinctButEqual)); // guard: a genuinely distinct instance
+        var newFather = new Person { FirstName = distinctButEqual };
+        person.Father = newFather;
+
+        // Assert: the equal-value transition delivers nothing.
+        Assert.Empty(events);
+
+        // Act: a real change on the retracked leaf delivers.
+        newFather.FirstName = "Jack";
+
+        // Assert: OldState is the retracked (newFather's) instance, not the departed original "Joe"; the
+        // baseline advanced on the suppressed retrack.
+        var change = Assert.Single(events);
+        Assert.Equal("Jack", change.NewState.GetValueOrDefault());
+        Assert.Same(distinctButEqual, change.OldState.GetValueOrDefault());
+    }
+
+    [Fact]
     public void WhenCollectionReplacedMovingDifferentSubjectToIndex_ThenPathChangeWithBothValues()
     {
         // Arrange
