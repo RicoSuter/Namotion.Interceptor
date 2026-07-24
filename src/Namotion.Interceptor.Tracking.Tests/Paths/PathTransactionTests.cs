@@ -28,7 +28,7 @@ public class PathTransactionTests
         // Act & Assert
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }));
+            person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full));
         Assert.Contains("active transaction", exception.Message);
     }
 
@@ -45,7 +45,7 @@ public class PathTransactionTests
 
         var events = new List<SubjectPathChange<string?>>();
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
-            (in SubjectPathChange<string?> c) => events.Add(c));
+            (in SubjectPathChange<string?> c) => events.Add(c), SubjectPathValidation.Full);
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
 
         // Act: stage a reassignment of the watched intermediate, then dispose without commit (rollback).
@@ -84,7 +84,7 @@ public class PathTransactionTests
 
         var events = new List<SubjectPathChange<string?>>();
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
-            (in SubjectPathChange<string?> c) => events.Add(c));
+            (in SubjectPathChange<string?> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -113,7 +113,7 @@ public class PathTransactionTests
 
         var events = new List<SubjectPathChange<string?>>();
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
-            (in SubjectPathChange<string?> c) => events.Add(c));
+            (in SubjectPathChange<string?> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act: stage a leaf write, then dispose without commit (rollback).
         using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -137,7 +137,7 @@ public class PathTransactionTests
 
         var events = new List<SubjectPathChange<string>>();
         using var subscription = node.SubscribeToPath(x => x.Accept,
-            (in SubjectPathChange<string> c) => events.Add(c));
+            (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act: stage a good change to the watched Accept and a poison change to Reject; commit under Rollback.
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
@@ -176,7 +176,7 @@ public class PathTransactionTests
 
         var events = new List<SubjectPathChange<string>>();
         using var subscription = root.SubscribeToPath(x => x.Child!.Value,
-            (in SubjectPathChange<string> c) => events.Add(c));
+            (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
 
         // White-box: A.Value is watched, B.Value is not.
@@ -239,7 +239,7 @@ public class PathTransactionTests
         {
             deliveries++;
             throw new InvalidOperationException("callback boom");
-        });
+        }, SubjectPathValidation.Full);
 
         // Act & Assert: inside a transaction the throwing callback runs in the commit apply loop, which
         // catches it and surfaces a SubjectTransactionException rather than letting it escape to the writer.

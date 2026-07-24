@@ -54,6 +54,10 @@ public class SubjectPathSubscriptionBenchmark
     private PathNode _bareDeliverDepth4Leaf;
     private IDisposable _bareDeliverDepth4;
 
+    // Delivery: leaf-only validation, depth 4.
+    private PathNode _pathDeliverLeafOnlyDepth4Leaf;
+    private SubjectPathSubscription<int> _pathDeliverLeafOnlyDepth4;
+
     // Hot leaf: repeated identical writes, walk paid, delivery suppressed.
     private PathNode _suppressedLeaf;
     private SubjectPathSubscription<int> _suppressedSubscription;
@@ -93,7 +97,7 @@ public class SubjectPathSubscriptionBenchmark
         _context = CreateContext();
         _pathDeliverDepth1Leaf = new PathNode(_context);
         _pathDeliverDepth1 = _pathDeliverDepth1Leaf.SubscribeToPath(
-            x => x.Count, static (in SubjectPathChange<int> _) => { });
+            x => x.Count, static (in SubjectPathChange<int> _) => { }, SubjectPathValidation.Full);
     }
 
     [Benchmark(Baseline = true)]
@@ -128,7 +132,7 @@ public class SubjectPathSubscriptionBenchmark
         var (root, leaf) = BuildChain(4);
         _pathDeliverDepth4Leaf = leaf;
         _pathDeliverDepth4 = root.SubscribeToPath(
-            x => x.Child!.Child!.Child!.Count, static (in SubjectPathChange<int> _) => { });
+            x => x.Child!.Child!.Child!.Count, static (in SubjectPathChange<int> _) => { }, SubjectPathValidation.Full);
     }
 
     [Benchmark]
@@ -155,6 +159,27 @@ public class SubjectPathSubscriptionBenchmark
         _toggle = !_toggle;
     }
 
+    // --- Delivery: leaf-only validation, depth 4 ----------------------------------------------------------
+
+    [GlobalSetup(Target = nameof(PathDeliverLeafOnlyDepth4))]
+    public void SetupPathDeliverLeafOnlyDepth4()
+    {
+        _context = CreateContext();
+        var (root, leaf) = BuildChain(4);
+        _pathDeliverLeafOnlyDepth4Leaf = leaf;
+        _pathDeliverLeafOnlyDepth4 = root.SubscribeToPath(
+            x => x.Child!.Child!.Child!.Count, static (in SubjectPathChange<int> _) => { }, SubjectPathValidation.LeafOnly);
+    }
+
+    [Benchmark]
+    public void PathDeliverLeafOnlyDepth4()
+    {
+        // Mirrors PathDeliverDepth4 but with leaf-only validation: the leaf write re-reads only the cached
+        // leaf instead of walking all four segments, so the delta to PathDeliverDepth4 is the walk cost.
+        _pathDeliverLeafOnlyDepth4Leaf.Count = _toggle ? LeafValueA : LeafValueB;
+        _toggle = !_toggle;
+    }
+
     // --- Hot leaf: walk paid, delivery suppressed --------------------------------------------------------
 
     [GlobalSetup(Target = nameof(PathHotLeafSuppressedDepth4))]
@@ -165,7 +190,7 @@ public class SubjectPathSubscriptionBenchmark
         leaf.Count = SuppressedValue;
         _suppressedLeaf = leaf;
         _suppressedSubscription = root.SubscribeToPath(
-            x => x.Child!.Child!.Child!.Count, static (in SubjectPathChange<int> _) => { });
+            x => x.Child!.Child!.Child!.Count, static (in SubjectPathChange<int> _) => { }, SubjectPathValidation.Full);
     }
 
     [Benchmark]
@@ -184,7 +209,7 @@ public class SubjectPathSubscriptionBenchmark
         _context = CreateContext();
         _stringLeaf = new PathNode(_context);
         _stringSubscription = _stringLeaf.SubscribeToPath(
-            x => x.Text, static (in SubjectPathChange<string> _) => { });
+            x => x.Text, static (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
     }
 
     [Benchmark]
@@ -207,7 +232,7 @@ public class SubjectPathSubscriptionBenchmark
             _immutableElement
         ];
         _immutableSubscription = holder.SubscribeToPath(
-            x => x.Items[2].Count, static (in SubjectPathChange<int> _) => { });
+            x => x.Items[2].Count, static (in SubjectPathChange<int> _) => { }, SubjectPathValidation.Full);
     }
 
     [Benchmark]
@@ -225,7 +250,7 @@ public class SubjectPathSubscriptionBenchmark
         _context = CreateContext();
         _structLeaf = new PathNode(_context);
         _structSubscription = _structLeaf.SubscribeToPath(
-            x => x.Point, static (in SubjectPathChange<PlainPoint> _) => { });
+            x => x.Point, static (in SubjectPathChange<PlainPoint> _) => { }, SubjectPathValidation.Full);
     }
 
     [Benchmark]
@@ -253,7 +278,7 @@ public class SubjectPathSubscriptionBenchmark
 
         _retrackRoot.Child = subtreeA;
         _retrackSubscription = _retrackRoot.SubscribeToPath(
-            x => x.Child!.Child!.Child!.Count, static (in SubjectPathChange<int> _) => { });
+            x => x.Child!.Child!.Child!.Count, static (in SubjectPathChange<int> _) => { }, SubjectPathValidation.Full);
     }
 
     [Benchmark]
@@ -273,7 +298,7 @@ public class SubjectPathSubscriptionBenchmark
         _context = CreateContext();
         var leaf = new PathNode(_context) { Count = LeafValueA };
         _currentDepth1 = leaf.SubscribeToPath(
-            x => x.Count, static (in SubjectPathChange<int> _) => { });
+            x => x.Count, static (in SubjectPathChange<int> _) => { }, SubjectPathValidation.Full);
     }
 
     [Benchmark]
@@ -289,7 +314,7 @@ public class SubjectPathSubscriptionBenchmark
         var (root, leaf) = BuildChain(4);
         leaf.Count = LeafValueA;
         _currentDepth4 = root.SubscribeToPath(
-            x => x.Child!.Child!.Child!.Count, static (in SubjectPathChange<int> _) => { });
+            x => x.Child!.Child!.Child!.Count, static (in SubjectPathChange<int> _) => { }, SubjectPathValidation.Full);
     }
 
     [Benchmark]
@@ -312,7 +337,7 @@ public class SubjectPathSubscriptionBenchmark
     public void SubscribeDisposeChurnDepth4()
     {
         using var subscription = _churnRoot.SubscribeToPath(
-            x => x.Child!.Child!.Child!.Count, _churnCallback);
+            x => x.Child!.Child!.Child!.Count, _churnCallback, SubjectPathValidation.Full);
     }
 
     // --- Deep mixed path: reference + collection + dictionary --------------------------------------------
@@ -331,7 +356,7 @@ public class SubjectPathSubscriptionBenchmark
         indexed.ByName = new Dictionary<string, PathNode> { ["key"] = _mixedLeaf };
 
         _mixedSubscription = root.SubscribeToPath(
-            x => x.Child!.Children[1].ByName["key"].Count, static (in SubjectPathChange<int> _) => { });
+            x => x.Child!.Children[1].ByName["key"].Count, static (in SubjectPathChange<int> _) => { }, SubjectPathValidation.Full);
     }
 
     [Benchmark]
@@ -348,6 +373,7 @@ public class SubjectPathSubscriptionBenchmark
         _bareDeliverDepth1?.Dispose();
         _pathDeliverDepth4?.Dispose();
         _bareDeliverDepth4?.Dispose();
+        _pathDeliverLeafOnlyDepth4?.Dispose();
         _suppressedSubscription?.Dispose();
         _stringSubscription?.Dispose();
         _immutableSubscription?.Dispose();

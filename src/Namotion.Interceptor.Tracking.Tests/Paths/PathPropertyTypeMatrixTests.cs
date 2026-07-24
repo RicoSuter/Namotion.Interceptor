@@ -733,7 +733,7 @@ public class PathPropertyTypeMatrixTests
     {
         var captured = new List<SubjectPathChange<TValue>>();
         events = captured;
-        return subject.SubscribeToPath(path, (in SubjectPathChange<TValue> change) => captured.Add(change));
+        return subject.SubscribeToPath(path, (in SubjectPathChange<TValue> change) => captured.Add(change), SubjectPathValidation.Full);
     }
 
     private static SubjectPathChange<TValue> AssertSingleTransition<TValue>(

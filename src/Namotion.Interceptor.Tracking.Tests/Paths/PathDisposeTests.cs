@@ -21,7 +21,7 @@ public class PathDisposeTests
         var father = new Person { FirstName = "Joe" };
         var person = new Person(context) { Father = father };
         var count = 0;
-        var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => count++);
+        var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => count++, SubjectPathValidation.Full);
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount()); // two segments, two listeners
 
         // Act
@@ -50,7 +50,7 @@ public class PathDisposeTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
-        var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { });
+        var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full);
         Assert.True(subscription.Current.IsResolved); // resolved while live
 
         // Act
@@ -83,7 +83,7 @@ public class PathDisposeTests
 
                 throw new InvalidOperationException("boom");
             }
-        });
+        }, SubjectPathValidation.Full);
 
         // Act: the throwing callback strands the queued Jack->Zed event in _pending (drainer flag reset).
         Assert.Throws<InvalidOperationException>(() => father.FirstName = "Jack");
@@ -128,7 +128,7 @@ public class PathDisposeTests
                 // must drop the remaining backlog rather than deliver it after disposal.
                 subscription.Dispose();
             }
-        });
+        }, SubjectPathValidation.Full);
 
         // Act
         father.FirstName = "Jack";
@@ -153,7 +153,7 @@ public class PathDisposeTests
         {
             count++;
             subscription.Dispose(); // self-dispose from inside the callback (runs outside _lock)
-        });
+        }, SubjectPathValidation.Full);
 
         // Act: the write runs on a worker thread bounded by a timeout so a deadlock regression fails fast
         // instead of hanging the suite. Self-dispose acquires the lock the drainer does not hold, so it
@@ -185,7 +185,7 @@ public class PathDisposeTests
         // Act & Assert: the throw propagates out of the rejected subscribe, and the already-installed first
         // segment listener is disposed so the process-wide count is rolled back to zero (no partial leak).
         Assert.Throws<InvalidOperationException>(() =>
-            person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }));
+            person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full));
         Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
     }
 
@@ -210,7 +210,7 @@ public class PathDisposeTests
             {
                 callbackFailure = new TimeoutException("release gate never opened");
             }
-        });
+        }, SubjectPathValidation.Full);
 
         // Act: trigger a delivery on a worker thread; the callback parks mid-flight outside the lock.
         var writer = Task.Run(() => father.FirstName = "Jack");

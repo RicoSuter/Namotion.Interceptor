@@ -30,6 +30,11 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     private readonly PathSubscriptionChain<TValue> _chain;
     private readonly PathDeliveryQueue<TValue> _deliveryQueue;
 
+    // Per-subscription validation mode: with LeafOnly, a callback fired by the resolved leaf re-reads
+    // only the leaf on its cached subject instead of running the from-root validating walk. Structural
+    // (upper-segment) callbacks always walk and retrack in both modes.
+    private readonly SubjectPathValidation _validation;
+
     // A single reusable walk buffer for the under-lock event computation: the ctor seed walk, every event
     // walk and every retrack re-walk write into it. All of those run under _lock and never nest (the
     // reentrancy guard returns without walking), so one buffer is safe. Current does NOT use it: Current is
@@ -49,8 +54,13 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 
     private bool _disposed;
 
-    internal SubjectPathSubscription(IInterceptorSubject root, PathSegment[] segments, ISubjectPathChangeObserver<TValue> observer)
+    internal SubjectPathSubscription(
+        IInterceptorSubject root,
+        PathSegment[] segments,
+        ISubjectPathChangeObserver<TValue> observer,
+        SubjectPathValidation validation)
     {
+        _validation = validation;
         _chain = new PathSubscriptionChain<TValue>(this, root, segments);
         _deliveryQueue = new PathDeliveryQueue<TValue>(_lock, observer, () => Volatile.Read(ref _disposed));
         _scratch = new IInterceptorSubject?[segments.Length];
@@ -181,6 +191,12 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
                 return;
             }
 
+            // The leaf-only fast path applies exactly when the firing observer is the resolved leaf's own
+            // listener: the compute below then re-reads only the cached leaf instead of walking from the
+            // root, skipping divergence detection and retrack (the mode's documented carve-out). Any
+            // upper-segment callback keeps the full validating walk in both modes.
+            var leafFast = _validation == SubjectPathValidation.LeafOnly && observer.Position == _chain.Length - 1;
+
             // Suppress the ambient transaction for the whole computation below. A [Derived]-with-setter or
             // cross-context write on a transaction-holding flow bypasses staging and dispatches here
             // synchronously, so the validating walk and every retrack read run WHILE a transaction is active.
@@ -206,7 +222,7 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
             {
                 _deferredRevalidation = false;
 
-                if (!TryComputeEvent(in cause, out var change))
+                if (!TryComputeEvent(in cause, leafFast, out var change))
                 {
                     // Suppressed pass: nothing to deliver. It still counts for the loop because its own walk
                     // may have set _deferredRevalidation via a getter write.
@@ -247,56 +263,73 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     }
 
     /// <summary>
-    /// Computes one event for the triggering <paramref name="cause"/>: a fresh validating walk into
-    /// <see cref="_scratch"/>, the divergence compare, a divergent retrack (via
+    /// Computes one event for the triggering <paramref name="cause"/>. The default head is a fresh
+    /// validating walk into <see cref="_scratch"/>, the divergence compare, a divergent retrack (via
     /// <see cref="PathSubscriptionChain{TValue}.DisposeSuffix"/> plus
-    /// <see cref="PathSubscriptionChain{TValue}.BuildFrom"/>) and re-walk, the kind decision, the
-    /// suppression check, and the <see cref="_lastObserved"/> advance-before-callback. Returns false when
-    /// the event is suppressed (no delivery, no baseline advance). Callers must hold <see cref="_lock"/>.
+    /// <see cref="PathSubscriptionChain{TValue}.BuildFrom"/>) and re-walk, and the kind decision; with
+    /// <paramref name="leafFast"/> (a leaf callback under <see cref="SubjectPathValidation.LeafOnly"/>)
+    /// the head instead re-reads only the cached leaf, with no walk, divergence check, or retrack. The
+    /// shared tail is the suppression check and the <see cref="_lastObserved"/> advance-before-callback.
+    /// Returns false when the event is suppressed (no delivery, no baseline advance). Callers must hold
+    /// <see cref="_lock"/>.
     /// </summary>
-    private bool TryComputeEvent(in SubjectPropertyChange cause, out SubjectPathChange<TValue> change)
+    private bool TryComputeEvent(in SubjectPropertyChange cause, bool leafFast, out SubjectPathChange<TValue> change)
     {
         change = default;
 
-        // Fresh validating walk from the root: it recomputes the observed value AND records, per position,
-        // the subject each segment now reads on, which the divergence check compares against the subscribed
-        // chain. Reuses the under-lock _scratch buffer (Walk clears it first); every access below runs under
-        // _lock, and any divergent subject is captured into a local before the retrack re-walk overwrites the
-        // buffer.
-        var scratch = _scratch;
-        var newValue = _chain.Walk(scratch);
-
-        // Divergence is the first position where the fresh walk reads on a different subject than the
-        // subscribed chain (reference identity). This one comparison covers every structural case: an intact
-        // chain never diverges; a reassigned intermediate, a heal (null -> subject) and a break
-        // (subject -> null) each first differ at the affected position.
-        var divergencePoint = _chain.FindDivergence(scratch);
-
-        var diverged = divergencePoint >= 0;
-        if (diverged)
+        SubjectPathValue<TValue> newValue;
+        SubjectPathChangeKind kind;
+        if (leafFast)
         {
-            // Retrack the suffix below the change: tear down the stale listeners, then reinstall the
-            // subscribe-before-read chain from the new subject. A null divergent subject is a break
-            // (an unresolved intermediate); dispose only, leaving the suffix torn down.
-            var divergentSubject = scratch[divergencePoint];
-            _chain.DisposeSuffix(divergencePoint);
-            if (divergentSubject is not null)
+            // Leaf-only fast path: the firing listener IS the resolved leaf's, so the cached leaf binding is
+            // re-read directly and the upper segments are trusted (an intact chain's upper segments cannot
+            // have changed without their own listeners firing; a divergence created while dormant is the
+            // mode's documented carve-out and heals on the next structural callback).
+            newValue = _chain.ReadResolvedLeaf();
+            kind = newValue.IsResolved ? SubjectPathChangeKind.ValueChange : SubjectPathChangeKind.PathChange;
+        }
+        else
+        {
+            // Fresh validating walk from the root: it recomputes the observed value AND records, per position,
+            // the subject each segment now reads on, which the divergence check compares against the subscribed
+            // chain. Reuses the under-lock _scratch buffer (Walk clears it first); every access below runs under
+            // _lock, and any divergent subject is captured into a local before the retrack re-walk overwrites the
+            // buffer.
+            var scratch = _scratch;
+            newValue = _chain.Walk(scratch);
+
+            // Divergence is the first position where the fresh walk reads on a different subject than the
+            // subscribed chain (reference identity). This one comparison covers every structural case: an intact
+            // chain never diverges; a reassigned intermediate, a heal (null -> subject) and a break
+            // (subject -> null) each first differ at the affected position.
+            var divergencePoint = _chain.FindDivergence(scratch);
+
+            var diverged = divergencePoint >= 0;
+            if (diverged)
             {
-                _chain.BuildFrom(divergencePoint, divergentSubject);
+                // Retrack the suffix below the change: tear down the stale listeners, then reinstall the
+                // subscribe-before-read chain from the new subject. A null divergent subject is a break
+                // (an unresolved intermediate); dispose only, leaving the suffix torn down.
+                var divergentSubject = scratch[divergencePoint];
+                _chain.DisposeSuffix(divergencePoint);
+                if (divergentSubject is not null)
+                {
+                    _chain.BuildFrom(divergencePoint, divergentSubject);
+                }
+
+                // Recompute from the rebuilt chain: the retrack's reads supersede the initial walk, so a write
+                // that raced the listener install is observed rather than lost. The captured divergentSubject
+                // local above is unaffected by reusing scratch for this re-walk.
+                newValue = _chain.Walk(scratch);
             }
 
-            // Recompute from the rebuilt chain: the retrack's reads supersede the initial walk, so a write
-            // that raced the listener install is observed rather than lost. The captured divergentSubject
-            // local above is unaffected by reusing scratch for this re-walk.
-            newValue = _chain.Walk(scratch);
-        }
-
-        // ValueChange only when the intact chain's own resolved leaf was the write; any structural change
-        // (divergence) or an unresolved result is a PathChange.
-        var kind = SubjectPathChangeKind.PathChange;
-        if (!diverged && newValue.IsResolved && _chain.IsResolvedLeafWrite(in cause))
-        {
-            kind = SubjectPathChangeKind.ValueChange;
+            // ValueChange only when the intact chain's own resolved leaf was the write; any structural change
+            // (divergence) or an unresolved result is a PathChange.
+            kind = SubjectPathChangeKind.PathChange;
+            if (!diverged && newValue.IsResolved && _chain.IsResolvedLeafWrite(in cause))
+            {
+                kind = SubjectPathChangeKind.ValueChange;
+            }
         }
 
         if (SubjectPathValue<TValue>.AreEquivalent(_lastObserved, newValue))

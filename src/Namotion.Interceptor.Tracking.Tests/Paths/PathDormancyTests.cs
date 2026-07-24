@@ -39,7 +39,7 @@ public class PathDormancyTests
         outer.Child = root; // attach: root and childA inherit the notifying context
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Sanity: while attached, a leaf write delivers.
         childA.Name = "A1";
@@ -77,7 +77,7 @@ public class PathDormancyTests
         outer.Child = root;
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act: detach, then replace the watched intermediate while dormant.
         outer.Child = null;
@@ -134,7 +134,7 @@ public class PathDormancyTests
         outer.Child = root;
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act: replace the intermediate while dormant (missed), then move the old suffix childA into the
         // attached keeper so childA becomes notifying again although it is off the true path.
@@ -196,7 +196,7 @@ public class PathDormancyTests
             {
                 delivered.Add(c);
             }
-        });
+        }, SubjectPathValidation.Full);
 
         blocking.ProceedWithCommit.Reset();
         blocking.EnteredInnerChain.Reset();
@@ -240,7 +240,7 @@ public class PathDormancyTests
         root.Child = childA;
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act & Assert: the leaf below the root is inert (childA never dispatches).
         childA.Name = "A1";
@@ -269,7 +269,7 @@ public class PathDormancyTests
         root.Child = childA;
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act
         childA.Name = "A1";
@@ -292,7 +292,7 @@ public class PathDormancyTests
         root.Child = childA;
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act
         childA.Name = "A1";
@@ -324,7 +324,7 @@ public class PathDormancyTests
                 reacted = true;
                 child.Name = "reacted"; // write the freshly attached child from inside the callback
             }
-        });
+        }, SubjectPathValidation.Full);
 
         // Act
         root.Child = child;
@@ -350,7 +350,7 @@ public class PathDormancyTests
         var holder = new DerivedExclusiveHolder(context);
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = holder.SubscribeToPath(x => x.Exclusive.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = holder.SubscribeToPath(x => x.Exclusive.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // White-box: alpha is watched but dormant (never attached), so its leaf write does not dispatch.
         Assert.True(HasListener(holder.Alpha, nameof(EqualityNode.Name)));
@@ -371,7 +371,7 @@ public class PathDormancyTests
         var holder = new DerivedExclusiveHolder(context);
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = holder.SubscribeToPath(x => x.Exclusive.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = holder.SubscribeToPath(x => x.Exclusive.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         holder.Alpha.Name = "A1"; // dormant, no delivery
         Assert.Empty(events);
@@ -403,7 +403,7 @@ public class PathDormancyTests
         var holder = new DerivedExclusiveHolder(context);
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = holder.SubscribeToPath(x => x.Exclusive.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = holder.SubscribeToPath(x => x.Exclusive.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         holder.Selector = 1; // heal onto beta
         Assert.Single(events);
@@ -436,7 +436,7 @@ public class PathDormancyTests
         holder.Backing = child;
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = holder.SubscribeToPath(x => x.Thrower!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = holder.SubscribeToPath(x => x.Thrower!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act
         child.Name = "C1";
@@ -460,7 +460,7 @@ public class PathDormancyTests
         var root = new Node(context) { Name = "root", Child = midM };
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         var observersBefore = GetSegmentObservers(subscription);
         var upper0 = observersBefore.GetValue(0);
@@ -501,7 +501,7 @@ public class PathDormancyTests
         other.Child = other;
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = node.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = node.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         Assert.Equal(3, PropertyChangeSubscriptions.ReadSubscriptionCount());
         var position1Before = GetSegmentObservers(subscription).GetValue(1);
@@ -555,7 +555,7 @@ public class PathDormancyTests
             {
                 events.Add(c);
             }
-        });
+        }, SubjectPathValidation.Full);
 
         // Act: T2 retracks root.Child to newChild and parks inside its walk (holding the subscription lock,
         // before it tears down the old suffix listener).
@@ -610,7 +610,7 @@ public class PathDormancyTests
         var root = new Node { Name = "root", Child = childA };
         outer.Child = root;
 
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> _) => { });
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
 
         outer.Child = null;
         var childB = new Node { Name = "B0" };
@@ -645,7 +645,7 @@ public class PathDormancyTests
         holder.Backing = child;
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = holder.SubscribeToPath(x => x.Thrower!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = holder.SubscribeToPath(x => x.Thrower!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         child.Name = "C1"; // sanity delivery
         Assert.Single(events);
@@ -693,7 +693,7 @@ public class PathDormancyTests
         var root = new Node(context) { Name = "root", ByName = new Dictionary<string, Node>(comparer) { ["key"] = element } };
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.ByName["key"].Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.ByName["key"].Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         element.Name = "E1"; // sanity delivery
         Assert.Single(events);
@@ -737,7 +737,7 @@ public class PathDormancyTests
         var holder = new GetterThrowHolder(context);
         var child = new Node { Name = "C0" };
         holder.Backing = child;
-        using var subscription = holder.SubscribeToPath(x => x.Thrower!.Name, (in SubjectPathChange<string> _) => { });
+        using var subscription = holder.SubscribeToPath(x => x.Thrower!.Name, (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
 
         holder.ThrowOnGet = true;
 
@@ -758,7 +758,7 @@ public class PathDormancyTests
         var holder = new HostileContainerHolder(context) { Items = new HostileList<Node>(new[] { element }) { Throw = true } };
 
         // Act: subscribing must not throw (the build's child resolution swallows the container failure).
-        using var subscription = holder.SubscribeToPath(x => x.Items[0].Name, (in SubjectPathChange<string> _) => { });
+        using var subscription = holder.SubscribeToPath(x => x.Items[0].Name, (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
 
         // Assert: the segment resolves unresolved.
         Assert.False(subscription.Current.IsResolved);

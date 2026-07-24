@@ -22,7 +22,7 @@ public class PathTransitionTests
         var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
 
         // Act
-        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { });
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full);
 
         // Assert: two segments (Father, FirstName) => two per-property listeners.
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
@@ -36,7 +36,7 @@ public class PathTransitionTests
         var person = new Person(context); // Father is null: the chain build stops after subscribing to Father.
 
         // Act
-        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { });
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full);
 
         // Assert: only the resolvable prefix is installed (Father subscribed, FirstName not reached).
         Assert.Equal(1, PropertyChangeSubscriptions.ReadSubscriptionCount());
@@ -51,7 +51,7 @@ public class PathTransitionTests
         var person = new Person(context) { Father = father };
         var events = new List<SubjectPathChange<string?>>();
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
-            (in SubjectPathChange<string?> c) => events.Add(c));
+            (in SubjectPathChange<string?> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act
         father.FirstName = "Jack";
@@ -72,7 +72,7 @@ public class PathTransitionTests
         var person = new Person(context) { FirstName = "Joe" };
         var events = new List<SubjectPathChange<string?>>();
         using var subscription = person.SubscribeToPath(x => x.FirstName,
-            (in SubjectPathChange<string?> c) => events.Add(c));
+            (in SubjectPathChange<string?> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act
         person.FirstName = "Jack";
@@ -92,7 +92,7 @@ public class PathTransitionTests
         var person = new Person(context); // Father null
         SubjectPathChange<string?>? last = null;
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
-            (in SubjectPathChange<string?> c) => last = c);
+            (in SubjectPathChange<string?> c) => last = c, SubjectPathValidation.Full);
 
         // Act
         person.Father = new Person { FirstName = "Joe" };
@@ -114,7 +114,7 @@ public class PathTransitionTests
         var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
         SubjectPathChange<string?>? last = null;
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
-            (in SubjectPathChange<string?> c) => last = c);
+            (in SubjectPathChange<string?> c) => last = c, SubjectPathValidation.Full);
 
         // Act
         person.Father = null;
@@ -136,7 +136,7 @@ public class PathTransitionTests
         var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
         SubjectPathChange<string?>? last = null;
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
-            (in SubjectPathChange<string?> c) => last = c);
+            (in SubjectPathChange<string?> c) => last = c, SubjectPathValidation.Full);
 
         // Act
         person.Father = new Person { FirstName = "Jack" };
@@ -157,7 +157,7 @@ public class PathTransitionTests
         var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
         var events = new List<SubjectPathChange<string?>>();
         using var subscription = person.SubscribeToPath(x => x.Father!.FirstName,
-            (in SubjectPathChange<string?> c) => events.Add(c));
+            (in SubjectPathChange<string?> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act: divergent retrack, but the retracked leaf value equals the last observed one.
         var newFather = new Person { FirstName = "Joe" };
@@ -186,7 +186,7 @@ public class PathTransitionTests
         var person = new Person(context) { Children = [childA] };
         SubjectPathChange<string?>? last = null;
         using var subscription = person.SubscribeToPath(x => x.Children[0].FirstName,
-            (in SubjectPathChange<string?> c) => last = c);
+            (in SubjectPathChange<string?> c) => last = c, SubjectPathValidation.Full);
 
         // Act
         person.Children = [childB];
@@ -207,7 +207,7 @@ public class PathTransitionTests
         var person = new Person(context) { Children = [childA] };
         var events = new List<SubjectPathChange<string?>>();
         using var subscription = person.SubscribeToPath(x => x.Children[0].FirstName,
-            (in SubjectPathChange<string?> c) => events.Add(c));
+            (in SubjectPathChange<string?> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act: a fresh array holding the same child at the same index; the watched value is unchanged.
         person.Children = new[] { childA };
@@ -233,7 +233,7 @@ public class PathTransitionTests
         var node = new Node(context); // ByName empty: "key" unresolved.
         SubjectPathChange<string>? last = null;
         using var subscription = node.SubscribeToPath(x => x.ByName["key"].Name,
-            (in SubjectPathChange<string> c) => last = c);
+            (in SubjectPathChange<string> c) => last = c, SubjectPathValidation.Full);
 
         // Act
         node.ByName = new Dictionary<string, Node> { ["key"] = new Node { Name = "Value" } };
@@ -254,7 +254,7 @@ public class PathTransitionTests
         var node = new Node(context) { ByName = new Dictionary<string, Node> { ["key"] = new Node { Name = "First" } } };
         SubjectPathChange<string>? last = null;
         using var subscription = node.SubscribeToPath(x => x.ByName["key"].Name,
-            (in SubjectPathChange<string> c) => last = c);
+            (in SubjectPathChange<string> c) => last = c, SubjectPathValidation.Full);
 
         // Act
         node.ByName = new Dictionary<string, Node> { ["key"] = new Node { Name = "Second" } };
@@ -274,7 +274,7 @@ public class PathTransitionTests
         var node = new Node(context) { ByName = new Dictionary<string, Node> { ["key"] = new Node { Name = "First" } } };
         SubjectPathChange<string>? last = null;
         using var subscription = node.SubscribeToPath(x => x.ByName["key"].Name,
-            (in SubjectPathChange<string> c) => last = c);
+            (in SubjectPathChange<string> c) => last = c, SubjectPathValidation.Full);
 
         // Act
         node.ByName = new Dictionary<string, Node>(); // key gone
@@ -295,7 +295,7 @@ public class PathTransitionTests
         var node = new Node(context) { ByName = new Dictionary<string, Node> { ["key"] = new Node { Name = "First" } } };
         SubjectPathChange<string>? last = null;
         using var subscription = node.SubscribeToPath(x => x.ByName["key"].Name,
-            (in SubjectPathChange<string> c) => last = c);
+            (in SubjectPathChange<string> c) => last = c, SubjectPathValidation.Full);
 
         // Act: the key stays present but its value is null, so the leaf is unreachable.
         node.ByName = new Dictionary<string, Node> { ["key"] = null! };
@@ -315,7 +315,7 @@ public class PathTransitionTests
         var childA = new Person { FirstName = "Amy" };
         var childB = new Person { FirstName = "Bob" };
         var person = new Person(context) { Children = [childA] };
-        using var subscription = person.SubscribeToPath(x => x.Children[0].FirstName, (in SubjectPathChange<string?> _) => { });
+        using var subscription = person.SubscribeToPath(x => x.Children[0].FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full);
 
         var chain = typeof(SubjectPathSubscription<string?>)
             .GetField("_chain", BindingFlags.NonPublic | BindingFlags.Instance)!
@@ -359,7 +359,7 @@ public class PathTransitionTests
 
                 throw new InvalidOperationException("boom");
             }
-        });
+        }, SubjectPathValidation.Full);
 
         // Act: the throwing callback strands the queued Jack->Zed event (drain abandoned, drainer flag reset).
         Assert.Throws<InvalidOperationException>(() => father.FirstName = "Jack");

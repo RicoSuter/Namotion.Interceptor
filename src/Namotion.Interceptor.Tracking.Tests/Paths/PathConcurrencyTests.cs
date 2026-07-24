@@ -38,7 +38,7 @@ public class PathConcurrencyTests
             }
 
             log.Add("exit:" + value);
-        });
+        }, SubjectPathValidation.Full);
 
         // Act
         father.FirstName = "Jack";
@@ -71,7 +71,7 @@ public class PathConcurrencyTests
 
                 throw new InvalidOperationException("boom");
             }
-        });
+        }, SubjectPathValidation.Full);
 
         // Act & Assert: the throwing callback propagates through the triggering write and abandons the drain.
         Assert.Throws<InvalidOperationException>(() => father.FirstName = "Jack");
@@ -119,7 +119,7 @@ public class PathConcurrencyTests
             {
                 delivered.Add(change);
             }
-        });
+        }, SubjectPathValidation.Full);
 
         // Act: arm the one-shot side effect, then trigger the outer walk with a watched-leaf write. The write
         // runs on a worker thread bounded by a timeout: a regression that reintroduces the AB-BA deadlock
@@ -166,7 +166,7 @@ public class PathConcurrencyTests
             {
                 delivered.Add(change);
             }
-        });
+        }, SubjectPathValidation.Full);
 
         blocking.ProceedWithCommit.Reset();
         blocking.EnteredInnerChain.Reset();
@@ -210,7 +210,7 @@ public class PathConcurrencyTests
             {
                 delivered.Add(change);
             }
-        });
+        }, SubjectPathValidation.Full);
 
         blocking.ProceedWithCommit.Reset();
         blocking.EnteredInnerChain.Reset();
@@ -273,7 +273,7 @@ public class PathConcurrencyTests
             {
                 delivered.Add(change);
             }
-        });
+        }, SubjectPathValidation.Full);
 
         // Release: the write commits "Jon" and its post-commit late dispatch resolves the freshly installed
         // listener, so the write racing the initial build is delivered, not lost.
@@ -308,7 +308,7 @@ public class PathConcurrencyTests
         other.Child = other; // the retrack target is itself cyclic, so the rebuilt chain is also length three
 
         var delivered = new List<SubjectPathChange<string>>();
-        using var subscription = node.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> change) => delivered.Add(change));
+        using var subscription = node.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> change) => delivered.Add(change), SubjectPathValidation.Full);
 
         Assert.Equal(3, PropertyChangeSubscriptions.ReadSubscriptionCount());
         Assert.Equal(2, ListenerCount(node, nameof(Node.Child))); // the doubly-appearing subject holds two listeners
@@ -366,7 +366,7 @@ public class PathConcurrencyTests
             {
                 fatherB.FirstName = "fromA"; // cross-write into path B while (correctly) holding no lock
             }
-        });
+        }, SubjectPathValidation.Full);
 
         using var subscriptionB = personB.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) =>
         {
@@ -384,7 +384,7 @@ public class PathConcurrencyTests
             {
                 fatherA.FirstName = "fromB"; // cross-write into path A while (correctly) holding no lock
             }
-        });
+        }, SubjectPathValidation.Full);
 
         // Act: two threads trigger the two callbacks concurrently. The barrier makes both callbacks
         // in-flight simultaneously, so a lock held across a callback would surface as an AB-BA deadlock.
@@ -421,7 +421,7 @@ public class PathConcurrencyTests
             {
                 lastDelivered = change;
             }
-        });
+        }, SubjectPathValidation.Full);
 
         using var start = new ManualResetEventSlim(false);
         const int iterations = 2000;

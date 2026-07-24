@@ -28,7 +28,7 @@ public class PathChainInvariantTests
         var root = new Node(context) { Name = "root", Child = mid };
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         Assert.Equal(1, ListenerCount(root, nameof(Node.Child)));
         Assert.Equal(1, ListenerCount(mid, nameof(Node.Child)));
@@ -67,7 +67,7 @@ public class PathChainInvariantTests
         var keeper = new Node(context) { Name = "keeper" };
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         Assert.Equal(1, ListenerCount(mid, nameof(Node.Name)));
 
@@ -100,7 +100,7 @@ public class PathChainInvariantTests
         var root = new Node(context) { Name = "root" };
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         Assert.Equal(1, PropertyChangeSubscriptions.ReadSubscriptionCount()); // only root."Child" is installed
 
@@ -131,7 +131,7 @@ public class PathChainInvariantTests
         var root = new Node(context) { Name = "root", Children = [a] };
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Children[0].Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Children[0].Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         Assert.Equal(1, ListenerCount(a, nameof(Node.Name)));
 
@@ -160,7 +160,7 @@ public class PathChainInvariantTests
         var root = new Node(context) { Name = "root", ByName = new Dictionary<string, Node> { ["key"] = a } };
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.ByName["key"].Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.ByName["key"].Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         Assert.Equal(1, ListenerCount(a, nameof(Node.Name)));
 
@@ -189,7 +189,7 @@ public class PathChainInvariantTests
         var mid = new Node { Name = "mid", Child = leaf };
         var root = new Node(context) { Name = "root", Child = mid };
 
-        using var subscription = root.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> _) => { });
+        using var subscription = root.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
         Assert.Equal(3, PropertyChangeSubscriptions.ReadSubscriptionCount());
 
         // Act: break the chain by nulling the first intermediate.
@@ -212,7 +212,7 @@ public class PathChainInvariantTests
         var a1 = new Node { Name = "a1" };
         var root = new Node(context) { Name = "root", Children = [a0, a1] };
 
-        using var subscription = root.SubscribeToPath(x => x.Children[1].Name, (in SubjectPathChange<string> _) => { });
+        using var subscription = root.SubscribeToPath(x => x.Children[1].Name, (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
         Assert.Equal(1, ListenerCount(a1, nameof(Node.Name)));
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
 
@@ -233,7 +233,7 @@ public class PathChainInvariantTests
         var a = new Node { Name = "a0" };
         var root = new Node(context) { Name = "root", ByName = new Dictionary<string, Node> { ["key"] = a } };
 
-        using var subscription = root.SubscribeToPath(x => x.ByName["key"].Name, (in SubjectPathChange<string> _) => { });
+        using var subscription = root.SubscribeToPath(x => x.ByName["key"].Name, (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
         Assert.Equal(1, ListenerCount(a, nameof(Node.Name)));
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
 
@@ -254,7 +254,7 @@ public class PathChainInvariantTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var root = new Node(context) { Name = "root" };
 
-        using var subscription = root.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> _) => { });
+        using var subscription = root.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
 
         // Act & Assert: repeatedly heal to a full chain (length three) then break to the bare prefix
         // (length one). The count must equal the current chain length after each transition and NEVER grow
@@ -289,7 +289,7 @@ public class PathChainInvariantTests
         node.Child = node;
 
         // Act
-        using var subscription = node.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> _) => { });
+        using var subscription = node.SubscribeToPath(x => x.Child!.Child!.Name, (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
 
         // Assert: the multiset invariant. The subject appearing at two positions holds two listeners on Child.
         Assert.Equal(2, ListenerCount(node, nameof(Node.Child)));
@@ -344,7 +344,7 @@ public class PathChainInvariantTests
     {
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var root = new Node(context) { Name = "root", Child = new Node { Name = "child" } };
-        var handle = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> _) => { });
+        var handle = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
 
         return (new WeakReference(root), new WeakReference(handle));
     }
@@ -358,7 +358,7 @@ public class PathChainInvariantTests
         var root = new Node(context) { Child = oldChild };
         var subscription = root.SubscribeToPath(
             x => x.Child!.Name,
-            (in SubjectPathChange<string> _) => { });
+            (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
 
         var weakOldChild = new WeakReference(oldChild);
         root.Child = new Node { Name = "new" };

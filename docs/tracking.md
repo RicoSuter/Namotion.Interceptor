@@ -148,7 +148,7 @@ It differs from a per-property subscription in both what it watches and what it 
 | Event payload | the write's exact old and new value and origin | an observed-state transition (`OldState`/`NewState`); `NewState` is a fresh re-read, not a specific write's value |
 | Use when | you need every write or per-write origin fidelity (a write log, via the queue or observable channels) | you care about the value at a location as intermediates appear, move, or vanish |
 
-Two overloads mirror the per-property primitive, one taking a callback and one a zero-closure observer:
+Two overloads mirror the per-property primitive, one taking a callback and one a zero-closure observer. Both require a `SubjectPathValidation` mode as the last parameter:
 
 ```csharp
 // Callback overload:
@@ -157,11 +157,19 @@ using var handle = car.SubscribeToPath(
     (in SubjectPathChange<double> change) =>
     {
         // Re-render from Current on every callback (see below).
-    });
+    },
+    SubjectPathValidation.Full);
 
 // Observer overload (ISubjectPathChangeObserver<double>, no per-event closure):
-using var handle2 = car.SubscribeToPath(x => x.Engine.PrimarySensor.Temperature, observer);
+using var handle2 = car.SubscribeToPath(x => x.Engine.PrimarySensor.Temperature, observer, SubjectPathValidation.Full);
 ```
+
+The validation mode chooses how much of the path a leaf write revalidates:
+
+- `SubjectPathValidation.Full`: every delivered callback, leaf or structural, revalidates the whole path from the root. A divergence created while part of the path was dormant (a structural change that could not dispatch) is healed on the next delivered callback of any kind. Choose this unless the walk cost on leaf writes is a measured problem.
+- `SubjectPathValidation.LeafOnly`: a write to the resolved leaf re-reads only the leaf on its cached subject and skips the from-root walk; structural writes still revalidate and retrack. This is faster for deep paths with high-frequency leaf writes, but a divergence created while dormant is not healed by a leaf write, only by a later structural write, so a stale off-path leaf value can keep delivering until then (a bounded consistency carve-out).
+
+`Current` is always a fresh full walk and stays accurate in both modes.
 
 `SubscribeToPath` delivers no event at subscribe time. Every delivered event corresponds to exactly one real property write, carried as `Cause`. Consumers seed their initial state from `Current`, which computes the current observed state on demand and never caches it:
 
@@ -188,7 +196,8 @@ lock (gate)
             {
                 state = subscription.Current; // read Current, never change.NewState or a cached snapshot
             }
-        });
+        },
+        SubjectPathValidation.Full);
 
     state = subscription.Current; // seed under the same lock
 }

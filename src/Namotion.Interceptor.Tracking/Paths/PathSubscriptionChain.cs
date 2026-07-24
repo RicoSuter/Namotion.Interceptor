@@ -84,6 +84,34 @@ internal sealed class PathSubscriptionChain<TValue>
     }
 
     /// <summary>
+    /// Re-reads only the resolved leaf on its cached subject (the <see cref="SubjectPathValidation.LeafOnly"/>
+    /// leaf-write head), with no from-root walk, divergence check, or retrack. Defensive null checks return
+    /// unresolved; when the leaf observer legitimately fires, both the cached accessor and the resolved leaf
+    /// subject are set. The read shares the walk's never-throw contract: a throwing getter resolves as
+    /// unresolved rather than propagating out of the under-lock computation. Callers must hold the lock.
+    /// </summary>
+    internal SubjectPathValue<TValue> ReadResolvedLeaf()
+    {
+        Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "ReadResolvedLeaf must be called under the coordinator lock.");
+        var leafPosition = _segments.Length - 1;
+        var resolvedSegment = _resolvedSegments[leafPosition];
+        var leafSubject = _resolvedSubjects[leafPosition];
+        if (resolvedSegment is null || leafSubject is null)
+        {
+            return SubjectPathValue<TValue>.Unresolved;
+        }
+
+        try
+        {
+            return resolvedSegment.ReadLeaf(leafSubject);
+        }
+        catch
+        {
+            return SubjectPathValue<TValue>.Unresolved;
+        }
+    }
+
+    /// <summary>
     /// True when <paramref name="cause"/> is a write to the chain's current resolved leaf (subject reference
     /// and name match), the condition that makes an intact-chain, resolved event a
     /// <see cref="SubjectPathChangeKind.ValueChange"/>. Callers must hold the lock.

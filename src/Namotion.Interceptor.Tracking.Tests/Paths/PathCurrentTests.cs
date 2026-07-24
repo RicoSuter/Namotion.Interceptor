@@ -19,7 +19,7 @@ public class PathCurrentTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
-        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { });
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full);
 
         // Act
         var current = subscription.Current;
@@ -35,7 +35,7 @@ public class PathCurrentTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var person = new Person(context) { Father = new Person() }; // FirstName left null
-        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { });
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full);
 
         // Act
         var current = subscription.Current;
@@ -51,7 +51,7 @@ public class PathCurrentTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var person = new Person(context); // Father is null
-        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { });
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full);
 
         // Act & Assert
         Assert.False(subscription.Current.IsResolved);
@@ -63,7 +63,7 @@ public class PathCurrentTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var person = new Person(context); // Children is empty
-        using var subscription = person.SubscribeToPath(x => x.Children[3].FirstName, (in SubjectPathChange<string?> _) => { });
+        using var subscription = person.SubscribeToPath(x => x.Children[3].FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full);
 
         // Act & Assert
         Assert.False(subscription.Current.IsResolved);
@@ -76,7 +76,7 @@ public class PathCurrentTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var node = new Node(context);
         node.ByName = new Dictionary<string, Node> { ["key"] = null! };
-        using var subscription = node.SubscribeToPath(x => x.ByName["key"].Name, (in SubjectPathChange<string> _) => { });
+        using var subscription = node.SubscribeToPath(x => x.ByName["key"].Name, (in SubjectPathChange<string> _) => { }, SubjectPathValidation.Full);
 
         // Act & Assert
         Assert.False(subscription.Current.IsResolved);
@@ -88,7 +88,7 @@ public class PathCurrentTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var person = new Person(context) { Father = new Person { FirstName = "Joe" } };
-        var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { });
+        var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full);
 
         // Act
         subscription.Dispose();
@@ -105,10 +105,10 @@ public class PathCurrentTests
         var person = new Person(context);
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => ((Person)null!).SubscribeToPath(x => x.FirstName, (in SubjectPathChange<string?> _) => { }));
-        Assert.Throws<ArgumentNullException>(() => person.SubscribeToPath((Expression<Func<Person, string?>>)null!, (in SubjectPathChange<string?> _) => { }));
-        Assert.Throws<ArgumentNullException>(() => person.SubscribeToPath(x => x.FirstName, (SubjectPathChangeCallback<string?>)null!));
-        Assert.Throws<ArgumentNullException>(() => person.SubscribeToPath(x => x.FirstName, (ISubjectPathChangeObserver<string?>)null!));
+        Assert.Throws<ArgumentNullException>(() => ((Person)null!).SubscribeToPath(x => x.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full));
+        Assert.Throws<ArgumentNullException>(() => person.SubscribeToPath((Expression<Func<Person, string?>>)null!, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full));
+        Assert.Throws<ArgumentNullException>(() => person.SubscribeToPath(x => x.FirstName, (SubjectPathChangeCallback<string?>)null!, SubjectPathValidation.Full));
+        Assert.Throws<ArgumentNullException>(() => person.SubscribeToPath(x => x.FirstName, (ISubjectPathChangeObserver<string?>)null!, SubjectPathValidation.Full));
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public class PathCurrentTests
         using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             Assert.Throws<InvalidOperationException>(
-                () => person.SubscribeToPath(x => x.FirstName, (in SubjectPathChange<string?> _) => { }));
+                () => person.SubscribeToPath(x => x.FirstName, (in SubjectPathChange<string?> _) => { }, SubjectPathValidation.Full));
         }
     }
 }

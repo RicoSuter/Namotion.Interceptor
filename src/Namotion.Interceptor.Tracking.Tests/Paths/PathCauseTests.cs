@@ -29,7 +29,7 @@ public class PathCauseTests
         var root = new Node(context) { Name = "root", Child = child };
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act: a plain leaf write.
         child.Name = "c1";
@@ -53,7 +53,7 @@ public class PathCauseTests
         var root = new Node(context) { Name = "root", Child = child };
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act: a structural write to the intermediate.
         var child2 = new Node { Name = "c2" };
@@ -78,7 +78,7 @@ public class PathCauseTests
         var source = new object();
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act: an inbound source write to the leaf.
         new PropertyReference(child, nameof(Node.Name))
@@ -102,7 +102,7 @@ public class PathCauseTests
         var source = new object();
 
         var events = new List<SubjectPathChange<string>>();
-        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c));
+        using var subscription = root.SubscribeToPath(x => x.Child!.Name, (in SubjectPathChange<string> c) => events.Add(c), SubjectPathValidation.Full);
 
         // Act: an inbound source write to the intermediate.
         var child2 = new Node { Name = "c2" };
@@ -152,7 +152,7 @@ public class PathCauseTests
             {
                 delivered.Add(c);
             }
-        });
+        }, SubjectPathValidation.Full);
 
         gate.Arm(); // the seed walk already ran during Subscribe, so only the dispatch walks are gated now
 
