@@ -20,7 +20,9 @@ namespace Namotion.Interceptor.Tracking.Paths;
 internal sealed class PathDeliveryQueue<TValue>
 {
     private readonly Lock _lock;
-    private readonly ISubjectPathChangeObserver<TValue> _observer;
+    // Nulled by ReleaseObserver on dispose (Volatile.Write) so a retained handle does not pin the observer's
+    // closure; Drain reads it into a local first. Mirrors PropertyChangeSubscription's _observer handling.
+    private ISubjectPathChangeObserver<TValue>? _observer;
     private readonly Func<bool> _isDisposed;
 
     // Both guarded by the shared lock. _draining marks the single active drainer; _pending is the FIFO
@@ -116,11 +118,17 @@ internal sealed class PathDeliveryQueue<TValue>
     {
         Debug.Assert(!_lock.IsHeldByCurrentThread, "Drain must be called with the coordinator lock released.");
 
+        // Read the observer once, outside the lock, into a local. Dispose may null it concurrently (releasing
+        // the closure), but an already-claimed drain must still run its in-flight callbacks to completion, so
+        // the captured local is used for the whole session. A null here means Dispose won the race before any
+        // delivery began; deliver nothing (post-dispose delivery stays bounded) but still clear the drainer.
+        var observer = Volatile.Read(ref _observer);
+
         try
         {
-            if (hasDirectEvent)
+            if (hasDirectEvent && observer is not null)
             {
-                _observer.OnChange(in directEvent);
+                observer.OnChange(in directEvent);
             }
 
             while (true)
@@ -131,10 +139,10 @@ internal sealed class PathDeliveryQueue<TValue>
                     // Atomic empty-check and drainer clear: a write enqueuing just as the drainer exits is
                     // either seen here (dequeued and delivered) or finds _draining false under the lock and
                     // becomes the next drainer. Neither loses the event nor lets two threads drain at once.
-                    // The disposed check bounds post-dispose delivery: once disposal is observed the drainer
-                    // starts no new delivery and drops the remaining backlog (Dispose already cleared the
-                    // backlog), so at most the one callback already dispatched outside the lock completes.
-                    if (_isDisposed() || _pending.Count == 0)
+                    // The disposed/observer check bounds post-dispose delivery: once disposal is observed the
+                    // drainer starts no new delivery and drops the remaining backlog (Dispose already cleared
+                    // the backlog), so at most the one callback already dispatched outside the lock completes.
+                    if (observer is null || _isDisposed() || _pending.Count == 0)
                     {
                         _draining = false;
                         return;
@@ -143,7 +151,7 @@ internal sealed class PathDeliveryQueue<TValue>
                     next = _pending.Dequeue();
                 }
 
-                _observer.OnChange(in next);
+                observer.OnChange(in next);
             }
         }
         catch
@@ -166,4 +174,12 @@ internal sealed class PathDeliveryQueue<TValue>
         Debug.Assert(_lock.IsHeldByCurrentThread, "Clear must be called under the coordinator lock.");
         _pending.Clear();
     }
+
+    /// <summary>
+    /// Releases the observer on dispose (<c>Volatile.Write</c>) so a retained handle does not pin its closure.
+    /// Paired with the <c>Volatile.Read</c> at the top of <see cref="Drain"/>: a drain already in flight keeps
+    /// delivering through its captured local, so an in-flight callback still completes. Called from dispose
+    /// under the lock, but the release itself needs only the volatile write.
+    /// </summary>
+    internal void ReleaseObserver() => Volatile.Write(ref _observer, null);
 }

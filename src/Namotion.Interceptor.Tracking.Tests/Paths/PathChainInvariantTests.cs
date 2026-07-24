@@ -334,6 +334,25 @@ public class PathChainInvariantTests
         }
     }
 
+    [Fact]
+    public void WhenDisposedHandleRetained_ThenRootAndObserverAreCollectible()
+    {
+        // Arrange & Act: create a subscription, dispose it, then drop every external reference EXCEPT the
+        // disposed handle itself. The helper returns weak references to the graph root and to an object that
+        // only the callback closure captures.
+        var (subscription, weakRoot, weakCallbackTarget) = CreateAndDisposeRetainedSubscription();
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        // Assert: dispose nulled the root and observer references (Volatile.Write, matching the primitive), so
+        // a still-referenced disposed handle pins neither the graph root nor the observer closure.
+        Assert.False(weakRoot.IsAlive, "a disposed subscription must not pin the graph root even when its handle is retained");
+        Assert.False(weakCallbackTarget.IsAlive, "a disposed subscription must not pin the observer closure even when its handle is retained");
+        GC.KeepAlive(subscription); // the handle is deliberately retained across the assertions
+    }
+
     // Builds a root and an undisposed path subscription in an isolated scope, using a bare notifications
     // context created here (not passed in) so the whole graph is unreachable once the returned weak
     // references are the only thing pointing at it. Bare subscriptions avoid the lifecycle interceptor's
@@ -363,6 +382,24 @@ public class PathChainInvariantTests
         var weakOldChild = new WeakReference(oldChild);
         root.Child = new Node { Name = "new" };
         return (root, subscription, weakOldChild);
+    }
+
+    // Creates a subscription in an isolated scope, disposes it, and returns the retained handle plus weak
+    // references to the graph root and to an object captured only by the callback closure. Bare context for
+    // the same reason as CreateFireAndForgetSubscription (no lifecycle retention of the root).
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (SubjectPathSubscription<string> Subscription, WeakReference Root, WeakReference CallbackTarget)
+        CreateAndDisposeRetainedSubscription()
+    {
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var root = new Node(context) { Name = "root", Child = new Node { Name = "child" } };
+        var callbackTarget = new object();
+        var subscription = root.SubscribeToPath(
+            x => x.Child!.Name,
+            (in SubjectPathChange<string> _) => GC.KeepAlive(callbackTarget),
+            SubjectPathValidation.Full);
+        subscription.Dispose();
+        return (subscription, new WeakReference(root), new WeakReference(callbackTarget));
     }
 
     private static int ListenerCount(IInterceptorSubject subject, string propertyName)

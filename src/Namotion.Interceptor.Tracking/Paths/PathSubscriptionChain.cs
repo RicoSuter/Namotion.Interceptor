@@ -23,7 +23,9 @@ namespace Namotion.Interceptor.Tracking.Paths;
 internal sealed class PathSubscriptionChain<TValue>
 {
     private readonly SubjectPathSubscription<TValue> _coordinator;
-    private readonly IInterceptorSubject _root;
+    // Nulled by ReleaseRoot on dispose (Volatile.Write) so a retained handle does not pin the graph root;
+    // Walk reads it into a local first. Mirrors PropertyChangeSubscription's _subject handling.
+    private IInterceptorSubject? _root;
     private readonly PathSegment[] _segments;
 
     // All arrays are indexed by segment position and are mutated only under the coordinator's lock.
@@ -61,7 +63,14 @@ internal sealed class PathSubscriptionChain<TValue>
     /// with a rented buffer). The caller supplies the buffer.
     /// </summary>
     internal SubjectPathValue<TValue> Walk(IInterceptorSubject?[] buffer)
-        => PathWalker.Walk(_segments, _root, buffer, _resolvedSegments);
+    {
+        // _root is read lock-free by Current and may be nulled by ReleaseRoot on a racing dispose; capture it
+        // into a local and treat a null root as unresolved (the documented post-dispose Current result).
+        var root = Volatile.Read(ref _root);
+        return root is null
+            ? SubjectPathValue<TValue>.Unresolved
+            : PathWalker.Walk(_segments, root, buffer, _resolvedSegments);
+    }
 
     /// <summary>
     /// The first position where <paramref name="walkedSubjects"/> read on a different subject (reference
@@ -225,4 +234,11 @@ internal sealed class PathSubscriptionChain<TValue>
 
     /// <summary>Tears down the entire chain (equivalent to <c>DisposeSuffix(0)</c>). Callers must hold the lock.</summary>
     internal void DisposeAll() => DisposeSuffix(0);
+
+    /// <summary>
+    /// Releases the root reference on dispose (<c>Volatile.Write</c>) so a retained handle does not pin the
+    /// graph root. Paired with the <c>Volatile.Read</c> in <see cref="Walk"/>, which then resolves to
+    /// unresolved. Called after <see cref="DisposeAll"/> has cleared the per-position subject entries.
+    /// </summary>
+    internal void ReleaseRoot() => Volatile.Write(ref _root, null);
 }

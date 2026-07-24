@@ -124,10 +124,11 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
 
     /// <summary>
     /// One-shot dispose: tears down every installed segment listener (returning the process-wide count to
-    /// zero), drops any queued-but-undelivered events, releases the buffered walk references, and marks the
-    /// subscription disposed. Idempotent and never throws; after it returns <see cref="Current"/> is
-    /// unresolved. A callback already dispatched outside the lock may run to completion, but the drain loop
-    /// observes the disposed flag and starts no new delivery, so post-dispose delivery is bounded.
+    /// zero), drops any queued-but-undelivered events, releases the buffered walk references, the graph root,
+    /// and the observer, and marks the subscription disposed. Idempotent and never throws; after it returns
+    /// <see cref="Current"/> is unresolved. A callback already dispatched outside the lock may run to
+    /// completion, but the drain loop observes the disposed flag and starts no new delivery, so post-dispose
+    /// delivery is bounded.
     /// </summary>
     public void Dispose()
     {
@@ -142,14 +143,16 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
             _chain.DisposeAll();
             _deliveryQueue.Clear();
 
-            // Release what the teardown above leaves behind: the last-walked subjects held in the reusable
-            // scratch buffer (some may already be detached from the graph) and the last observed leaf value.
-            // Both are touched only under _lock, so clearing them here is race-free. The root subject and the
-            // observer callback are intentionally NOT nulled: the caller already owns the root, and the
-            // lock-free Current walk and an in-flight drain (which must run to completion) read them without
-            // the lock, so nulling them would race into a NullReferenceException.
+            // Release what the listener teardown above leaves behind so a retained disposed handle pins
+            // nothing: the last-walked subjects in the reusable scratch buffer (some already detached) and the
+            // last observed leaf value (both touched only under _lock, so cleared here race-free), plus the
+            // graph root and the observer closure. Root and observer are nulled via Volatile.Write, matching
+            // the per-property primitive (PropertyChangeSubscription): the lock-free Current walk and an
+            // in-flight drain read them into a local first, so an already-claimed callback still completes.
             Array.Clear(_scratch);
             _lastObserved = SubjectPathValue<TValue>.Unresolved;
+            _chain.ReleaseRoot();
+            _deliveryQueue.ReleaseObserver();
         }
     }
 
@@ -279,8 +282,8 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
     /// <paramref name="leafFast"/> (a leaf callback under <see cref="SubjectPathValidation.LeafOnly"/>)
     /// the head instead re-reads only the cached leaf, with no walk, divergence check, or retrack. The
     /// shared tail is the suppression check and the <see cref="_lastObserved"/> advance-before-callback.
-    /// Returns false when the event is suppressed (no delivery, no baseline advance). Callers must hold
-    /// <see cref="_lock"/>.
+    /// Returns false when the event is suppressed (no delivery), though the baseline still advances to the
+    /// fresh value. Callers must hold <see cref="_lock"/>.
     /// </summary>
     private bool TryComputeEvent(in SubjectPropertyChange cause, bool leafFast, out SubjectPathChange<TValue> change)
     {
