@@ -146,12 +146,13 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
             // Release what the listener teardown above leaves behind so a retained disposed handle pins
             // nothing: the last-walked subjects in the reusable scratch buffer (some already detached) and the
             // last observed leaf value (both touched only under _lock, so cleared here race-free), plus the
-            // graph root and the observer closure. Root and observer are nulled via Volatile.Write, matching
-            // the per-property primitive (PropertyChangeSubscription): the lock-free Current walk and an
-            // in-flight drain read them into a local first, so an already-claimed callback still completes.
+            // graph root, the decomposed segments (their fixed dictionary-key/index arguments may be arbitrary
+            // objects), and the observer closure. Root, segments, and observer are nulled via Volatile.Write,
+            // matching the per-property primitive (PropertyChangeSubscription): the lock-free Current walk and
+            // an in-flight drain read them into a local first, so an already-claimed callback still completes.
             Array.Clear(_scratch);
             _lastObserved = SubjectPathValue<TValue>.Unresolved;
-            _chain.ReleaseRoot();
+            _chain.ReleaseReferences();
             _deliveryQueue.ReleaseObserver();
         }
     }
@@ -206,8 +207,9 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
             // The leaf-only fast path applies exactly when the firing observer is the resolved leaf's own
             // listener: the compute below then re-reads only the cached leaf instead of walking from the
             // root, skipping divergence detection and retrack (the mode's documented carve-out). Any
-            // upper-segment callback keeps the full validating walk in both modes.
-            var leafFast = _validation == SubjectPathValidation.LeafOnly && observer.Position == _chain.Length - 1;
+            // upper-segment callback keeps the full validating walk in both modes. This is the FIRST-pass
+            // determination only; a deferred re-pass forces the full walk (see the loop below).
+            var leafOnlyLeafWrite = _validation == SubjectPathValidation.LeafOnly && observer.Position == _chain.Length - 1;
 
             // Suppress the ambient transaction for the whole computation below. A [Derived]-with-setter or
             // cross-context write on a transaction-holding flow bypasses staging and dispatches here
@@ -230,9 +232,19 @@ public sealed class SubjectPathSubscription<TValue> : IDisposable
             // contract violation (getters must be side-effect-free), not a supported case.
             SubjectPathChange<TValue> heldEvent = default;
             var hasHeldEvent = false;
+            var firstPass = true;
             do
             {
                 _deferredRevalidation = false;
+
+                // Only the first pass corresponds to the actual firing observer, so only it may take the
+                // leaf-only fast path. A deferred re-pass was triggered by a watched-segment write a getter
+                // made during the previous pass's walk; the reentrancy guard did not record that write's
+                // position, so it may be a structural (upper-segment) change. Force the full from-root walk on
+                // every deferred pass so such a change is detected and retracked instead of being trusted as a
+                // leaf re-read (which would strand the chain on the departed branch).
+                var leafFast = leafOnlyLeafWrite && firstPass;
+                firstPass = false;
 
                 if (!TryComputeEvent(in cause, leafFast, out var change))
                 {

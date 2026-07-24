@@ -152,6 +152,58 @@ public class PathConcurrencyTests
     }
 
     [Fact]
+    public async Task WhenLeafOnlyGetterReentrantlyReplacesUpperSegmentDuringWalk_ThenDeferredPassRetracks()
+    {
+        // Arrange: a two-segment LeafOnly path (x => x.Father!.FirstName). A read interceptor, once after
+        // arming, replaces the WATCHED INTERMEDIATE (person.Father) while the leaf is being read during the
+        // tracker's leaf-only re-read. That structural write dispatches synchronously and re-enters the
+        // subscription on the walking (lock-holding) thread, so the reentrancy guard defers it WITHOUT
+        // recording its position. The deferred re-pass must therefore run the full from-root walk rather than
+        // the leaf-only fast path, so the divergence is detected and the chain retracks onto the new father;
+        // otherwise the chain strands on the old father and the last delivered value disagrees with Current.
+        var oldFather = new Person { FirstName = "Old" };
+        var newFather = new Person { FirstName = "New" };
+        var replaceFather = new UpperSegmentSideEffectReadInterceptor(oldFather, nameof(Person.FirstName), newFather);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => replaceFather, _ => false);
+        var person = new Person(context) { Father = oldFather };
+        replaceFather.Bind(person);
+
+        var deliveredLock = new object();
+        var delivered = new List<SubjectPathChange<string?>>();
+        using var subscription = person.SubscribeToPath(x => x.Father!.FirstName, (in SubjectPathChange<string?> change) =>
+        {
+            lock (deliveredLock)
+            {
+                delivered.Add(change);
+            }
+        }, SubjectPathValidation.LeafOnly);
+
+        // Act: arm, then a watched-leaf write triggers the leaf-only re-read; the interceptor swaps the father
+        // mid-read. Bounded by a timeout so a deadlock regression fails fast instead of hanging the suite.
+        replaceFather.Arm();
+        await Task.Run(() => oldFather.FirstName = "Old2").WaitAsync(TimeSpan.FromSeconds(10));
+
+        SubjectPathChange<string?>[] observed;
+        lock (deliveredLock)
+        {
+            observed = delivered.ToArray();
+        }
+
+        // Assert: the deferred full walk retracked onto the new father. Quiescent consistency holds (the last
+        // delivered New equals Current equals the new father's leaf), and the leaf listener moved off the old
+        // father onto the new one.
+        Assert.Equal("New", person.Father!.FirstName);
+        Assert.Equal("New", subscription.Current.GetValueOrDefault());
+        Assert.NotEmpty(observed);
+        Assert.Equal("New", observed[^1].NewState.GetValueOrDefault());
+        Assert.Equal(0, ListenerCount(oldFather, nameof(Person.FirstName)));
+        Assert.Equal(1, ListenerCount(newFather, nameof(Person.FirstName)));
+    }
+
+    [Fact]
     public async Task WhenLeafWriteFollowsRetrackInstall_ThenListenerLookupFindsItAndDelivers()
     {
         // Arrange: interleaving (a). The structural retrack installs the suffix listener FIRST; the racing
@@ -544,6 +596,50 @@ public class PathConcurrencyTests
                 // means the outer walk already captured the pre-side-effect value, so the deferred revalidation
                 // has a genuinely distinct value to deliver.
                 ((Person)_target).FirstName = _sideEffectValue;
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// A read interceptor that, exactly once and only after <see cref="Arm"/>, replaces a WATCHED INTERMEDIATE
+    /// (an upper segment) while the leaf is being read, so the structural write re-enters the path subscription
+    /// on the walking (lock-holding) thread. Used to prove a deferred revalidation runs the full walk even
+    /// under leaf-only validation, where the first pass would otherwise take the leaf-only fast path.
+    /// </summary>
+    private sealed class UpperSegmentSideEffectReadInterceptor : IReadInterceptor
+    {
+        private readonly IInterceptorSubject _leafSubject;
+        private readonly string _leafPropertyName;
+        private readonly Person _replacementFather;
+        private Person? _parent;
+        private int _armed;
+        private int _fired;
+
+        public UpperSegmentSideEffectReadInterceptor(IInterceptorSubject leafSubject, string leafPropertyName, Person replacementFather)
+        {
+            _leafSubject = leafSubject;
+            _leafPropertyName = leafPropertyName;
+            _replacementFather = replacementFather;
+        }
+
+        public void Bind(Person parent) => _parent = parent;
+
+        public void Arm() => Interlocked.Exchange(ref _armed, 1);
+
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
+        {
+            var result = next(ref context);
+
+            if (Volatile.Read(ref _armed) == 1
+                && ReferenceEquals(context.Property.Subject, _leafSubject)
+                && context.Property.Name == _leafPropertyName
+                && Interlocked.CompareExchange(ref _fired, 1, 0) == 0)
+            {
+                // Replace the watched intermediate mid-read: a structural (upper-segment) change that
+                // dispatches synchronously and re-enters on this lock-holding thread, deferring a revalidation.
+                _parent!.Father = _replacementFather;
             }
 
             return result;

@@ -16,17 +16,23 @@ namespace Namotion.Interceptor.Tracking.Paths;
 /// LOCK CONTRACT: every method is called under the coordinator's lock, EXCEPT the <c>_resolvedSegments</c>
 /// reads that <see cref="Walk"/> performs when it is called from the lock-free
 /// <see cref="SubjectPathSubscription{TValue}.Current"/>; those reads go through <see cref="Volatile"/>. The
-/// immutable root and segment array are safe to read without the lock. Subscribe-before-read ordering in
+/// root and segment array are captured into a local before use because dispose nulls them (via
+/// <see cref="Volatile"/>) to release the graph and any captured key/index objects; a null capture reads as
+/// unresolved, and the array reference is swapped, never mutated in place. Subscribe-before-read ordering in
 /// <see cref="BuildFrom"/> (install the listener, THEN read to resolve the next subject) is load-bearing for
 /// the missed-write guarantee and must be preserved exactly.
 /// </remarks>
 internal sealed class PathSubscriptionChain<TValue>
 {
     private readonly SubjectPathSubscription<TValue> _coordinator;
-    // Nulled by ReleaseRoot on dispose (Volatile.Write) so a retained handle does not pin the graph root;
-    // Walk reads it into a local first. Mirrors PropertyChangeSubscription's _subject handling.
+    // Nulled by ReleaseReferences on dispose (Volatile.Write) so a retained handle does not pin the graph
+    // root; Walk reads it into a local first. Mirrors PropertyChangeSubscription's _subject handling.
     private IInterceptorSubject? _root;
-    private readonly PathSegment[] _segments;
+    // Nulled by ReleaseReferences on dispose (Volatile.Write) so a retained handle does not pin the decomposed
+    // segments and any evaluated dictionary-key or index objects they captured; Walk reads it into a local
+    // first. The length is cached separately so the lock-free Length stays valid after the array is released.
+    private PathSegment[]? _segments;
+    private readonly int _length;
 
     // All arrays are indexed by segment position and are mutated only under the coordinator's lock.
     // _segmentHandles[p] is the installed listener for position p; _segmentObservers[p] is the CURRENT
@@ -44,16 +50,17 @@ internal sealed class PathSubscriptionChain<TValue>
         _coordinator = coordinator;
         _root = root;
         _segments = segments;
+        _length = segments.Length;
 
-        var length = segments.Length;
+        var length = _length;
         _segmentHandles = new IDisposable?[length];
         _segmentObservers = new PathSegmentObserver<TValue>?[length];
         _resolvedSubjects = new IInterceptorSubject?[length];
         _resolvedSegments = new ResolvedPathSegment<TValue>?[length];
     }
 
-    /// <summary>The number of segments in the path. Immutable; safe to read without the lock.</summary>
-    internal int Length => _segments.Length;
+    /// <summary>The number of segments in the path. Immutable; safe to read without the lock even after dispose.</summary>
+    internal int Length => _length;
 
     /// <summary>
     /// Walks the segments from the root into <paramref name="buffer"/> and returns the observed leaf value.
@@ -64,12 +71,15 @@ internal sealed class PathSubscriptionChain<TValue>
     /// </summary>
     internal SubjectPathValue<TValue> Walk(IInterceptorSubject?[] buffer)
     {
-        // _root is read lock-free by Current and may be nulled by ReleaseRoot on a racing dispose; capture it
-        // into a local and treat a null root as unresolved (the documented post-dispose Current result).
+        // _root and _segments are read lock-free by Current and may be nulled by ReleaseReferences on a racing
+        // dispose; capture both into locals (the array reference is swapped atomically, never mutated in place,
+        // so a captured array is always fully valid) and treat either being null as unresolved, the documented
+        // post-dispose Current result.
         var root = Volatile.Read(ref _root);
-        return root is null
+        var segments = Volatile.Read(ref _segments);
+        return root is null || segments is null
             ? SubjectPathValue<TValue>.Unresolved
-            : PathWalker.Walk(_segments, root, buffer, _resolvedSegments);
+            : PathWalker.Walk(segments, root, buffer, _resolvedSegments);
     }
 
     /// <summary>
@@ -81,7 +91,7 @@ internal sealed class PathSubscriptionChain<TValue>
     internal int FindDivergence(IInterceptorSubject?[] walkedSubjects)
     {
         Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "FindDivergence must be called under the coordinator lock.");
-        for (var position = 0; position < _segments.Length; position++)
+        for (var position = 0; position < _length; position++)
         {
             if (!ReferenceEquals(walkedSubjects[position], _resolvedSubjects[position]))
             {
@@ -102,7 +112,7 @@ internal sealed class PathSubscriptionChain<TValue>
     internal SubjectPathValue<TValue> ReadResolvedLeaf()
     {
         Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "ReadResolvedLeaf must be called under the coordinator lock.");
-        var leafPosition = _segments.Length - 1;
+        var leafPosition = _length - 1;
         var resolvedSegment = _resolvedSegments[leafPosition];
         var leafSubject = _resolvedSubjects[leafPosition];
         if (resolvedSegment is null || leafSubject is null)
@@ -128,8 +138,10 @@ internal sealed class PathSubscriptionChain<TValue>
     internal bool IsResolvedLeafWrite(in SubjectPropertyChange cause)
     {
         Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "IsResolvedLeafWrite must be called under the coordinator lock.");
-        var leafSubject = _resolvedSubjects[_segments.Length - 1];
-        var leafName = _segments[_segments.Length - 1].PropertyName;
+        // _segments is non-null here: this runs under the lock and dispose (which nulls it) also runs under the
+        // lock, and a disposed subscription never reaches event computation.
+        var leafSubject = _resolvedSubjects[_length - 1];
+        var leafName = _segments![_length - 1].PropertyName;
         return leafSubject is not null
             && ReferenceEquals(cause.Property.Subject, leafSubject)
             && string.Equals(cause.Property.Name, leafName, StringComparison.Ordinal);
@@ -156,10 +168,13 @@ internal sealed class PathSubscriptionChain<TValue>
     internal void BuildFrom(int startPosition, IInterceptorSubject startSubject)
     {
         Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "BuildFrom must be called under the coordinator lock.");
+        // _segments is non-null here: BuildFrom runs under the lock (ctor build and retrack), and dispose,
+        // which nulls it, also runs under the lock, so a released array is never observed mid-build.
+        var segments = _segments!;
         var subject = startSubject;
-        for (var position = startPosition; position < _segments.Length; position++)
+        for (var position = startPosition; position < _length; position++)
         {
-            var segment = _segments[position];
+            var segment = segments[position];
 
             // Record the current observer for this position (slot identity) and the subject this segment
             // reads on, then install the listener.
@@ -222,7 +237,7 @@ internal sealed class PathSubscriptionChain<TValue>
     internal void DisposeSuffix(int fromPosition)
     {
         Debug.Assert(_coordinator.IsLockHeldByCurrentThread, "DisposeSuffix must be called under the coordinator lock.");
-        for (var position = fromPosition; position < _segments.Length; position++)
+        for (var position = fromPosition; position < _length; position++)
         {
             _segmentHandles[position]?.Dispose();
             _segmentHandles[position] = null;
@@ -236,9 +251,15 @@ internal sealed class PathSubscriptionChain<TValue>
     internal void DisposeAll() => DisposeSuffix(0);
 
     /// <summary>
-    /// Releases the root reference on dispose (<c>Volatile.Write</c>) so a retained handle does not pin the
-    /// graph root. Paired with the <c>Volatile.Read</c> in <see cref="Walk"/>, which then resolves to
-    /// unresolved. Called after <see cref="DisposeAll"/> has cleared the per-position subject entries.
+    /// Releases the references a retained disposed handle would otherwise pin: the graph root and the
+    /// decomposed segment array (whose fixed dictionary-key or index arguments may be arbitrary objects, up to
+    /// and including the root). Both are nulled via <c>Volatile.Write</c>, paired with the <c>Volatile.Read</c>
+    /// in <see cref="Walk"/>, which then resolves to unresolved. The cached <see cref="Length"/> stays valid.
+    /// Called after <see cref="DisposeAll"/> has cleared the per-position subject/accessor entries.
     /// </summary>
-    internal void ReleaseRoot() => Volatile.Write(ref _root, null);
+    internal void ReleaseReferences()
+    {
+        Volatile.Write(ref _root, null);
+        Volatile.Write(ref _segments, null);
+    }
 }

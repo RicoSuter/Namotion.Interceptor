@@ -15,6 +15,7 @@ public static class SubjectPathSubscriptionExtensions
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="subject"/>, <paramref name="path"/>, or <paramref name="callback"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a supported path expression (for example a cast, a field selector, a captured-object chain, a multi-argument indexer, the identity path, or a path ending in an index). A segment that is merely invalid at runtime (missing, or non-intercepted and non-derived) does not throw; the path resolves as unresolved instead.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="validation"/> is not a defined <see cref="SubjectPathValidation"/> value.</exception>
     /// <exception cref="InvalidOperationException">Called while an active, not-yet-committing transaction is on the current flow.</exception>
     public static SubjectPathSubscription<TValue> SubscribeToPath<TSubject, TValue>(
         this TSubject subject,
@@ -33,6 +34,7 @@ public static class SubjectPathSubscriptionExtensions
     /// <summary>Observer overload of <see cref="SubscribeToPath{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, SubjectPathChangeCallback{TValue}, SubjectPathValidation)"/>.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="subject"/>, <paramref name="path"/>, or <paramref name="observer"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a supported path expression. A segment that is merely invalid at runtime does not throw; the path resolves as unresolved instead.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="validation"/> is not a defined <see cref="SubjectPathValidation"/> value.</exception>
     /// <exception cref="InvalidOperationException">Called while an active, not-yet-committing transaction is on the current flow.</exception>
     public static SubjectPathSubscription<TValue> SubscribeToPath<TSubject, TValue>(
         this TSubject subject,
@@ -55,6 +57,12 @@ public static class SubjectPathSubscriptionExtensions
         SubjectPathValidation validation)
         where TSubject : IInterceptorSubject
     {
+        if (validation is not (SubjectPathValidation.Full or SubjectPathValidation.LeafOnly))
+        {
+            throw new ArgumentOutOfRangeException(nameof(validation), validation,
+                "Validation must be a defined SubjectPathValidation value (Full or LeafOnly).");
+        }
+
         // Installing a chain from inside an active, not-yet-committing transaction would resolve its
         // intermediates against the transaction's speculative staged subjects and install listeners on them;
         // a rollback would then strand those listeners on subjects that never became part of the committed

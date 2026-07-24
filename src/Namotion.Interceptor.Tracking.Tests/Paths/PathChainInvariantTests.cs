@@ -353,6 +353,24 @@ public class PathChainInvariantTests
         GC.KeepAlive(subscription); // the handle is deliberately retained across the assertions
     }
 
+    [Fact]
+    public void WhenDisposedHandleRetained_ThenEvaluatedDictionaryKeyIsCollectible()
+    {
+        // Arrange & Act: a dictionary-key path evaluates and stores the key object on the segment. Dispose,
+        // then drop the graph while retaining the disposed handle; only the segment array could still pin the
+        // key (keys may be arbitrary reference types, up to the root itself).
+        var (subscription, weakKey) = CreateAndDisposeDictionaryKeySubscription();
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        // Assert: dispose released the segment array (Volatile.Write null), so the retained handle no longer
+        // pins the evaluated dictionary key.
+        Assert.False(weakKey.IsAlive, "a disposed subscription must not pin an evaluated dictionary key even when its handle is retained");
+        GC.KeepAlive(subscription); // the handle is deliberately retained across the assertion
+    }
+
     // Builds a root and an undisposed path subscription in an isolated scope, using a bare notifications
     // context created here (not passed in) so the whole graph is unreachable once the returned weak
     // references are the only thing pointing at it. Bare subscriptions avoid the lifecycle interceptor's
@@ -400,6 +418,24 @@ public class PathChainInvariantTests
             SubjectPathValidation.Full);
         subscription.Dispose();
         return (subscription, new WeakReference(root), new WeakReference(callbackTarget));
+    }
+
+    // Creates a dictionary-key path subscription whose key is a distinct (non-interned) reference-type
+    // instance, disposes it, and returns the retained handle plus a weak reference to the key. The graph
+    // (which also holds the key as a dictionary key) is dropped, so after dispose only the segment array
+    // could keep the key alive.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (SubjectPathSubscription<string> Subscription, WeakReference Key) CreateAndDisposeDictionaryKeySubscription()
+    {
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var key = new string("k-e-y".ToCharArray()); // a distinct, non-interned key instance to weak-reference
+        var root = new Node(context) { ByName = new Dictionary<string, Node> { [key] = new Node { Name = "value" } } };
+        var subscription = root.SubscribeToPath(
+            x => x.ByName[key].Name,
+            (in SubjectPathChange<string> _) => { },
+            SubjectPathValidation.Full);
+        subscription.Dispose();
+        return (subscription, new WeakReference(key));
     }
 
     private static int ListenerCount(IInterceptorSubject subject, string propertyName)

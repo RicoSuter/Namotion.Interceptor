@@ -112,6 +112,18 @@ public class PathCurrentTests
     }
 
     [Fact]
+    public void WhenValidationModeIsNotDefined_ThenThrowArgumentOutOfRangeException()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context);
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            person.SubscribeToPath(x => x.FirstName, (in SubjectPathChange<string?> _) => { }, (SubjectPathValidation)999));
+    }
+
+    [Fact]
     public async Task WhenSubscribeInActiveNonCommittingTransaction_ThenThrowInvalidOperationException()
     {
         // Arrange
