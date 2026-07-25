@@ -14,7 +14,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
-        var context = new PropertyReadContext(new PropertyReference(_subject, propertyName));
+        var context = new PropertyReadContext<TProperty>(new PropertyReference(_subject, propertyName));
         return ExecuteInterceptedRead(ref context, readValue);
     }
     

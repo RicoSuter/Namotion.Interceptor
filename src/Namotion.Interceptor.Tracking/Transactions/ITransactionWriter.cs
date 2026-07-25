@@ -19,9 +19,9 @@ public interface ITransactionWriter
     /// Report failures via <see cref="SourceWriteResult"/>, never throw: a throw returns neither the
     /// written set nor the revert state, so the transaction fails terminally with nothing reverted.
     /// After (and only after) a source accepts a change, replace that slot in <paramref name="changes"/>
-    /// with the same change marked by the accepting source (<see cref="SubjectPropertyChange.WithSource"/>),
+    /// with the same change marked by the accepting source (<see cref="SubjectPropertyChange.WithOrigin"/>),
     /// so the commit's local apply and revert notifications are recognized as echoes by that source's
-    /// outbound queue. Change only the slot's <see cref="SubjectPropertyChange.Source"/>, never move a
+    /// outbound queue. Change only the slot's <see cref="SubjectPropertyChange.Origin"/>, never move a
     /// change to a different slot, and leave failed slots untouched. Not marking at all is harmless but
     /// keeps the legacy double write (the queue re-pushes each committed value).
     /// <paramref name="changes"/> is a pooled buffer owned by the commit: do not retain or mutate it after

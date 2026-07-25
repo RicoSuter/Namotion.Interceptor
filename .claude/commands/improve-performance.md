@@ -25,7 +25,7 @@ Ask the user one question at a time:
 3. **Benchmark mapping.** Read the benchmark project sources. For each candidate, propose a BenchmarkDotNet filter pattern. Show the table with a `Coverage` column. For candidates with no clear coverage, ask per candidate: (a) write a new benchmark on the parent branch, (b) skip the candidate, (c) run with the closest existing filter and accept noisy results.
 4. **Run config.** `LaunchCount` (default 3) and `Short` toggle (default off).
 
-Test verification is fixed: every candidate runs `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"` (matches the project default in `CLAUDE.md`). Results are recorded only in the local design doc on the parent branch, not posted to any GitHub issue.
+Test verification is fixed: every candidate runs `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"` (matches the project default in `AGENTS.md`). Results are recorded only in the local design doc on the parent branch, not posted to any GitHub issue.
 
 Then print a final plan summary (parent branch name, list of candidates with branch names, benchmark filter, doc path) and ask one explicit `proceed?` confirmation. Warn that the working directory will be owned by the skill for ~30-90 min.
 

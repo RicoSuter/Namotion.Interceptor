@@ -293,10 +293,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         return Task.FromResult<Action?>(() =>
         {
             var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
-            using (SubjectChangeContext.WithSource(this))
-            {
-                _subject.ApplySubjectUpdate(_initialState, factory);
-            }
+            _subject.ApplySubjectUpdate(_initialState, factory, ChangeOrigin.FromSource(this));
 
             // Claim ownership of all properties matching the path provider
             ClaimPropertyOwnership();
@@ -534,13 +531,10 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         if (propertyWriter is null) return;
 
         propertyWriter.Write(
-            (update, subject: _subject, source: this, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance),
+            (update, subject: _subject, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance, source: this),
             static state =>
             {
-                using (SubjectChangeContext.WithSource(state.source))
-                {
-                    state.subject.ApplySubjectUpdate(state.update, state.factory);
-                }
+                state.subject.ApplySubjectUpdate(state.update, state.factory, ChangeOrigin.FromSource(state.source));
             });
     }
 

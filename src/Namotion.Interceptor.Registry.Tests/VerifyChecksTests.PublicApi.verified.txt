@@ -119,7 +119,7 @@ namespace Namotion.Interceptor.Registry
         public static void SetSubjectId(this Namotion.Interceptor.IInterceptorSubject subject, string id) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetRegisteredProperty(this Namotion.Interceptor.PropertyReference propertyReference) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetRegisteredProperty(this Namotion.Interceptor.IInterceptorSubject subject, string propertyName, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry? registry = null) { }
-        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetRegisteredProperty<T>(this T subject, System.Linq.Expressions.Expression<System.Func<T, object?>> propertyExpression)
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetRegisteredProperty<T, TValue>(this T subject, System.Linq.Expressions.Expression<System.Func<T, TValue>> propertyExpression)
             where T : Namotion.Interceptor.IInterceptorSubject { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetRegisteredSubject(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static string? TryGetSubjectId(this Namotion.Interceptor.IInterceptorSubject subject) { }

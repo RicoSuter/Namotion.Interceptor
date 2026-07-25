@@ -127,10 +127,13 @@ public static class SubjectAspNetCoreServiceCollection
             var propertyValidatorsArray = propertyValidators.ToArray();
             foreach (var update in resolvedUpdates)
             {
+                var validationContext = new PropertyValidationContext<object?>(
+                    new PropertyReference(update.Subject!, update.Property.Name),
+                    update.Value,
+                    ChangeOrigin.Local);
+
                 var updateErrors = propertyValidatorsArray
-                    .SelectMany(v => v.Validate(
-                        new PropertyReference(update.Subject!, update.Property.Name),
-                        update.Value))
+                    .SelectMany(v => v.Validate(validationContext))
                     .ToArray();
 
                 if (updateErrors.Any())

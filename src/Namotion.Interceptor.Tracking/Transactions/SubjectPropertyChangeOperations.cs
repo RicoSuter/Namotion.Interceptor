@@ -118,9 +118,24 @@ internal static class SubjectPropertyChangeOperations
         try
         {
             var metadata = change.Property.Metadata;
-            using (SubjectChangeContext.WithState(change.Source, change.ChangedTimestamp, change.ReceivedTimestamp))
+            var newValue = change.GetNewValue<object?>();
+            // Local origins arm no stamp: an absent stamp and a Local stamp both finalize to Local
+            // (FinalizeOrigin short-circuits on Local before reading the sent value), so skip
+            // PendingOrigin.Set on the Local replay/revert hot path. Non-Local origins (FromSource,
+            // Confirmed) still arm so echo suppression sees the source.
+            using (SubjectChangeContext.WithTimestamps(change.ChangedTimestamp, change.ReceivedTimestamp))
             {
-                metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
+                if (change.Origin.Kind == ChangeOriginKind.Local)
+                {
+                    metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                }
+                else
+                {
+                    using (PendingOrigin.Set(change.Property, change.Origin, newValue))
+                    {
+                        metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                    }
+                }
             }
             error = null;
             return true;
@@ -138,7 +153,7 @@ internal static class SubjectPropertyChangeOperations
     internal static SubjectPropertyChange ToRollbackChange(this SubjectPropertyChange change) =>
         SubjectPropertyChange.Create(
             change.Property,
-            source: change.Source,
+            origin: change.Origin,
             changedTimestamp: change.ChangedTimestamp,
             receivedTimestamp: change.ReceivedTimestamp,
             oldValue: change.GetNewValue<object?>(),

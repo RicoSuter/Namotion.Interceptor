@@ -13,7 +13,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
 
     private SubjectPropertyChange(
         PropertyReference property,
-        object? source,
+        ChangeOrigin origin,
         DateTimeOffset changedTimestamp,
         DateTimeOffset? receivedTimestamp,
         InlineValueStorage oldValueStorage,
@@ -22,7 +22,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         object? newBoxedHolder)
     {
         Property = property;
-        Source = source;
+        Origin = origin;
         ChangedTimestamp = changedTimestamp;
         ReceivedTimestamp = receivedTimestamp;
         _oldValueStorage = oldValueStorage;
@@ -33,7 +33,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
 
     public PropertyReference Property { get; }
 
-    public object? Source { get; }
+    public ChangeOrigin Origin { get; }
 
     public DateTimeOffset ChangedTimestamp { get; }
 
@@ -42,18 +42,22 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static SubjectPropertyChange Create<TValue>(
         PropertyReference property,
-        object? source,
+        ChangeOrigin origin,
         DateTimeOffset changedTimestamp,
         DateTimeOffset? receivedTimestamp,
         TValue oldValue,
         TValue newValue)
     {
-        // Fast path: value types that fit inline (primitives, small structs) - ZERO allocations
-        if (typeof(TValue).IsValueType && Unsafe.SizeOf<TValue>() <= InlineValueStorage.MaxSize)
+        // Fast path: small ref-free value types stored inline - zero allocations. Structs containing
+        // references (e.g. ImmutableArray<T>) must be excluded: inline storage is not GC-scanned, so a
+        // contained reference could dangle. All checks fold to JIT-time constants (zero-cost guard).
+        if (typeof(TValue).IsValueType &&
+            !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() &&
+            Unsafe.SizeOf<TValue>() <= InlineValueStorage.MaxSize)
         {
             return new SubjectPropertyChange(
                 property,
-                source,
+                origin,
                 changedTimestamp,
                 receivedTimestamp,
                 InlineValueStorage.Create(oldValue),
@@ -67,7 +71,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         {
             return new SubjectPropertyChange(
                 property,
-                source,
+                origin,
                 changedTimestamp,
                 receivedTimestamp,
                 default,
@@ -79,7 +83,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         // Slow path: other reference types or large value types - TWO allocations (one per value)
         return new SubjectPropertyChange(
             property,
-            source,
+            origin,
             changedTimestamp,
             receivedTimestamp,
             default,
@@ -181,15 +185,16 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     /// <summary>
     /// Merges this (earlier) change with a newer change to the same property.
     /// Keeps this change's old value and takes the newer change's new value,
-    /// source, and timestamps. Used during deduplication to preserve the correct
-    /// diff baseline while reflecting the latest state.
+    /// origin, and timestamps. Used during deduplication to preserve the correct
+    /// diff baseline while reflecting the latest state. Copies the newer change's full
+    /// <see cref="Origin"/> so a deduplicated change keeps its kind and source.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public SubjectPropertyChange MergeWithNewer(SubjectPropertyChange newerChange)
     {
         return new SubjectPropertyChange(
             Property,
-            newerChange.Source,
+            newerChange.Origin,
             newerChange.ChangedTimestamp,
             newerChange.ReceivedTimestamp,
             _oldValueStorage,
@@ -199,13 +204,13 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     /// <summary>
-    /// Copies this change with a different source, without re-boxing the values. A transaction writer
-    /// uses this to mark an accepted change with the source that confirmed it.
+    /// Copies this change with a different origin, without re-boxing the values. A transaction writer
+    /// uses this to mark an accepted change with the origin that confirmed it.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public SubjectPropertyChange WithSource(object? source) =>
+    public SubjectPropertyChange WithOrigin(ChangeOrigin origin) =>
         new(Property,
-            source,
+            origin,
             ChangedTimestamp,
             ReceivedTimestamp,
             _oldValueStorage,

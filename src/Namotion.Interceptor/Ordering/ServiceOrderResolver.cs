@@ -111,12 +111,18 @@ internal static class ServiceOrderResolver
             return;
         }
 
-        // Build type-to-index mapping
-        var typeToIndex = new Dictionary<Type, int>(count);
+        // Build type-to-indices mapping; a type can have multiple instances when a
+        // context aggregates fallback contexts that each register the same service type
+        var typeToIndices = new Dictionary<Type, List<int>>(count);
         for (var i = 0; i < count; i++)
-            typeToIndex[services[i]!.GetType()] = i;
+        {
+            var type = services[i]!.GetType();
+            if (!typeToIndices.TryGetValue(type, out var indices))
+                typeToIndices[type] = indices = [];
+            indices.Add(i);
+        }
 
-        // Build adjacency list and in-degree counts
+        // Build adjacency list and in-degree counts; edges bind to every instance of the referenced type
         var adjacency = new List<int>[count];
         var inDegree = new int[count];
 
@@ -126,19 +132,25 @@ internal static class ServiceOrderResolver
 
             foreach (var beforeType in info.RunsBefore)
             {
-                if (typeToIndex.TryGetValue(beforeType, out var target))
+                if (typeToIndices.TryGetValue(beforeType, out var targets))
                 {
-                    (adjacency[i] ??= []).Add(target);
-                    inDegree[target]++;
+                    foreach (var target in targets)
+                    {
+                        (adjacency[i] ??= []).Add(target);
+                        inDegree[target]++;
+                    }
                 }
             }
 
             foreach (var afterType in info.RunsAfter)
             {
-                if (typeToIndex.TryGetValue(afterType, out var source))
+                if (typeToIndices.TryGetValue(afterType, out var sources))
                 {
-                    (adjacency[source] ??= []).Add(i);
-                    inDegree[i]++;
+                    foreach (var source in sources)
+                    {
+                        (adjacency[source] ??= []).Add(i);
+                        inDegree[i]++;
+                    }
                 }
             }
         }

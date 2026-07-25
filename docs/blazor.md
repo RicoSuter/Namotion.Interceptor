@@ -168,7 +168,7 @@ The tracking system consists of three core components:
 ┌─────────────────────────────────────────────────────────────────┐
 │                   Property Change Detection                      │
 │                                                                 │
-│  PropertyChangeObservable ─── Subscribe ──► TrackingScope       │
+│  PropertyChangeInterceptor ─── Subscribe ──► TrackingScope      │
 │        │                                          │             │
 │        ▼                                          ▼             │
 │   change.Property              1. Check _properties directly    │

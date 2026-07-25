@@ -93,10 +93,11 @@ public class DynamicPropertyWithWriteInterceptorTests
     /// </summary>
     private class RegistryAccessingValidator : IPropertyValidator
     {
-        public IEnumerable<ValidationResult> Validate<TProperty>(PropertyReference property, TProperty value)
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
         {
-            var registeredProperty = property.GetRegisteredProperty();
-            yield break;
+            // Access the registry on every write (as EnumerationValueValidator does); result unused.
+            _ = context.Property.GetRegisteredProperty();
+            return [];
         }
     }
 

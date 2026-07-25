@@ -32,6 +32,18 @@ foreach (var prop in registeredTire.Properties)
 }
 ```
 
+You can also resolve a specific registered property from a strongly-typed expression, including nested paths across subjects:
+
+```csharp
+// Direct property
+var pressureProperty = tire.TryGetRegisteredProperty(t => t.Pressure);
+
+// Nested path, including collection or dictionary segments
+var frontPressureProperty = car.TryGetRegisteredProperty(c => c.Tires[0].Pressure);
+```
+
+Member-access hops resolve through the registry; index and dictionary segments evaluate against the object graph. The lookup is null-safe either way: if a subject along the path is null or not tracked by the registry, the method returns `null` instead of throwing.
+
 ## Enumerate property attributes
 
 The registry makes it easy to find metadata associated with properties:

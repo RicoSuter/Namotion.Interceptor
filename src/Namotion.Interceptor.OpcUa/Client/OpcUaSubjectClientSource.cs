@@ -369,6 +369,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             sessionManager.Subscriptions,
             cancellationToken).ConfigureAwait(false);
 
+        await sessionManager.SubscriptionManager
+            .EscalatePersistentlyFailedItemsAsync(cancellationToken).ConfigureAwait(false);
+
         return false;
     }
 
@@ -580,8 +583,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _logger.LogError(ex, "OPC UA CurrentSessionChanged event handler threw an exception.");
         }
     }
-
-    internal static bool IsTransientWriteError(StatusCode statusCode) => OutboundWriter.IsTransientWriteError(statusCode);
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)

@@ -34,7 +34,8 @@ public class RootManager : BackgroundService, IConfigurationWriter
         ConfigurableSubjectSerializer serializer,
         IInterceptorSubjectContext context,
         IConfiguration? configuration = null,
-        ILogger<RootManager>? logger = null)
+        ILogger<RootManager>? logger = null,
+        ILoggerFactory? loggerFactory = null)
     {
         _typeRegistry = typeRegistry;
         _serializer = serializer;
@@ -44,6 +45,15 @@ public class RootManager : BackgroundService, IConfigurationWriter
 
         // Register self with context for subjects to access
         context.AddService(this);
+
+        // Make host logging available to context services and lifecycle handlers, which are
+        // constructed by the context factory before any provider exists and so cannot inject it
+        // (for example PropertyAttributeInitializer warning on a [State]/secret conflict). Runs
+        // before the root graph is built in ExecuteAsync, so handlers see it during attach.
+        if (loggerFactory is not null)
+        {
+            context.AddService(loggerFactory);
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

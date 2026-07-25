@@ -22,7 +22,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("John", target.FirstName);
@@ -47,7 +47,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(timestamp, target.GetPropertyReference("FirstName").TryGetWriteTimestamp());
@@ -68,7 +68,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("Child", target.FirstName);
@@ -105,7 +105,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(2, target.Children.Count);
@@ -132,7 +132,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("Updated", target.FirstName);
@@ -166,7 +166,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(2, target.Children.Count);
@@ -197,7 +197,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Single(target.Children);
@@ -230,7 +230,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(3, target.Children.Count);
@@ -261,7 +261,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Same(targetChild, target.Children[0]); // Same instance reused
@@ -287,7 +287,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(2, target.Lookup.Count);
@@ -330,7 +330,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(2, target.Lookup.Count);
@@ -370,7 +370,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Single(target.Lookup);
@@ -392,7 +392,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(parent, []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("Parent", target.Name);
@@ -415,7 +415,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(node, []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("SelfRef", target.Name);
@@ -451,7 +451,7 @@ public partial class SubjectUpdateExtensionsTests
 
         // Act
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("JsonValue", target.FirstName);
@@ -476,14 +476,153 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
         await Verify(update);
-        using (SubjectChangeContext.WithSource(externalSource))
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.FromSource(externalSource));
+
+        // Assert - the applied write carries the FromSource origin so echo suppression can skip the source
+        Assert.NotNull(capturedChange);
+        Assert.Equal(ChangeOriginKind.FromSource, capturedChange.Value.Origin.Kind);
+        Assert.Same(externalSource, capturedChange.Value.Origin.Source);
+    }
+
+    [Fact]
+    public void WhenUpdateIsAppliedWithSource_ThenChangeCarriesUpdateTimestamp()
+    {
+        // Arrange - a FromSource apply must publish the inbound update's timestamp, not capture-time now
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new Person(context) { FirstName = "Original" };
+        var source = new object();
+        var updateTimestamp = new DateTimeOffset(2024, 1, 15, 10, 30, 0, TimeSpan.Zero);
+
+        var update = new SubjectUpdate
         {
-            target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
-        }
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Updated",
+                        Timestamp = updateTimestamp
+                    }
+                }
+            }
+        };
+
+        SubjectPropertyChange? capturedChange = null;
+        using var subscription = context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == "FirstName")
+            .Subscribe(c => capturedChange = c);
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.FromSource(source));
 
         // Assert
+        Assert.Equal("Updated", target.FirstName);
         Assert.NotNull(capturedChange);
-        Assert.Equal(externalSource, capturedChange.Value.Source);
+        Assert.Equal(updateTimestamp, capturedChange.Value.ChangedTimestamp);
+        Assert.Equal(ChangeOriginKind.FromSource, capturedChange.Value.Origin.Kind);
+        Assert.Same(source, capturedChange.Value.Origin.Source);
+    }
+
+    [Fact]
+    public void WhenFromSourceApplyTransformChangesValue_ThenChangeCarriesLocalOrigin()
+    {
+        // Arrange - a FromSource apply whose transform corrects the inbound value must publish the
+        // corrected value under a Local origin. The pending origin's evidence has to stay the value
+        // the source semantically sent (pre-transform); otherwise the survival check compares the
+        // corrected value against itself, the FromSource origin survives, and the outbound processor
+        // echo-suppresses the correction back to the source, diverging the source from the applied value.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new NumericNode(context) { Value = 0 };
+        var source = new object();
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Value"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = 105
+                    }
+                }
+            }
+        };
+
+        SubjectPropertyChange? capturedChange = null;
+        using var subscription = context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == "Value")
+            .Subscribe(c => capturedChange = c);
+
+        // Act - the transform corrects 105 to 100 before the value is applied
+        target.ApplySubjectUpdate(
+            update,
+            DefaultSubjectFactory.Instance,
+            ChangeOrigin.FromSource(source),
+            (_, propertyUpdate) => propertyUpdate.Value = 100);
+
+        // Assert
+        Assert.Equal(100, target.Value);
+        Assert.NotNull(capturedChange);
+        Assert.Equal(ChangeOriginKind.Local, capturedChange.Value.Origin.Kind);
+    }
+
+    [Fact]
+    public void WhenFromSourceApplyTransformLeavesReferenceTypeValueUnchanged_ThenChangeCarriesFromSourceOrigin()
+    {
+        // Arrange - a FromSource apply whose transform inspects but does NOT replace a reference-type
+        // value (int[]) must publish under the FromSource origin so echo suppression skips the source.
+        // The JsonElement must be converted once and reused as both the written value and the origin's
+        // survival evidence: converting twice produces two reference-distinct int[] instances that fail
+        // the reference-equality survival check and wrongly demote a genuine unchanged source write to
+        // Local, defeating echo suppression.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new ArrayNode(context) { Numbers = [] };
+        var source = new object();
+
+        var jsonElement = JsonDocument.Parse("[1,2,3]").RootElement;
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Numbers"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = jsonElement
+                    }
+                }
+            }
+        };
+
+        SubjectPropertyChange? capturedChange = null;
+        using var subscription = context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == "Numbers")
+            .Subscribe(c => capturedChange = c);
+
+        // Act - the transform reads the value but leaves propertyUpdate.Value unchanged
+        target.ApplySubjectUpdate(
+            update,
+            DefaultSubjectFactory.Instance,
+            ChangeOrigin.FromSource(source),
+            (property, propertyUpdate) => { _ = propertyUpdate.Value; });
+
+        // Assert
+        Assert.Equal([1, 2, 3], target.Numbers);
+        Assert.NotNull(capturedChange);
+        Assert.Equal(ChangeOriginKind.FromSource, capturedChange.Value.Origin.Kind);
+        Assert.Same(source, capturedChange.Value.Origin.Source);
     }
 
     [Fact]
@@ -513,7 +652,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Null(target.Father);
@@ -532,7 +671,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
         await Verify(update);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("updated", target.Name_Status);
@@ -562,7 +701,7 @@ public partial class SubjectUpdateExtensionsTests
         };
 
         // Act
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert - nothing should change
         Assert.Equal("Original", target.FirstName);
@@ -592,7 +731,7 @@ public partial class SubjectUpdateExtensionsTests
         };
 
         // Act
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert - nothing should change
         Assert.Equal("Original", target.FirstName);
@@ -637,7 +776,7 @@ public partial class SubjectUpdateExtensionsTests
         };
 
         // Act - should not throw
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert - collection unchanged
         Assert.Single(target.Children);
@@ -668,7 +807,7 @@ public partial class SubjectUpdateExtensionsTests
         };
 
         // Act - should not throw
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert - Father should remain null (not set to anything)
         Assert.Null(target.Father);
@@ -720,7 +859,7 @@ public partial class SubjectUpdateExtensionsTests
 
         // Act & Assert - should throw because index >= count
         var exception = Assert.Throws<InvalidOperationException>(
-            () => target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance));
+            () => target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
         Assert.Contains("out of bounds", exception.Message.ToLower());
     }
 
@@ -769,7 +908,7 @@ public partial class SubjectUpdateExtensionsTests
         };
 
         // Act - should not throw
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(2, target.Children.Count);
@@ -812,7 +951,7 @@ public partial class SubjectUpdateExtensionsTests
         };
 
         // Act - should not throw
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert - collection unchanged
         Assert.Equal(2, target.Children.Count);
@@ -856,7 +995,7 @@ public partial class SubjectUpdateExtensionsTests
         };
 
         // Act - should not throw
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert - collection unchanged
         Assert.Single(target.Children);
@@ -907,7 +1046,7 @@ public partial class SubjectUpdateExtensionsTests
         };
 
         // Act
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Single(target.Children);
@@ -932,7 +1071,7 @@ public partial class SubjectUpdateExtensionsTests
 
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Null(target.Children);
@@ -964,7 +1103,7 @@ public partial class SubjectUpdateExtensionsTests
 
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Null(target.Lookup);
@@ -985,6 +1124,18 @@ public partial class SubjectUpdateExtensionsTests
         Assert.True(rootProps.ContainsKey("Children"));
         Assert.Equal(SubjectPropertyUpdateKind.Value, rootProps["Children"].Kind);
         Assert.Null(rootProps["Children"].Value);
+    }
+
+    [InterceptorSubject]
+    public partial class NumericNode
+    {
+        public partial int Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class ArrayNode
+    {
+        public partial int[] Numbers { get; set; }
     }
 
     [InterceptorSubject]
@@ -1018,7 +1169,7 @@ public partial class SubjectUpdateExtensionsTests
 
         // Act - complete update round-trip (values will be int keys in source, need to be matched after deserialization)
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(2, target.IntLookup.Count);
@@ -1064,7 +1215,7 @@ public partial class SubjectUpdateExtensionsTests
 
         // Act - apply the deserialized update (this is where the bug manifested:
         // Kind=Collection with a string JsonElement key caused ConvertIndexToInt to throw)
-        target.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("Item1Updated", target.Lookup["myKey"].Name);
@@ -1105,7 +1256,7 @@ public partial class SubjectUpdateExtensionsTests
 
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(2, target.IntLookup.Count);

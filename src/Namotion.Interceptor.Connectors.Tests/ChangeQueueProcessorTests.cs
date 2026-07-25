@@ -15,7 +15,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -56,7 +56,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -95,7 +95,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -140,7 +140,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var writeHandlerCalled = false;
 
@@ -172,7 +172,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var processor = new ChangeQueueProcessor(
             source: null,
@@ -194,7 +194,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var flushCount = 0;
@@ -244,7 +244,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
 
@@ -287,7 +287,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
 
@@ -333,8 +333,7 @@ public class ChangeQueueProcessorTests
         ChangeQueueProcessor processor,
         PropertyReference property,
         string? oldValue,
-        string? newValue,
-        object? source = null)
+        string? newValue)
     {
         // Use reflection to access the private _changes queue
         var changesField = typeof(ChangeQueueProcessor)
@@ -344,7 +343,7 @@ public class ChangeQueueProcessorTests
 
         var change = SubjectPropertyChange.Create(
             property,
-            source,
+            ChangeOrigin.Local,
             DateTimeOffset.UtcNow,
             null,
             oldValue,

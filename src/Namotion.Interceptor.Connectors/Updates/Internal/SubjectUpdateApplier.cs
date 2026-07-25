@@ -16,6 +16,7 @@ internal static class SubjectUpdateApplier
         IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory subjectFactory,
+        ChangeOrigin origin,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         if (string.IsNullOrEmpty(update.Root))
@@ -27,7 +28,7 @@ internal static class SubjectUpdateApplier
         var context = ContextPool.Rent();
         try
         {
-            context.Initialize(update.Subjects, subjectFactory, transformValueBeforeApply);
+            context.Initialize(update.Subjects, subjectFactory, origin, transformValueBeforeApply);
             context.TryMarkAsProcessed(update.Root);
             ApplyPropertyUpdates(subject, rootProperties, context);
         }
@@ -80,13 +81,33 @@ internal static class SubjectUpdateApplier
         switch (propertyUpdate.Kind)
         {
             case SubjectPropertyUpdateKind.Value:
-                context.TransformValueBeforeApply?.Invoke(registeredProperty, propertyUpdate);
-                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+            {
+                if (context.TransformValueBeforeApply is not null)
+                {
+                    // Convert once BEFORE the transform runs; this converted instance is the value the
+                    // source semantically sent and doubles as the origin's survival evidence. If the
+                    // transform does not replace propertyUpdate.Value (reference unchanged), reuse that
+                    // same instance as the written value too: converting a JSON value twice yields two
+                    // reference-distinct instances for reference types (int[], DTOs), which fail the
+                    // reference-equality survival check and wrongly demote a genuine unchanged source
+                    // write to Local, defeating echo suppression. Only re-convert when the transform
+                    // substituted a new value, so a locally corrected value differs from the evidence
+                    // and the origin correctly demotes to Local.
+                    var rawValue = propertyUpdate.Value;
+                    var sentValue = ConvertValue(rawValue, registeredProperty.Type);
+                    context.TransformValueBeforeApply.Invoke(registeredProperty, propertyUpdate);
+                    var value = ReferenceEquals(propertyUpdate.Value, rawValue)
+                        ? sentValue
+                        : ConvertValue(propertyUpdate.Value, registeredProperty.Type);
+                    context.SetPropertyValue(registeredProperty, propertyUpdate.Timestamp, value, sentValue);
+                }
+                else
                 {
                     var value = ConvertValue(propertyUpdate.Value, registeredProperty.Type);
-                    registeredProperty.SetValue(value);
+                    context.SetPropertyValue(registeredProperty, propertyUpdate.Timestamp, value);
                 }
                 break;
+            }
 
             case SubjectPropertyUpdateKind.Object:
                 ApplyObjectUpdate(subject, registeredProperty, propertyUpdate, context);
@@ -128,18 +149,12 @@ internal static class SubjectUpdateApplier
                     ApplyPropertyUpdates(newItem, itemProperties, context);
                 }
 
-                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-                {
-                    property.SetValue(newItem);
-                }
+                context.SetPropertyValue(property, propertyUpdate.Timestamp, newItem);
             }
         }
         else
         {
-            using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-            {
-                property.SetValue(null);
-            }
+            context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
         }
     }
 

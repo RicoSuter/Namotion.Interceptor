@@ -11,8 +11,6 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Also manages the per-context transaction lock for serialized transactions.
 /// </summary>
 [RunsBefore(typeof(DerivedPropertyChangeHandler))]
-[RunsBefore(typeof(PropertyChangeObservable))]
-[RunsBefore(typeof(PropertyChangeQueue))]
 public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInterceptor
 {
     private readonly SemaphoreSlim _exclusiveTransactionLock = new(1, 1);
@@ -29,7 +27,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
     /// <inheritdoc />
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
+    public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
     {
         // Fast path: Skip transaction check when no transaction is active (avoids AsyncLocal read)
         if (!SubjectTransaction.HasActiveTransaction)
@@ -69,13 +67,18 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
                     $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");
             }
 
-            var currentContext = SubjectChangeContext.Current;
+            // Capture is a terminal outcome for the chain: the downstream write (and its origin
+            // finalization) never runs. Finalize here so a stamped origin whose captured value was
+            // transformed (e.g. an OnChanging clamp) demotes to Local, matching what the terminal
+            // write would have produced. Otherwise the stale FromSource survives commit replay and
+            // the corrected value is echo-suppressed, leaving the source diverged.
+            context.FinalizeOrigin();
 
             transaction.CaptureChange(
                 context.Property,
-                currentContext.Source,
+                context.Origin,
                 context.WriteTimestampForPublishing,
-                currentContext.ReceivedTimestamp,
+                SubjectChangeContext.Current.ReceivedTimestamp,
                 context.CurrentValue,
                 context.NewValue);
 
