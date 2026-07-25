@@ -1,6 +1,6 @@
 # Outbound write map design
 
-Status: draft for review (revision 14)
+Status: approved (revision 14, externally reviewed to no remaining correctness blockers); next step is the phase-1 implementation plan
 Base branch: `feature/outbound-write-map` (currently master + #388; contains no #355 code)
 Supersedes: PR #355 (`fix/capture-user-writes-during-connect`)
 Prerequisite: the commit-sequence and attachment-generation stamps (partial #385), a per-property last-commit-seq, a terminal seq-guarded write, and a terminal write receipt; see Prerequisite
