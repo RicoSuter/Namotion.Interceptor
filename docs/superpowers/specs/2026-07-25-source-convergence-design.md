@@ -72,7 +72,9 @@ Derived from the map and the belief register, so no new per-property storage is 
 | `Diverged` | Quiescent, `model != observedValue`, and the difference cannot be resolved by sending (permanent rejection, or an unwritable property) |
 | `NotVerifiable` | The transport cannot observe this property's source state (see Transport tiers) |
 
-This extends #354's `SourceState` and per-property `GetSourceState()`; the map's dirty count is #354's `PendingWriteCount`. `Diverged` and `NotVerifiable` are the two states the previous design lacked, and they are what makes "never silently wrong" true.
+This is a **different axis** from #354's `SourceState`, not an extension of it. #354 answers a connection-lifecycle question ("initial load complete, live updates flowing"); these states answer a value-agreement question. The two diverge precisely where it matters: a permanently rejected write leaves a property `Diverged` while its source is legitimately `Synchronized`. #354's own problem statement targets the value question but its enum answers the connection one, so publishing #354's state as "in sync" without this axis would be silently wrong in the same way the withdrawn design was.
+
+The relationship is therefore: this design computes the per-property truth; #354's typed event stream, wait primitives, and source-level lifecycle states are the natural way to publish it. `PendingWriteCount` is backed by the intent map's dirty count either way (it already exists on `SubjectSourceBase` today, so no dependency runs in either direction). `Diverged` and `NotVerifiable` are the states the withdrawn design lacked, and they are what makes "never silently wrong" true.
 
 ### Divergence policy (configurable)
 
