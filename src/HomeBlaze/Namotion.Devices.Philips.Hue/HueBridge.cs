@@ -43,6 +43,7 @@ public partial class HueBridge : BackgroundService,
 
     private readonly ILogger<HueBridge> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
+    private readonly Lock _clientLock = new();
 
     private LocatedBridge? _bridge;
     private HttpClient? _httpClient;
@@ -133,24 +134,67 @@ public partial class HueBridge : BackgroundService,
     /// </summary>
     internal LocalHueApi GetOrCreateClient()
     {
-        if (_client is not null)
+        lock (_clientLock)
         {
-            return _client;
+            if (_client is not null)
+            {
+                return _client;
+            }
+
+            if (AppKey == null || _bridge == null)
+            {
+                throw new InvalidOperationException("Bridge is not configured or not discovered.");
+            }
+
+            var httpClient = new HttpClient(new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback =
+                    HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            });
+
+            try
+            {
+                var client = new LocalHueApi(_bridge.IpAddress, AppKey, httpClient);
+                _httpClient = httpClient;
+                _client = client;
+                return client;
+            }
+            catch
+            {
+                httpClient.Dispose();
+                throw;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Stops and releases a failed or shutting-down client. A subsequent connection attempt creates
+    /// a fresh HttpClient because HueApi configures it during construction and .NET forbids changing
+    /// those properties after the first request.
+    /// </summary>
+    internal void ResetClient(LocalHueApi client)
+    {
+        HttpClient? httpClient;
+        lock (_clientLock)
+        {
+            if (!ReferenceEquals(_client, client))
+            {
+                return;
+            }
+
+            _client = null;
+            httpClient = _httpClient;
+            _httpClient = null;
         }
 
-        if (AppKey == null || _bridge == null)
+        try
         {
-            throw new InvalidOperationException("Bridge is not configured or not discovered.");
+            client.StopEventStream();
         }
-
-        _httpClient ??= new HttpClient(new HttpClientHandler
+        finally
         {
-            ServerCertificateCustomValidationCallback =
-                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        });
-
-        _client = new LocalHueApi(_bridge.IpAddress, AppKey, _httpClient);
-        return _client;
+            httpClient?.Dispose();
+        }
     }
 
     /// <inheritdoc />
@@ -254,11 +298,10 @@ public partial class HueBridge : BackgroundService,
             finally
             {
                 IsConnected = false;
-                _client = null;
 
                 if (client is not null)
                 {
-                    client.StopEventStream();
+                    ResetClient(client);
                 }
             }
         }
