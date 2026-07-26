@@ -419,8 +419,11 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         while (bucketStart < query.To)
         {
             var bucketEnd = bucketStart + bucket;
-            if (coverageRanges.IsEmpty ||
-                !coverageRanges[0].Contains(new HistoryCoverage(bucketStart, bucketEnd)))
+
+            // Clipped to the query window: the newest bucket runs past To whenever To is not
+            // bucket-aligned, and coverage cannot reach into the future (see HistoryDispatchPlanner).
+            var coveredRange = new HistoryCoverage(bucketStart, bucketEnd < query.To ? bucketEnd : query.To);
+            if (coverageRanges.IsEmpty || !coverageRanges[0].Contains(coveredRange))
             {
                 carriedNumber = null;
                 carriedJson = null;

@@ -81,8 +81,13 @@ internal static class HistoryDispatchPlanner
         while (bucketStart < query.To)
         {
             var bucketEnd = bucketStart + bucket;
-            var bucketRange = new HistoryCoverage(bucketStart, bucketEnd);
-            var owner = FindOwner(stores, query.Aggregation, isAlwaysAvailable, bucketRange);
+
+            // Ownership is tested against the bucket clipped to the query window. The newest bucket
+            // runs past To whenever To is not bucket-aligned, which it never is for a live query
+            // ending at "now", and no store's coverage can reach into the future. Testing the
+            // unclipped bucket would leave that bucket unowned and blank out the live edge.
+            var ownedRange = new HistoryCoverage(bucketStart, bucketEnd < query.To ? bucketEnd : query.To);
+            var owner = FindOwner(stores, query.Aggregation, isAlwaysAvailable, ownedRange);
 
             if (ReferenceEquals(owner, currentOwner) && owner is not null)
             {

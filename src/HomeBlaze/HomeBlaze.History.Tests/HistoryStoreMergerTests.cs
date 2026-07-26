@@ -698,14 +698,13 @@ public class HistoryStoreMergerTests
     }
 
     [Fact]
-    public async Task WhenBucketedRangeIsNotBucketAlignedAndCoverageIsEdgeTight_ThenUnownedBucketsAreHonestGaps()
+    public async Task WhenLeadingBucketStartsBeforeCoverage_ThenItIsAnHonestGapButTheTrailingOneIsServed()
     {
         // The bucketed planner enumerates the bucket-aligned span, not the raw [From,To). With 10-minute
-        // buckets and From/To at minutes 5 and 25, the aligned buckets are [0,10), [10,20), [20,30). A
-        // store whose coverage is edge-tight to [5,25) fully contains only the middle bucket [10,20);
-        // the two edge buckets spill outside its coverage. Because the store DOES support Minimum, this
-        // is a coverage shortfall, not a capability gap: it must not throw. The fully-contained bucket
-        // is served and the spilling edge buckets are honest gaps (absent).
+        // buckets and From/To at minutes 5 and 25, the aligned buckets are [0,10), [10,20), [20,30).
+        // A store edge-tight to [5,25) does not cover the leading bucket, which genuinely reaches back
+        // before the store has data. The trailing bucket only spills past To, and ownership is tested
+        // against the bucket clipped to To, so it is served from the data that does exist.
         //
         // Arrange: a single Minimum-capable store covering exactly the non-aligned [5,25).
         var store = new FakeHistoryStore
@@ -716,19 +715,67 @@ public class HistoryStoreMergerTests
         }.AddSample(At(10), 1);
         var query = new HistoryQuery("temp", At(5), At(25), TimeSpan.FromMinutes(10), HistoryAggregations.Minimum);
 
-        // Act: no throw; only the fully-contained aligned bucket is served.
+        // Act: a coverage shortfall is not a capability gap, so this must not throw.
         var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
 
-        // Assert: only the contained bucket [10,20) was dispatched. The edge buckets [0,10)
-        // and [20,30) are explicit null gaps.
+        // Assert: the two owned buckets coalesce into one sub-query; the leading bucket is a null gap.
         Assert.Single(store.ReceivedQueries);
         Assert.Equal(At(10), store.ReceivedQueries[0].From);
-        Assert.Equal(At(20), store.ReceivedQueries[0].To);
+        Assert.Equal(At(30), store.ReceivedQueries[0].To);
         Assert.Equal(3, series.Points.Length);
         Assert.Null(series.Points[0].Number);
         Assert.Equal(At(10), series.Points[1].Timestamp);
         Assert.Equal(1d, series.Points[1].Number);
-        Assert.Null(series.Points[2].Number);
+    }
+
+    [Fact]
+    public async Task WhenQueryEndsAtNow_ThenTheNewestBucketIsStillServed()
+    {
+        // The live edge: a chart asks for [now-3h, now) with 1-hour buckets, so the newest bucket runs
+        // past To, and a live store's coverage ends at "now" and cannot reach into the future. Testing
+        // ownership against the unclipped bucket left it unowned, blanking the current hour on every
+        // chart even though its samples were recorded.
+        //
+        // Arrange
+        var now = Origin.AddHours(13).AddMinutes(37).AddSeconds(12);
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(now.AddHours(-4), now.AddMilliseconds(5))
+        }.AddSample(now.AddMinutes(-90), 1).AddSample(now.AddMinutes(-20), 2);
+        var query = new HistoryQuery(
+            "temp", now.AddHours(-3), now, TimeSpan.FromHours(1), HistoryAggregations.Last, MaxPoints: 100);
+
+        // Act
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert: the newest bucket carries the sample recorded 20 minutes ago.
+        Assert.Equal(2d, series.Points[^1].Number);
+    }
+
+    [Fact]
+    public async Task WhenBudgetDropsOlderSegments_ThenCoverageOnlyClaimsWhatWasServed()
+    {
+        // Arrange: two disjoint stores, budget enough for only the newest.
+        var older = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(0), At(30))
+        }.AddSample(At(10), 1).AddSample(At(20), 2);
+        var newer = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(30), At(60))
+        }.AddSample(At(40), 3).AddSample(At(50), 4);
+        var query = new HistoryQuery("temp", At(0), At(60), Aggregation: HistoryAggregations.Last, MaxPoints: 2);
+
+        // Act
+        var series = await new[] { older, newer }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert: the dropped older range must not be reported as covered, or a caller reads its
+        // absent points as "the value did not change" rather than "this was never read".
+        Assert.Empty(older.ReceivedQueries);
+        Assert.Equal(new[] { new HistoryCoverage(At(30), At(60)) }, series.CoverageRanges.ToArray());
     }
 
     [Fact]

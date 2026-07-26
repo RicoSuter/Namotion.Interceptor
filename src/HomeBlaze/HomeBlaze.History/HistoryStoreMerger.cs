@@ -350,12 +350,19 @@ public static class HistoryStoreMerger
             query.PropertyPath,
             points,
             truncated,
-            EffectiveCoverage(segments, query));
+            EffectiveCoverage(segments, served, query));
     }
 
+    /// <summary>
+    /// The coverage the returned series actually stands behind: only the segments that were served.
+    /// A budget shortfall drops the oldest planned segments without querying them, and reporting
+    /// those as covered would tell a caller "no samples here" for a range that was never read.
+    /// </summary>
     private static ImmutableArray<HistoryCoverage> EffectiveCoverage(
-        IReadOnlyList<PlannedSegment> segments, HistoryQuery query) =>
+        IReadOnlyList<PlannedSegment> segments, bool[] served, HistoryQuery query) =>
         HistoryCoverage.Clip(
-            segments.Select(segment => new HistoryCoverage(segment.From, segment.To)),
+            segments
+                .Where((_, index) => served[index])
+                .Select(segment => new HistoryCoverage(segment.From, segment.To)),
             new HistoryCoverage(query.From, query.To));
 }

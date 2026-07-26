@@ -115,9 +115,14 @@ internal static class BucketAssembler
                 coverageIndex++;
             }
 
+            // Clipped to the query window: the newest bucket runs past To whenever To is not
+            // bucket-aligned, and coverage cannot reach into the future (see HistoryDispatchPlanner).
+            var coveredRange = new HistoryCoverage(
+                bucketStartTimestamp,
+                bucketEndTimestamp < query.To ? bucketEndTimestamp : query.To);
+
             if (coverageIndex >= coverageRanges.Length ||
-                !coverageRanges[coverageIndex].Contains(
-                    new HistoryCoverage(bucketStartTimestamp, bucketEndTimestamp)))
+                !coverageRanges[coverageIndex].Contains(coveredRange))
             {
                 carriedNumber = null;
                 carriedJson = null;
