@@ -275,6 +275,16 @@ internal static class BucketAssembler
         return Math.Sqrt(variance);
     }
 
-    private static JsonElement? ParseJson(string? jsonText) =>
-        jsonText is null ? null : JsonDocument.Parse(jsonText).RootElement.Clone();
+    private static JsonElement? ParseJson(string? jsonText)
+    {
+        if (jsonText is null)
+        {
+            return null;
+        }
+
+        // Cloning detaches the element, but the document still has to be disposed or its pooled buffers
+        // are never returned: this runs once per point, so a large query leaks thousands of rentals.
+        using var document = JsonDocument.Parse(jsonText);
+        return document.RootElement.Clone();
+    }
 }

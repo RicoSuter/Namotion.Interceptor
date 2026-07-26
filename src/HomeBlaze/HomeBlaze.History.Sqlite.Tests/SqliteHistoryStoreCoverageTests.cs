@@ -129,6 +129,58 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenADropIsFollowedByAFlush_ThenTheGapIsPersistedAndNotHealedOver()
+    {
+        // Arrange: the flush that ends drop mode must write the range ending at the dropped change, and
+        // the recovery range must start separately, or the next flush extends the pre-gap range straight
+        // across the hole and the loss disappears from durable coverage.
+        var now = Base;
+        using var store = NewStore(() => now, maxPendingSamples: 1);
+        store.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        store.Record("/a/Value", Base.AddSeconds(5), 2d, typeof(double));   // dropped
+
+        // Act
+        now = Base.AddSeconds(10);
+        await store.FlushAsync(CancellationToken.None);
+        now = Base.AddSeconds(20);
+        await store.FlushAsync(CancellationToken.None);
+
+        // Assert: two ranges with the drop between them, not one range spanning it.
+        Assert.Equal(
+            new[]
+            {
+                new HistoryCoverage(Base, Base.AddSeconds(5)),
+                new HistoryCoverage(Base.AddSeconds(10), Base.AddSeconds(20).AddTicks(1))
+            },
+            store.CoverageRanges.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenAStaleTimestampIsPending_ThenOnlyTheCurrentSessionRetracts()
+    {
+        // Arrange: durable coverage from an earlier session.
+        var now = Base;
+        using (var first = NewStore(() => now))
+        {
+            first.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+            now = Base.AddSeconds(10);
+            await first.FlushAsync(CancellationToken.None);
+        }
+
+        now = Base.AddSeconds(20);
+        using var store = NewStore(() => now);
+        var beforeStaleSample = store.CoverageRanges.Length;
+
+        // Act: a device reporting an uninitialized timestamp, which is reachable from OPC UA sources.
+        store.Record("/a/Value", new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero), 2d, typeof(double));
+
+        // Assert: one stale sample must not blank the snapshot and drop the store out of every query.
+        Assert.NotEmpty(store.CoverageRanges);
+        Assert.Equal(beforeStaleSample, store.CoverageRanges.Length);
+        Assert.Equal(Base, store.CoverageRanges[0].From);
+    }
+
+    [Fact]
     public async Task WhenDroppedSamplesArriveOutOfOrder_ThenCoverageEndsAtEarliestTimestamp()
     {
         // Arrange

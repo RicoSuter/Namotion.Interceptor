@@ -88,6 +88,20 @@ internal sealed class SqliteCoverageStore(Func<SqliteConnection> openMetadata)
     public void Trim(long retainedFrom)
     {
         var connection = openMetadata();
+        try
+        {
+            TrimRows(connection, retainedFrom);
+        }
+        finally
+        {
+            // Whatever was trimmed before a failure is already gone from the database and from _rows,
+            // so the published snapshot has to follow or it keeps claiming ranges that no longer exist.
+            RebuildSnapshot();
+        }
+    }
+
+    private void TrimRows(SqliteConnection connection, long retainedFrom)
+    {
         for (var index = _rows.Count - 1; index >= 0; index--)
         {
             var row = _rows[index];
@@ -113,8 +127,6 @@ internal sealed class SqliteCoverageStore(Func<SqliteConnection> openMetadata)
                 _rows[index] = row with { FromTicks = from };
             }
         }
-
-        RebuildSnapshot();
     }
 
     private void RebuildSnapshot() =>

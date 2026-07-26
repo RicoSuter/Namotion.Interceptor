@@ -273,16 +273,17 @@ internal static class SqliteBucketReader
     {
         var isFirst = aggregation == HistoryAggregations.First;
         var edge = isFirst ? "MIN(ts)" : "MAX(ts)";
-        var bucket = FloorBucketExpression("h.ts");
-        var innerBucket = FloorBucketExpression("ts");
 
+        // SQLite's bare-column rule: with a single MIN or MAX, the other selected columns come from the
+        // row that produced it. That gives one grouped pass over the range. The correlated-subquery form
+        // this replaces re-ran an unindexable per-row lookup for every candidate row, so a Last query
+        // (the default aggregation) over a large partition was quadratic, and it runs while the engine's
+        // connection lock is held, which stalls the flush loop and grows the unbounded change queue.
         using var command = connection.CreateCommand();
         command.CommandText =
-            "SELECT " + bucket + " AS bucket, h.ts, h.value_long, h.value_double, h.value_json FROM history h " +
-            "WHERE h.path = @path AND h.ts >= @from AND h.ts < @to " +
-            "AND h.ts = (SELECT " + edge + " FROM history WHERE path = @path AND " +
-            innerBucket + " = " + bucket + " " +
-            "AND ts >= @from AND ts < @to) " +
+            "SELECT " + FloorBucketExpression("ts") + " AS bucket, " + edge + " AS ts, " +
+            "value_long, value_double, value_json FROM history " +
+            "WHERE path = @path AND ts >= @from AND ts < @to " +
             "GROUP BY bucket;";
         command.Parameters.AddWithValue("@path", propertyPath);
         command.Parameters.AddWithValue("@b", bucketTicks);
@@ -302,6 +303,15 @@ internal static class SqliteBucketReader
             // The numeric projection for an edge sample mirrors ToPoint via SqliteValueRouting.Numeric:
             // double/long, plus a ulong-overflow JSON number folded in when the property is ulong.
             var number = SqliteValueRouting.Numeric(new RawRow(ts, longValue, doubleValue, jsonValue), isUlong);
+
+            // A decimal writes both value_double and its exact text into value_json. ToPoint suppresses
+            // the JSON when a numeric column is present, so the edge readers must too: otherwise the same
+            // decimal property comes back numeric from a raw query and JSON-valued from a bucketed one,
+            // and a consumer that dispatches on Json renders it as a discrete state.
+            if (doubleValue is not null || longValue is not null)
+            {
+                jsonValue = null;
+            }
 
             if (isFirst)
             {

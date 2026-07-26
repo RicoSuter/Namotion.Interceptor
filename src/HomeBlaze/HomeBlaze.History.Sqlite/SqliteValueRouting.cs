@@ -115,7 +115,8 @@ internal static class SqliteValueRouting
 
         if (row.Json is { } jsonText)
         {
-            var element = JsonDocument.Parse(jsonText).RootElement.Clone();
+            using var document = JsonDocument.Parse(jsonText);
+            var element = document.RootElement.Clone();
             double? number = isUlong && element.ValueKind == JsonValueKind.Number ? element.GetDouble() : null;
             return new HistoryPoint(timestamp, number, element);
         }

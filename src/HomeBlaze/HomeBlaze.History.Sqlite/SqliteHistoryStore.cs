@@ -55,6 +55,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
     private bool _droppingNewSamples;
     private bool _pendingStartsNewCoverageRange = true;
     private DateTimeOffset _pendingCoverageStart;
+
+    // _pendingCoverageStart republished for the lock-free coverage read, which must not take
+    // _pendingLock: a flush holds it across the durable coverage write.
+    private long _sessionCoverageStartTicks;
     private DateTimeOffset? _firstDroppedTimestamp;
 
     // The earliest instant this store holds an uncommitted (pending, in-flight, or dropped) change for,
@@ -101,7 +105,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
         _maxJsonSize = maxJsonSize;
         _maxPendingSamples = maxPendingSamples;
         _getUtcNow = getUtcNow;
-        _pendingCoverageStart = getUtcNow();
+        SetPendingCoverageStart(getUtcNow());
         _readContext = new SqliteReadContext(
             _databaseDirectory, _partitionInterval, MetadataKey, OpenPartition, OpenMetadata);
         _coverageStore = new SqliteCoverageStore(OpenMetadata);
@@ -122,7 +126,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
     {
         lock (_pendingLock)
         {
-            _pendingCoverageStart = _getUtcNow();
+            SetPendingCoverageStart(_getUtcNow());
             _pendingStartsNewCoverageRange = true;
         }
     }
@@ -250,9 +254,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
                 _pendingMoves.Clear();
                 _earliestInFlightTimestamp = _earliestPendingTimestamp;
                 _earliestPendingTimestamp = null;
+                // Left set until the flush actually writes the range it authorizes (see below), so a
+                // skipped or failed coverage update cannot silently swallow a gap marker.
                 startsNewCoverageRange = _pendingStartsNewCoverageRange;
                 coverageStart = _pendingCoverageStart;
-                _pendingStartsNewCoverageRange = false;
                 _inFlightSampleCount = batch.Length;
                 PublishUncommittedWatermark();
             }
@@ -316,12 +321,15 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
                         }
                     }
 
-                    var recoveredFromDrops = _droppingNewSamples && _pending.Count == 0;
-                    if (recoveredFromDrops && _firstDroppedTimestamp is { } droppedAt &&
-                        droppedAt < coverageEnd)
+                    // Clamp at the first dropped change unconditionally. Deferring this to the recovery
+                    // flush let an interim flush persist coverage past the drop whenever samples newer
+                    // than it were still pending, and a crash before recovery made that durable.
+                    if (_firstDroppedTimestamp is { } droppedAt && droppedAt < coverageEnd)
                     {
                         coverageEnd = droppedAt;
                     }
+
+                    var recoveredFromDrops = _droppingNewSamples && _pending.Count == 0;
 
                     lock (_connectionLock)
                     {
@@ -330,6 +338,15 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
                         if (fromTicks < toTicks)
                         {
                             _coverageStore.Update(fromTicks, toTicks, startsNewCoverageRange);
+
+                            // Only consume the marker once the range it authorizes actually exists.
+                            // Clearing it at swap time lost the gap whenever this guard skipped, and the
+                            // next flush then extended the pre-gap range straight across the hole.
+                            _pendingStartsNewCoverageRange = false;
+                        }
+                        else
+                        {
+                            _pendingStartsNewCoverageRange |= startsNewCoverageRange;
                         }
                     }
 
@@ -343,7 +360,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
                         _firstDroppedTimestamp = null;
                         _droppingNewSamples = false;
                         _pendingStartsNewCoverageRange = true;
-                        _pendingCoverageStart = successfulAt;
+                        SetPendingCoverageStart(successfulAt);
                     }
 
                     PublishUncommittedWatermark();
@@ -372,7 +389,6 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
                         _earliestPendingTimestamp,
                         _earliestInFlightTimestamp);
                     _earliestInFlightTimestamp = null;
-                    _pendingStartsNewCoverageRange |= startsNewCoverageRange;
                     PublishUncommittedWatermark();
                 }
 
@@ -458,7 +474,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
         for (var index = ranges.Length - 1; index >= 0; index--)
         {
             var range = ranges[index];
-            if (range.From <= asOf && range.To >= asOf)
+            // Half-open, like every other coverage test: asOf exactly at To is outside the range.
+            if (range.From <= asOf && range.To > asOf)
             {
                 containingRange = range;
                 break;
@@ -487,7 +504,21 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
             return ranges;
         }
 
+        var sessionStart = new DateTimeOffset(Interlocked.Read(ref _sessionCoverageStartTicks), TimeSpan.Zero);
+
+        // Everything from the watermark onwards is dropped rather than merely clipped, because the
+        // watermark is only the earliest uncommitted instant: later pending changes may fall anywhere
+        // after it, so no later range can be vouched for. That makes a wildly backdated sample
+        // destructive, and one is reachable (a device reporting an uninitialized 1601 timestamp), so
+        // the watermark is floored at this session's coverage start. A change older than that cannot
+        // be describing work this session is responsible for, and without the floor a single such
+        // sample empties the snapshot and drops the store out of every query until it restarts.
         var uncommittedFrom = new DateTimeOffset(uncommittedFromTicks, TimeSpan.Zero);
+        if (uncommittedFrom < sessionStart)
+        {
+            uncommittedFrom = sessionStart;
+        }
+
         var builder = ImmutableArray.CreateBuilder<HistoryCoverage>(ranges.Length);
         foreach (var range in ranges)
         {
@@ -514,6 +545,12 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
             ref _uncommittedFromTicks, uncommittedFrom?.UtcTicks ?? long.MaxValue);
     }
 
+    private void SetPendingCoverageStart(DateTimeOffset value)
+    {
+        _pendingCoverageStart = value;
+        Interlocked.Exchange(ref _sessionCoverageStartTicks, value.UtcTicks);
+    }
+
     private static DateTimeOffset? Earlier(DateTimeOffset? left, DateTimeOffset? right)
     {
         if (left is null)
@@ -534,18 +571,35 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
             {
                 if (_pendingCoverageStart < cutoff)
                 {
-                    _pendingCoverageStart = cutoff;
+                    SetPendingCoverageStart(cutoff);
                 }
             }
 
             lock (_connectionLock)
             {
+                // Give up the claim before deleting the data behind it. Deleting first leaves the store
+                // claiming a window whose partitions are gone if a delete throws (a locked file) or the
+                // process dies mid-sweep, and inside claimed coverage the merger will not fall back to
+                // another store, so those queries return empty rather than the other store's data.
+                _coverageStore.Trim(EpochTicks.ToEpochTicks(cutoff));
+
                 foreach (var key in _readContext.EnumeratePartitionFileKeys().ToArray())
                 {
                     var (_, end) = SqlitePartition.PartitionRange(key, _partitionInterval);
-                    if (end < cutoff)
+                    if (end >= cutoff)
+                    {
+                        continue;
+                    }
+
+                    try
                     {
                         DeletePartition(key);
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        // One locked file must not abort the sweep: the rest still needs trimming, and
+                        // this partition is already outside the coverage claimed above.
+                        _lastError = exception.Message;
                     }
                 }
 
@@ -555,8 +609,6 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
                 {
                     Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
                 }
-
-                _coverageStore.Trim(EpochTicks.ToEpochTicks(cutoff));
             }
         }
     }
@@ -600,13 +652,26 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
                 DataSource = _readContext.PartitionFilePath(key),
                 Pooling = false
             }.ToString());
-            connection.Open();
-            Execute(connection, "PRAGMA journal_mode=WAL;");
-            Execute(connection,
-                "CREATE TABLE IF NOT EXISTS history (ts INTEGER NOT NULL, path TEXT NOT NULL, " +
-                "value_long INTEGER, value_double REAL, value_json TEXT, PRIMARY KEY (path, ts)) WITHOUT ROWID;");
-            Execute(connection,
-                "CREATE TABLE IF NOT EXISTS path_meta (path TEXT PRIMARY KEY, column INTEGER NOT NULL, is_ulong INTEGER NOT NULL);");
+
+            // Only cached once initialization succeeds, so the connection must be disposed on the way
+            // out: pooling is off, so an abandoned one holds a real file handle until finalization, and
+            // the flush loop retries a corrupt partition every interval.
+            try
+            {
+                connection.Open();
+                Execute(connection, "PRAGMA journal_mode=WAL;");
+                Execute(connection,
+                    "CREATE TABLE IF NOT EXISTS history (ts INTEGER NOT NULL, path TEXT NOT NULL, " +
+                    "value_long INTEGER, value_double REAL, value_json TEXT, PRIMARY KEY (path, ts)) WITHOUT ROWID;");
+                Execute(connection,
+                    "CREATE TABLE IF NOT EXISTS path_meta (path TEXT PRIMARY KEY, column INTEGER NOT NULL, is_ulong INTEGER NOT NULL);");
+            }
+            catch
+            {
+                connection.Dispose();
+                throw;
+            }
+
             _connections[key] = connection;
             return connection;
         }
@@ -627,14 +692,24 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
                 DataSource = _readContext.PartitionFilePath(MetadataKey),
                 Pooling = false
             }.ToString());
-            connection.Open();
-            Execute(connection, "PRAGMA journal_mode=WAL;");
-            Execute(connection,
-                "CREATE TABLE IF NOT EXISTS moves (ts INTEGER NOT NULL, from_path TEXT NOT NULL, to_path TEXT NOT NULL);");
-            Execute(connection,
-                "CREATE TABLE IF NOT EXISTS coverage_ranges (" +
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, from_ts INTEGER NOT NULL, to_ts INTEGER NOT NULL, " +
-                "CHECK (from_ts < to_ts));");
+
+            try
+            {
+                connection.Open();
+                Execute(connection, "PRAGMA journal_mode=WAL;");
+                Execute(connection,
+                    "CREATE TABLE IF NOT EXISTS moves (ts INTEGER NOT NULL, from_path TEXT NOT NULL, to_path TEXT NOT NULL);");
+                Execute(connection,
+                    "CREATE TABLE IF NOT EXISTS coverage_ranges (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, from_ts INTEGER NOT NULL, to_ts INTEGER NOT NULL, " +
+                    "CHECK (from_ts < to_ts));");
+            }
+            catch
+            {
+                connection.Dispose();
+                throw;
+            }
+
             _connections[MetadataKey] = connection;
             return connection;
         }
