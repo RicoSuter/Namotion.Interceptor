@@ -17,7 +17,7 @@ public static class StateUnitExtensions
         [(StateUnit.WattHour, "Wh", 1m), (StateUnit.KilowattHour, "kWh", 1000m)],
         [(StateUnit.Millimeter, "mm", 1m), (StateUnit.Meter, "m", 1000m), (StateUnit.Kilometer, "km", 1_000_000m)],
         [(StateUnit.Milliampere, "mA", 1m), (StateUnit.Ampere, "A", 1000m)],
-        [(StateUnit.Kilobyte, "kB", 1m), (default, "MB", 1000m), (default, "GB", 1_000_000m)],
+        [(StateUnit.Byte, "B", 1m), (StateUnit.Kilobyte, "kB", 1000m), (default, "MB", 1_000_000m), (default, "GB", 1_000_000_000m)],
         [(StateUnit.KilobytePerSecond, "kB/s", 1m), (default, "MB/s", 1000m)],
     ];
 
@@ -187,6 +187,7 @@ public static class StateUnitExtensions
         StateUnit.Meter => ("m", true),
         StateUnit.Millimeter => ("mm", true),
         StateUnit.MillimeterPerHour => ("mm/h", true),
+        StateUnit.Byte => ("B", true),
         StateUnit.Kilobyte => ("kB", true),
         StateUnit.KilobytePerSecond => ("kB/s", true),
         StateUnit.MegabitPerSecond => ("Mbit/s", true),

@@ -34,7 +34,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
     private readonly TimeSpan _maxAge;
     private readonly int _maxJsonSize;
     private readonly Func<DateTimeOffset> _getUtcNow;
-    private readonly DateTimeOffset _startTime;
+    private DateTimeOffset _startTime;
 
     private readonly ConcurrentDictionary<string, PropertyBuffer> _buffers = new(StringComparer.Ordinal);
 
@@ -43,6 +43,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
 
     private long _recordedCount;
     private long _oversizeCount;
+    private long _evictionCoverageFromUtcTicks = DateTimeOffset.MinValue.UtcTicks;
 
     public InMemoryHistoryStore(
         int priority, int maxPointsPerProperty, TimeSpan maxAge, int maxJsonSize, Func<DateTimeOffset> getUtcNow)
@@ -54,6 +55,13 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         _getUtcNow = getUtcNow;
         _startTime = getUtcNow();
     }
+
+    /// <summary>
+    /// Restarts the coverage session at the current instant. The constructor already starts one, so
+    /// this only narrows what the store claims: the owner calls it once its change subscription is
+    /// live, so no change can fall inside claimed coverage without reaching this engine.
+    /// </summary>
+    internal void BeginCoverageSession() => _startTime = _getUtcNow();
 
     public int Priority { get; }
 
@@ -68,46 +76,33 @@ public sealed class InMemoryHistoryStore : IHistoryStore
     // Rough estimate: 4 references/values per Sample (~40 bytes) plus dictionary/key overhead.
     public long EstimatedMemoryBytes => TotalSampleCount * 40 + _buffers.Count * 64;
 
-    public HistoryCoverage CurrentCoverage
+    public ImmutableArray<HistoryCoverage> CoverageRanges
     {
         get
         {
             var now = _getUtcNow();
             var ageFloor = now - _maxAge;
+            var from = _startTime > ageFloor ? _startTime : ageFloor;
 
-            // A per-property ring buffer bounded by the count cap can evict older samples well before
-            // _maxAge, so the store may only retain the last few samples even with a large max age. Base
-            // From on the oldest sample actually retained (clamped to the age floor) so the cross-store
-            // merger does not route already-evicted older ranges here and skip the lower-priority store.
-            var oldestRetained = OldestRetainedTimestamp();
-            DateTimeOffset from;
-            if (oldestRetained is { } oldest)
+            // Coverage is store-wide and therefore all-or-nothing across property paths. Any actual
+            // eviction advances a monotonic global floor. Capacity uses the affected buffer's oldest
+            // retained timestamp; age eviction uses its cutoff. A buffer that has never overflowed
+            // contributes no capacity floor because no earlier changes is complete history.
+            var evictionFloorTicks = Interlocked.Read(ref _evictionCoverageFromUtcTicks);
+            if (evictionFloorTicks > from.UtcTicks)
             {
-                from = oldest > ageFloor ? oldest : ageFloor;
-            }
-            else
-            {
-                from = _startTime > ageFloor ? _startTime : ageFloor;
+                from = new DateTimeOffset(evictionFloorTicks, TimeSpan.Zero);
             }
 
-            return new HistoryCoverage(from, now);
+            if (from > now)
+            {
+                from = now;
+            }
+
+            return from < now
+                ? ImmutableArray.Create(new HistoryCoverage(from, now))
+                : ImmutableArray<HistoryCoverage>.Empty;
         }
-    }
-
-    // Oldest sample timestamp retained across all buffers, or null when no samples exist. Iterates the
-    // dictionary directly (no Values snapshot) to keep this allocation-light.
-    private DateTimeOffset? OldestRetainedTimestamp()
-    {
-        DateTimeOffset? oldest = null;
-        foreach (var pair in _buffers)
-        {
-            if (pair.Value.OldestTimestamp is { } timestamp && (oldest is null || timestamp < oldest))
-            {
-                oldest = timestamp;
-            }
-        }
-
-        return oldest;
     }
 
     public void Record(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
@@ -116,8 +111,31 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         var isUlong = HistoryColumns.IsUlongProperty(propertyType);
         var buffer = _buffers.GetOrAdd(propertyPath, _ => new PropertyBuffer(_maxPointsPerProperty, column, isUlong));
 
-        buffer.Append(CreateSample(timestamp, value, column, isUlong));
+        if (buffer.Append(CreateSample(timestamp, value, column, isUlong)) &&
+            buffer.OldestTimestamp is { } oldestRetained)
+        {
+            // Capacity eviction: this buffer no longer has complete history before its oldest sample,
+            // and coverage is store-wide, so the global floor advances to that boundary.
+            AdvanceEvictionCoverageFrom(oldestRetained.UtcTicks);
+        }
+
         Interlocked.Increment(ref _recordedCount);
+    }
+
+    private void AdvanceEvictionCoverageFrom(long candidateUtcTicks)
+    {
+        var current = Interlocked.Read(ref _evictionCoverageFromUtcTicks);
+        while (candidateUtcTicks > current)
+        {
+            var observed = Interlocked.CompareExchange(
+                ref _evictionCoverageFromUtcTicks, candidateUtcTicks, current);
+            if (observed == current)
+            {
+                return;
+            }
+
+            current = observed;
+        }
     }
 
     private Sample CreateSample(DateTimeOffset timestamp, object? value, ValueColumn column, bool isUlong)
@@ -148,7 +166,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
 
     private JsonElement SerializeJson(object value)
     {
-        // enum -> name; decimal/string -> native JSON; oversize string -> placeholder.
+        // enum -> name; string -> native JSON; oversize string -> placeholder.
         JsonElement element = value is Enum
             ? JsonSerializer.SerializeToElement(value.ToString())
             : JsonSerializer.SerializeToElement(value);
@@ -262,14 +280,32 @@ public sealed class InMemoryHistoryStore : IHistoryStore
     }
 
     public Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken)
-        => Task.FromResult(Query(query));
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Query(query));
+    }
 
     public ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
         string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
-        => new(GetSampleAtOrBefore(propertyPath, asOf));
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<HistoryPoint?>(GetSampleAtOrBefore(propertyPath, asOf));
+    }
 
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
     {
+        var ranges = CoverageRanges;
+        if (ranges.IsEmpty)
+        {
+            return null;
+        }
+
+        var coverage = ranges[0];
+        if (asOf < coverage.From || asOf > coverage.To)
+        {
+            return null;
+        }
+
         foreach (var leg in ResolveChain(propertyPath))
         {
             // Only legs whose validity starts at or before asOf can hold the value.
@@ -282,9 +318,11 @@ public sealed class InMemoryHistoryStore : IHistoryStore
             {
                 var ceiling = asOf < leg.ValidTo ? asOf : leg.ValidTo - new TimeSpan(1);
                 var sample = buffer.AtOrBefore(ceiling);
-                if (sample is { } found && found.Timestamp >= leg.ValidFrom)
+                if (sample is { } found &&
+                    found.Timestamp >= leg.ValidFrom &&
+                    found.Timestamp >= coverage.From)
                 {
-                    return ToPoint(found, buffer.IsUlong);
+                    return InMemoryHistoryAggregation.ToPoint(found, buffer.IsUlong);
                 }
             }
         }
@@ -294,6 +332,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
 
     public HistorySeries Query(HistoryQuery query)
     {
+        query.Validate();
         return query.Bucket is null ? QueryRaw(query) : QueryBucketed(query);
     }
 
@@ -324,8 +363,10 @@ public sealed class InMemoryHistoryStore : IHistoryStore
 
         var truncated = samples.Count > query.MaxPoints;
         var kept = truncated ? samples.Skip(samples.Count - query.MaxPoints) : samples; // newest-N
-        var points = kept.Select(entry => ToPoint(entry.Sample, entry.IsUlong)).ToImmutableArray();
-        return new HistorySeries(query.PropertyPath, points, truncated);
+        var points = kept
+            .Select(entry => InMemoryHistoryAggregation.ToPoint(entry.Sample, entry.IsUlong))
+            .ToImmutableArray();
+        return new HistorySeries(query.PropertyPath, points, truncated, GetQueryCoverage(query));
     }
 
     private HistorySeries QueryBucketed(HistoryQuery query)
@@ -336,8 +377,10 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         var chain = ResolveChain(query.PropertyPath);
         var buffer = ResolveBuffer(query.PropertyPath);
         var isUlong = buffer?.IsUlong ?? false;
+        var coverageRanges = CoverageRanges;
 
-        if (buffer is not null && buffer.Column == ValueColumn.Json && !isUlong && IsNumericAggregation(aggregation))
+        if (buffer is not null && buffer.Column == ValueColumn.Json && !isUlong &&
+            InMemoryHistoryAggregation.IsNumeric(aggregation))
         {
             throw new HistoryAggregationNotSupportedException(
                 aggregation,
@@ -347,211 +390,88 @@ public sealed class InMemoryHistoryStore : IHistoryStore
                 });
         }
 
-        // Build all buckets first (deterministic count), then apply the newest-N budget.
-        var carriedNumber = IsCarryDependent(aggregation) ? query.CarrySeed?.Number : null;
-        var carriedJson = IsCarryDependent(aggregation) ? query.CarrySeed?.Json : null;
+        var carriedNumber = InMemoryHistoryAggregation.IsCarryDependent(aggregation)
+            ? query.CarrySeed?.Number
+            : null;
+        var carriedJson = InMemoryHistoryAggregation.IsCarryDependent(aggregation)
+            ? query.CarrySeed?.Json
+            : null;
+        var alignedFrom = BucketAlignment.BucketStart(query.From, bucket);
+        var firstBucketStart = BucketAlignment.FirstBucketStart(
+            query.From, query.To, bucket, query.MaxPoints);
+        var bucketStart = firstBucketStart;
 
-        // For TWA, when the merger supplied no CarrySeed, fall back to this store's own held value
-        // entering the range (the sample at-or-before From), so an empty leading bucket is not a gap.
-        // The chain-aware GetSampleAtOrBefore follows moves, so this seeds both single-path and moved-path TWA.
-        if (aggregation == HistoryAggregations.TimeWeightedAverage && carriedNumber is null)
+        // When work was clipped to the newest buckets, advance carry to the clipped boundary.
+        // Otherwise TWA falls back to this store's held value when the merger supplied no seed.
+        if (InMemoryHistoryAggregation.IsCarryDependent(aggregation) &&
+            (bucketStart > alignedFrom ||
+             aggregation == HistoryAggregations.TimeWeightedAverage && query.CarrySeed is null))
         {
-            var prior = GetSampleAtOrBefore(query.PropertyPath, BucketAlignment.BucketStart(query.From, bucket));
-            carriedNumber = prior?.Number;
+            var prior = GetSampleAtOrBefore(query.PropertyPath, bucketStart);
+            if (prior is not null)
+            {
+                carriedNumber = prior.Number;
+                carriedJson = prior.Json;
+            }
         }
 
         var allPoints = new List<HistoryPoint>();
-        var bucketStart = BucketAlignment.BucketStart(query.From, bucket);
         while (bucketStart < query.To)
         {
             var bucketEnd = bucketStart + bucket;
+            if (coverageRanges.IsEmpty ||
+                !coverageRanges[0].Contains(new HistoryCoverage(bucketStart, bucketEnd)))
+            {
+                carriedNumber = null;
+                carriedJson = null;
+                allPoints.Add(new HistoryPoint(bucketStart, null, null));
+                bucketStart = bucketEnd;
+                continue;
+            }
+
             var samples = RangeAcrossChain(chain, bucketStart, bucketEnd);
 
-            var point = AggregateBucket(aggregation, bucketStart, bucketEnd, samples, isUlong, ref carriedNumber, ref carriedJson);
+            var point = InMemoryHistoryAggregation.AggregateBucket(
+                aggregation,
+                bucketStart,
+                bucketEnd,
+                samples,
+                isUlong,
+                ref carriedNumber,
+                ref carriedJson);
             allPoints.Add(point);
 
             bucketStart = bucketEnd;
         }
 
-        var truncated = allPoints.Count > query.MaxPoints;
-        var kept = truncated
-            ? allPoints.Skip(allPoints.Count - query.MaxPoints).ToImmutableArray()
-            : allPoints.ToImmutableArray();
+        var truncated = firstBucketStart > alignedFrom;
 
-        return new HistorySeries(query.PropertyPath, kept, truncated);
+        return new HistorySeries(
+            query.PropertyPath,
+            allPoints.ToImmutableArray(),
+            truncated,
+            GetQueryCoverage(query));
     }
 
-    private static bool IsCarryDependent(string aggregation) =>
-        aggregation is HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
-
-    private static bool IsNumericAggregation(string aggregation) =>
-        aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
-            or HistoryAggregations.Minimum or HistoryAggregations.Maximum
-            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation;
-
-    private HistoryPoint AggregateBucket(
-        string aggregation, DateTimeOffset bucketStart, DateTimeOffset bucketEnd, List<Sample> samples, bool isUlong,
-        ref double? carriedNumber, ref JsonElement? carriedJson)
-    {
-        switch (aggregation)
-        {
-            case HistoryAggregations.Count:
-                return new HistoryPoint(bucketStart, samples.Count, null);
-
-            case HistoryAggregations.Last:
-                if (samples.Count > 0)
-                {
-                    var lastPoint = ToPoint(samples[^1], isUlong);
-                    carriedNumber = lastPoint.Number;
-                    carriedJson = lastPoint.Json;
-                }
-
-                return new HistoryPoint(bucketStart, carriedNumber, carriedJson);
-
-            case HistoryAggregations.First:
-                return samples.Count > 0
-                    ? ToPoint(samples[0], isUlong) with { Timestamp = bucketStart }
-                    : new HistoryPoint(bucketStart, null, null);
-
-            case HistoryAggregations.TimeWeightedAverage:
-                return TimeWeightedAverageBucket(bucketStart, bucketEnd, samples, isUlong, ref carriedNumber);
-
-            default:
-                return AggregateNumeric(aggregation, bucketStart, samples, isUlong);
-        }
-    }
-
-    private HistoryPoint TimeWeightedAverageBucket(
-        DateTimeOffset bucketStart, DateTimeOffset bucketEnd, List<Sample> samples, bool isUlong,
-        ref double? carriedNumber)
-    {
-        double weightedSum = 0;
-        double totalDuration = 0;
-
-        var previousTimestamp = bucketStart;
-        var previousValue = carriedNumber; // value held entering the bucket (carry / look-back / seed)
-
-        foreach (var sample in samples)
-        {
-            var duration = (sample.Timestamp - previousTimestamp).TotalSeconds;
-            if (previousValue is { } held && duration > 0)
-            {
-                weightedSum += held * duration;
-                totalDuration += duration;
-            }
-
-            var numeric = Numeric(sample, isUlong);
-            if (numeric is not null)
-            {
-                previousValue = numeric;
-            }
-
-            previousTimestamp = sample.Timestamp;
-        }
-
-        // Close the final interval to the bucket end.
-        var tailDuration = (bucketEnd - previousTimestamp).TotalSeconds;
-        if (previousValue is { } tailHeld && tailDuration > 0)
-        {
-            weightedSum += tailHeld * tailDuration;
-            totalDuration += tailDuration;
-        }
-
-        // Advance the carried value to the bucket's last numeric sample (so the next bucket continues it).
-        if (samples.Count > 0)
-        {
-            var lastNumeric = Numeric(samples[^1], isUlong);
-            if (lastNumeric is not null)
-            {
-                carriedNumber = lastNumeric;
-            }
-        }
-
-        return new HistoryPoint(bucketStart, totalDuration > 0 ? weightedSum / totalDuration : null, null);
-    }
-
-    private HistoryPoint AggregateNumeric(
-        string aggregation, DateTimeOffset bucketStart, List<Sample> samples, bool isUlong)
-    {
-        var values = samples
-            .Select(sample => Numeric(sample, isUlong))
-            .Where(number => number.HasValue)
-            .Select(number => number!.Value)
-            .ToList();
-
-        if (values.Count == 0)
-        {
-            return new HistoryPoint(bucketStart, null, null);
-        }
-
-        double? result = aggregation switch
-        {
-            HistoryAggregations.SampleAverage => values.Average(),
-            HistoryAggregations.Minimum => values.Min(),
-            HistoryAggregations.Maximum => values.Max(),
-            HistoryAggregations.Sum => values.Sum(),
-            HistoryAggregations.StandardDeviation => SampleStandardDeviation(values),
-            _ => throw new HistoryAggregationNotSupportedException(
-                aggregation,
-                new HashSet<string>(StringComparer.Ordinal)
-                {
-                    HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count
-                })
-        };
-
-        return new HistoryPoint(bucketStart, result, null);
-    }
-
-    private static double? SampleStandardDeviation(List<double> values)
-    {
-        if (values.Count < 2)
-        {
-            return null; // sample stddev is undefined for n < 2
-        }
-
-        var mean = values.Average();
-        var sumSquares = values.Sum(value => (value - mean) * (value - mean));
-        return Math.Sqrt(sumSquares / (values.Count - 1));
-    }
-
-    // numeric value of a sample for aggregation; null for non-numeric json (decimal/string/enum)
-    private static double? Numeric(Sample sample, bool isUlong)
-    {
-        if (sample.Double is { } doubleValue) return doubleValue;
-        if (sample.Long is { } longValue) return longValue;
-        if (isUlong && sample.Json is { ValueKind: JsonValueKind.Number } json) return json.GetDouble();
-        return null;
-    }
+    private ImmutableArray<HistoryCoverage> GetQueryCoverage(HistoryQuery query) =>
+        HistoryCoverage.Clip(CoverageRanges, new HistoryCoverage(query.From, query.To));
 
     public void Sweep()
     {
         var cutoff = _getUtcNow() - _maxAge;
+        var anyEvicted = false;
         foreach (var buffer in _buffers.Values)
         {
-            buffer.EvictOlderThan(cutoff);
+            if (buffer.EvictOlderThan(cutoff) > 0)
+            {
+                anyEvicted = true;
+            }
+        }
+
+        if (anyEvicted)
+        {
+            AdvanceEvictionCoverageFrom(cutoff.UtcTicks);
         }
     }
 
-    // Maps a stored Sample to the wire HistoryPoint. Numeric columns -> Number; json columns -> Json;
-    // ulong overflow (json number on a ulong property) -> Number via COALESCE so numeric aggregation works.
-    private static HistoryPoint ToPoint(Sample sample, bool isUlong)
-    {
-        if (sample.Double is { } doubleValue)
-        {
-            return new HistoryPoint(sample.Timestamp, doubleValue, null);
-        }
-
-        if (sample.Long is { } longValue)
-        {
-            return new HistoryPoint(sample.Timestamp, longValue, null);
-        }
-
-        if (sample.Json is { } json)
-        {
-            double? number = isUlong && json.ValueKind == JsonValueKind.Number ? json.GetDouble() : null;
-            return new HistoryPoint(sample.Timestamp, number, json);
-        }
-
-        return new HistoryPoint(sample.Timestamp, null, null); // explicit null sample
-    }
 }

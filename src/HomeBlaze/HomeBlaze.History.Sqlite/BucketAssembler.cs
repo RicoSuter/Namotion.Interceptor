@@ -88,7 +88,8 @@ internal static class BucketAssembler
         HistoryQuery query,
         IReadOnlyDictionary<long, BucketPartial> partials,
         double? carrySeedNumber,
-        JsonElement? carrySeedJson)
+        JsonElement? carrySeedJson,
+        ImmutableArray<HistoryCoverage> coverageRanges)
     {
         var bucket = query.Bucket!.Value;
         var aggregation = query.Aggregation;
@@ -99,10 +100,32 @@ internal static class BucketAssembler
         var carriedJson = IsCarryDependent(aggregation) ? carrySeedJson : null;
 
         var bucketTicks = bucket.Ticks;
+        var alignedFrom = BucketAlignment.BucketStart(query.From, bucket);
+        var firstBucketStart = BucketAlignment.FirstBucketStart(
+            query.From, query.To, bucket, query.MaxPoints);
+        var bucketStartTimestamp = firstBucketStart;
         var allPoints = new List<HistoryPoint>();
-        var bucketStartTimestamp = BucketAlignment.BucketStart(query.From, bucket);
+        var coverageIndex = 0;
         while (bucketStartTimestamp < query.To)
         {
+            var bucketEndTimestamp = bucketStartTimestamp + bucket;
+            while (coverageIndex < coverageRanges.Length &&
+                   coverageRanges[coverageIndex].To <= bucketStartTimestamp)
+            {
+                coverageIndex++;
+            }
+
+            if (coverageIndex >= coverageRanges.Length ||
+                !coverageRanges[coverageIndex].Contains(
+                    new HistoryCoverage(bucketStartTimestamp, bucketEndTimestamp)))
+            {
+                carriedNumber = null;
+                carriedJson = null;
+                allPoints.Add(new HistoryPoint(bucketStartTimestamp, null, null));
+                bucketStartTimestamp = bucketEndTimestamp;
+                continue;
+            }
+
             var bucketStartTicks = EpochTicks.ToEpochTicks(bucketStartTimestamp);
             partials.TryGetValue(bucketStartTicks, out var partial);
             var hasPartial = partials.ContainsKey(bucketStartTicks);
@@ -112,15 +135,14 @@ internal static class BucketAssembler
                 hasPartial ? partial : null, ref carriedNumber, ref carriedJson);
             allPoints.Add(point);
 
-            bucketStartTimestamp += bucket;
+            bucketStartTimestamp = bucketEndTimestamp;
         }
 
-        var truncated = allPoints.Count > query.MaxPoints;
-        var kept = truncated
-            ? allPoints.Skip(allPoints.Count - query.MaxPoints).ToImmutableArray() // newest-N over buckets
-            : allPoints.ToImmutableArray();
-
-        return new HistorySeries(query.PropertyPath, kept, truncated);
+        return new HistorySeries(
+            query.PropertyPath,
+            allPoints.ToImmutableArray(),
+            firstBucketStart > alignedFrom,
+            ImmutableArray<HistoryCoverage>.Empty);
     }
 
     private static bool IsCarryDependent(string aggregation) =>
@@ -161,9 +183,10 @@ internal static class BucketAssembler
     }
 
     // Time-weighted average for one bucket. The SQL partial covers only the IN-BUCKET integral
-    // [firstNumericTs, bucketEnd); the value held entering the bucket (carry / look-back / seed) is integrated
-    // over the leading interval [bucketStart, firstNumericTs) here, and over the WHOLE bucket when it is empty.
-    // The carry then advances to the bucket's last numeric sample. Mirrors InMemory.TimeWeightedAverageBucket;
+    // [firstEventTs, bucketEnd); the value held entering the bucket (carry / look-back / seed) is integrated
+    // over the leading interval [bucketStart, firstEventTs) here, and over the WHOLE bucket when it is empty.
+    // The carry then advances to the bucket's last event, including explicit null. Mirrors
+    // InMemory.TimeWeightedAverageBucket;
     // ticks vs seconds does not matter because the ratio weightedSum/totalDuration is unit-free.
     private static HistoryPoint TimeWeightedAverage(
         DateTimeOffset bucketStart, long bucketStartTicks, long bucketTicks,
@@ -171,7 +194,7 @@ internal static class BucketAssembler
     {
         if (partial is { FirstTicks: { } firstTicks } combined)
         {
-            // Leading interval [bucketStart, firstNumericTs): the held value (if any) over that gap.
+            // Leading interval [bucketStart, firstEventTs): the held value (if any) over that gap.
             var weightedSum = combined.WeightedSum;
             var totalDuration = combined.TotalDuration;
             if (carriedNumber is { } held)
@@ -184,16 +207,16 @@ internal static class BucketAssembler
                 }
             }
 
-            // Advance the carried value to the bucket's last numeric sample for the next bucket.
-            if (combined.LastNumber is { } lastNumber)
+            // Advance carry even when the last event is explicit null, which clears the held value.
+            if (combined.LastTicks is not null)
             {
-                carriedNumber = lastNumber;
+                carriedNumber = combined.LastNumber;
             }
 
             return new HistoryPoint(bucketStart, totalDuration > 0 ? weightedSum / totalDuration : null, null);
         }
 
-        // Empty bucket (no numeric samples): the held value, if any, covers the whole bucket -> that value.
+        // Empty bucket (no events): the held value, if any, covers the whole bucket -> that value.
         if (carriedNumber is { } heldWhole && bucketTicks > 0)
         {
             return new HistoryPoint(bucketStart, heldWhole, null);

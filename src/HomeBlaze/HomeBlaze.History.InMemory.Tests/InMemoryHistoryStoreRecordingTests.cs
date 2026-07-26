@@ -104,6 +104,19 @@ public class InMemoryHistoryStoreRecordingTests
             CancellationToken.None).GetAwaiter().GetResult();
 
     [Fact]
+    public void WhenConstructed_ThenTitleIsRenderedForInMemoryHistory()
+    {
+        // Arrange
+        var store = new InMemoryHistoryStoreSubject(NullLogger<InMemoryHistoryStoreSubject>.Instance);
+
+        // Act
+        var title = store.Title;
+
+        // Assert
+        Assert.Equal("In-Memory History", title);
+    }
+
+    [Fact]
     public async Task WhenRootStatePropertyMutated_ThenRecordedUnderCanonicalPath()
     {
         // Arrange
@@ -275,7 +288,7 @@ public class InMemoryHistoryStoreRecordingTests
             // Assert
             Assert.NotEmpty(series.Points);
             Assert.Equal(100, store.Priority);
-            Assert.True(store.CurrentCoverage.To >= DateTimeOffset.UtcNow.AddMinutes(-1));
+            Assert.True(Assert.Single(store.CoverageRanges).To >= DateTimeOffset.UtcNow.AddMinutes(-1));
         }
         finally
         {

@@ -73,7 +73,7 @@ internal static class SqlitePartition
     }
 
     // Returns true when the key is a valid partition key for the interval. Used to filter out
-    // non-partition database files in the same directory (for example the moves database).
+    // non-partition database files in the same directory (for example the metadata database).
     public static bool IsPartitionKey(string key, PartitionInterval interval)
     {
         var candidate = interval == PartitionInterval.Monthly ? key + "-01" : key;

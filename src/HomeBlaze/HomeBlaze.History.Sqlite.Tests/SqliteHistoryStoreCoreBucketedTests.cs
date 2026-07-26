@@ -11,10 +11,21 @@ public sealed class SqliteHistoryStoreCoreBucketedTests : IDisposable
     private readonly string _directory =
         Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
 
-    // A far-future now and a long maxAge so nothing is swept while the bucketed cases run.
-    private SqliteHistoryStore NewCore() =>
-        new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly, TimeSpan.FromHours(1), maxJsonSize: 8192,
-            getUtcNow: () => Base.AddHours(1));
+    // Start before the test samples, then expose a far-future now so the complete query interval
+    // is covered while nothing is swept.
+    private SqliteHistoryStore NewCore()
+    {
+        var now = Base.AddHours(-1);
+        var store = new SqliteHistoryStore(
+            priority: 50,
+            databaseDirectory: _directory,
+            PartitionInterval.Weekly,
+            TimeSpan.FromHours(2),
+            maxJsonSize: 8192,
+            getUtcNow: () => now);
+        now = Base.AddHours(1);
+        return store;
+    }
 
     private static HistoryQuery BucketedQuery(string aggregation, int fromSecond, int toSecond,
         HistoryPoint? carrySeed = null) =>
@@ -168,6 +179,26 @@ public sealed class SqliteHistoryStoreCoreBucketedTests : IDisposable
         // Assert
         Assert.True(series.Truncated);
         Assert.Equal(new double?[] { 4, 5 }, series.Points.Select(point => point.Number).ToArray());
+    }
+
+    [Fact]
+    public async Task WhenLastClipsOlderBuckets_ThenHeldValueSeedsNewestEmptyBuckets()
+    {
+        // Arrange
+        using var core = await WithDoublesAsync((1, 7));
+
+        // Act
+        var series = core.Query(new HistoryQuery(
+            "/a/Value",
+            Base,
+            Base.AddSeconds(50),
+            Bucket,
+            HistoryAggregations.Last,
+            MaxPoints: 2));
+
+        // Assert
+        Assert.True(series.Truncated);
+        Assert.Equal(new double?[] { 7, 7 }, series.Points.Select(point => point.Number).ToArray());
     }
 
     [Fact]

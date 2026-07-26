@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.History.Abstractions;
 using Microsoft.Data.Sqlite;
 
@@ -5,8 +6,8 @@ namespace HomeBlaze.History.Sqlite;
 
 /// <summary>
 /// Pure bucketed-aggregation read SQL for the SQLite history engine: the bucketed query orchestration
-/// plus the four per-partition partial readers (first/last edge, count, numeric reductions, and the
-/// time-weighted-average <c>LEAD</c> scan). It reuses <see cref="SqliteHistoryReader"/> for move-chain
+/// plus the four partial readers (first/last edge, count, numeric reductions, and the
+/// time-weighted-average ordered event scan). It reuses <see cref="SqliteHistoryReader"/> for move-chain
 /// resolution and column metadata, <see cref="SqliteValueRouting"/> for value mapping, and
 /// <see cref="BucketAssembler"/> for final assembly. Every method takes a <see cref="SqliteReadContext"/>
 /// (the engine's open-connection delegates plus partition layout); these helpers never lock and never
@@ -15,8 +16,14 @@ namespace HomeBlaze.History.Sqlite;
 internal static class SqliteBucketReader
 {
     public static HistorySeries QueryBucketed(
-        SqliteReadContext context, HistoryQuery query, Func<string, DateTimeOffset, HistoryPoint?> getSampleAtOrBefore)
+        SqliteReadContext context,
+        HistoryQuery query,
+        Func<string, DateTimeOffset, HistoryPoint?> getSampleAtOrBefore,
+        ImmutableArray<HistoryCoverage> coverageRanges,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var bucket = query.Bucket!.Value;
         var aggregation = query.Aggregation;
         var bucketTicks = bucket.Ticks;
@@ -27,7 +34,7 @@ internal static class SqliteBucketReader
 
         // Resolve the stored column kind and ulong flag from path_meta along the chain (the SQLite
         // equivalent of the InMemory buffer's Column/IsUlong, which uses the first buffer in the chain).
-        // A numeric aggregation on a json-stored, non-ulong property (decimal/string/enum) is not
+        // A numeric aggregation on a json-stored, non-ulong property (string/enum) is not
         // supported, mirroring InMemoryHistoryStore.QueryBucketed.
         var meta = SqliteHistoryReader.ResolveColumnMeta(context, chain);
         var isUlong = meta?.IsUlong ?? false;
@@ -44,7 +51,8 @@ internal static class SqliteBucketReader
 
         // The aligned bucket range, intersected per leg below. A bucket straddling a move boundary draws its
         // samples from whichever leg owns each instant, exactly like InMemory's RangeAcrossChain.
-        var alignedFrom = BucketAlignment.BucketStart(query.From, bucket);
+        var alignedFrom = BucketAlignment.FirstBucketStart(
+            query.From, query.To, bucket, query.MaxPoints);
 
         // Expand the chain into concrete (path, tickWindow) segments over existing partition files.
         var segments = BuildChainSegments(context, chain, alignedFrom, query.To);
@@ -52,17 +60,15 @@ internal static class SqliteBucketReader
         Dictionary<long, BucketPartial> partials;
         if (aggregation == HistoryAggregations.TimeWeightedAverage)
         {
-            // TWA needs LEAD to see across partition files AND across legs: a sample is held until the NEXT
-            // sample, which may live in a later partition file or a later leg's path. So read the numeric
-            // samples over the UNION ALL of all segments in one ordered query (others ATTACHed), mirroring
-            // InMemory which merges every leg's samples into one ascending list before integrating.
-            partials = ReadTimeWeightedAveragePartials(context, segments, isUlong, bucketTicks);
+            partials = ReadTimeWeightedAveragePartials(
+                context, segments, isUlong, bucketTicks, cancellationToken);
         }
         else
         {
             partials = new Dictionary<long, BucketPartial>();
             foreach (var segment in segments)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var connection = context.OpenPartition(segment.PartitionKey);
                 foreach (var partial in ReadPartials(connection, segment.Path, aggregation, isUlong,
                              bucketTicks, segment.FromTicks, segment.ToTicks))
@@ -74,20 +80,28 @@ internal static class SqliteBucketReader
             }
         }
 
-        // Seed the carry for Last from the merger-supplied CarrySeed.
-        var carrySeedNumber = aggregation == HistoryAggregations.Last ? query.CarrySeed?.Number : null;
+        var isCarryDependent = aggregation is
+            HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
+        var carrySeedNumber = isCarryDependent ? query.CarrySeed?.Number : null;
         var carrySeedJson = aggregation == HistoryAggregations.Last ? query.CarrySeed?.Json : null;
+        var originalAlignedFrom = BucketAlignment.BucketStart(query.From, bucket);
 
-        // For TWA, seed the held value entering the range from the merger-supplied CarrySeed, else this
-        // store's own at-or-before look-back at BucketStart(From), so an empty leading bucket is not a gap.
-        // Mirrors InMemoryHistoryStore.QueryBucketed.
-        if (aggregation == HistoryAggregations.TimeWeightedAverage)
+        // When MaxPoints clipped older buckets, advance the held value to the clipped boundary.
+        // TWA also falls back to the store's own look-back when the merger supplied no seed.
+        if (isCarryDependent &&
+            (alignedFrom > originalAlignedFrom ||
+             aggregation == HistoryAggregations.TimeWeightedAverage && query.CarrySeed is null))
         {
-            carrySeedNumber = query.CarrySeed?.Number
-                ?? getSampleAtOrBefore(query.PropertyPath, alignedFrom)?.Number;
+            var prior = getSampleAtOrBefore(query.PropertyPath, alignedFrom);
+            if (prior is not null)
+            {
+                carrySeedNumber = prior.Number;
+                carrySeedJson = prior.Json;
+            }
         }
 
-        return BucketAssembler.Assemble(query, partials, carrySeedNumber, carrySeedJson);
+        return BucketAssembler.Assemble(
+            query, partials, carrySeedNumber, carrySeedJson, coverageRanges);
     }
 
     // Expands a chain into concrete (path, partitionKey, tickWindow) segments over EXISTING partition files.
@@ -146,29 +160,25 @@ internal static class SqliteBucketReader
         return ReadNumericPartials(connection, propertyPath, isUlong, bucketTicks, fromTicks, toTicks);
     }
 
-    // Time-weighted average: per bucket, the IN-BUCKET integral only. Each numeric sample's value is held
-    // over [ts, min(nextNumericTs, bucketEnd)); the next numeric sample bridges across non-numeric/null rows
-    // because those are filtered out of the ordered set (mirroring InMemory, where a null sample leaves the
-    // held value unchanged). The leading interval [bucketStart, firstNumericTs) and empty-bucket carry are
-    // supplied by BucketAssembler, which also needs FirstTicks (the leading-interval boundary) and LastNumber
-    // (the carry-advance value).
+    // Time-weighted average: per bucket, the IN-BUCKET integral only. Each recorded event's value is held
+    // over [ts, min(nextTs, bucketEnd)). Explicit null events remain in the ordered set: they terminate
+    // the held numeric value and contribute a gap until a later numeric event. The leading interval
+    // [bucketStart, firstEventTs) and empty-bucket carry are supplied by BucketAssembler, which also needs
+    // FirstTicks (the leading-interval boundary), LastTicks, and LastNumber (including null) to advance carry.
     //
-    // Unlike the other aggregations, TWA cannot be computed per segment then summed: a sample is held until the
-    // NEXT sample, which may live in a LATER partition file OR a LATER move-chain leg's path, so the integrator
-    // must see one ascending stream over ALL segments (mirroring InMemory, which merges every leg's samples
-    // into one ascending list before integrating). The old reader produced that stream by ATTACHing every
-    // distinct partition file onto one connection and UNION ALL-ing them, but SQLite caps attached databases at
-    // 10 (SQLITE_MAX_ATTACHED), so a range spanning 11+ partition files threw "too many attached databases".
-    // Instead, read each segment's numeric samples on its own partition connection and merge them in memory:
-    // the segments cover disjoint (path, time) slices (partition files cover disjoint time ranges and move-chain
-    // legs cover disjoint validity windows), so a single ascending sort over the union faithfully reconstructs
-    // the ordered scan the integrator needs, with no attach cap.
+    // Unlike the other aggregations, TWA must see one ascending event stream across partition files and
+    // move legs. The segments are disjoint time slices, so ordering them and streaming each SQL reader in
+    // timestamp order reconstructs that stream with constant sample memory and no SQLite ATTACH limit.
     //
     // The value is read as REAL so value * duration is floating point: tick products are huge (value ~tens
     // times ~10^8 ticks per 10s) and an integer sum could overflow; the weightedSum/totalDuration ratio is
     // unit-free.
     private static Dictionary<long, BucketPartial> ReadTimeWeightedAveragePartials(
-        SqliteReadContext context, IReadOnlyList<ChainSegment> segments, bool isUlong, long bucketTicks)
+        SqliteReadContext context,
+        IReadOnlyList<ChainSegment> segments,
+        bool isUlong,
+        long bucketTicks,
+        CancellationToken cancellationToken)
     {
         var result = new Dictionary<long, BucketPartial>();
         if (segments.Count == 0)
@@ -180,16 +190,17 @@ internal static class SqliteBucketReader
             ? "CAST(COALESCE(value_double, value_long, CAST(value_json AS REAL)) AS REAL)"
             : "CAST(COALESCE(value_double, value_long) AS REAL)";
 
-        // Collect every segment's numeric (ts, value) rows. Each segment reads only its own path over its tick
-        // window from its own partition file, so a row belongs to exactly one segment (no duplication).
-        var samples = new List<(long Ticks, double Value)>();
-        foreach (var segment in segments)
+        (long Ticks, double? Value)? previous = null;
+        foreach (var segment in segments
+                     .OrderBy(segment => segment.FromTicks)
+                     .ThenBy(segment => segment.PartitionKey, StringComparer.Ordinal))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var connection = context.OpenPartition(segment.PartitionKey);
             using var command = connection.CreateCommand();
             command.CommandText =
                 "SELECT ts, " + numeric + " AS v FROM history " +
-                "WHERE path = @path AND ts >= @from AND ts < @to AND " + numeric + " IS NOT NULL;";
+                "WHERE path = @path AND ts >= @from AND ts < @to ORDER BY ts;";
             command.Parameters.AddWithValue("@path", segment.Path);
             command.Parameters.AddWithValue("@from", segment.FromTicks);
             command.Parameters.AddWithValue("@to", segment.ToTicks);
@@ -197,51 +208,62 @@ internal static class SqliteBucketReader
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
-                samples.Add((reader.GetInt64(0), reader.GetDouble(1)));
-            }
-        }
-
-        if (samples.Count == 0)
-        {
-            return result;
-        }
-
-        // Ascending order by ts reproduces the old "ORDER BY ts" over the UNION ALL. The merged stream is the
-        // single ordered scan the in-bucket integral below needs.
-        samples.Sort(static (left, right) => left.Ticks.CompareTo(right.Ticks));
-
-        // In-bucket integral, equivalent to the old window-function SQL: each sample's value is held over
-        // [ts, min(nextTs, bucketEnd)); the next sample is the global successor (held across buckets, files, and
-        // legs), defaulting to bucketEnd for the final sample. Per bucket: FirstTicks is the earliest sample's
-        // ts (the leading-interval boundary) and LastNumber is the latest sample's value (the carry-advance).
-        for (var index = 0; index < samples.Count; index++)
-        {
-            var (ticks, value) = samples[index];
-            var bucketStart = (ticks / bucketTicks) * bucketTicks;
-            var bucketEnd = bucketStart + bucketTicks;
-            var nextTicks = index + 1 < samples.Count ? samples[index + 1].Ticks : bucketEnd;
-            var duration = (double)((nextTicks < bucketEnd ? nextTicks : bucketEnd) - ticks);
-
-            if (result.TryGetValue(bucketStart, out var partial))
-            {
-                // Ascending order: this is a later sample in the same bucket, so it becomes the new LastNumber.
-                result[bucketStart] = partial with
+                cancellationToken.ThrowIfCancellationRequested();
+                var current = (Ticks: reader.GetInt64(0), Value: reader.IsDBNull(1) ? (double?)null : reader.GetDouble(1));
+                if (previous is { } pending)
                 {
-                    WeightedSum = partial.WeightedSum + value * duration,
-                    TotalDuration = partial.TotalDuration + duration,
-                    LastNumber = value
-                };
+                    AccumulateTimeWeightedSample(result, pending, current.Ticks, bucketTicks);
+                }
+
+                previous = current;
             }
-            else
-            {
-                // First (earliest) sample seen for this bucket: it is both FirstTicks and (so far) LastNumber.
-                result[bucketStart] = new BucketPartial(
-                    bucketStart, 0, null, null, null, null,
-                    ticks, null, null, null, value, null, value * duration, duration);
-            }
+        }
+
+        if (previous is { } final)
+        {
+            var bucketStart = AlignBucketStart(final.Ticks, bucketTicks);
+            AccumulateTimeWeightedSample(result, final, bucketStart + bucketTicks, bucketTicks);
         }
 
         return result;
+    }
+
+    private static void AccumulateTimeWeightedSample(
+        Dictionary<long, BucketPartial> result,
+        (long Ticks, double? Value) sample,
+        long nextTicks,
+        long bucketTicks)
+    {
+        var (ticks, value) = sample;
+        var bucketStart = AlignBucketStart(ticks, bucketTicks);
+        var bucketEnd = bucketStart + bucketTicks;
+        var intervalEnd = nextTicks < bucketEnd ? nextTicks : bucketEnd;
+        var duration = (double)Math.Max(0, intervalEnd - ticks);
+        var weightedContribution = value is { } number ? number * duration : 0;
+        var knownDuration = value is not null ? duration : 0;
+
+        if (result.TryGetValue(bucketStart, out var partial))
+        {
+            result[bucketStart] = partial with
+            {
+                WeightedSum = partial.WeightedSum + weightedContribution,
+                TotalDuration = partial.TotalDuration + knownDuration,
+                LastTicks = ticks,
+                LastNumber = value
+            };
+        }
+        else
+        {
+            result[bucketStart] = new BucketPartial(
+                bucketStart, 0, null, null, null, null,
+                ticks, null, null, ticks, value, null, weightedContribution, knownDuration);
+        }
+    }
+
+    private static long AlignBucketStart(long ticks, long bucketTicks)
+    {
+        var quotient = Math.DivRem(ticks, bucketTicks, out var remainder);
+        return (remainder < 0 ? quotient - 1 : quotient) * bucketTicks;
     }
 
     // First/Last: the earliest (MIN ts) or latest (MAX ts) row per bucket, with its raw value columns.
@@ -251,12 +273,15 @@ internal static class SqliteBucketReader
     {
         var isFirst = aggregation == HistoryAggregations.First;
         var edge = isFirst ? "MIN(ts)" : "MAX(ts)";
+        var bucket = FloorBucketExpression("h.ts");
+        var innerBucket = FloorBucketExpression("ts");
 
         using var command = connection.CreateCommand();
         command.CommandText =
-            "SELECT (h.ts/@b)*@b AS bucket, h.ts, h.value_long, h.value_double, h.value_json FROM history h " +
+            "SELECT " + bucket + " AS bucket, h.ts, h.value_long, h.value_double, h.value_json FROM history h " +
             "WHERE h.path = @path AND h.ts >= @from AND h.ts < @to " +
-            "AND h.ts = (SELECT " + edge + " FROM history WHERE path = @path AND (ts/@b)*@b = (h.ts/@b)*@b " +
+            "AND h.ts = (SELECT " + edge + " FROM history WHERE path = @path AND " +
+            innerBucket + " = " + bucket + " " +
             "AND ts >= @from AND ts < @to) " +
             "GROUP BY bucket;";
         command.Parameters.AddWithValue("@path", propertyPath);
@@ -302,7 +327,7 @@ internal static class SqliteBucketReader
     {
         using var command = connection.CreateCommand();
         command.CommandText =
-            "SELECT (ts/@b)*@b AS bucket, COUNT(*) AS cnt FROM history " +
+            "SELECT " + FloorBucketExpression("ts") + " AS bucket, COUNT(*) AS cnt FROM history " +
             "WHERE path = @path AND ts >= @from AND ts < @to GROUP BY bucket ORDER BY bucket;";
         command.Parameters.AddWithValue("@path", propertyPath);
         command.Parameters.AddWithValue("@b", bucketTicks);
@@ -335,7 +360,7 @@ internal static class SqliteBucketReader
 
         using var command = connection.CreateCommand();
         command.CommandText =
-            "SELECT (ts/@b)*@b AS bucket, " +
+            "SELECT " + FloorBucketExpression("ts") + " AS bucket, " +
             "COUNT(" + numeric + ") AS cnt, " +
             "SUM(" + numeric + ") AS sum_num, " +
             "MIN(" + numeric + ") AS min_num, " +
@@ -366,4 +391,8 @@ internal static class SqliteBucketReader
 
         return result;
     }
+
+    private static string FloorBucketExpression(string timestampExpression) =>
+        "((" + timestampExpression + " / @b) - CASE WHEN " + timestampExpression +
+        " < 0 AND " + timestampExpression + " % @b <> 0 THEN 1 ELSE 0 END) * @b";
 }

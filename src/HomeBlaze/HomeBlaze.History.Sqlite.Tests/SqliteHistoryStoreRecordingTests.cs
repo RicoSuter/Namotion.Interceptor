@@ -132,6 +132,19 @@ public class SqliteHistoryStoreRecordingTests
     }
 
     [Fact]
+    public void WhenConstructed_ThenTitleIsRenderedForSQLiteHistory()
+    {
+        // Arrange
+        var store = new SqliteHistoryStoreSubject(NullLogger<SqliteHistoryStoreSubject>.Instance);
+
+        // Act
+        var title = store.Title;
+
+        // Assert
+        Assert.Equal("SQLite History", title);
+    }
+
+    [Fact]
     public async Task WhenRootStatePropertyMutated_ThenRecordedUnderCanonicalPath()
     {
         // Arrange
@@ -234,6 +247,52 @@ public class SqliteHistoryStoreRecordingTests
     }
 
     [Fact]
+    public async Task WhenChildWithTwoHistoryPropertiesReparented_ThenSiblingPropertyKeepsPreMoveHistory()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var child = new TestChild(context);
+        root.Child = child;
+
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(
+                store, "/Child/Pressure", value => child.Pressure = value, 3.3);
+            await RecordAndWaitForValueAsync(
+                store, "/Child/Humidity", value => child.Humidity = value, 4.4);
+
+            root.SecondChild = child;
+            root.Child = null;
+
+            await RecordAndWaitForValueAsync(
+                store, "/SecondChild/Pressure", value => child.Pressure = value, 7.7);
+            await RecordAndWaitForValueAsync(
+                store, "/SecondChild/Humidity", value => child.Humidity = value, 8.8);
+
+            // Act
+            await store.FlushNowAsync();
+            var series = await store.QueryAsync(
+                new HistoryQuery(
+                    "/SecondChild/Humidity",
+                    DateTimeOffset.UtcNow.AddMinutes(-1),
+                    DateTimeOffset.UtcNow.AddMinutes(1)),
+                CancellationToken.None);
+
+            // Assert
+            Assert.Contains(series.Points, point => point.Number == 4.4);
+            Assert.Contains(series.Points, point => point.Number == 8.8);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
     public async Task WhenRunning_ThenCoverageToAdvancesAndPriorityIsFifty()
     {
         // Arrange
@@ -249,7 +308,7 @@ public class SqliteHistoryStoreRecordingTests
             // Assert
             Assert.NotEmpty(series.Points);
             Assert.Equal(50, store.Priority);
-            Assert.True(store.CurrentCoverage.To >= DateTimeOffset.UtcNow.AddMinutes(-1));
+            Assert.True(Assert.Single(store.CoverageRanges).To >= DateTimeOffset.UtcNow.AddMinutes(-1));
         }
         finally
         {

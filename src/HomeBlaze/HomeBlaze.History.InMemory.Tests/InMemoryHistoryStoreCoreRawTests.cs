@@ -12,6 +12,10 @@ public class InMemoryHistoryStoreCoreRawTests
         new(priority: 100, maxPointsPerProperty: maxPoints, maxAge: TimeSpan.FromSeconds(maxAgeSeconds),
             maxJsonSize: 8192, getUtcNow: () => now);
 
+    private static InMemoryHistoryStore NewCore(Func<DateTimeOffset> getUtcNow) =>
+        new(priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromSeconds(60),
+            maxJsonSize: 8192, getUtcNow);
+
     [Fact]
     public void WhenDoublesRecorded_ThenRawQueryReturnsNumbersAscending()
     {
@@ -145,9 +149,11 @@ public class InMemoryHistoryStoreCoreRawTests
     public void WhenGetSampleAtOrBefore_ThenReturnsHeldValueOrNull()
     {
         // Arrange
-        var core = NewCore(Base.AddSeconds(10));
+        var now = Base;
+        var core = NewCore(() => now);
         core.Record("/a/Value", Base.AddSeconds(0), 7d, typeof(double));
         core.Record("/a/Value", Base.AddSeconds(5), 9d, typeof(double));
+        now = Base.AddSeconds(10);
 
         // Act
         var held = core.GetSampleAtOrBefore("/a/Value", Base.AddSeconds(3));
@@ -162,17 +168,22 @@ public class InMemoryHistoryStoreCoreRawTests
     public void WhenCoverageRequested_ThenSpansMaxAgeWindowToNow()
     {
         // Arrange
-        var now = Base.AddSeconds(120);
-        var core = NewCore(now, maxAgeSeconds: 60);
+        var now = Base;
+        var core = new InMemoryHistoryStore(
+            priority: 100,
+            maxPointsPerProperty: 1000,
+            maxAge: TimeSpan.FromSeconds(60),
+            maxJsonSize: 8192,
+            getUtcNow: () => now);
         core.Record("/a/Value", Base.AddSeconds(70), 1d, typeof(double));
+        now = Base.AddSeconds(120);
 
         // Act
-        var coverage = core.CurrentCoverage;
+        var coverage = Assert.Single(core.CoverageRanges);
 
-        // Assert - From = max(startTime, now-60s); startTime == now here (set in ctor), so From == now-?
+        // Assert
+        Assert.Equal(Base.AddSeconds(60), coverage.From);
         Assert.Equal(now, coverage.To);
-        Assert.True(coverage.From <= now);
-        Assert.True(coverage.From >= now - TimeSpan.FromSeconds(60));
     }
 
     [Fact]
@@ -194,11 +205,86 @@ public class InMemoryHistoryStoreCoreRawTests
         clock = Base.AddSeconds(30);
 
         // Act
-        var coverage = core.CurrentCoverage;
+        var coverage = Assert.Single(core.CoverageRanges);
 
         // Assert - From is the oldest sample actually retained (t=2s), not now - maxAge nor _startTime; the
         // store cannot honestly claim coverage back to a time whose samples were evicted by the count cap.
         Assert.Equal(Base.AddSeconds(2), coverage.From);
+        Assert.Equal(clock, coverage.To);
+    }
+
+    [Fact]
+    public void WhenOnePropertyOverflows_ThenStoreCoverageUsesWorstPropertyFloor()
+    {
+        // Arrange
+        var clock = Base;
+        var core = new InMemoryHistoryStore(
+            priority: 100, maxPointsPerProperty: 2, maxAge: TimeSpan.FromHours(1),
+            maxJsonSize: 8192, getUtcNow: () => clock);
+
+        // A quiet property has older retained data, while the noisy property exceeds its capacity.
+        core.Record("/quiet/Value", Base.AddSeconds(1), 1d, typeof(double));
+        core.Record("/noisy/Value", Base.AddSeconds(2), 2d, typeof(double));
+        core.Record("/noisy/Value", Base.AddSeconds(3), 3d, typeof(double));
+        core.Record("/noisy/Value", Base.AddSeconds(4), 4d, typeof(double));
+        clock = Base.AddSeconds(30);
+
+        // Act
+        var coverage = Assert.Single(core.CoverageRanges);
+
+        // Assert
+        Assert.Equal(Base.AddSeconds(3), coverage.From);
+        Assert.Equal(clock, coverage.To);
+    }
+
+    [Fact]
+    public void WhenAnotherPropertyAdvancesCoverageFloor_ThenDirectBucketsDoNotCarryOlderValue()
+    {
+        // Arrange
+        var clock = Base;
+        var core = new InMemoryHistoryStore(
+            priority: 100,
+            maxPointsPerProperty: 2,
+            maxAge: TimeSpan.FromHours(1),
+            maxJsonSize: 8192,
+            getUtcNow: () => clock);
+        core.Record("/quiet/Value", Base.AddSeconds(1), 7d, typeof(double));
+        core.Record("/noisy/Value", Base.AddSeconds(2), 2d, typeof(double));
+        core.Record("/noisy/Value", Base.AddSeconds(3), 3d, typeof(double));
+        core.Record("/noisy/Value", Base.AddSeconds(4), 4d, typeof(double));
+        clock = Base.AddSeconds(30);
+
+        // Act
+        var series = core.Query(new HistoryQuery(
+            "/quiet/Value",
+            Base,
+            clock,
+            TimeSpan.FromSeconds(10),
+            HistoryAggregations.Last,
+            MaxPoints: 10));
+
+        // Assert
+        Assert.Equal(
+            new double?[] { null, null, null },
+            series.Points.Select(point => point.Number).ToArray());
+    }
+
+    [Fact]
+    public void WhenNoPropertyHasOverflowed_ThenFirstSampleDoesNotNarrowCoverage()
+    {
+        // Arrange
+        var clock = Base;
+        var core = new InMemoryHistoryStore(
+            priority: 100, maxPointsPerProperty: 2, maxAge: TimeSpan.FromHours(1),
+            maxJsonSize: 8192, getUtcNow: () => clock);
+        core.Record("/quiet/Value", Base.AddSeconds(10), 1d, typeof(double));
+        clock = Base.AddSeconds(30);
+
+        // Act
+        var coverage = Assert.Single(core.CoverageRanges);
+
+        // Assert
+        Assert.Equal(Base, coverage.From);
         Assert.Equal(clock, coverage.To);
     }
 
@@ -213,12 +299,49 @@ public class InMemoryHistoryStoreCoreRawTests
         clock = Base.AddSeconds(30);
 
         // Act
-        var coverage = core.CurrentCoverage;
+        var coverage = Assert.Single(core.CoverageRanges);
 
         // Assert - with no samples, From keeps the existing max(_startTime, now - maxAge) behavior. Here
         // now - maxAge (Base + 30s - 1h) is below _startTime (Base), so From == _startTime.
         Assert.Equal(Base, coverage.From);
         Assert.Equal(clock, coverage.To);
+    }
+
+    [Fact]
+    public void WhenClockMovesBeforeStoreStart_ThenCoverageIsEmpty()
+    {
+        // Arrange
+        var clock = Base;
+        var core = new InMemoryHistoryStore(
+            priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromHours(1),
+            maxJsonSize: 8192, getUtcNow: () => clock);
+        clock = Base.AddMinutes(-1);
+
+        // Act
+        var coverage = core.CoverageRanges;
+
+        // Assert
+        Assert.Empty(coverage);
+    }
+
+    [Fact]
+    public void WhenClockMovesBackwardAfterAgeEviction_ThenCoverageDoesNotReclaimEvictedRange()
+    {
+        // Arrange
+        var clock = Base;
+        var core = new InMemoryHistoryStore(
+            priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromHours(1),
+            maxJsonSize: 8192, getUtcNow: () => clock);
+        core.Record("/a/Value", Base, 1d, typeof(double));
+        clock = Base.AddHours(2);
+        core.Sweep();
+        clock = Base.AddMinutes(30);
+
+        // Act
+        var coverage = core.CoverageRanges;
+
+        // Assert
+        Assert.Empty(coverage);
     }
 
     [Fact]

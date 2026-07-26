@@ -115,6 +115,7 @@ public class GetPropertyHistoryToolTests
         {
             Assert.True(json.TryGetProperty(path, out var entry));
             Assert.True(entry.TryGetProperty("value_type", out _));     // present (null when unresolved)
+            Assert.Empty(entry.GetProperty("coverage").EnumerateArray());
             Assert.Empty(entry.GetProperty("points").EnumerateArray());
             Assert.False(entry.GetProperty("truncated").GetBoolean());
         }

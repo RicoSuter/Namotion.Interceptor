@@ -95,6 +95,42 @@ public class TimeWeightedAverageParityTests
 
     [Theory]
     [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenExplicitNullRecorded_ThenHeldValueIsCleared(ParityStoreFactory factory)
+    {
+        // Arrange - 10 is known for the first half of bucket 0, then explicit null clears it.
+        // Bucket 1 has no event and must remain a gap rather than carrying 10.
+        using var store = factory.Create();
+        store.Record("/a/Value", Base, 10d, typeof(double?));
+        store.Record("/a/Value", Base.AddSeconds(5), null, typeof(double?));
+        await store.FlushAsync();
+
+        // Act
+        var series = store.Query(Twa(0, 20));
+
+        // Assert
+        ParityAssert.NumbersEqual(new double?[] { 10d, null }, series);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenExplicitNullCarrySeedProvided_ThenStoreLookBackDoesNotRestoreOlderValue(
+        ParityStoreFactory factory)
+    {
+        // Arrange
+        using var store = factory.Create();
+        store.Record("/a/Value", Base.AddSeconds(-5), 7d, typeof(double?));
+        await store.FlushAsync();
+        var explicitNullSeed = new HistoryPoint(Base.AddSeconds(-1), null, null);
+
+        // Act
+        var point = store.Query(Twa(0, 10, explicitNullSeed)).Points.Single();
+
+        // Assert
+        Assert.Null(point.Number);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
     public async Task WhenBucketStraddlesPartitionBoundary_ThenTwaMatchesAcrossStores(ParityStoreFactory factory)
     {
         // Arrange - a 3-day bucket whose interior contains the SQLite weekly partition split (Monday).

@@ -1,0 +1,12 @@
+[mcp_servers.homeblaze]
+command = "npx"
+args = ["-y", "mcp-remote", "https://localhost:7298/mcp"]
+
+[mcp_servers.homeblaze.env]
+NODE_TLS_REJECT_UNAUTHORIZED = "0"
+
+[mcp_servers.homeblaze.tools.browse]
+approval_mode = "approve"
+
+[mcp_servers.homeblaze.tools.search]
+approval_mode = "approve"

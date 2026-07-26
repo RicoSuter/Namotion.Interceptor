@@ -8,9 +8,18 @@ public class InMemoryHistoryStoreCoreTimeWeightedAverageTests
     private static readonly DateTimeOffset Base = new(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
     private static readonly TimeSpan Bucket = TimeSpan.FromSeconds(10);
 
-    private static InMemoryHistoryStore NewCore() =>
-        new(priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromHours(1),
-            maxJsonSize: 8192, getUtcNow: () => Base.AddHours(1));
+    private static InMemoryHistoryStore NewCore()
+    {
+        var now = Base.AddMinutes(-1);
+        var store = new InMemoryHistoryStore(
+            priority: 100,
+            maxPointsPerProperty: 1000,
+            maxAge: TimeSpan.FromHours(2),
+            maxJsonSize: 8192,
+            getUtcNow: () => now);
+        now = Base.AddHours(1);
+        return store;
+    }
 
     private static HistoryQuery Twa(int fromSecond, int toSecond, HistoryPoint? carrySeed = null) =>
         new("/a/Value", Base.AddSeconds(fromSecond), Base.AddSeconds(toSecond), Bucket,
@@ -78,8 +87,15 @@ public class InMemoryHistoryStoreCoreTimeWeightedAverageTests
     {
         // Arrange - a sample before From at t=-5 (value 4) inside coverage; bucket [0,10) empty.
         // The store's own at-or-before look-back supplies the held value 4.
-        var core = NewCore();
+        var now = Base.AddSeconds(-10);
+        var core = new InMemoryHistoryStore(
+            priority: 100,
+            maxPointsPerProperty: 1000,
+            maxAge: TimeSpan.FromHours(1),
+            maxJsonSize: 8192,
+            getUtcNow: () => now);
         core.Record("/a/Value", Base.AddSeconds(-5), 4d, typeof(double));
+        now = Base.AddSeconds(10);
 
         // Act
         var point = core.Query(Twa(0, 10)).Points.Single();

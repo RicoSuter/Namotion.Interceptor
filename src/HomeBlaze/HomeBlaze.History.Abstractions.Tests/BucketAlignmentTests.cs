@@ -60,4 +60,44 @@ public class BucketAlignmentTests
         // Assert
         Assert.Equal(once, twice);
     }
+
+    [Fact]
+    public void WhenTimestampPredatesUnixEpoch_ThenFloorsTowardEarlierBoundary()
+    {
+        // Arrange
+        var bucket = TimeSpan.FromSeconds(10);
+        var timestamp = DateTimeOffset.UnixEpoch.AddSeconds(-1);
+
+        // Act
+        var start = BucketAlignment.BucketStart(timestamp, bucket);
+
+        // Assert
+        Assert.Equal(DateTimeOffset.UnixEpoch.AddSeconds(-10), start);
+    }
+
+    [Fact]
+    public void WhenBucketIsNotPositive_ThenThrows()
+    {
+        // Arrange
+        var timestamp = DateTimeOffset.UnixEpoch;
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => BucketAlignment.BucketStart(timestamp, TimeSpan.Zero));
+    }
+
+    [Fact]
+    public void WhenRangeContainsMoreThanMaximumBuckets_ThenFirstBucketSkipsOldest()
+    {
+        // Arrange
+        var bucket = TimeSpan.FromSeconds(10);
+        var from = DateTimeOffset.UnixEpoch.AddSeconds(1);
+        var to = DateTimeOffset.UnixEpoch.AddSeconds(51);
+
+        // Act
+        var start = BucketAlignment.FirstBucketStart(from, to, bucket, maxBuckets: 2);
+
+        // Assert
+        Assert.Equal(DateTimeOffset.UnixEpoch.AddSeconds(40), start);
+    }
 }

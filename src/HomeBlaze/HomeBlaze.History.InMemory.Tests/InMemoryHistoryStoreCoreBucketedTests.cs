@@ -9,9 +9,18 @@ public class InMemoryHistoryStoreCoreBucketedTests
     private static readonly DateTimeOffset Base = new(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
     private static readonly TimeSpan Bucket = TimeSpan.FromSeconds(10);
 
-    private static InMemoryHistoryStore NewCore() =>
-        new(priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromHours(1),
-            maxJsonSize: 8192, getUtcNow: () => Base.AddHours(1));
+    private static InMemoryHistoryStore NewCore()
+    {
+        var now = Base.AddMinutes(-1);
+        var store = new InMemoryHistoryStore(
+            priority: 100,
+            maxPointsPerProperty: 1000,
+            maxAge: TimeSpan.FromHours(2),
+            maxJsonSize: 8192,
+            getUtcNow: () => now);
+        now = Base.AddHours(1);
+        return store;
+    }
 
     private static InMemoryHistoryStore WithDoubles(params (int second, double value)[] samples)
     {

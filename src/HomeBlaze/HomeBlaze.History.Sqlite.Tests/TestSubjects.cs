@@ -23,11 +23,15 @@ public partial class TestRoot
 }
 
 /// <summary>
-/// Child test subject with a recordable [State] numeric property, recorded under its own canonical path.
+/// Child test subject with two recordable [State] numeric properties, recorded under their own canonical paths.
+/// The sibling property verifies that move detection is independent per history property.
 /// </summary>
 [InterceptorSubject]
 public partial class TestChild
 {
     [State]
     public partial double Pressure { get; set; }
+
+    [State]
+    public partial double Humidity { get; set; }
 }

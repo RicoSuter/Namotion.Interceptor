@@ -147,4 +147,29 @@ public class AggregationParityTests
         // Assert
         ParityAssert.NumbersEqual(new double?[] { 3d, 0d }, series);
     }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenSamplesPredateUnixEpoch_ThenBucketsFloorAcrossStores(ParityStoreFactory factory)
+    {
+        // Arrange
+        using var store = factory.Create();
+        var timestamp = DateTimeOffset.UnixEpoch.AddSeconds(-1);
+        store.Record("/a/Value", timestamp, 42d, typeof(double));
+        await store.FlushAsync();
+
+        // Act
+        var series = store.Query(new HistoryQuery(
+            "/a/Value",
+            DateTimeOffset.UnixEpoch.AddSeconds(-10),
+            DateTimeOffset.UnixEpoch,
+            Bucket,
+            HistoryAggregations.Last,
+            MaxPoints: 10));
+
+        // Assert
+        var point = Assert.Single(series.Points);
+        Assert.Equal(DateTimeOffset.UnixEpoch.AddSeconds(-10), point.Timestamp);
+        Assert.Equal(42d, point.Number);
+    }
 }

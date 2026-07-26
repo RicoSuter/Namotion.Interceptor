@@ -14,6 +14,10 @@ public sealed class SqliteHistoryStoreCoreRawTests : IDisposable
     private SqliteHistoryStore NewCore(DateTimeOffset now, int maxAgeSeconds = 3600) =>
         new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly, TimeSpan.FromSeconds(maxAgeSeconds), maxJsonSize: 8192, () => now);
 
+    private SqliteHistoryStore NewCore(Func<DateTimeOffset> getUtcNow, int maxAgeSeconds = 3600) =>
+        new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly,
+            TimeSpan.FromSeconds(maxAgeSeconds), maxJsonSize: 8192, getUtcNow);
+
     public void Dispose()
     {
         try { if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true); }
@@ -112,9 +116,11 @@ public sealed class SqliteHistoryStoreCoreRawTests : IDisposable
     public async Task WhenGetSampleAtOrBefore_ThenReturnsHeldValueOrNull()
     {
         // Arrange
-        using var core = NewCore(Base.AddSeconds(10));
+        var now = Base;
+        using var core = NewCore(() => now);
         core.Record("/a/Value", Base.AddSeconds(0), 7d, typeof(double));
         core.Record("/a/Value", Base.AddSeconds(5), 9d, typeof(double));
+        now = Base.AddSeconds(10);
         await core.FlushAsync(CancellationToken.None);
 
         // Act
@@ -130,9 +136,10 @@ public sealed class SqliteHistoryStoreCoreRawTests : IDisposable
     public async Task WhenFlushed_ThenCoverageToTracksLastCommittedAndQueueDepthZero()
     {
         // Arrange
-        var now = Base.AddSeconds(120);
-        using var core = NewCore(now);
+        var now = Base.AddSeconds(80);
+        using var core = NewCore(() => now);
         core.Record("/a/Value", Base.AddSeconds(90), 1d, typeof(double));
+        now = Base.AddSeconds(120);
 
         // Act
         Assert.Equal(1, core.QueueDepth);
@@ -140,7 +147,32 @@ public sealed class SqliteHistoryStoreCoreRawTests : IDisposable
 
         // Assert
         Assert.Equal(0, core.QueueDepth);
-        Assert.Equal(Base.AddSeconds(90), core.CurrentCoverage.To);
+        var coverage = Assert.Single(core.CoverageRanges);
+        Assert.Equal(Base.AddSeconds(80), coverage.From);
+        Assert.Equal(Base.AddSeconds(120).AddTicks(1), coverage.To);
         Assert.True(core.LastFlushUtc is not null);
+    }
+
+    [Fact]
+    public async Task WhenStoreReopened_ThenCoverageIsRestoredFromPersistedSamples()
+    {
+        // Arrange
+        var now = Base.AddSeconds(80);
+        using (var writer = NewCore(() => now))
+        {
+            writer.Record("/a/Value", Base.AddSeconds(90), 1d, typeof(double));
+            now = Base.AddSeconds(120);
+            await writer.FlushAsync(CancellationToken.None);
+        }
+
+        // Act
+        using var reader = NewCore(Base.AddSeconds(180));
+        var coverage = Assert.Single(reader.CoverageRanges);
+        var series = reader.Query(new HistoryQuery("/a/Value", coverage.From, coverage.To));
+
+        // Assert
+        Assert.Equal(Base.AddSeconds(80), coverage.From);
+        Assert.Equal(Base.AddSeconds(120).AddTicks(1), coverage.To);
+        Assert.Equal(1d, series.Points.Single().Number);
     }
 }

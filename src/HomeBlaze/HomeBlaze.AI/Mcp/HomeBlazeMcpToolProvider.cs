@@ -105,7 +105,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             Name = "get_property_history",
             Description = "Query recorded history for one or more [State] property paths over a time range. " +
                           "Supports raw samples or bucketed downsampling with an aggregation. Returns a per-path " +
-                          "map with a value_type hint, the points (null entries are gaps), and a truncated flag. " +
+                          "map with a value_type hint, effective coverage ranges, the points (null entries are gaps), " +
+                          "and a truncated flag. " +
                           "All input and output timestamps are UTC. " +
                           "Use browse or search to discover paths first.",
             InputSchema = GetPropertyHistorySchema,
@@ -278,6 +279,11 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             {
                 value_type = valueTypes.GetValueOrDefault(series.PropertyPath),
                 truncated = series.Truncated,
+                coverage = series.CoverageRanges.Select(range => new
+                {
+                    from = range.From.ToString("o", CultureInfo.InvariantCulture),
+                    to = range.To.ToString("o", CultureInfo.InvariantCulture)
+                }).ToArray(),
                 points = series.Points.Select(point => new
                 {
                     t = point.Timestamp.ToString("o", CultureInfo.InvariantCulture),

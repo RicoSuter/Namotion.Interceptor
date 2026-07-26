@@ -6,7 +6,7 @@ namespace HomeBlaze.History.InMemory
     {
         public static readonly System.Collections.Generic.IReadOnlySet<string> AllAggregations;
         public InMemoryHistoryStore(int priority, int maxPointsPerProperty, System.TimeSpan maxAge, int maxJsonSize, System.Func<System.DateTimeOffset> getUtcNow) { }
-        public HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges { get; }
         public long EstimatedMemoryBytes { get; }
         public long EvictedCount { get; }
         public long OversizeCount { get; }
@@ -26,14 +26,14 @@ namespace HomeBlaze.History.InMemory
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("History")]
     [System.ComponentModel.Description("Records recent [State] history in memory (priority 100).")]
-    public class InMemoryHistoryStoreSubject : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
+    public class InMemoryHistoryStoreSubject : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
     {
         public InMemoryHistoryStoreSubject(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.InMemory.InMemoryHistoryStoreSubject> logger) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int BufferTimeMilliseconds { get; set; }
-        public HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }
-        [HomeBlaze.Abstractions.Attributes.State]
-        public long EstimatedMemoryBytes { get; set; }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long EstimatedMemorySize { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
         public long EvictedCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
@@ -57,6 +57,7 @@ namespace HomeBlaze.History.InMemory
         [HomeBlaze.Abstractions.Attributes.State]
         public string Status { get; set; }
         public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
+        public string? Title { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public long TotalSampleCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]

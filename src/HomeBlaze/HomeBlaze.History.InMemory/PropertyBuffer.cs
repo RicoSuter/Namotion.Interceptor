@@ -9,6 +9,7 @@ internal sealed class PropertyBuffer
     private readonly int _capacity;
     private int _start;   // index of the oldest sample
     private int _count;
+    private long _evictedCount;
 
     public PropertyBuffer(int capacity, ValueColumn column, bool isUlong)
     {
@@ -22,7 +23,10 @@ internal sealed class PropertyBuffer
 
     public bool IsUlong { get; }
 
-    public long EvictedCount { get; private set; }
+    public long EvictedCount
+    {
+        get { lock (_lock) { return _evictedCount; } }
+    }
 
     public int Count
     {
@@ -34,8 +38,8 @@ internal sealed class PropertyBuffer
         get { lock (_lock) { return _count == 0 ? null : _items[_start]; } }
     }
 
-    // Timestamp of the oldest retained sample, or null when empty. Cheaper than reading Oldest when only
-    // the timestamp is needed (no Sample copy), used by coverage to find the true retention floor.
+    // Timestamp of the oldest retained sample, or null when empty. Cheaper than reading Oldest when
+    // only the timestamp is needed (no Sample copy).
     public DateTimeOffset? OldestTimestamp
     {
         get { lock (_lock) { return _count == 0 ? null : _items[_start].Timestamp; } }
@@ -46,25 +50,39 @@ internal sealed class PropertyBuffer
         get { lock (_lock) { return _count == 0 ? null : _items[Index(_count - 1)]; } }
     }
 
-    public void Append(Sample sample)
+    // Appends (or replaces at an identical timestamp) and reports whether a sample was evicted to
+    // make room, which is what the store needs to know to advance its coverage floor.
+    public bool Append(Sample sample)
     {
         lock (_lock)
         {
-            if (_count > 0 && sample.Timestamp < _items[Index(_count - 1)].Timestamp)
+            if (_count > 0)
             {
-                InsertOrdered(sample);
-                return;
+                var newestIndex = Index(_count - 1);
+                var newestTimestamp = _items[newestIndex].Timestamp;
+                if (sample.Timestamp < newestTimestamp)
+                {
+                    return InsertOrdered(sample);
+                }
+
+                if (sample.Timestamp == newestTimestamp)
+                {
+                    _items[newestIndex] = sample;
+                    return false;
+                }
             }
 
-            if (_count == _capacity)
+            var capacityEvicted = _count == _capacity;
+            if (capacityEvicted)
             {
                 _start = (_start + 1) % _capacity; // overwrite oldest
                 _count--;
-                EvictedCount++;
+                _evictedCount++;
             }
 
             _items[Index(_count)] = sample;
             _count++;
+            return capacityEvicted;
         }
     }
 
@@ -80,7 +98,7 @@ internal sealed class PropertyBuffer
                 dropped++;
             }
 
-            EvictedCount += dropped;
+            _evictedCount += dropped;
             return dropped;
         }
     }
@@ -159,18 +177,32 @@ internal sealed class PropertyBuffer
         return low;
     }
 
-    private void InsertOrdered(Sample sample)
+    private bool InsertOrdered(Sample sample)
     {
-        // Rare late-arrival path. Drop the oldest first if full so there is room, then shift
-        // the tail right by one from the insertion point. O(n) but only for out-of-order samples.
-        if (_count == _capacity)
+        // Rare late-arrival path. Keep the newest _capacity timestamps, matching the ring's
+        // normal in-order behavior. A late sample older than everything retained is discarded
+        // rather than evicting a newer retained sample to make room for it.
+        var position = LowerBound(sample.Timestamp); // first index with Timestamp >= sample.Timestamp
+        if (position < _count && _items[Index(position)].Timestamp == sample.Timestamp)
         {
-            _start = (_start + 1) % _capacity;
-            _count--;
-            EvictedCount++;
+            _items[Index(position)] = sample; // same (path, timestamp) replaces, matching SQLite
+            return false;
         }
 
-        var position = LowerBound(sample.Timestamp); // first index with Timestamp >= sample.Timestamp
+        var capacityEvicted = _count == _capacity;
+        if (capacityEvicted)
+        {
+            _evictedCount++;
+            if (position == 0)
+            {
+                return true; // the late sample itself is the one dropped
+            }
+
+            _start = (_start + 1) % _capacity;
+            _count--;
+            position--;
+        }
+
         for (var logical = _count; logical > position; logical--)
         {
             _items[Index(logical)] = _items[Index(logical - 1)];
@@ -178,5 +210,6 @@ internal sealed class PropertyBuffer
 
         _items[Index(position)] = sample;
         _count++;
+        return capacityEvicted;
     }
 }

@@ -76,6 +76,40 @@ public class HistoryStoreMergerTests
     }
 
     [Fact]
+    public async Task WhenHigherPriorityStoreHasCoverageGap_ThenLowerPriorityStoreFillsIt()
+    {
+        // Arrange
+        var highPriority = new FakeHistoryStore
+        {
+            Priority = 100,
+            CoverageRanges =
+            [
+                new HistoryCoverage(At(0), At(20)),
+                new HistoryCoverage(At(40), At(60))
+            ]
+        }.AddSample(At(10), 100).AddSample(At(50), 500);
+        var lowPriority = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
+        }.AddSample(At(10), 1).AddSample(At(30), 3).AddSample(At(50), 5);
+        var query = new HistoryQuery("temp", At(0), At(60));
+
+        // Act
+        var series = await new[] { lowPriority, highPriority }
+            .QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new double?[] { 100, 3, 500 }, series.Points.Select(point => point.Number));
+        Assert.Equal(2, highPriority.ReceivedQueries.Count);
+        var lowQuery = Assert.Single(lowPriority.ReceivedQueries);
+        Assert.Equal(At(20), lowQuery.From);
+        Assert.Equal(At(40), lowQuery.To);
+        var coverage = Assert.Single(series.CoverageRanges);
+        Assert.Equal(new HistoryCoverage(At(0), At(60)), coverage);
+    }
+
+    [Fact]
     public async Task WhenStoreThrows_ThenErrorPropagates()
     {
         // Arrange
@@ -176,6 +210,34 @@ public class HistoryStoreMergerTests
         Assert.Single(store.ReceivedQueries);
         Assert.Equal(At(0), store.ReceivedQueries[0].From);
         Assert.Equal(At(60), store.ReceivedQueries[0].To);
+    }
+
+    [Fact]
+    public async Task WhenBucketRangeExceedsBudget_ThenOnlyNewestBucketsArePlanned()
+    {
+        // Arrange
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
+        };
+        var query = new HistoryQuery(
+            "temp",
+            At(0),
+            At(60),
+            TimeSpan.FromMinutes(10),
+            HistoryAggregations.Count,
+            MaxPoints: 2);
+
+        // Act
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        var received = Assert.Single(store.ReceivedQueries);
+        Assert.Equal(At(40), received.From);
+        Assert.Equal(At(60), received.To);
+        Assert.Equal(2, series.Points.Length);
+        Assert.True(series.Truncated);
     }
 
     [Fact]
@@ -394,7 +456,7 @@ public class HistoryStoreMergerTests
         var highPriority = new FakeHistoryStore
         {
             Priority = 100,
-            CurrentCoverage = new HistoryCoverage(At(40), At(60))
+            CurrentCoverage = new HistoryCoverage(At(0), At(60))
         }.AddSample(At(10), 9);
         var query = new HistoryQuery("temp", At(40), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Last);
 
@@ -434,6 +496,68 @@ public class HistoryStoreMergerTests
     }
 
     [Fact]
+    public async Task WhenCoverageHasGap_ThenCarryDoesNotCrossGap()
+    {
+        // Arrange
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CoverageRanges =
+            [
+                new HistoryCoverage(At(0), At(20)),
+                new HistoryCoverage(At(40), At(60))
+            ]
+        }.AddSample(At(10), 7);
+        var query = new HistoryQuery(
+            "temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.Last);
+
+        // Act
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new double?[] { null, 7, null, null, null, null },
+            series.Points.Select(point => point.Number));
+        Assert.Equal(2, store.ReceivedQueries.Count);
+        Assert.Null(store.ReceivedQueries[1].CarrySeed);
+        Assert.Equal(
+            new[]
+            {
+                new HistoryCoverage(At(0), At(20)),
+                new HistoryCoverage(At(40), At(60))
+            },
+            series.CoverageRanges.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenExplicitNullEndsEarlierSegment_ThenLaterSegmentReceivesClearedCarry()
+    {
+        // Arrange
+        var persistent = new FakeHistoryStore
+        {
+            Priority = 50,
+            CurrentCoverage = new HistoryCoverage(At(0), At(40))
+        }.AddSample(At(5), 17).AddNullSample(At(35));
+        var live = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(40), At(60))
+        };
+        var query = new HistoryQuery(
+            "temp", At(0), At(60), TimeSpan.FromMinutes(10), HistoryAggregations.TimeWeightedAverage);
+
+        // Act
+        var series = await new[] { persistent, live }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(live.ReceivedQueries[0].CarrySeed);
+        Assert.Null(live.ReceivedQueries[0].CarrySeed!.Number);
+        Assert.Null(live.ReceivedQueries[0].CarrySeed!.Json);
+        Assert.All(
+            series.Points.Where(point => point.Timestamp >= At(40)),
+            point => Assert.Null(point.Number));
+    }
+
+    [Fact]
     public async Task WhenNoSampleExistsBeforeFrom_ThenInitialSeedIsNull()
     {
         // Arrange: no store has any sample before From.
@@ -455,7 +579,7 @@ public class HistoryStoreMergerTests
     public async Task WhenCarriedValueIsJson_ThenEmptyBucketsCarryTheHeldJsonValue()
     {
         // The carry-advance treats a point as non-null when Number OR Json is set, so a Json-valued
-        // property (decimal, string, enum) under Last must carry forward across empty buckets just like
+        // property (string or enum) under Last must carry forward across empty buckets just like
         // a numeric one, without rendering a spurious gap.
         //
         // Arrange: a string-valued property changed at minute 5 and never again. The persistent store
@@ -513,14 +637,12 @@ public class HistoryStoreMergerTests
         // Act: must not throw despite the 24h range exceeding the 60s coverage window.
         var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
 
-        // Assert: only the covered recent tail was dispatched and every returned point falls inside
-        // the covered window; the older uncovered range is absent rather than an error.
+        // Assert: only the covered recent tail was dispatched. The requested bucket grid is complete,
+        // with explicit null gaps before the covered tail.
         Assert.NotEmpty(series.Points);
-        Assert.All(series.Points, point =>
-        {
-            Assert.True(point.Timestamp >= coverageStart);
-            Assert.True(point.Timestamp < now);
-        });
+        Assert.Equal(2880, series.Points.Length);
+        Assert.All(series.Points[..^2], point => Assert.Null(point.Number));
+        Assert.Equal([20d, 22d], series.Points[^2..].Select(point => point.Number));
         Assert.Single(store.ReceivedQueries);
         Assert.Equal(coverageStart, store.ReceivedQueries[0].From);
         Assert.Equal(now, store.ReceivedQueries[0].To);
@@ -553,14 +675,14 @@ public class HistoryStoreMergerTests
         // Act: no throw; only the Minimum-capable covered part is served.
         var series = await new[] { minStore, otherStore }.QueryHistoryAsync(query, CancellationToken.None);
 
-        // Assert: the Minimum store served [0,30); the SampleAverage-only store was not dispatched and
-        // every returned point falls inside the covered window.
+        // Assert: the Minimum store served [0,30); the SampleAverage-only store was not dispatched.
+        // The unowned [30,60) buckets remain explicit null gaps.
         Assert.Single(minStore.ReceivedQueries);
         Assert.Equal(At(0), minStore.ReceivedQueries[0].From);
         Assert.Equal(At(30), minStore.ReceivedQueries[0].To);
         Assert.Empty(otherStore.ReceivedQueries);
-        Assert.NotEmpty(series.Points);
-        Assert.All(series.Points, point => Assert.True(point.Timestamp < At(30)));
+        Assert.Equal(6, series.Points.Length);
+        Assert.All(series.Points[3..], point => Assert.Null(point.Number));
     }
 
     [Fact]
@@ -597,14 +719,16 @@ public class HistoryStoreMergerTests
         // Act: no throw; only the fully-contained aligned bucket is served.
         var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
 
-        // Assert: only the contained bucket [10,20) was dispatched and returned; the edge buckets [0,10)
-        // and [20,30) are absent.
+        // Assert: only the contained bucket [10,20) was dispatched. The edge buckets [0,10)
+        // and [20,30) are explicit null gaps.
         Assert.Single(store.ReceivedQueries);
         Assert.Equal(At(10), store.ReceivedQueries[0].From);
         Assert.Equal(At(20), store.ReceivedQueries[0].To);
-        var point = Assert.Single(series.Points);
-        Assert.Equal(At(10), point.Timestamp);
-        Assert.Equal(1d, point.Number);
+        Assert.Equal(3, series.Points.Length);
+        Assert.Null(series.Points[0].Number);
+        Assert.Equal(At(10), series.Points[1].Timestamp);
+        Assert.Equal(1d, series.Points[1].Number);
+        Assert.Null(series.Points[2].Number);
     }
 
     [Fact]

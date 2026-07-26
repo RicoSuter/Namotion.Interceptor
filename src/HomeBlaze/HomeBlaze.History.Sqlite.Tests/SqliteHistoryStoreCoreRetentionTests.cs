@@ -39,18 +39,42 @@ public sealed class SqliteHistoryStoreCoreRetentionTests : IDisposable
     public async Task WhenPartitionOlderThanMaxAge_ThenSweepDeletesFileAndAdvancesCoverageFrom()
     {
         // Arrange - one old-week sample, one recent; MaxAge ~ 8 days
-        var now = Base.AddDays(20);
-        using var core = NewCore(now, maxAgeSeconds: 60 * 60 * 24 * 8);
+        var now = Base;
+        using var core = new SqliteHistoryStore(
+            priority: 50,
+            databaseDirectory: _directory,
+            PartitionInterval.Weekly,
+            TimeSpan.FromDays(8),
+            maxJsonSize: 8192,
+            getUtcNow: () => now);
         core.Record("/a/V", Base.AddDays(0), 1d, typeof(double));   // older than now-8d -> swept
         core.Record("/a/V", Base.AddDays(18), 2d, typeof(double));  // retained
+        now = Base.AddDays(20);
         await core.FlushAsync(CancellationToken.None);
 
         // Act
         core.Sweep();
         var series = core.Query(new HistoryQuery("/a/V", Base.AddDays(-1), now));
 
-        // Assert - old partition file gone; only the recent sample remains; CurrentCoverage.From advanced past the old week
+        // Assert - old partition file gone; only the recent sample remains; coverage advanced past the old week
         Assert.Equal(new double?[] { 2 }, series.Points.Select(p => p.Number).ToArray());
-        Assert.True(core.CurrentCoverage.From >= Base.AddDays(18).AddDays(-7)); // within the retained partition's week
+        var coverage = Assert.Single(core.CoverageRanges);
+        Assert.Equal(Base.AddDays(12), coverage.From);
+
+        // A later flush must extend the active range without restoring its pre-retention start.
+        core.Record("/a/V", Base.AddDays(20).AddHours(1), 3d, typeof(double));
+        now = Base.AddDays(21);
+        await core.FlushAsync(CancellationToken.None);
+        Assert.Equal(Base.AddDays(12), Assert.Single(core.CoverageRanges).From);
+
+        core.Dispose();
+        using var reopened = new SqliteHistoryStore(
+            priority: 50,
+            databaseDirectory: _directory,
+            PartitionInterval.Weekly,
+            TimeSpan.FromDays(8),
+            maxJsonSize: 8192,
+            getUtcNow: () => now);
+        Assert.Equal(Base.AddDays(12), Assert.Single(reopened.CoverageRanges).From);
     }
 }

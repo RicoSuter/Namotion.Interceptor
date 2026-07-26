@@ -18,22 +18,22 @@ internal readonly record struct ColumnMeta(ValueColumn Column, bool IsUlong);
 
 /// <summary>
 /// The connection access the read helpers need, supplied by the engine: the open-partition and
-/// open-moves delegates plus the partition layout (directory, interval, moves key). The engine builds
+/// metadata-connection delegates plus the partition layout (directory, interval, metadata key). The engine builds
 /// this while holding its connection lock and passes it in; the delegates re-enter the engine lock when
 /// they open or reuse a cached connection. This context never locks itself and never caches connections.
 /// </summary>
 internal readonly struct SqliteReadContext(
     string databaseDirectory,
     PartitionInterval partitionInterval,
-    string movesKey,
+    string metadataKey,
     Func<string, SqliteConnection> openPartition,
-    Func<SqliteConnection> openMoves)
+    Func<SqliteConnection> openMetadata)
 {
-    public string MovesKey => movesKey;
+    public string MetadataKey => metadataKey;
 
     public SqliteConnection OpenPartition(string key) => openPartition(key);
 
-    public SqliteConnection OpenMoves() => openMoves();
+    public SqliteConnection OpenMetadata() => openMetadata();
 
     public string PartitionFilePath(string key) => Path.Combine(databaseDirectory, key + ".db");
 
@@ -52,7 +52,7 @@ internal readonly struct SqliteReadContext(
             var key = Path.GetFileNameWithoutExtension(file);
             if (SqlitePartition.IsPartitionKey(key, partitionInterval))
             {
-                yield return key; // skip non-partition files such as the moves database
+                yield return key; // skip non-partition files such as the metadata database
             }
         }
     }
@@ -83,7 +83,8 @@ internal readonly struct SqliteReadContext(
 /// </summary>
 internal static class SqliteHistoryReader
 {
-    public static HistorySeries QueryRaw(SqliteReadContext context, HistoryQuery query)
+    public static HistorySeries QueryRaw(
+        SqliteReadContext context, HistoryQuery query, CancellationToken cancellationToken)
     {
         var limit = query.MaxPoints + 1; // +1 overflow probe to detect truncation
 
@@ -93,6 +94,8 @@ internal static class SqliteHistoryReader
         var rows = new List<(RawRow Row, bool IsUlong)>();
         foreach (var leg in ResolveChain(context, query.PropertyPath))
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var legFrom = query.From > leg.ValidFrom ? query.From : leg.ValidFrom;
             var legTo = query.To < leg.ValidTo ? query.To : leg.ValidTo;
             if (legFrom >= legTo)
@@ -106,6 +109,8 @@ internal static class SqliteHistoryReader
 
             foreach (var key in context.PartitionKeysOverlapping(legFrom, legTo))
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (!context.PartitionFileExists(key))
                 {
                     continue;
@@ -124,6 +129,7 @@ internal static class SqliteHistoryReader
                 using var reader = command.ExecuteReader();
                 while (reader.Read())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     rows.Add((ReadRawRow(reader), isUlong));
                 }
             }
@@ -136,7 +142,11 @@ internal static class SqliteHistoryReader
         kept.Sort((left, right) => left.Row.Ticks.CompareTo(right.Row.Ticks));
 
         var points = kept.Select(entry => SqliteValueRouting.ToPoint(entry.Row, entry.IsUlong)).ToImmutableArray();
-        return new HistorySeries(query.PropertyPath, points, truncated);
+        return new HistorySeries(
+            query.PropertyPath,
+            points,
+            truncated,
+            ImmutableArray<HistoryCoverage>.Empty);
     }
 
     public static HistoryPoint? GetSampleAtOrBefore(SqliteReadContext context, string propertyPath, DateTimeOffset asOf)
@@ -181,7 +191,7 @@ internal static class SqliteHistoryReader
     // Builds the path chain for a queried (current) path by walking moves backward; returns legs each
     // scoped to [ValidFrom, ValidTo). With no moves a single unbounded leg [MinValue, MaxValue), so the
     // query path is unchanged. Identical algorithm to InMemoryHistoryStore.ResolveChain, but the move
-    // set is read from moves.db.
+    // set is read from the metadata database.
     public static List<ChainLeg> ResolveChain(SqliteReadContext context, string currentPath)
     {
         var snapshot = ReadMoves(context);
@@ -219,17 +229,17 @@ internal static class SqliteHistoryReader
         return legs;
     }
 
-    // Reads every move from moves.db into memory (the move set is small). Empty when moves.db has no
+    // Reads every move from the metadata database into memory (the move set is small). Empty when it has no
     // rows or does not exist yet.
     private static List<MoveRecord> ReadMoves(SqliteReadContext context)
     {
         var result = new List<MoveRecord>();
-        if (!File.Exists(context.PartitionFilePath(context.MovesKey)))
+        if (!File.Exists(context.PartitionFilePath(context.MetadataKey)))
         {
             return result; // no moves recorded yet -> single unbounded leg in ResolveChain
         }
 
-        var connection = context.OpenMoves();
+        var connection = context.OpenMetadata();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT ts, from_path, to_path FROM moves;";
         using var reader = command.ExecuteReader();

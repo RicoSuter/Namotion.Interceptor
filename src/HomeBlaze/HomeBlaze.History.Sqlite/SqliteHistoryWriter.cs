@@ -11,7 +11,7 @@ internal readonly record struct PendingSample(
     string Path, DateTimeOffset Timestamp, Row Row, ValueColumn Column, bool IsUlong);
 
 /// <summary>
-/// A recorded path move queued for flush, persisted into <c>moves.db</c> and replayed when resolving a
+/// A recorded path move queued for flush, persisted in the metadata database (<c>moves.db</c>) and replayed when resolving a
 /// queried path's move chain.
 /// </summary>
 internal readonly record struct MoveRecord(DateTimeOffset Timestamp, string FromPath, string ToPath);
@@ -76,7 +76,7 @@ internal static class SqliteHistoryWriter
         return maxTicks;
     }
 
-    // Persists queued moves into moves.db in a single transaction (the engine passes the moves connection).
+    // Persists queued moves into the metadata database in a single transaction.
     public static void WriteMoves(SqliteConnection movesConnection, IReadOnlyList<MoveRecord> moves)
     {
         using var transaction = movesConnection.BeginTransaction();

@@ -11,10 +11,20 @@ public sealed class SqliteHistoryStoreCoreTimeWeightedAverageTests : IDisposable
     private readonly string _directory =
         Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
 
-    // A far-future now and a long maxAge so nothing is swept while the cases run.
-    private SqliteHistoryStore NewCore() =>
-        new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly, TimeSpan.FromDays(365), maxJsonSize: 8192,
-            getUtcNow: () => Base.AddHours(1));
+    // Start before every test interval, then expose a future now so the complete interval is covered.
+    private SqliteHistoryStore NewCore()
+    {
+        var now = Base.AddYears(-1);
+        var store = new SqliteHistoryStore(
+            priority: 50,
+            databaseDirectory: _directory,
+            PartitionInterval.Weekly,
+            TimeSpan.FromDays(3650),
+            maxJsonSize: 8192,
+            getUtcNow: () => now);
+        now = Base.AddYears(1);
+        return store;
+    }
 
     private static HistoryQuery Twa(int fromSecond, int toSecond, HistoryPoint? carrySeed = null) =>
         new("/a/Value", Base.AddSeconds(fromSecond), Base.AddSeconds(toSecond), Bucket,
@@ -92,8 +102,16 @@ public sealed class SqliteHistoryStoreCoreTimeWeightedAverageTests : IDisposable
     {
         // Arrange - a sample before From at t=-5 (value 4) inside coverage; bucket [0,10) empty.
         // The store's own at-or-before look-back supplies the held value 4.
-        using var core = NewCore();
+        var now = Base.AddSeconds(-10);
+        using var core = new SqliteHistoryStore(
+            priority: 50,
+            databaseDirectory: _directory,
+            PartitionInterval.Weekly,
+            TimeSpan.FromDays(365),
+            maxJsonSize: 8192,
+            getUtcNow: () => now);
         core.Record("/a/Value", Base.AddSeconds(-5), 4d, typeof(double));
+        now = Base.AddSeconds(10);
         await core.FlushAsync(CancellationToken.None);
 
         // Act
@@ -130,9 +148,11 @@ public sealed class SqliteHistoryStoreCoreTimeWeightedAverageTests : IDisposable
         var dayStart = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero); // UTC midnight == bucket boundary
         var dayBucket = TimeSpan.FromDays(1);
         const int dayCount = 14;
+        var now = dayStart.AddDays(-1);
         using var core = new SqliteHistoryStore(
             priority: 50, databaseDirectory: _directory, PartitionInterval.Daily, TimeSpan.FromDays(3650),
-            maxJsonSize: 8192, getUtcNow: () => dayStart.AddDays(dayCount + 5));
+            maxJsonSize: 8192, getUtcNow: () => now);
+        now = dayStart.AddDays(dayCount + 5);
         for (var day = 0; day < dayCount; day++)
         {
             core.Record("/a/Value", dayStart.AddDays(day), 10d + day, typeof(double));

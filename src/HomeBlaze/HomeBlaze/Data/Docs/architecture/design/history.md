@@ -8,152 +8,285 @@ status: Implemented
 
 ## Overview
 
-The history system records property changes over time, enabling historical queries, trend analysis, and AI-driven insights. It runs on low-powered devices (Raspberry Pi / SD cards) with many changes over long retention, and scales up to industrial deployments.
+The history system records eligible property changes for charts, historical queries, and AI tools. It is designed for both low-powered HomeBlaze installations and larger industrial deployments.
 
-Each history store is a standalone subject: an `[InterceptorSubject]` `BackgroundService` with its own `ChangeQueueProcessor`, recording and serving history independently. There is no central orchestrator. This follows the connector pattern (OPC UA, MQTT, WebSocket): stores are configured by dropping a JSON subject into the graph, discovered through the registry, and queried by a stateless cross-store merger.
+Each history store is an independent `[InterceptorSubject]` `BackgroundService`. It records and serves its own data, exposes immutable coverage information, and is discovered through the subject registry. A stateless merger combines the available stores. There is no central history coordinator.
 
-**Status.** v1 ships the InMemory and SQLite stores, the cross-store merger, the property-history chart dialog, and the `get_property_history` MCP tool. The TimescaleDB industrial tier is designed against the same abstractions and is the planned third tier. Snapshots and structural recording are the v1.1 layer (designed, deferred).
+The implemented stores are:
+
+| Store | Default priority | Purpose |
+|---|---:|---|
+| In-Memory History | 100 | Full-resolution recent data and live edge |
+| SQLite History | 50 | Durable local history |
+
+A TimescaleDB store is planned as a lower-priority industrial tier. Snapshots and structural history are deferred.
 
 ## Architecture
 
-Each store independently subscribes to the change pipeline, filters with the same eligibility predicate, deduplicates within its own buffer window, and records to its backend. Stores expose a coverage window (`CurrentCoverage`) and a `Priority`; a stateless merger takes the set of `IHistoryStore` (HomeBlaze supplies it from the registry's `KnownSubjects`) and stitches their results.
+Each store has two parts:
 
-### Recent-tail coverage
+- A graph-free engine implementing `IHistoryStore`, operating on canonical property paths and typed values.
+- A thin subject adapter that owns graph discovery, eligibility, path resolution, move detection, configuration, metrics, and the change queue.
 
-The InMemory store (priority 100, `CurrentCoverage.To = now`) answers the most recent samples at full resolution while persistent stores trail "now" by roughly their flush interval. Persistent stores (SQLite, TimescaleDB) set `CurrentCoverage.To` to their last committed sample's timestamp, so the merger routes the live edge to InMemory, and set `CurrentCoverage.From` to their oldest retained sample's timestamp (not the retention horizon), so a freshly started store never claims a range it has no data for.
+The engine and adapter split keeps storage and query behavior testable without a HomeBlaze graph and makes future extraction into a generic library mechanical.
 
-To avoid a blind window between InMemory eviction and a persistent store's commit, the sizing constraint is `InMemory.MaxAge >= 2 * FlushInterval` of any companion persistent store. The default configs satisfy it.
+The package responsibilities are:
 
-### Package structure
-
-| Package | Role |
+| Package | Responsibility |
 |---|---|
-| `HomeBlaze.History.Abstractions` | `IHistoryStore`, the query/result records, `HistoryAggregations`, `HistoryEligibility`, `HistoryColumns`, `BucketAlignment`, `HistoryAggregationNotSupportedException`. Pure interfaces, DTOs, and helpers only. |
-| `HomeBlaze.History` | The stateless cross-store merger (`HistoryStoreMerger.QueryHistoryAsync`). |
-| `HomeBlaze.History.InMemory` | `InMemoryHistoryStore` engine + `InMemoryHistoryStoreSubject` adapter. Ring buffer per property path. Priority 100. |
-| `HomeBlaze.History.Sqlite` | `SqliteHistoryStore` engine + `SqliteHistoryStoreSubject` adapter. Partitioned database files, typed columns, native SQL aggregation. Priority 50. |
-| `HomeBlaze.History.Blazor` | The cross-store property-history chart dialog. |
-| `*.Blazor` (per store) | One edit component per store. |
-| `HomeBlaze.History.TimescaleDb` (planned) | `TimescaleDbHistoryStore` engine + adapter. Npgsql binary `COPY`, hypertable storage, `drop_chunks` retention. Priority 10. |
+| `HomeBlaze.History.Abstractions` | Store interface, query and result records, aggregations, eligibility, column routing, bucket alignment |
+| `HomeBlaze.History` | Stateless cross-store query planner and merger |
+| `HomeBlaze.History.InMemory` | In-memory engine and subject |
+| `HomeBlaze.History.Sqlite` | SQLite engine and subject |
+| `HomeBlaze.History.Blazor` | Property history dialog |
+| Store-specific `.Blazor` packages | Store configuration components |
+| `HomeBlaze.AI` | `get_property_history` MCP tool |
 
-The `get_property_history` MCP tool lives in `HomeBlaze.AI`. Target framework `net10.0` throughout.
-
-### Engine vs subject
-
-Each store is split into a graph-free engine (the public, clean-named `IHistoryStore`: `InMemoryHistoryStore`, `SqliteHistoryStore`) that operates only on path strings and typed values, and a thin `[InterceptorSubject]` adapter (`InMemoryHistoryStoreSubject`, `SqliteHistoryStoreSubject`) that owns the `ChangeQueueProcessor`, the cached path resolution, and write-side move detection, delegating all storage and querying to the engine. The adapter also implements `IHistoryStore` (by delegation) so registry discovery via `KnownSubjects.OfType<IHistoryStore>()` works. This split keeps a later lift into a generic library mechanical: the engine is already decoupled from the graph.
-
-## Abstractions
+## Store contract
 
 ```csharp
 public interface IHistoryStore
 {
-    int Priority { get; }                               // higher = preferred for overlapping ranges
-    HistoryCoverage CurrentCoverage { get; }
+    int Priority { get; }
+    ImmutableArray<HistoryCoverage> CoverageRanges { get; }
     IReadOnlySet<string> SupportedAggregations { get; }
 
-    Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken);
+    Task<HistorySeries> QueryAsync(
+        HistoryQuery query,
+        CancellationToken cancellationToken);
 
-    // Most recent sample at or before asOf for the property path (following move chains), or null.
-    // Serves TimeWeightedAverage integration and Last LOCF gap-fill.
     ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
-        string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken);
+        string propertyPath,
+        DateTimeOffset asOf,
+        CancellationToken cancellationToken);
 }
 
-public readonly record struct HistoryCoverage(DateTimeOffset From, DateTimeOffset To);
+public readonly record struct HistoryCoverage(
+    DateTimeOffset From,
+    DateTimeOffset To);
 
 public record HistoryQuery(
-    string PropertyPath, DateTimeOffset From, DateTimeOffset To,
-    TimeSpan? Bucket = null,                             // null => raw query
+    string PropertyPath,
+    DateTimeOffset From,
+    DateTimeOffset To,
+    TimeSpan? Bucket = null,
     string Aggregation = HistoryAggregations.Last,
     int MaxPoints = 10_000,
-    HistoryPoint? CarrySeed = null);                     // value held entering From, supplied by the merger
+    HistoryPoint? CarrySeed = null);
 
-public record HistoryPoint(DateTimeOffset Timestamp, double? Number, JsonElement? Json);
-public record HistorySeries(string PropertyPath, ImmutableArray<HistoryPoint> Points, bool Truncated);
+public record HistorySeries(
+    string PropertyPath,
+    ImmutableArray<HistoryPoint> Points,
+    bool Truncated,
+    ImmutableArray<HistoryCoverage> CoverageRanges);
 ```
 
-A single `QueryAsync` serves both raw (`Bucket == null`) and bucketed queries. Every store returns at most `MaxPoints` results, ascending by timestamp, representing the newest samples or buckets, so the merger can compose them.
+Queries require a non-empty path and aggregation, `From < To`, a positive optional bucket, and a positive `MaxPoints`. Every entry point validates these invariants and honors cancellation.
 
-### Aggregations
+Stores return the newest `MaxPoints` results in ascending timestamp order. `Truncated` is true when older results were omitted. `HistorySeries.CoverageRanges` describes effective coverage within the requested range.
 
-PascalCase string identifiers, not a closed enum: `Last`, `First`, `SampleAverage`, `TimeWeightedAverage`, `Minimum`, `Maximum`, `Sum`, `Count`, `StandardDeviation`. `HistoryAggregations.AlwaysAvailable` is `{ Last, Count }`, which the eligibility check skips. The MCP boundary accepts case-insensitive input and normalizes; internal equality uses `StringComparer.Ordinal`. `TimeWeightedAverage` weights each sample by how long its value held and is the UI default for numeric properties (labelled "Average"); `SampleAverage` is the count-weighted mean (labelled "Sample Average").
+## Coverage
 
-### Eligibility
+Coverage is the basis for correct cross-store routing. It is not inferred from whether a particular property has samples.
 
-`HasHistory()` is the single source of truth for whether a property is recorded and whether the UI offers the history action. It requires the `[State]` attribute, excludes subject-bearing properties (`CanContainSubjects`, deferred to v1.1), and accepts only recordable types: `double`/`float` (value_double), the integer types and `bool` (value_long), and `decimal`/`string`/`enum` (value_json).
+Each `HistoryCoverage` is a half-open interval `[From, To)`. `CoverageRanges` is an immutable, ordered, non-overlapping snapshot. Empty intervals are omitted and touching or overlapping intervals are normalized.
 
-### Column dispatch
+A range means:
 
-`HistoryColumns.GetValueColumnFor(Type)` is the single source of truth for routing a value into one of three typed columns: `value_long`, `value_double`, `value_json`. Typed columns preserve `long` exactly and keep `decimal` lossless. They map cleanly across backends: `bigint` / `double precision` / `jsonb` in PostgreSQL, `INTEGER` / `REAL` / `TEXT` in SQLite, and a typed sample in memory. A `ulong` above `long.MaxValue` spills to `value_json`; read paths COALESCE across both columns.
+> The store was actively collecting its configured history stream throughout this interval and detected no loss.
 
-### Bucket alignment
+The configured stream coalesces repeated updates to the same property within `BufferTimeMilliseconds`, keeping the oldest old value and newest new value. It is a time-series sampling policy, not an audit log of every setter invocation. After that policy is applied, no sample for a property inside a covered interval means that the property did not change. Coverage is intentionally store-wide and all-or-nothing. Per-property coverage would make routing and correctness dependent on a large and continuously changing metadata set.
 
-All backends produce buckets at identical timestamps for the same `(bucket size, sample timestamps)` using the epoch-anchored formula matching Postgres `time_bucket`, so the merger never interleaves duplicates:
+Ranges are necessary because continuity can be lost independently of retention:
 
-```csharp
-public static DateTimeOffset BucketStart(DateTimeOffset ts, TimeSpan bucket)
-{
-    var ticksFromEpoch = (ts - DateTimeOffset.UnixEpoch).Ticks;
-    return DateTimeOffset.UnixEpoch.AddTicks((ticksFromEpoch / bucket.Ticks) * bucket.Ticks);
-}
+- An application or store restart creates a gap between the last successful coverage heartbeat and the next store session.
+- A temporary database failure does not create a gap when every pending sample remains buffered and is later committed.
+- A bounded pending queue overflow creates a gap from the first dropped change until persistence catches up and recording resumes.
+- Retention trims or removes old portions of ranges.
+
+The merger snapshots each store's immutable ranges once per query. Planning then uses those snapshots. It does not load ranges per property or per bucket. A persistent store may hold years of ranges, but the normal count is approximately the number of discontinuities, not the number of samples. For example, one daily restart over five years is about 1,800 small metadata rows.
+
+### In-memory coverage
+
+The in-memory store has at most one current range. Its initial lower bound is the later of store start and `now - MaxAge`.
+
+`MaxPointsPerProperty` is an in-memory safety cap, not a query limit. Each property has its own bounded ring. A ring that has never discarded a sample does not narrow coverage because absence of an earlier sample still means no earlier change was observed. When any ring evicts data by age or capacity, a monotonic store-wide floor advances to the worst retained boundary across all properties.
+
+The worst-case floor is deliberate. A quiet property may still have older physical samples, but the store can only claim the interval that is complete for every eligible property. The merger can ask a lower-priority persistent store for the older interval.
+
+The store returns no coverage when its clock has not advanced past the range start. A backward wall-clock adjustment cannot reclaim already evicted history.
+
+### SQLite coverage
+
+SQLite persists raw history separately from coverage:
+
+- Partition databases contain samples and per-path column metadata.
+- The existing `moves.db` sidecar is the metadata database and contains both the `moves` table and the `coverage_ranges` table. Keeping the filename preserves existing move history.
+
+Coverage rows use:
+
+```sql
+CREATE TABLE coverage_ranges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_ts INTEGER NOT NULL,
+    to_ts INTEGER NOT NULL,
+    CHECK (from_ts < to_ts)
+);
 ```
 
-## Recording path
+Each engine session begins a new durable range. Every successful flush updates a small coverage heartbeat even when no properties changed. This records healthy quiet periods and makes application downtime visible after restart. Coverage metadata is loaded once at engine construction and exposed through a cached immutable snapshot.
 
-Each store's adapter constructs a `ChangeQueueProcessor` (own `BufferTime` coalesce window, opt-in `maxQueueDepth` bounded queue, oldest dropped on overflow) and runs its process loop. For each change in a flushed batch it resolves the property's canonical path (cached per property, recomputed only on a structural lifecycle event), routes the value into the correct column, and records it. Oversize strings (over `MaxJsonSize`, default 8 KB) record a `{ "$oversize": true, "size": n }` placeholder so the timeline is preserved.
+The public snapshot normalizes overlapping or touching rows. The durable rows remain session-oriented, which keeps writes simple and preserves outage boundaries.
+
+SQLite never exposes coverage beyond an uncommitted engine sample. The immutable public snapshot is conservatively clipped at the earliest pending sample, pending move, or detected drop, even when a prior heartbeat extended farther. Both inputs to that clip (the durable ranges and the earliest uncommitted instant) are published independently, so reading coverage never waits behind a flush holding the connection lock. It extends durable coverage only after partition writes, move writes, and the metadata update succeed. On a transient failure, the batch is put back at the front of the queue and retried. `INSERT OR REPLACE` makes sample retries idempotent.
+
+A fixed limit of `100_000` bounds the samples waiting for durable persistence. This is a memory safety valve, not a tuning knob, so it is not exposed as configuration. Once the combined pending and in-flight count reaches the limit:
+
+1. New samples are dropped and `DropCount` increments.
+2. Dropping continues while the accepted backlog is drained.
+3. The existing coverage range ends at the first dropped change.
+4. A successful drain ends drop mode.
+5. The next healthy period starts a new coverage range.
+
+This policy keeps memory bounded, does not block the property-change hot path, and never claims completeness over lost changes.
+
+The subject constructs the engine, installs its change subscription, and only then calls `BeginCoverageSession`, so no change can fall inside claimed coverage without reaching the engine. During graceful shutdown SQLite performs a final bounded engine flush. This persists samples that already reached the engine, but `ChangeQueueProcessor` currently provides no contract for draining its coalescing queue when service cancellation begins.
+
+Retention removes complete partition files whose interval is older than `now - MaxAge`. It also removes or clamps coverage rows at that cutoff. Coverage does not depend on finding a sample near either boundary, so a quiet store remains honestly covered.
+
+## Recording
+
+`HistoryEligibility.HasHistory()` is the single predicate used by recording and UI discovery. A property is eligible when it:
+
+- has `[State]`;
+- does not contain subjects;
+- uses a supported scalar type.
+
+Supported values route through one shared column decision:
+
+| Types | Storage |
+|---|---|
+| `double`, `float`, `decimal` | `value_double` |
+| signed and unsigned integers, `bool` | `value_long` |
+| `string`, enum | `value_json` |
+
+`ulong` values above `long.MaxValue` spill into `value_json` and are folded back into numeric reads. SQLite also archives exact decimal JSON text while exposing decimals as `double` for charting and aggregation.
+
+Only strings are unbounded. A string larger than `MaxJsonSize` records an oversize placeholder with its original serialized size, preserving the timeline without retaining an arbitrary payload.
+
+The subject adapter resolves each canonical subject path and caches the last path per `(subject, property)`. Structural lifecycle changes invalidate the resolver cache. The storage engines only see complete property path strings.
 
 ## Move tracking
 
-Subjects are identified by canonical path. When a subject is renamed or reparented while the app runs, the adapter detects it on the path cache (a recomputed path that differs from the cached one) and writes a `MoveRecord(changeTimestamp, fromPath, toPath)` to the store's own moves table. Querying follows the chain backwards through the moves table inside `QueryAsync` / `GetSampleAtOrBeforeAsync`, time-scoping each path to its valid interval and returning results under the queried path, so the merger never has to know moves exist. Move tracking is runtime-only (in-memory identity); moves across restarts are not detected.
+Move support remains local to every store. When a subject is renamed or reparented, the adapter compares the newly resolved path with the last path for that subject and property. It records:
 
-## Query path
+```text
+MoveRecord(change timestamp, old property path, new property path)
+```
 
-Two shapes, dispatched on whether `Bucket` is null; both honor the newest-N contract and return ascending by timestamp. Empty buckets are explicit `null` entries (not absent): `Count` returns 0 (a fact), `Last` and `TimeWeightedAverage` carry the held value, other aggregations return null and the chart shows a gap. Numeric aggregations on a `value_json`-stored property (decimal, string, enum) raise `HistoryAggregationNotSupportedException`.
+The per-property cache is required so that the first changed sibling does not consume move detection for every other history property.
+
+SQLite stores moves in the `moves` table in its metadata database, currently named `moves.db` for compatibility. In-memory stores keep them in memory. Queries walk move records backwards from the current path, guard against cycles, and time-scope every path leg to its valid interval. `QueryAsync` and `GetSampleAtOrBeforeAsync` both follow the chain, so the merger does not need move-specific logic.
+
+Move detection uses runtime object identity. Moves performed while HomeBlaze is stopped cannot be inferred after restart.
+
+## Query semantics
+
+A null bucket requests raw samples. A non-null bucket requests one point per epoch-aligned bucket. Alignment uses floor division anchored at the Unix epoch and is correct for timestamps before and after the epoch.
+
+Empty bucket behavior is:
+
+| Aggregation | Empty bucket |
+|---|---|
+| `Count` | `0` |
+| `Last` | carried value, or null when unknown |
+| `TimeWeightedAverage` | carried value integrated over known duration, or null when unknown |
+| Other aggregations | null |
+
+Bucketed merger results include the complete newest bucket grid, subject to `MaxPoints`. Planning and store aggregation start at the first bucket that can appear in that output, so a multi-year request with a small point budget does not enumerate every older bucket. Uncovered buckets are explicit null points. This lets the chart render gaps without guessing whether an omitted point means no data or truncation.
+
+Direct store queries apply the same coverage rule. A bucket that is not fully contained in one of that store's ranges is null and clears carried state, so `Last` and `TimeWeightedAverage` never synthesize values through a restart or drop gap.
+
+Numeric aggregations on JSON properties throw `HistoryAggregationNotSupportedException`. Aggregation identifiers are PascalCase strings so stores can add capabilities without changing a closed enum:
+
+| Identifier | Meaning |
+|---|---|
+| `Last` | newest sample in the bucket, else the carried value (the UI default for non-numeric properties) |
+| `First` | oldest sample in the bucket |
+| `TimeWeightedAverage` | each value weighted by how long it held (the UI default for numeric properties, labelled "Average") |
+| `SampleAverage` | count-weighted mean (labelled "Sample Average") |
+| `Minimum`, `Maximum`, `Sum` | numeric reductions over the bucket's samples |
+| `Count` | number of samples in the bucket |
+| `StandardDeviation` | sample standard deviation, null for fewer than two values |
+
+`HistoryAggregations.AlwaysAvailable` is `{ Last, Count }`; the capability check skips those.
 
 ## Cross-store merge
 
-The merger (`HistoryStoreMerger.QueryHistoryAsync`, with an `ISubjectRegistry` convenience overload and a multi-path fan-out overload) is a stateless function over the store set: a query-type-specific planner plus a shared executor.
+The merger orders stores by descending priority and snapshots coverage once. It uses two planners:
 
-- `EnsureEligibility`: a capability check. The query proceeds as long as some store supports the requested aggregation (`AlwaysAvailable` aggregations always pass). A range wider than the stores' coverage is not an error: the planners return the buckets that are covered and leave the rest as honest empty gaps (the documented offline-tail behavior). `HistoryAggregationNotSupportedException` is thrown only when no store can compute the aggregation at all, and its `Available` set lists the aggregations that can be used instead.
-- Raw planner: higher-priority stores claim their range first; lower-priority stores fill the remaining gaps (coverage subtraction).
-- Bucketed planner: each bucket is assigned to a single store, the highest-priority one that supports the aggregation and whose `CurrentCoverage` fully contains the bucket. Consecutive same-store buckets group into one ranged sub-query. No bucket is ever computed from two stores, which sidesteps the average-of-averages problem.
-- Sequential-budget executor: stores queried in priority order, each receiving the remaining budget; newest-first; dedup on identical timestamps (higher priority wins); `Truncated` set honestly.
+- Raw queries use coverage subtraction. Higher-priority ranges claim their overlap first and lower-priority stores fill uncovered pieces.
+- Bucketed queries assign each complete bucket to one highest-priority store that both covers the full bucket and supports the aggregation. A bucket is never split across stores, avoiding invalid combinations such as an average of averages.
 
-### Carried-value resolution
+Consecutive buckets with the same owner become one store query. Coverage gaps break segments even when the same store owns both sides.
 
-For `Last` and `TimeWeightedAverage`, an empty bucket equals the value already held when the bucket began. No single store is guaranteed to hold that prior sample, so the merger resolves the carry: it seeds the value held entering the whole range with a priority-ordered `GetSampleAtOrBeforeAsync(path, From)` walk, then threads the running carried value as the `CarrySeed` of each store-segment's bucketed sub-query oldest to newest. The persistent tier seeds the held value and InMemory's live-edge buckets carry it forward instead of rendering a spurious gap.
+Point budgets favor the newest data. Non-carry queries execute newest-first with the remaining budget. Carry-dependent queries first select the newest segments that fit, then execute those segments oldest-to-newest to thread state correctly.
+
+For `Last` and `TimeWeightedAverage`, the merger resolves a value held at the start of each contiguous served region. It threads that value across adjacent segments. It does not carry across an uncovered interval. After each segment it asks for the last raw event rather than using an aggregate point as the next carry.
+
+Query errors propagate. A failed store must not look like an empty store.
 
 ## Time-weighted average
 
-Time-weighted average is supported by every numeric-capable store via a portable `LEAD()`-over-ordered-samples implementation that clips each sample's validity interval to the bucket and, for the final sample, to the bucket end. SQLite sums `weighted_sum` / `total_duration` across overlapping partition files in a single ordered scan so a bucket that straddles a partition boundary is not double-counted. InMemory uses step/LOCF integration with the same look-back semantics. The TimescaleDB toolkit, when present, replaces the portable query with `average(time_weight('locf', ts, value))` as a transparent performance fast-path; it never changes which aggregations are available.
+`TimeWeightedAverage` uses step interpolation, also called last observation carried forward. A value holds until the next event.
 
-A cross-store parity battery (`HomeBlaze.History.Parity.Tests`) feeds identical samples to every store and asserts identical results across the edge cases (empty / single-sample / boundary / look-back / partition-straddle buckets, all aggregations, move chains, oversize, value routing). This equivalence is what makes the unified merger sound.
+For each bucket:
 
-## Store implementations
+```text
+sum(value * known duration) / sum(known duration)
+```
 
-- **InMemoryHistoryStore (priority 100).** `ConcurrentDictionary<string, PropertyBuffer>` keyed by path; each buffer is an array-backed ring. `MaxAge` (default 60 s) evicts old samples; `MaxPointsPerProperty` (default 1000) caps a runaway property. Records are immediately queryable; nothing survives restart (a hot buffer / dev / test store).
-- **SqliteHistoryStore (priority 50).** The edge / Raspberry-Pi tier. One `WITHOUT ROWID` `(path, ts)` database file per configurable interval (Daily / Weekly / Monthly), plus a small moves database; WAL mode; batched `INSERT OR REPLACE` per partition; retention sweeps whole partition files older than `now - MaxAge`. All connection access is serialized through a single re-entrant lock.
-- **TimescaleDbHistoryStore (priority 10, planned).** The industrial tier. Npgsql native (no ORM), hypertable, daily chunks, batched binary `COPY` per `FlushInterval`, `drop_chunks` retention, idempotent schema bootstrap, a toolkit probe driving the TWA fast-path, and a `CurrentCoverage.To` high-water-mark frozen during outages. Genuinely async, so it uses an async gate rather than a re-entrant lock.
+An explicit null event clears the held value. Unknown intervals contribute to neither the numerator nor the denominator. A later numeric event establishes a known value again.
 
-## UI
+In-memory integrates directly over its ordered buffer. SQLite streams one ascending event sequence across move legs and partition files. It keeps only the pending prior event plus bucket partials, so sample memory is constant and it does not use SQLite `ATTACH`. This also avoids SQLite's attached-database limit for long queries.
 
-The property-history chart dialog (`HomeBlaze.History.Blazor`) is reachable from any `[State]` property whose `HasHistory()` is true when at least one `IHistoryStore` exists. It offers range presets (1h / 6h / 24h / 7d / 30d / custom), a period (bucket) selector (Auto, None for raw samples, or a fixed size from 1s through 24h; Auto picks about range / 200 rounded to a sane interval), and an aggregation dropdown gated by column type and cumulativeness (cumulative counters offer only Last / First / Minimum / Maximum / Count; JSON columns offer Last / First / Count; numeric columns offer the full set, intersected with the union of the stores' `SupportedAggregations`). The aggregation dropdown is disabled for the raw (None) period, which returns the actual samples and has no aggregate. It renders a time-series chart, splitting the series at null entries so gaps render as visual breaks; carry-dependent aggregations draw a continuous line. Non-numeric results fall back to a table. Each store also ships an edit component for its settings.
+The parity test suite feeds identical cases to both engines. Any future TimescaleDB fast path must preserve the same explicit-null and carry semantics.
 
-## MCP tool
+## Store implementation notes
 
-`get_property_history` in `HomeBlaze.AI` queries one or more canonical `[State]` property paths over a range, raw or bucketed, with a chosen aggregation:
+### In-Memory History
 
-| Parameter | Required | Default | Notes |
-|---|---|---|---|
-| `paths` | yes | | one or more canonical property paths |
-| `from` | yes | | ISO 8601; bare timestamps treated as UTC |
-| `to` | no | now | ISO 8601 |
-| `bucket` | no | null (raw) | for example `5m`, `30s`, `1h`, `7d` |
-| `aggregation` | no | `Last` | case-insensitive match against `HistoryAggregations` |
+- `ConcurrentDictionary<string, PropertyBuffer>` by property path.
+- Array-backed ring with a lock per property.
+- Lock-free monotonic store-wide eviction watermark.
+- Immediate query visibility.
+- No persistence across restart.
+- Default `MaxAgeSeconds`: `60`.
+- Default `MaxPointsPerProperty`: `1_000`.
+- Default `BufferTimeMilliseconds`: `250`.
+- Default `MaxJsonSize`: `8_192`.
+- Metrics include recorded, oversize, evicted, property and sample counts, memory size in bytes, and throughput.
 
-The response is a per-path map, each entry carrying a `value_type` hint (number / string / boolean / enum), the `points` array (null entries for gaps), and `truncated`. Unknown or non-servable aggregation returns a structured error with the `available` set; empty results and unknown paths are not errors. The tool reuses the cross-store merger's multi-path fan-out overload.
+### SQLite History
 
-## Configuration summary
+- One `WITHOUT ROWID` history database per daily, weekly, or monthly partition.
+- `(path, ts)` primary key and `INSERT OR REPLACE` retry behavior.
+- WAL mode with pooling disabled.
+- `moves.db` metadata sidecar for moves and coverage ranges.
+- Serialized connection access because `SqliteConnection` and commands are not thread-safe.
+- Pending and in-flight sample accounting under one lock.
+- Flush serialization under a separate gate.
+- No lock path acquires the pending lock while already holding the connection lock.
+- Default `MaxAgeDays`: `365`.
+- Default `FlushIntervalSeconds`: `10`.
+- Default `BufferTimeMilliseconds`: `250`.
+- Default `PartitionInterval`: `Weekly`.
+- Default `MaxJsonSize`: `8_192`.
+- Metrics include queue depth, drop count, storage size in bytes, last successful flush, errors, and throughput.
+
+`InMemory.MaxAge` should remain comfortably larger than a persistent store's flush interval. The defaults provide a recent overlap so the live edge stays available while SQLite commits.
+
+### Configuration summary
 
 | Knob | InMemory | SQLite | TimescaleDB (planned) |
 |---|---|---|---|
@@ -165,15 +298,69 @@ The response is a per-path map, each entry carrying a `value_type` hint (number 
 | `MaxPointsPerProperty` | 1000 | n/a | n/a |
 | `MaxJsonSize` | 8 KB | 8 KB | 8 KB |
 
-## Known limitations
+## UI and MCP
 
-- Changing a property's declared type shifts the read column; old-type samples become invisible to the new query path.
-- Up to `FlushInterval` of samples are lost on a hard crash; graceful shutdown drains.
-- InMemory-only loses history on restart (a hot buffer, not a production substitute).
-- When `bucket_size > InMemory.MaxAge`, the rightmost bucket may omit up to `FlushInterval` of samples; raise `MaxAge` for pixel-perfect live edges.
-- Per-property resolution is bounded by `BufferTime` (the recorder coalesces to the latest value per property per window).
-- Move tracking is runtime-only (in-memory identity).
+The history subjects implement `ITitleProvider` and render as “In-Memory History” and “SQLite History”.
 
-## Roadmap
+The property history dialog is available for eligible `[State]` properties when at least one store exists. It supports preset and custom ranges, raw or bucketed queries, type-aware aggregation choices, line breaks at explicit null gaps, and a table fallback for non-numeric values.
 
-v1.1 (designed, deferred) adds snapshots (periodic whole-graph capture plus backwards-scan-and-replay reconstruction) and structural recording (subject-bearing `[State]` properties recorded as path references in `value_json`), plus `get_snapshot` / `get_snapshots` MCP tools. Both build additively on the v1 schema: a new table plus a widened eligibility predicate, with nothing in v1 undone.
+`get_property_history` takes:
+
+| Parameter | Required | Default | Notes |
+|---|---|---|---|
+| `paths` | yes | | one or more canonical property paths |
+| `from` | yes | | ISO 8601; bare timestamps treated as UTC |
+| `to` | no | now | ISO 8601 |
+| `bucket` | no | null (raw) | for example `5m`, `30s`, `1h`, `7d` |
+| `aggregation` | no | `Last` | case-insensitive match against `HistoryAggregations` |
+
+The response is a per-path map, each entry carrying:
+
+- a value type hint (number / string / boolean / enum);
+- points, including explicit null gaps;
+- truncation state;
+- effective coverage ranges.
+
+Unknown or non-servable aggregations return a structured error with the `available` set; empty results and unknown paths are not errors. Aggregation input is normalized case-insensitively at the MCP boundary. Internal identifiers use ordinal comparison.
+
+## Planned TimescaleDB tier
+
+The planned store uses Npgsql binary `COPY`, a hypertable with daily chunks, `drop_chunks` retention, idempotent schema bootstrap, and an async gate for connection and reconnect state.
+
+It must use the same coverage contract:
+
+- a small durable coverage-range table;
+- a new session range after restart or loss of continuity;
+- a heartbeat advanced only after accepted writes are durable;
+- no gap for an outage whose complete bounded backlog is later committed;
+- a gap after any dropped sample;
+- retention pruning of both chunks and coverage metadata.
+
+Queries should send the relevant range predicate to PostgreSQL rather than loading coverage rows per property. A toolkit time-weighted-average path is only valid when it preserves explicit null boundaries and matches the portable parity suite.
+
+## Known limitations and roadmap
+
+- Changing a property's declared type changes its storage column. Older samples under another type may not be visible.
+- Service cancellation or a hard crash can lose changes still in the coalescing queue. A hard crash can also lose samples accepted by the engine since the last durable flush. These losses cannot retroactively mark their exact tail as a coverage gap.
+- The in-memory store loses all data on restart.
+- Move detection cannot discover moves that occurred while HomeBlaze was stopped.
+- Per-property time resolution is bounded by the change queue's coalescing interval.
+- When the requested bucket size exceeds `InMemory.MaxAge`, the rightmost bucket can omit up to a persistent store's `FlushInterval` of samples. Raise `MaxAgeSeconds` for a pixel-perfect live edge.
+- Subject-bearing state, full graph snapshots, `Rate`, `Delta`, `StateDuration`, interpolation, compression, and continuous aggregates are future work.
+
+The planned snapshot layer stores periodic compressed whole-graph snapshots and reconstructs a requested time by finding the nearest prior snapshot and replaying scalar, structural, and move events. Planned MCP tools are `get_snapshot` and capped `get_snapshots`.
+
+## Design decisions
+
+| Decision | Reason |
+|---|---|
+| Independent store subjects | Matches HomeBlaze connector configuration and avoids a central lifecycle owner |
+| Store-wide coverage ranges | Makes completeness explicit while keeping metadata and routing bounded |
+| Immutable coverage snapshots | Prevents torn reads and avoids allocations during merger planning |
+| Persisted SQLite health ranges | Preserves restart and drop gaps without scanning years of samples |
+| Per-bucket single-owner dispatch | Prevents mathematically invalid aggregate merging |
+| Cross-store carry with gap reset | Keeps sparse state correct without inventing values through outages |
+| Typed value columns | Preserves integer precision and enables native numeric aggregation |
+| Streaming SQLite TWA | Keeps long queries bounded in memory and avoids `ATTACH` limits |
+| Bounded pending persistence queue | Protects 24/7 hosts from unbounded memory growth during outages |
+| Engine and subject split | Keeps storage logic graph-free, testable, and extraction-ready |

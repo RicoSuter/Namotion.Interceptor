@@ -17,17 +17,29 @@ public interface IParityStore : IDisposable
     HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf);
 }
 
-/// <summary>The fixed wall-clock "now" all parity stores share (one hour after the sample base).</summary>
+/// <summary>The wall-clock bounds all parity stores share.</summary>
 public static class ParityClock
 {
     public static readonly DateTimeOffset Base = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
-    public static DateTimeOffset Now() => Base.AddHours(1);
+    public static readonly DateTimeOffset Start = new(1960, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    public static readonly DateTimeOffset Now = Base.AddYears(1);
 }
 
 internal sealed class InMemoryParityStore : IParityStore
 {
-    private readonly InMemoryHistoryStore _engine =
-        new(priority: 100, maxPointsPerProperty: 100_000, maxAge: TimeSpan.FromDays(3650), maxJsonSize: 8192, getUtcNow: ParityClock.Now);
+    private DateTimeOffset _now = ParityClock.Start;
+    private readonly InMemoryHistoryStore _engine;
+
+    public InMemoryParityStore()
+    {
+        _engine = new InMemoryHistoryStore(
+            priority: 100,
+            maxPointsPerProperty: 100_000,
+            maxAge: TimeSpan.FromDays(36500),
+            maxJsonSize: 8192,
+            getUtcNow: () => _now);
+        _now = ParityClock.Now;
+    }
 
     public void Record(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
         => _engine.Record(propertyPath, timestamp, value, propertyType);
@@ -50,13 +62,15 @@ internal sealed class SqliteParityStore : IParityStore
     private readonly string _directory =
         Path.Combine(Path.GetTempPath(), "hb-parity-" + Guid.NewGuid().ToString("N"));
 
+    private DateTimeOffset _now = ParityClock.Start;
     private readonly SqliteHistoryStore _engine;
 
     public SqliteParityStore()
     {
         _engine = new SqliteHistoryStore(
             priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly,
-            maxAge: TimeSpan.FromDays(3650), maxJsonSize: 8192, getUtcNow: ParityClock.Now);
+            maxAge: TimeSpan.FromDays(36500), maxJsonSize: 8192, getUtcNow: () => _now);
+        _now = ParityClock.Now;
     }
 
     public void Record(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)

@@ -220,7 +220,10 @@
             // larger than any store's coverage, so no bucket fits and the chart is empty. Clamp Auto to the span of
             // recorded data (the earliest covered instant up to 'to') so a fresh system still renders.
             var stores = Registry.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray();
-            var earliest = stores.Length == 0 ? (DateTimeOffset?)null : stores.Min(store => store.CurrentCoverage.From);
+            var earliest = stores
+                .SelectMany(store => store.CoverageRanges)
+                .Select(range => (DateTimeOffset?)range.From)
+                .Min();
             TimeSpan? availableCoverage = earliest is { } coverageStart && coverageStart < to ? to - coverageStart : null;
 
             var bucket = PropertyHistoryChartModel.ResolveBucket(

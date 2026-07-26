@@ -4,6 +4,7 @@ namespace HomeBlaze.History.Abstractions
     public static class BucketAlignment
     {
         public static System.DateTimeOffset BucketStart(System.DateTimeOffset ts, System.TimeSpan bucket) { }
+        public static System.DateTimeOffset FirstBucketStart(System.DateTimeOffset from, System.DateTimeOffset to, System.TimeSpan bucket, int maxBuckets) { }
     }
     public class HistoryAggregationNotSupportedException : System.Exception
     {
@@ -36,7 +37,10 @@ namespace HomeBlaze.History.Abstractions
         public System.DateTimeOffset From { get; init; }
         public System.DateTimeOffset To { get; init; }
         public bool Contains(HomeBlaze.History.Abstractions.HistoryCoverage other) { }
+        public HomeBlaze.History.Abstractions.HistoryCoverage? Intersect(HomeBlaze.History.Abstractions.HistoryCoverage other) { }
         public bool Overlaps(HomeBlaze.History.Abstractions.HistoryCoverage other) { }
+        public static System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> Clip(System.Collections.Generic.IEnumerable<HomeBlaze.History.Abstractions.HistoryCoverage> ranges, HomeBlaze.History.Abstractions.HistoryCoverage window) { }
+        public static System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> Normalize(System.Collections.Generic.IEnumerable<HomeBlaze.History.Abstractions.HistoryCoverage> ranges) { }
     }
     public static class HistoryEligibility
     {
@@ -60,17 +64,19 @@ namespace HomeBlaze.History.Abstractions
         public int MaxPoints { get; init; }
         public string PropertyPath { get; init; }
         public System.DateTimeOffset To { get; init; }
+        public void Validate() { }
     }
     public class HistorySeries : System.IEquatable<HomeBlaze.History.Abstractions.HistorySeries>
     {
-        public HistorySeries(string PropertyPath, System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryPoint> Points, bool Truncated) { }
+        public HistorySeries(string PropertyPath, System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryPoint> Points, bool Truncated, System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges) { }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges { get; init; }
         public System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryPoint> Points { get; init; }
         public string PropertyPath { get; init; }
         public bool Truncated { get; init; }
     }
     public interface IHistoryStore
     {
-        HomeBlaze.History.Abstractions.HistoryCoverage CurrentCoverage { get; }
+        System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges { get; }
         int Priority { get; }
         System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
         System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken);

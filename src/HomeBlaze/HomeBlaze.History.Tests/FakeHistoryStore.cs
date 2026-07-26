@@ -16,7 +16,18 @@ public sealed class FakeHistoryStore : IHistoryStore
 
     public int Priority { get; set; }
 
+    // Convenience for the existing single-range routing tests.
     public HistoryCoverage CurrentCoverage { get; set; }
+
+    private ImmutableArray<HistoryCoverage> _coverageRanges;
+
+    public ImmutableArray<HistoryCoverage> CoverageRanges
+    {
+        get => _coverageRanges.IsDefault
+            ? ImmutableArray.Create(CurrentCoverage)
+            : _coverageRanges;
+        set => _coverageRanges = value;
+    }
 
     public IReadOnlySet<string> SupportedAggregations { get; set; } =
         new HashSet<string>(StringComparer.Ordinal)
@@ -46,7 +57,7 @@ public sealed class FakeHistoryStore : IHistoryStore
     }
 
     /// <summary>
-    /// Adds a Json-valued sample (decimal, string, enum). Mirrors <see cref="AddSample(DateTimeOffset, double)"/>
+    /// Adds a Json-valued sample (string or enum). Mirrors <see cref="AddSample(DateTimeOffset, double)"/>
     /// for the <c>value_json</c> column so carry-forward of non-numeric properties can be exercised.
     /// </summary>
     public FakeHistoryStore AddJsonSample(DateTimeOffset timestamp, JsonElement value)
@@ -56,8 +67,17 @@ public sealed class FakeHistoryStore : IHistoryStore
         return this;
     }
 
+    public FakeHistoryStore AddNullSample(DateTimeOffset timestamp)
+    {
+        _samples.Add(new HistoryPoint(timestamp, null, null));
+        _samples.Sort((left, right) => left.Timestamp.CompareTo(right.Timestamp));
+        return this;
+    }
+
     public Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (ThrowOnQuery)
         {
             throw new InvalidOperationException("Fake store failure.");
@@ -76,7 +96,11 @@ public sealed class FakeHistoryStore : IHistoryStore
             points = points.Skip(points.Count - query.MaxPoints).ToList();
         }
 
-        return Task.FromResult(new HistorySeries(query.PropertyPath, points.ToImmutableArray(), truncated));
+        return Task.FromResult(new HistorySeries(
+            query.PropertyPath,
+            points.ToImmutableArray(),
+            truncated,
+            CoverageRanges));
     }
 
     public ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
@@ -87,10 +111,28 @@ public sealed class FakeHistoryStore : IHistoryStore
             throw new InvalidOperationException("Fake store failure.");
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+
+        HistoryCoverage? containingRange = null;
+        for (var index = CoverageRanges.Length - 1; index >= 0; index--)
+        {
+            var range = CoverageRanges[index];
+            if (range.From <= asOf && range.To >= asOf)
+            {
+                containingRange = range;
+                break;
+            }
+        }
+
+        if (containingRange is null)
+        {
+            return new ValueTask<HistoryPoint?>((HistoryPoint?)null);
+        }
+
         HistoryPoint? result = null;
         foreach (var sample in _samples)
         {
-            if (sample.Timestamp <= asOf)
+            if (sample.Timestamp >= containingRange.Value.From && sample.Timestamp <= asOf)
             {
                 result = sample;
             }
@@ -113,7 +155,7 @@ public sealed class FakeHistoryStore : IHistoryStore
         var carryDependent = query.Aggregation is HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
 
         // The held value carries both the numeric and the Json column so carry-forward works for
-        // value_json properties (decimal, string, enum) exactly as it does for numeric ones.
+        // value_json properties (string or enum) exactly as it does for numeric ones.
         var carriedNumber = carryDependent ? query.CarrySeed?.Number : null;
         var carriedJson = carryDependent ? query.CarrySeed?.Json : null;
 

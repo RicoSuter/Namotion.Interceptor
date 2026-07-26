@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -23,17 +24,20 @@ namespace HomeBlaze.History.Sqlite;
 [Category("History")]
 [Description("Persists [State] history to partitioned SQLite files (priority 50).")]
 [InterceptorSubject]
-public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurable, IHistoryStore, ILifecycleHandler
+public partial class SqliteHistoryStoreSubject :
+    BackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
 {
     private readonly ILogger<SqliteHistoryStoreSubject> _logger;
 
     private readonly ThroughputCounter _incomingThroughput = new();
     private readonly ThroughputCounter _recordedThroughput = new();
 
-    // Last canonical subject path seen per subject, used for move detection. The resolver's own
-    // cache is cleared on every structural change, so GetPath() is always current; comparing the
+    // Last canonical subject path seen per subject and property, used for move detection. The resolver's
+    // own cache is cleared on every structural change, so GetPath() is always current; comparing the
     // returned path to the stored one detects a move without depending on lifecycle event delivery.
-    private readonly Dictionary<IInterceptorSubject, string> _lastSubjectPath = new();
+    // The per-property inner map ensures the first changed property after a move does not consume the
+    // move detection for sibling history properties.
+    private readonly Dictionary<IInterceptorSubject, Dictionary<string, string>> _lastSubjectPath = new();
     private readonly object _pathCacheLock = new();
 
     private SqliteHistoryStore? _engine;
@@ -53,6 +57,9 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
 
         Status = "Stopped";
     }
+
+    /// <inheritdoc />
+    public string? Title => "SQLite History";
 
     // Configuration properties (persisted to JSON)
 
@@ -133,7 +140,7 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
     public partial int QueueDepth { get; set; }
 
     /// <summary>
-    /// Cumulative number of samples dropped (kept for symmetry; stays zero because the change queue is unbounded).
+    /// Cumulative number of samples dropped after the pending persistence queue reached its limit.
     /// </summary>
     [State]
     public partial long DropCount { get; set; }
@@ -151,10 +158,10 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
     public partial string? LastError { get; set; }
 
     /// <summary>
-    /// Estimated on-disk storage used by the partition and moves database files in bytes.
+    /// Estimated on-disk storage used by the partition and metadata database files in bytes.
     /// </summary>
-    [State]
-    public partial long EstimatedStorageBytes { get; set; }
+    [State(Unit = StateUnit.Byte)]
+    public partial long EstimatedStorageSize { get; set; }
 
     /// <summary>
     /// Average incoming changes per second (eligible [State] changes observed).
@@ -171,8 +178,8 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
     // IHistoryStore
 
     /// <inheritdoc />
-    public HistoryCoverage CurrentCoverage =>
-        _engine?.CurrentCoverage ?? new HistoryCoverage(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+    public ImmutableArray<HistoryCoverage> CoverageRanges =>
+        _engine?.CoverageRanges ?? ImmutableArray<HistoryCoverage>.Empty;
 
     /// <inheritdoc />
     public IReadOnlySet<string> SupportedAggregations => SqliteHistoryStore.AllAggregations;
@@ -180,10 +187,16 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
     /// <inheritdoc />
     public Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (_engine is null)
         {
             return Task.FromResult(
-                new HistorySeries(query.PropertyPath, System.Collections.Immutable.ImmutableArray<HistoryPoint>.Empty, false));
+                new HistorySeries(
+                    query.PropertyPath,
+                    ImmutableArray<HistoryPoint>.Empty,
+                    false,
+                    ImmutableArray<HistoryCoverage>.Empty));
         }
 
         return _engine.QueryAsync(query, cancellationToken);
@@ -193,6 +206,7 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
     public ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
         string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
     }
 
@@ -249,15 +263,9 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
             return;
         }
 
-        _engine = engine;
-
-        // Drop detached subjects from the move-detection cache (memory hygiene).
-        context.AddService(this);
-
-        // Construct the processor first so its change-queue subscription is live before the first await
-        // (BackgroundService.StartAsync returns at that point); this minimizes the startup gap during
-        // which changes would otherwise go unobserved. The engine buffers samples and flushes on an interval,
-        // so the queue is never stuck and needs no bound (maxQueueDepth: null).
+        // The change-queue subscription is live from construction, before the first await
+        // (BackgroundService.StartAsync returns at that point). The coverage session starts only
+        // afterwards, so no change can fall inside claimed coverage without reaching the engine.
         using var processor = new ChangeQueueProcessor(
             this,
             context,
@@ -266,6 +274,12 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
             TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
             maxQueueDepth: null,
             logger: _logger);
+
+        engine.BeginCoverageSession();
+        _engine = engine;
+
+        // Drop detached subjects from the move-detection cache (memory hygiene).
+        context.AddService(this);
 
         _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
 
@@ -332,7 +346,13 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
 
             lock (_pathCacheLock)
             {
-                if (_lastSubjectPath.TryGetValue(subject, out var previousSubjectPath) &&
+                if (!_lastSubjectPath.TryGetValue(subject, out var pathsByProperty))
+                {
+                    pathsByProperty = new Dictionary<string, string>(StringComparer.Ordinal);
+                    _lastSubjectPath[subject] = pathsByProperty;
+                }
+
+                if (pathsByProperty.TryGetValue(propertyName, out var previousSubjectPath) &&
                     !string.Equals(previousSubjectPath, subjectPath, StringComparison.Ordinal))
                 {
                     engine.RecordMove(
@@ -341,11 +361,17 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
                         fullPath);
                 }
 
-                _lastSubjectPath[subject] = subjectPath;
+                pathsByProperty[propertyName] = subjectPath;
             }
 
-            engine.Record(fullPath, change.ChangedTimestamp, change.GetNewValue<object>(), registered.Type);
-            _recordedThroughput.Add(1);
+            if (engine.TryRecord(
+                    fullPath,
+                    change.ChangedTimestamp,
+                    change.GetNewValue<object>(),
+                    registered.Type))
+            {
+                _recordedThroughput.Add(1);
+            }
         }
 
         return ValueTask.CompletedTask;
@@ -391,7 +417,8 @@ public partial class SqliteHistoryStoreSubject : BackgroundService, IConfigurabl
         RecordedCount = engine.RecordedCount;
         OversizeCount = engine.OversizeCount;
         QueueDepth = engine.QueueDepth;
-        EstimatedStorageBytes = engine.EstimatedStorageBytes;
+        DropCount = engine.DropCount;
+        EstimatedStorageSize = engine.EstimatedStorageBytes;
         LastFlushUtc = engine.LastFlushUtc;
         LastError = engine.LastError;
         IncomingChangesPerSecond = _incomingThroughput.CurrentRate;

@@ -65,6 +65,72 @@ public class PropertyBufferTests
     }
 
     [Fact]
+    public void WhenCapacityNotExceeded_ThenCapacityCoverageFloorIsUnset()
+    {
+        // Arrange
+        var buffer = NewBuffer(capacity: 3);
+
+        // Act
+        var evicted = buffer.Append(LongSample(10, 10));
+
+        // Assert
+        Assert.False(evicted);
+    }
+
+    [Fact]
+    public void WhenCapacityExceeded_ThenEvictionIsReportedAndOldestRetainedAdvances()
+    {
+        // Arrange
+        var buffer = NewBuffer(capacity: 2);
+        buffer.Append(LongSample(1, 1));
+        buffer.Append(LongSample(2, 2));
+
+        // Act
+        var evicted = buffer.Append(LongSample(3, 3));
+
+        // Assert
+        Assert.True(evicted);
+        Assert.Equal(Base.AddSeconds(2), buffer.OldestTimestamp);
+    }
+
+    [Fact]
+    public void WhenOlderLateSampleArrivesAtCapacity_ThenNewerRetainedSamplesRemain()
+    {
+        // Arrange
+        var buffer = NewBuffer(capacity: 2);
+        buffer.Append(LongSample(2, 2));
+        buffer.Append(LongSample(3, 3));
+
+        // Act
+        var evicted = buffer.Append(LongSample(1, 1));
+
+        // Assert
+        var range = buffer.Range(Base, Base.AddSeconds(10));
+        Assert.Equal(new long?[] { 2, 3 }, range.Select(sample => sample.Long).ToArray());
+        Assert.Equal(1, buffer.EvictedCount);
+        Assert.True(evicted);
+        Assert.Equal(Base.AddSeconds(2), buffer.OldestTimestamp);
+    }
+
+    [Fact]
+    public void WhenTimestampAlreadyExists_ThenSampleIsReplaced()
+    {
+        // Arrange
+        var buffer = NewBuffer(capacity: 2);
+        buffer.Append(LongSample(1, 1));
+        buffer.Append(LongSample(2, 2));
+
+        // Act
+        buffer.Append(LongSample(1, 10));
+
+        // Assert
+        var range = buffer.Range(Base, Base.AddSeconds(10));
+        Assert.Equal(new long?[] { 10, 2 }, range.Select(sample => sample.Long).ToArray());
+        Assert.Equal(2, buffer.Count);
+        Assert.Equal(0, buffer.EvictedCount);
+    }
+
+    [Fact]
     public void WhenEvictOlderThan_ThenLeadingOldSamplesDropped()
     {
         // Arrange

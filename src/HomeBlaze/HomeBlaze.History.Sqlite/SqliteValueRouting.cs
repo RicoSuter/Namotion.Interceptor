@@ -6,7 +6,8 @@ namespace HomeBlaze.History.Sqlite;
 
 /// <summary>
 /// A typed row routed from a recorded value, ready to bind into the <c>history</c> insert. Exactly
-/// one of the three value columns is populated for a non-null value (or all null for a recorded null).
+/// one value column is populated for most non-null values (or all null for a recorded null).
+/// Decimal values use value_double for queries and also archive exact text in value_json.
 /// </summary>
 internal readonly record struct Row(long? Long, double? Double, string? Json);
 
@@ -78,7 +79,7 @@ internal static class SqliteValueRouting
     // string value exceeds the cap; otherwise the verbatim JSON (and oversized = false).
     public static (string Json, bool Oversized) SerializeJson(object value, int maxJsonSize)
     {
-        // enum -> name; decimal/string -> native JSON; oversize string -> placeholder.
+        // enum -> name; string -> native JSON; oversize string -> placeholder.
         JsonElement element = value is Enum
             ? JsonSerializer.SerializeToElement(value.ToString())
             : JsonSerializer.SerializeToElement(value);

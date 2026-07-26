@@ -11,6 +11,10 @@ public class InMemoryHistoryStoreCoreMoveTests
         new(priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromHours(1),
             maxJsonSize: 8192, getUtcNow: () => Base.AddHours(1));
 
+    private static InMemoryHistoryStore NewCore(Func<DateTimeOffset> getUtcNow) =>
+        new(priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromHours(1),
+            maxJsonSize: 8192, getUtcNow);
+
     [Fact]
     public void WhenPropertyMovedOnce_ThenRawQueryFollowsChainAcrossPaths()
     {
@@ -67,9 +71,11 @@ public class InMemoryHistoryStoreCoreMoveTests
     public void WhenGetSampleAtOrBeforeAcrossMove_ThenFollowsChain()
     {
         // Arrange - value recorded only at the old path, then moved
-        var core = NewCore();
+        var now = Base;
+        var core = NewCore(() => now);
         core.Record("/old/V", Base.AddSeconds(5), 42d, typeof(double));
         core.RecordMove(Base.AddSeconds(10), "/old/V", "/new/V");
+        now = Base.AddSeconds(20);
 
         // Act - ask the current path for the value held at t=8 (only the old path has it)
         var held = core.GetSampleAtOrBefore("/new/V", Base.AddSeconds(8));

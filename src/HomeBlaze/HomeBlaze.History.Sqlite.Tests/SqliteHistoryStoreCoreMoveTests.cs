@@ -14,6 +14,10 @@ public sealed class SqliteHistoryStoreCoreMoveTests : IDisposable
         new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly, TimeSpan.FromHours(1), maxJsonSize: 8192,
             () => Base.AddHours(1));
 
+    private SqliteHistoryStore NewCore(Func<DateTimeOffset> getUtcNow) =>
+        new(priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly,
+            TimeSpan.FromHours(1), maxJsonSize: 8192, getUtcNow);
+
     public void Dispose()
     {
         try { if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true); }
@@ -37,6 +41,30 @@ public sealed class SqliteHistoryStoreCoreMoveTests : IDisposable
         // Assert - all three samples, ascending, under the queried path
         Assert.Equal("/new/Value", series.PropertyPath);
         Assert.Equal(new double?[] { 1, 2, 3 }, series.Points.Select(point => point.Number).ToArray());
+    }
+
+    [Fact]
+    public async Task WhenStoreReopens_ThenPersistedMoveChainIsResolved()
+    {
+        // Arrange
+        var now = Base;
+        using (var first = NewCore(() => now))
+        {
+            first.Record("/old/Value", Base.AddSeconds(5), 1d, typeof(double));
+            first.RecordMove(Base.AddSeconds(10), "/old/Value", "/new/Value");
+            first.Record("/new/Value", Base.AddSeconds(15), 2d, typeof(double));
+            now = Base.AddSeconds(20);
+            await first.FlushAsync(CancellationToken.None);
+        }
+
+        now = Base.AddSeconds(30);
+        using var reopened = NewCore(() => now);
+
+        // Act
+        var series = reopened.Query(new HistoryQuery("/new/Value", Base, Base.AddSeconds(20)));
+
+        // Assert
+        Assert.Equal(new double?[] { 1, 2 }, series.Points.Select(point => point.Number).ToArray());
     }
 
     [Fact]
@@ -79,9 +107,11 @@ public sealed class SqliteHistoryStoreCoreMoveTests : IDisposable
     public async Task WhenGetSampleAtOrBeforeAcrossMove_ThenFollowsChain()
     {
         // Arrange - value recorded only at the old path, then moved
-        using var core = NewCore();
+        var now = Base;
+        using var core = NewCore(() => now);
         core.Record("/old/V", Base.AddSeconds(5), 42d, typeof(double));
         core.RecordMove(Base.AddSeconds(10), "/old/V", "/new/V");
+        now = Base.AddSeconds(20);
         await core.FlushAsync(CancellationToken.None);
 
         // Act - ask the current path for the value held at t=8 (only the old path has it)
