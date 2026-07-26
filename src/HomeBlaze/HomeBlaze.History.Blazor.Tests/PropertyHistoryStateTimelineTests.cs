@@ -74,15 +74,63 @@ public class PropertyHistoryStateTimelineTests
     }
 
     [Fact]
-    public void WhenNoValueIsKnown_ThenTheWindowIsUnknownRatherThanFalse()
+    public void WhenCoveredButNoValueWasEverObserved_ThenTheRunIsCoveredWithNoLabel()
     {
         // Arrange & Act
         var segments = Build([], valueAtStart: null);
 
-        // Assert
+        // Assert: the store vouches for the window, so this is not a coverage gap. It is a covered
+        // span whose value is absent, and conflating the two makes a healthy null read as lost history.
         var single = Assert.Single(segments);
-        Assert.True(single.IsUnknown);
+        Assert.False(single.IsUnknown);
         Assert.Null(single.Label);
+    }
+
+    [Fact]
+    public void WhenValueIsExplicitlyNull_ThenItIsNotReportedAsACoverageGap()
+    {
+        // Arrange: a nullable property recorded as null, inside fully covered time.
+        var clearedAt = From.AddMinutes(20);
+
+        // Act
+        var segments = Build(
+            [new HistoryPoint(clearedAt, null, null)],
+            valueAtStart: Bool(From.AddMinutes(-5), true));
+
+        // Assert
+        Assert.Collection(
+            segments,
+            first =>
+            {
+                Assert.Equal("Yes", first.Label);
+                Assert.False(first.IsUnknown);
+            },
+            second =>
+            {
+                Assert.Null(second.Label);
+                Assert.False(second.IsUnknown);
+                Assert.Equal(clearedAt, second.Start);
+            });
+    }
+
+    [Fact]
+    public void WhenAGapAdjoinsAnAbsentValue_ThenTheyRemainSeparateRuns()
+    {
+        // Arrange: coverage stops at 20m; the value was already absent before that.
+        ImmutableArray<HistoryCoverage> coverage = [new HistoryCoverage(From, From.AddMinutes(20))];
+
+        // Act
+        var segments = Build([], valueAtStart: null, coverage: coverage);
+
+        // Assert: merging these would hide where recording actually stopped.
+        Assert.Collection(
+            segments,
+            covered =>
+            {
+                Assert.False(covered.IsUnknown);
+                Assert.Equal(From.AddMinutes(20), covered.End);
+            },
+            gap => Assert.True(gap.IsUnknown));
     }
 
     [Fact]

@@ -43,6 +43,13 @@
             </MudSelect>
         </div>
 
+        @if (_truncated && !_loading && _error is null)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="flex:0 0 auto; margin-top:8px;">
+                Too much history for this range: the oldest data is not shown.
+            </MudText>
+        }
+
         <div style="flex:1 1 auto; min-height:0; margin-top:16px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
             @if (_loading)
             {
@@ -55,41 +62,22 @@
             else if (_segments is { Count: > 0 })
             {
                 <div style="width:100%; height:100%; display:flex; flex-direction:column; gap:8px;">
-                    <div style="display:flex; flex:0 0 56px; width:100%; border-radius:4px; overflow:hidden;">
-                        @foreach (var segment in _segments)
-                        {
-                            <div title="@SegmentTooltip(segment)"
-                                 style="@SegmentStyle(segment)"></div>
-                        }
-                    </div>
+                    @* The band is decorative: every run it shows is also a row in the table below,
+                       which is the accessible representation. *@
+                    <div aria-hidden="true"
+                         style="@($"flex:0 0 56px; width:100%; border-radius:4px; background:{_bandGradient};")"></div>
 
                     <div style="display:flex; justify-content:space-between;">
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.ToZoned(_windowFrom).ToString("g")</MudText>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.ToZoned(_windowTo).ToString("g")</MudText>
                     </div>
 
-                    @if (_truncated)
-                    {
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                            Too many changes for this range: the oldest ones are not shown.
-                        </MudText>
-                    }
-
                     <div style="display:flex; gap:16px; flex-wrap:wrap;">
-                        @foreach (var label in _segments.Where(segment => !segment.IsUnknown)
-                                                        .Select(segment => segment.Label!)
-                                                        .Distinct())
+                        @foreach (var entry in _legend)
                         {
                             <div style="display:flex; align-items:center; gap:6px;">
-                                <span style="@($"width:12px; height:12px; border-radius:2px; background:{ColorFor(label)};")"></span>
-                                <MudText Typo="Typo.caption">@label</MudText>
-                            </div>
-                        }
-                        @if (_segments.Any(segment => segment.IsUnknown))
-                        {
-                            <div style="display:flex; align-items:center; gap:6px;">
-                                <span style="@($"width:12px; height:12px; border-radius:2px; background:{UnknownFill};")"></span>
-                                <MudText Typo="Typo.caption">No data</MudText>
+                                <span style="@($"width:12px; height:12px; border-radius:2px; background:{entry.Fill};")"></span>
+                                <MudText Typo="Typo.caption">@entry.Label</MudText>
                             </div>
                         }
                     </div>
@@ -97,11 +85,11 @@
                     <MudSimpleTable Dense="true" Style="flex:1 1 auto; min-height:0; overflow:auto;">
                         <thead><tr><th>Time</th><th>Value</th><th>Duration</th></tr></thead>
                         <tbody>
-                        @foreach (var segment in _segments.Reverse())
+                        @foreach (var segment in _newestFirstSegments)
                         {
                             <tr>
                                 <td>@TimeZone.ToZoned(segment.Start).ToString("g")</td>
-                                <td>@(segment.Label ?? "No data")</td>
+                                <td>@DescribeValue(segment)</td>
                                 <td>@FormatDuration(segment.Duration)</td>
                             </tr>
                         }
@@ -209,10 +197,22 @@
     private const string UnknownFill =
         "repeating-linear-gradient(45deg, #BDBDBD, #BDBDBD 4px, #E0E0E0 4px, #E0E0E0 8px)";
 
+    // A covered span whose value is absent is not the same as an uncovered one, and must not read as
+    // missing history: the store does vouch for this span, the value there simply is null.
+    private const string NoValueFill = "#455A64";
+    private const string NoValueLabel = "(no value)";
+
+    private const string PinnedOnColor = "#2979FF";
+    private const string PinnedOffColor = "#9E9E9E";
+
     private static readonly string[] StatePalette =
-        ["#2979FF", "#00B8A9", "#F6A609", "#8E44AD", "#E4572E", "#3D5A80"];
+        ["#00B8A9", "#F6A609", "#8E44AD", "#E4572E", "#3D5A80", "#C2185B"];
 
     private readonly Dictionary<string, string> _stateColors = new(StringComparer.Ordinal);
+    private int _paletteCursor;
+    private string _bandGradient = string.Empty;
+    private IReadOnlyList<(string Label, string Fill)> _legend = [];
+    private IReadOnlyList<PropertyHistoryChartModel.StateSegment> _newestFirstSegments = [];
 
     // A discrete property renders as a state timeline, except under Count, which is a numeric
     // aggregate of a discrete value and so belongs on the chart.
@@ -314,6 +314,8 @@
                 _chartSeries = null;
                 _tableRows = null;
                 _segments = null;
+                _legend = [];
+                _newestFirstSegments = [];
                 return;
             }
 
@@ -350,7 +352,9 @@
 
             // The value held entering the window: a raw query returns only the samples inside it, so a
             // property that last changed before 'from' would otherwise render as an empty timeline.
-            var valueAtStart = UseStateTimeline
+            // Only a raw query can start after the window: a bucketed one always emits a point at the
+            // aligned bucket start, which is at or before From, so the look-back would go unused.
+            var valueAtStart = UseStateTimeline && bucket is null
                 ? await Registry.GetValueAtAsync(PropertyPath, from, cancellationToken)
                 : null;
 
@@ -371,6 +375,8 @@
             _chartSeries = null;
             _tableRows = null;
             _segments = null;
+            _legend = [];
+            _newestFirstSegments = [];
         }
         catch (OperationCanceledException)
         {
@@ -382,6 +388,8 @@
             _chartSeries = null;
             _tableRows = null;
             _segments = null;
+            _legend = [];
+            _newestFirstSegments = [];
         }
         finally
         {
@@ -405,6 +413,12 @@
                 _windowTo,
                 series.CoverageRanges,
                 point => PropertyHistoryChartModel.FormatDiscreteValue(point, PropertyType));
+
+            // Derived once per load: the band, its legend and the newest-first rows are all pure
+            // functions of the segments, and recomputing them per render is wasted work.
+            _paletteCursor = 0;
+            BuildBand(_segments);
+            _newestFirstSegments = _segments.Reverse().ToArray();
             _chartSeries = null;
             _tableRows = null;
             return;
@@ -458,20 +472,71 @@
         }
     }
 
-    private string SegmentStyle(PropertyHistoryChartModel.StateSegment segment)
+    /// <summary>
+    /// Renders the whole band as one gradient with hard colour stops rather than one element per run.
+    /// A chattering property yields hundreds of sub-pixel runs, and as elements those cannot shrink
+    /// below their minimum width, so the long runs lose their proportion and the newest runs are
+    /// clipped off the end: exactly the case where the timeline matters most.
+    /// </summary>
+    private void BuildBand(IReadOnlyList<PropertyHistoryChartModel.StateSegment> segments)
     {
-        // Percentage widths keep every run proportional to its duration; a flex-grow layout would
-        // collapse a short state (a light toggled for seconds) to nothing.
         var window = (_windowTo - _windowFrom).Ticks;
-        var share = window <= 0 ? 0d : segment.Duration.Ticks * 100d / window;
-        var fill = segment.IsUnknown ? UnknownFill : ColorFor(segment.Label!);
-        return string.Create(
-            CultureInfo.InvariantCulture,
-            $"width:{share:0.####}%; background:{fill}; min-width:1px;");
+        if (window <= 0)
+        {
+            _bandGradient = UnknownFill;
+            _legend = [];
+            return;
+        }
+
+        _stateColors.Clear();
+        var stops = new List<string>(segments.Count * 2);
+        var offset = 0d;
+
+        foreach (var segment in segments)
+        {
+            var fill = FillFor(segment);
+            var next = offset + segment.Duration.Ticks * 100d / window;
+            stops.Add(string.Create(CultureInfo.InvariantCulture, $"{fill} {offset:0.####}%"));
+            stops.Add(string.Create(CultureInfo.InvariantCulture, $"{fill} {next:0.####}%"));
+            offset = next;
+        }
+
+        // The hatch is itself a gradient, so an unknown run cannot be a stop in a linear-gradient.
+        // Layering the hatch underneath and punching transparent holes in the colour layer keeps both.
+        _bandGradient = segments.Any(segment => segment.IsUnknown)
+            ? $"linear-gradient(to right, {string.Join(", ", stops)}), {UnknownFill}"
+            : $"linear-gradient(to right, {string.Join(", ", stops)})";
+
+        var legend = _stateColors
+            .Select(entry => (Label: entry.Key, Fill: entry.Value))
+            .ToList();
+
+        if (segments.Any(segment => segment.IsUnknown))
+        {
+            legend.Add(("No data", UnknownFill));
+        }
+
+        if (segments.Any(segment => !segment.IsUnknown && segment.Label is null))
+        {
+            legend.Add((NoValueLabel, NoValueFill));
+        }
+
+        _legend = legend;
     }
 
-    private string SegmentTooltip(PropertyHistoryChartModel.StateSegment segment) =>
-        $"{segment.Label ?? "No data"}\n{TimeZone.ToZoned(segment.Start):g} for {FormatDuration(segment.Duration)}";
+    private string FillFor(PropertyHistoryChartModel.StateSegment segment)
+    {
+        // Unknown runs show the hatch layered beneath, so the colour layer is punched through.
+        if (segment.IsUnknown)
+        {
+            return "transparent";
+        }
+
+        return segment.Label is { } label ? ColorFor(label) : NoValueFill;
+    }
+
+    private static string DescribeValue(PropertyHistoryChartModel.StateSegment segment) =>
+        segment.IsUnknown ? "No data" : segment.Label ?? NoValueLabel;
 
     private string ColorFor(string label)
     {
@@ -480,11 +545,14 @@
             return existing;
         }
 
+        // The pinned pair keeps a boolean reading the same way every time. Palette assignment counts
+        // only the labels that actually took a palette slot, so a pinned label does not consume one
+        // and push a later label onto a colour already in use.
         var color = label switch
         {
-            "Yes" or "True" or "On" => StatePalette[0],
-            "No" or "False" or "Off" => "#9E9E9E",
-            _ => StatePalette[_stateColors.Count % StatePalette.Length]
+            "Yes" or "True" or "On" => PinnedOnColor,
+            "No" or "False" or "Off" => PinnedOffColor,
+            _ => StatePalette[_paletteCursor++ % StatePalette.Length]
         };
 
         _stateColors[label] = color;

@@ -174,9 +174,10 @@ public static class PropertyHistoryChartModel
     }
 
     /// <summary>
-    /// One constant-value run of a discrete property's history. <see cref="Label"/> is null exactly when
-    /// <see cref="IsUnknown"/> is true, which covers both an uncovered span (no store vouches for it) and
-    /// a covered span whose value was never observed.
+    /// One constant-value run of a discrete property's history. <see cref="IsUnknown"/> means no store
+    /// vouches for the span, so nothing can be said about it. A null <see cref="Label"/> on a covered
+    /// span means the opposite: the span is recorded, and the value there is genuinely absent (an
+    /// explicit null, or a bucket with no sample under an aggregation that does not carry forward).
     /// </summary>
     public readonly record struct StateSegment(
         DateTimeOffset Start, DateTimeOffset End, string? Label, bool IsUnknown)
@@ -193,6 +194,9 @@ public static class PropertyHistoryChartModel
     /// Spans outside <paramref name="coverage"/> become unknown segments rather than extending the
     /// neighbouring value across them: a gap means no store can say whether the value changed, which is
     /// precisely the distinction a line chart cannot draw.
+    ///
+    /// <paramref name="points"/> and <paramref name="coverage"/> must be ascending by time, which is what
+    /// every store and the merger return.
     /// </summary>
     public static IReadOnlyList<StateSegment> BuildStateSegments(
         IReadOnlyList<HistoryPoint> points,
@@ -225,46 +229,93 @@ public static class PropertyHistoryChartModel
 
         var segments = new List<StateSegment>();
         var ordered = boundaries.ToArray();
+
+        // Cursors over the ascending points and ranges, so the walk stays linear rather than
+        // rescanning both lists at every boundary.
+        var pointIndex = 0;
+        var coverageIndex = 0;
+        var held = valueAtStart is { } seed && seed.Timestamp <= from ? seed : null;
+
         for (var index = 0; index < ordered.Length - 1; index++)
         {
             var start = ordered[index];
             var end = ordered[index + 1];
 
-            var held = points
-                .Where(point => point.Timestamp <= start)
-                .LastOrDefault() ?? (valueAtStart is { } seed && seed.Timestamp <= start ? seed : null);
-
-            var label = held is null ? null : format(held);
-            var isCovered = coverage.Any(range => range.Contains(new HistoryCoverage(start, end)));
-            var isUnknown = !isCovered || label is null;
-
-            // Merge into the previous run when nothing observable changed at this boundary.
-            if (segments.Count > 0 &&
-                segments[^1].IsUnknown == isUnknown &&
-                segments[^1].Label == (isUnknown ? null : label))
+            while (pointIndex < points.Count && points[pointIndex].Timestamp <= start)
             {
-                segments[^1] = segments[^1] with { End = end };
+                held = points[pointIndex];
+                pointIndex++;
+            }
+
+            while (coverageIndex < coverage.Count && coverage[coverageIndex].To <= start)
+            {
+                coverageIndex++;
+            }
+
+            var isCovered = coverageIndex < coverage.Count &&
+                coverage[coverageIndex].Contains(new HistoryCoverage(start, end));
+
+            // Three distinct states, and conflating the last two is what makes a healthy null read as
+            // missing history: no store vouches for this span; a store vouches for it but no value was
+            // ever observed (an explicitly recorded null, or a bucket with no sample under a
+            // non-carrying aggregation); or a value is held.
+            var label = isCovered && held is not null ? format(held) : null;
+            segments.Add(new StateSegment(start, end, label, IsUnknown: !isCovered));
+        }
+
+        return Coalesce(segments);
+    }
+
+    /// <summary>
+    /// Merges neighbouring runs that render identically, so a boundary that changed nothing observable
+    /// (a coverage edge mid-run, or a sample that repeated the current value) does not split the band.
+    /// </summary>
+    private static List<StateSegment> Coalesce(List<StateSegment> segments)
+    {
+        var merged = new List<StateSegment>(segments.Count);
+        foreach (var segment in segments)
+        {
+            if (merged.Count > 0 &&
+                merged[^1].IsUnknown == segment.IsUnknown &&
+                merged[^1].Label == segment.Label)
+            {
+                merged[^1] = merged[^1] with { End = segment.End };
             }
             else
             {
-                segments.Add(new StateSegment(start, end, isUnknown ? null : label, isUnknown));
+                merged.Add(segment);
             }
         }
 
-        return segments;
+        return merged;
     }
 
     /// <summary>
     /// Formats a point as the display value of a discrete property: booleans read as Yes/No (matching the
     /// subject browser), everything else as its recorded JSON or numeric value. Returns null for a point
-    /// carrying no value at all, which the timeline renders as unknown.
+    /// carrying no value at all, which the timeline renders as an absent value.
     /// </summary>
     public static string? FormatDiscreteValue(HistoryPoint point, Type propertyType)
     {
         var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
         if (point.Json is { } json)
         {
-            return json.ValueKind == JsonValueKind.String ? json.GetString() : json.ToString();
+            // An oversize string is recorded as a placeholder object rather than the value itself;
+            // showing its raw JSON as a state label is worse than saying what happened.
+            if (json.ValueKind == JsonValueKind.Object)
+            {
+                return json.TryGetProperty("$oversize", out _) ? "(value too large)" : json.ToString();
+            }
+
+            if (json.ValueKind != JsonValueKind.String)
+            {
+                return json.ToString();
+            }
+
+            // An empty string is a real value, but an empty label renders as a coloured run with a
+            // blank legend entry, which reads as a bug.
+            var text = json.GetString();
+            return string.IsNullOrEmpty(text) ? "(empty)" : text;
         }
 
         if (point.Number is not { } number)
