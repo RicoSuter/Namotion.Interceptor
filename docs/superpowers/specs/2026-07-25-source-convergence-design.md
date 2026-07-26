@@ -98,25 +98,116 @@ Three of these fields exist for reasons that are easy to miss:
 
 `Diverged` is not a state: it is a derived report, because a property can be diverged with or without an intent and with or without a fault.
 
-## Transition table
+## State machine
 
-`S`/`V` are the sequence and value of an incoming local change, `O`/`P` the value and `observedAtSeq` of an observation, `A` the attempt an outcome refers to. `≈` means "compares equal under the value comparer". **Any event whose epoch differs from the property's current epoch is discarded before dispatch** and does not appear below.
+The machine is specified per state with explicit guards, because the recurring defect in earlier drafts was an event occurring in a state nobody had considered. Every state lists every event; there are no implicit cells.
 
-| Event | `Clean` | `Dirty` | `InFlight` | `Awaiting` |
-|---|---|---|---|---|
-| **Local commit** (S,V) | Create intent: `desired=V,desiredSeq=S`, `baseline=belief`, `attempts=0` → `Dirty` | If `S>desiredSeq`: update desired; baseline unchanged → `Dirty` | If `S>desiredSeq`: update desired; attempt untouched → `InFlight` | If `S>desiredSeq`: update desired → `Dirty` (send the successor; the outstanding attempt's confirmation now only updates belief) |
-| **Observation** (O,P) | `belief=(O,P)` → `Clean` | `belief=(O,P)`. If `P>baselineSeq` and `O≉baseline`: source moved since our write → **resolve by policy**. Else if `O≈desired`: source already holds it → clear intent → `Clean`. Else → `Dirty` | `belief=(O,P)`; same source-moved test, but the in-flight attempt completes first and the intent is cleared on completion → `InFlight` | `belief=(O,P)`. If `O≈attemptValue`: confirmed → `Dirty` if `desiredSeq>attemptSeq`, else clear intent → `Clean`. Else if `P>attemptSeq`: source moved after our attempt → **resolve by policy**. Else → `Awaiting` |
-| **Accepted** (A) | ignore (late) | ignore (late) | If `desiredSeq>A` → `Dirty` (successor pending); else record attempt → `Awaiting` | ignore (duplicate) |
-| **Transient** (A) | ignore | ignore | `attempts++`; budget exhausted → record fault, resolve by policy; else → `Dirty` (backoff) | ignore |
-| **PermanentlyRejected** (A) | ignore | ignore | Record fault. If `desiredSeq>A` → `Dirty` (the newer value may be acceptable); else resolve by policy → `Clean` | ignore |
-| **NotAttempted** (A) | ignore | ignore | → `Dirty`, without consuming budget (it was never transmitted) | ignore |
-| **Grace expiry** (A) | n/a | n/a | n/a | `attempts++`; budget exhausted → record fault, resolve by policy; else force a readback where the transport supports one, then → `Dirty` |
-| **Epoch change** | Invalidate belief → `Clean` | Drop intent (it targets a stale binding), invalidate belief → `Clean` | Abandon attempt, drop intent, invalidate belief → `Clean` | Drop intent, invalidate belief → `Clean` |
-| **Load complete** | Apply staged observations as **Observation** events, then check → `Clean` | As **Observation** per property, then check | As **Observation**; the attempt completes normally | As **Observation** |
-| **Transaction confirmed** (T) | Register a verification intent with `attempt=(seq,T)` → `Awaiting` | Same, superseding a lower-seq intent → `Awaiting` | Attempt abandoned (the transaction wrote under the gate) → `Awaiting` | → `Awaiting` with the transaction's attempt |
-| **Convergence tick** | see below | report `Pending` | report `Pending` | report `Pending` |
+The decision logic is a **pure function** `(state, event) -> (state', actions)` with no I/O, no clocks and no async, so it can be exhaustively enumerated in tests (see Validation). Performing the actions (sending, writing the model, arming timers) is a separate layer.
 
-**Resolve by policy.** `RevertToSource` writes `observedValue` to the model through a **sequence-guarded write** that fails if a local commit newer than `desiredSeq` exists, so adoption cannot clobber a concurrent newer write; it clears the intent and leaves any fault standing. `KeepLocal` clears the intent, leaves the model, and records the divergence.
+### Alphabet
+
+`S`/`V` are the sequence and value of a local change; `O`/`P` the value and `observedAtSeq` of an observation; `A` an attempt sequence. `≈` is the value comparer. `budget` is the retry budget.
+
+Events: `LocalCommit(S,V)`, `Observation(O,P)`, `SendPicked`, `Accepted(A)`, `Transient(A)`, `PermanentlyRejected(A,status)`, `NotAttempted(A)`, `GraceExpiry(A)`, `EpochChange`, `LoadComplete`, `TransactionConfirmed(S,T)`, `ConvergenceTick`.
+
+**Precondition applied to every event:** an event whose epoch differs from the property's current epoch is discarded before it reaches the machine. An `Observation` with `P <= belief.observedAtSeq` updates nothing, because belief never regresses.
+
+### State: `Clean` (no intent; belief and fault may exist)
+
+| Event | Guard | Actions | Next |
+|---|---|---|---|
+| `LocalCommit(S,V)` | always | create intent `{desired=V, desiredSeq=S, baseline=belief.value, baselineSeq=belief.observedAtSeq, attempts=0, epoch=current}` | `Dirty` |
+| `Observation(O,P)` | always | `belief=(O,P)` | `Clean` |
+| `SendPicked` | no intent | ignore | `Clean` |
+| `Accepted` / `Transient` / `PermanentlyRejected` / `NotAttempted` / `GraceExpiry` | always | ignore (orphaned outcome for a resolved intent) | `Clean` |
+| `EpochChange` | always | invalidate belief; fault is retained | `Clean` |
+| `LoadComplete` | always | apply staged observations as `Observation`; then `ConvergenceTick` | `Clean` |
+| `TransactionConfirmed(S,T)` | always | create verification intent `{desired=T, desiredSeq=S, attempt=(S,T), attempts=0}` | `Awaiting` |
+| `ConvergenceTick` | not quiescent | report `Pending` | `Clean` |
+| `ConvergenceTick` | quiescent | run the convergence check below | `Clean` or `Dirty` |
+
+### State: `Dirty` (intent exists, not being sent)
+
+| Event | Guard | Actions | Next |
+|---|---|---|---|
+| `LocalCommit(S,V)` | `S > desiredSeq` | `desired=V`, `desiredSeq=S`; baseline unchanged | `Dirty` |
+| `LocalCommit(S,V)` | `S <= desiredSeq` | ignore (reordered or duplicate) | `Dirty` |
+| `Observation(O,P)` | `P > baselineSeq` and `O ≉ baselineValue` | `belief=(O,P)`; source moved since our write; **resolve by policy** | `Clean` |
+| `Observation(O,P)` | `O ≈ desiredValue` | `belief=(O,P)`; source already holds our value; clear intent | `Clean` |
+| `Observation(O,P)` | otherwise | `belief=(O,P)` | `Dirty` |
+| `SendPicked` | write gate held, `desiredSeq` unchanged since selection | `attempt=(desiredSeq, desiredValue)`; emit send | `InFlight` |
+| `Accepted` / `Transient` / `PermanentlyRejected` / `NotAttempted` / `GraceExpiry` | always | ignore (orphaned) | `Dirty` |
+| `EpochChange` | always | drop intent (it targets a stale binding); invalidate belief | `Clean` |
+| `LoadComplete` | always | apply staged observations as `Observation`, then evaluate as above | `Dirty` or `Clean` |
+| `TransactionConfirmed(S,T)` | `S > desiredSeq` | replace intent with verification intent | `Awaiting` |
+| `TransactionConfirmed(S,T)` | `S <= desiredSeq` | ignore | `Dirty` |
+| `ConvergenceTick` | always | report `Pending`; no check | `Dirty` |
+
+### State: `InFlight` (an attempt is being sent)
+
+| Event | Guard | Actions | Next |
+|---|---|---|---|
+| `LocalCommit(S,V)` | `S > desiredSeq` | `desired=V`, `desiredSeq=S`; attempt untouched | `InFlight` |
+| `LocalCommit(S,V)` | `S <= desiredSeq` | ignore | `InFlight` |
+| `Observation(O,P)` | `P > baselineSeq` and `O ≉ baselineValue` | `belief=(O,P)`; mark intent for policy resolution when the attempt completes | `InFlight` |
+| `Observation(O,P)` | otherwise | `belief=(O,P)` | `InFlight` |
+| `SendPicked` | attempt already in flight | ignore | `InFlight` |
+| `Accepted(A)` | `desiredSeq > A` | successor pending; do not await this attempt | `Dirty` |
+| `Accepted(A)` | `desiredSeq == A` | arm the grace timer | `Awaiting` |
+| `Transient(A)` | `attempts + 1 <= budget` | `attempts++`; schedule backoff | `Dirty` |
+| `Transient(A)` | `attempts + 1 > budget` | record fault; **resolve by policy** | `Clean` |
+| `PermanentlyRejected(A,status)` | `desiredSeq > A` | record fault; retry the newer value | `Dirty` |
+| `PermanentlyRejected(A,status)` | `desiredSeq == A` | record fault; **resolve by policy** | `Clean` |
+| `NotAttempted(A)` | always | never transmitted; do not consume budget | `Dirty` |
+| `GraceExpiry(A)` | always | ignore (not awaiting yet) | `InFlight` |
+| `EpochChange` | always | abandon attempt; drop intent; invalidate belief | `Clean` |
+| `LoadComplete` | always | apply staged observations; attempt completes normally | `InFlight` |
+| `TransactionConfirmed(S,T)` | always | abandon attempt (the transaction wrote under the gate); register verification | `Awaiting` |
+| `ConvergenceTick` | always | report `Pending`; no check | `InFlight` |
+
+### State: `Awaiting` (attempt accepted, awaiting a confirming observation)
+
+| Event | Guard | Actions | Next |
+|---|---|---|---|
+| `LocalCommit(S,V)` | `S > desiredSeq` | `desired=V`, `desiredSeq=S`; the outstanding attempt now only updates belief | `Dirty` |
+| `LocalCommit(S,V)` | `S <= desiredSeq` | ignore | `Awaiting` |
+| `Observation(O,P)` | `O ≈ attemptValue` and `desiredSeq > attemptSeq` | `belief=(O,P)`; attempt confirmed; successor pending | `Dirty` |
+| `Observation(O,P)` | `O ≈ attemptValue` and `desiredSeq == attemptSeq` | `belief=(O,P)`; attempt confirmed; clear intent | `Clean` |
+| `Observation(O,P)` | `O ≉ attemptValue` and `P > attemptSeq` | `belief=(O,P)`; source moved after our attempt; **resolve by policy** | `Clean` |
+| `Observation(O,P)` | otherwise (older or unrelated) | `belief=(O,P)` | `Awaiting` |
+| `SendPicked` | attempt outstanding | ignore | `Awaiting` |
+| `Accepted` / `Transient` / `PermanentlyRejected` / `NotAttempted` | always | ignore (duplicate or late) | `Awaiting` |
+| `GraceExpiry(A)` | `A != attemptSeq` | ignore (stale timer) | `Awaiting` |
+| `GraceExpiry(A)` | `A == attemptSeq`, `attempts + 1 <= budget` | `attempts++`; force a readback where the transport supports one | `Dirty` |
+| `GraceExpiry(A)` | `A == attemptSeq`, `attempts + 1 > budget` | record fault; **resolve by policy** | `Clean` |
+| `EpochChange` | always | drop intent; invalidate belief | `Clean` |
+| `LoadComplete` | always | apply staged observations, then evaluate as above | per `Observation` |
+| `TransactionConfirmed(S,T)` | `S > desiredSeq` | replace attempt with the transaction's | `Awaiting` |
+| `TransactionConfirmed(S,T)` | `S <= desiredSeq` | ignore | `Awaiting` |
+| `ConvergenceTick` | always | report `Pending`; no check | `Awaiting` |
+
+### Sub-machine: resolve by policy
+
+| Policy | Actions |
+|---|---|
+| `RevertToSource` (default) | sequence-guarded write of `belief.observedValue` to the model, which fails if a local commit newer than `desiredSeq` exists, so adoption cannot clobber a concurrent newer write; clear intent; retain any fault |
+| `KeepLocal` | clear intent; leave the model; record the divergence |
+
+In both cases the intent is cleared, so the machine lands in `Clean`. A failed guarded write means a newer local commit exists, whose own `LocalCommit` event creates a fresh intent.
+
+### Invariants
+
+These are the properties the enumeration in Validation asserts after every event.
+
+| | Invariant |
+|---|---|
+| I1 | An intent exists if and only if the state is not `Clean` |
+| I2 | In `InFlight` or `Awaiting`, an attempt is set; in `Clean` or `Dirty`, none is |
+| I3 | `desiredSeq >= attemptSeq` |
+| I4 | `belief.observedAtSeq` never decreases, and `attempts` never exceeds `budget` |
+| I5 | Every local commit is eventually delivered, superseded by a newer commit, resolved by policy, or recorded as a fault. It is never silently dropped |
+| I6 | Once quiescent with an observable property, the report is `InSync` or `Diverged`, and `InSync` implies `model ≈ belief.observedValue` |
+| I7 | No send is emitted whose value is older than an observation the source produced after it, unless policy chose it |
 
 ## Convergence check
 
@@ -266,16 +357,15 @@ The same capture and coalescing split for servers, with no belief and no converg
 
 ## Validation
 
-A transition table removes undefined cases, but it cannot establish correctness under concurrent interleavings, which is where this design has been wrong before. Step 3 is therefore validated by model checking in the TLC harness already built in #358, which ships trace generation and `ModelTrace` capture.
+A state table removes undefined cases, but it cannot establish correctness under concurrent interleavings, which is where earlier drafts of this design were repeatedly wrong. Step 3 is therefore gated on **exhaustive enumeration of the state machine**, in the repository, not on further review.
 
-Invariants to check:
+Because the decision logic is a pure `(state, event) -> (state', actions)` function, a test can enumerate every event sequence up to a bounded depth from every reachable starting state and assert invariants I1 to I7 after each step. With four states and twelve events this is fast, and unlike an external model it exercises **the shipped code**, so it cannot drift from the implementation.
 
-- **Quiescent convergence**: once no local commits are issued and the transport is healthy, every property eventually reports `InSync`, `Diverged` or `NotVerifiable`, and `InSync` implies `model ≈ observedValue`.
-- **No stale overwrite**: no send emits a value whose `commitSeq` is lower than an observation the source produced after it, unless policy explicitly chose it.
-- **No lost intent**: a local commit is delivered, superseded by a newer commit, resolved by policy, or recorded as a fault. Never silently dropped.
-- **Bounded retries**: no attempt retries without bound.
+The interleavings to cover explicitly, expressed as event sequences: a commit whose dispatch is delayed past an observation; an observation arriving between commit and capture; an outcome for an obsolete attempt; overlapping loads producing out-of-order observations; an epoch change mid-flight; and a transaction confirming while a send is in flight.
 
-Interleavings to model explicitly: commit before dispatch; observation between commit and capture; an outcome for an obsolete attempt; overlapping loads; epoch change mid-flight; transaction versus send.
+This replaces an earlier plan to model the machine in TLA+ via #358. That is an unmerged experiment, and depending on it for a production gate would be fragile, would require TLA+ fluency to maintain, and would verify a model that can silently diverge from the code. If #358 lands independently, modelling the same machine there is a useful complement, but nothing here waits on it.
+
+Bounded enumeration proves less than a model checker: it establishes "no violation within N events" rather than a general temporal proof. For a machine this small that is an acceptable trade for testing the real implementation.
 
 ### Tests
 
@@ -321,7 +411,7 @@ Then: writes during an outage all land after recovery, with more distinct proper
 |---|---|
 | **PR #354** source sync state | Different axis; it publishes what step 3 computes. Note that `PendingWriteCount` changes meaning after step 2 (from "writes that failed" to "properties with outstanding intent", routinely non-zero), so existing alerts on `> 0` will fire |
 | **PR #370** sources own their write lock | Step 3's transaction gate depends on where the lock lives |
-| **PR #358** TLA+ model | Extended with this state machine; it is the validation gate for step 3 |
+| **PR #358** TLA+ model | **Not a dependency.** Step 3 is gated on in-repo enumeration instead. If #358 lands, modelling this machine there is a useful complement |
 | **PR #313** batch browse and read | Step 3's readback uses the same path |
 | **#385** commit sequence numbers | The stamp half is a step 2 prerequisite; in-order delivery stays out of scope |
 | **#299** data value status codes in diagnostics | Overlaps per-change outcomes |
