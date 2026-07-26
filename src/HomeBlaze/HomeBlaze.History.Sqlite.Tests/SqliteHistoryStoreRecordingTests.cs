@@ -303,12 +303,18 @@ public class SqliteHistoryStoreRecordingTests
         try
         {
             // Act
+            var beforeRecording = DateTimeOffset.UtcNow;
             var series = await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 12.5);
 
             // Assert
             Assert.NotEmpty(series.Points);
             Assert.Equal(50, store.Priority);
-            Assert.True(Assert.Single(store.CoverageRanges).To >= DateTimeOffset.UtcNow.AddMinutes(-1));
+
+            // Against a mark taken before the write, not a minute-wide window around "now", which
+            // the coverage end would have to be badly stale to fall outside of.
+            Assert.True(
+                Assert.Single(store.CoverageRanges).To >= beforeRecording,
+                "coverage did not advance past the instant before the recorded change");
         }
         finally
         {

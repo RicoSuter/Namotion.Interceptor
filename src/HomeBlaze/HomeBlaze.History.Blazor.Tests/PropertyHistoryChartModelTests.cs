@@ -43,8 +43,9 @@ public class PropertyHistoryChartModelTests
         // Act
         var bucket = PropertyHistoryChartModel.AutoBucket(range, availableCoverage: TimeSpan.FromHours(6));
 
-        // Assert
-        Assert.Equal(PropertyHistoryChartModel.AutoBucket(range), bucket);
+        // Assert: 1h / 200 = 18s, which rounds up to the 30s rung. A golden value, because
+        // comparing against AutoBucket would move with the code and pass even if the clamp were gone.
+        Assert.Equal(TimeSpan.FromSeconds(30), bucket);
     }
 
     [Fact]
@@ -68,8 +69,9 @@ public class PropertyHistoryChartModelTests
         // Act
         var bucket = PropertyHistoryChartModel.ResolveBucket(auto, range, coverage);
 
-        // Assert
-        Assert.Equal(PropertyHistoryChartModel.AutoBucket(range, coverage), bucket);
+        // Assert: driven by the 5 minute coverage rather than the 24 hour range, so 5m / 200 = 1.5s
+        // rounds up to the 2s rung. A golden value for the same reason as above.
+        Assert.Equal(TimeSpan.FromSeconds(2), bucket);
     }
 
     [Theory]

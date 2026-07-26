@@ -282,7 +282,7 @@ The parity test suite feeds identical cases to both engines. Any future Timescal
 - Default `BufferTimeMilliseconds`: `250`.
 - Default `PartitionInterval`: `Weekly`.
 - Default `MaxJsonSize`: `8_192`.
-- Metrics include queue depth, drop count, storage size in bytes, last successful flush, errors, and throughput.
+- Metrics include recorded and oversize counts, queue depth, drop count, storage size in bytes, last successful flush, errors, and throughput.
 
 `InMemory.MaxAge` should remain comfortably larger than a persistent store's flush interval. The defaults provide a recent overlap so the live edge stays available while SQLite commits.
 
@@ -300,9 +300,27 @@ The parity test suite feeds identical cases to both engines. Any future Timescal
 
 ## UI and MCP
 
-The history subjects implement `ITitleProvider` and render as “In-Memory History” and “SQLite History”.
+The history subjects implement `ITitleProvider` and render as "In-Memory History" and "SQLite History".
 
-The property history dialog is available for eligible `[State]` properties when at least one store exists. It supports preset and custom ranges, raw or bucketed queries, type-aware aggregation choices, line breaks at explicit null gaps, and a table fallback for non-numeric values.
+The property history dialog is available for eligible `[State]` properties when at least one store exists. It supports preset and custom ranges, raw or bucketed queries, and type-aware aggregation choices. Numeric properties render as a line chart, split at explicit null gaps.
+
+### State timeline
+
+A discrete property renders as a state timeline instead: a proportional band of constant-value runs, a legend, and a newest-first table of transitions with durations. Discrete means `bool`, `enum` or `string` by type, or anything marked `[State(IsDiscrete = true)]`.
+
+The reason is that a line chart misrepresents a discrete value three ways at once: the value axis auto-scales far past a 0/1 range, an averaging default reports fractions for a state that was never fractional, and joining the points implies the value passed through everything in between.
+
+Discrete properties default to the raw period, so transitions keep their exact times rather than being rounded to a bucket edge, and only `Last`, `First` and `Count` are offered.
+
+The band distinguishes three states, which is the distinction a line chart cannot draw at all:
+
+| Rendering | Meaning |
+|---|---|
+| Coloured run | a value was held over this span |
+| Neutral run, "(no value)" | the span is covered, and the value there is genuinely absent (an explicit null, or a bucket with no sample under an aggregation that does not carry forward) |
+| Hatched run, "No data" | no store covers this span, so nothing can be said about it |
+
+Filling the start of a window needs the value held entering it, which a raw query does not return, so the merger exposes `GetValueAtAsync`. Without it a property whose last change predates the window renders as empty rather than as its actual state.
 
 `get_property_history` takes:
 

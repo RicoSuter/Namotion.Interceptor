@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Sqlite;
@@ -90,7 +91,7 @@ public sealed class SqliteHistoryStoreCoreOversizeAndMetricsTests : IDisposable
         await File.WriteAllTextAsync(_directory, "collision");
 
         // Act & Assert - the flush throws and records the error, but does NOT drop the batch
-        await Assert.ThrowsAnyAsync<Exception>(() => core.FlushAsync(CancellationToken.None));
+        await Assert.ThrowsAnyAsync<SqliteException>(() => core.FlushAsync(CancellationToken.None));
         Assert.NotNull(core.LastError);
         Assert.Equal(2, core.QueueDepth);
 
@@ -116,7 +117,7 @@ public sealed class SqliteHistoryStoreCoreOversizeAndMetricsTests : IDisposable
         await File.WriteAllTextAsync(_directory, "collision");
 
         // Act & Assert - the flush throws; the move is not dropped, so the later read sees it
-        await Assert.ThrowsAnyAsync<Exception>(() => core.FlushAsync(CancellationToken.None));
+        await Assert.ThrowsAnyAsync<SqliteException>(() => core.FlushAsync(CancellationToken.None));
 
         File.Delete(_directory);
         Directory.CreateDirectory(_directory);

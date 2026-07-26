@@ -67,7 +67,6 @@ public sealed class SqliteHistoryStoreCoreRetentionTests : IDisposable
         await core.FlushAsync(CancellationToken.None);
         Assert.Equal(Base.AddDays(12), Assert.Single(core.CoverageRanges).From);
 
-        core.Dispose();
         using var reopened = new SqliteHistoryStore(
             priority: 50,
             databaseDirectory: _directory,

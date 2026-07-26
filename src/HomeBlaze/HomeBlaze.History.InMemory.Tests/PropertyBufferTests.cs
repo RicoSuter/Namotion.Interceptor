@@ -65,7 +65,7 @@ public class PropertyBufferTests
     }
 
     [Fact]
-    public void WhenCapacityNotExceeded_ThenCapacityCoverageFloorIsUnset()
+    public void WhenCapacityNotExceeded_ThenNothingIsEvicted()
     {
         // Arrange
         var buffer = NewBuffer(capacity: 3);
