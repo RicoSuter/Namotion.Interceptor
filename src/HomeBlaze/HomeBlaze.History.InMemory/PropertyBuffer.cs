@@ -50,40 +50,52 @@ internal sealed class PropertyBuffer
         get { lock (_lock) { return _count == 0 ? null : _items[Index(_count - 1)]; } }
     }
 
-    // Appends (or replaces at an identical timestamp) and reports whether a sample was evicted to
-    // make room, which is what the store needs to know to advance its coverage floor.
-    public bool Append(Sample sample)
+    // Appends (or replaces at an identical timestamp) and reports whether a sample was evicted to make
+    // room. The resulting oldest retained timestamp comes out under the same lock: reading it afterwards
+    // let a concurrent age sweep run in between, so the store latched its coverage floor at the sweep's
+    // cutoff instead of this eviction's boundary and under-claimed the samples still held.
+    public bool Append(Sample sample) => Append(sample, out _);
+
+    /// <inheritdoc cref="Append(Sample)"/>
+    public bool Append(Sample sample, out DateTimeOffset? oldestRetained)
     {
         lock (_lock)
         {
-            if (_count > 0)
-            {
-                var newestIndex = Index(_count - 1);
-                var newestTimestamp = _items[newestIndex].Timestamp;
-                if (sample.Timestamp < newestTimestamp)
-                {
-                    return InsertOrdered(sample);
-                }
-
-                if (sample.Timestamp == newestTimestamp)
-                {
-                    _items[newestIndex] = sample;
-                    return false;
-                }
-            }
-
-            var capacityEvicted = _count == _capacity;
-            if (capacityEvicted)
-            {
-                _start = (_start + 1) % _capacity; // overwrite oldest
-                _count--;
-                _evictedCount++;
-            }
-
-            _items[Index(_count)] = sample;
-            _count++;
-            return capacityEvicted;
+            var evicted = AppendCore(sample);
+            oldestRetained = _count == 0 ? null : _items[_start].Timestamp;
+            return evicted;
         }
+    }
+
+    private bool AppendCore(Sample sample)
+    {
+        if (_count > 0)
+        {
+            var newestIndex = Index(_count - 1);
+            var newestTimestamp = _items[newestIndex].Timestamp;
+            if (sample.Timestamp < newestTimestamp)
+            {
+                return InsertOrdered(sample);
+            }
+
+            if (sample.Timestamp == newestTimestamp)
+            {
+                _items[newestIndex] = sample;
+                return false;
+            }
+        }
+
+        var capacityEvicted = _count == _capacity;
+        if (capacityEvicted)
+        {
+            _start = (_start + 1) % _capacity; // overwrite oldest
+            _count--;
+            _evictedCount++;
+        }
+
+        _items[Index(_count)] = sample;
+        _count++;
+        return capacityEvicted;
     }
 
     public int EvictOlderThan(DateTimeOffset cutoff)

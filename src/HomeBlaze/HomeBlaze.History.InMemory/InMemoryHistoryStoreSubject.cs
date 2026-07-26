@@ -247,6 +247,10 @@ public partial class InMemoryHistoryStoreSubject :
         finally
         {
             await sweepTask.ConfigureAwait(false);
+
+            // Stop claiming the live edge: the engine stays queryable, but it is no longer recording,
+            // so coverage must end here rather than following the clock forever.
+            engine.EndCoverageSession();
             Status = "Stopped";
         }
     }

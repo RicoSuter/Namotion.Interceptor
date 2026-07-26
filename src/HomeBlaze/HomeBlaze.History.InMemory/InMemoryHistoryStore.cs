@@ -34,7 +34,11 @@ public sealed class InMemoryHistoryStore : IHistoryStore
     private readonly TimeSpan _maxAge;
     private readonly int _maxJsonSize;
     private readonly Func<DateTimeOffset> _getUtcNow;
-    private DateTimeOffset _startTime;
+
+    // Session bounds as ticks: written from the owner's lifecycle and read by query threads, and a
+    // DateTimeOffset is too wide to read atomically. Zero end means "still recording".
+    private long _startTimeUtcTicks;
+    private long _coverageEndUtcTicks;
 
     private readonly ConcurrentDictionary<string, PropertyBuffer> _buffers = new(StringComparer.Ordinal);
 
@@ -53,7 +57,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         _maxAge = maxAge;
         _maxJsonSize = maxJsonSize;
         _getUtcNow = getUtcNow;
-        _startTime = getUtcNow();
+        _startTimeUtcTicks = getUtcNow().UtcTicks;
     }
 
     /// <summary>
@@ -61,7 +65,19 @@ public sealed class InMemoryHistoryStore : IHistoryStore
     /// this only narrows what the store claims: the owner calls it once its change subscription is
     /// live, so no change can fall inside claimed coverage without reaching this engine.
     /// </summary>
-    internal void BeginCoverageSession() => _startTime = _getUtcNow();
+    internal void BeginCoverageSession()
+    {
+        Interlocked.Exchange(ref _startTimeUtcTicks, _getUtcNow().UtcTicks);
+        Interlocked.Exchange(ref _coverageEndUtcTicks, 0);
+    }
+
+    /// <summary>
+    /// Freezes coverage at the last instant this store was recording. Nothing observes it after the
+    /// owner stops, so without this it keeps claiming "up to now" forever: at priority 100 the merger
+    /// would route the live edge here and get empty buckets instead of falling back to a durable store.
+    /// </summary>
+    internal void EndCoverageSession() =>
+        Interlocked.Exchange(ref _coverageEndUtcTicks, _getUtcNow().UtcTicks);
 
     public int Priority { get; }
 
@@ -81,8 +97,19 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         get
         {
             var now = _getUtcNow();
+            var coverageEndTicks = Interlocked.Read(ref _coverageEndUtcTicks);
+            if (coverageEndTicks != 0)
+            {
+                var frozen = new DateTimeOffset(coverageEndTicks, TimeSpan.Zero);
+                if (frozen < now)
+                {
+                    now = frozen;
+                }
+            }
+
+            var startTime = new DateTimeOffset(Interlocked.Read(ref _startTimeUtcTicks), TimeSpan.Zero);
             var ageFloor = now - _maxAge;
-            var from = _startTime > ageFloor ? _startTime : ageFloor;
+            var from = startTime > ageFloor ? startTime : ageFloor;
 
             // Coverage is store-wide and therefore all-or-nothing across property paths. Any actual
             // eviction advances a monotonic global floor. Capacity uses the affected buffer's oldest
@@ -111,8 +138,8 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         var isUlong = HistoryColumns.IsUlongProperty(propertyType);
         var buffer = _buffers.GetOrAdd(propertyPath, _ => new PropertyBuffer(_maxPointsPerProperty, column, isUlong));
 
-        if (buffer.Append(CreateSample(timestamp, value, column, isUlong)) &&
-            buffer.OldestTimestamp is { } oldestRetained)
+        if (buffer.Append(CreateSample(timestamp, value, column, isUlong), out var oldest) &&
+            oldest is { } oldestRetained)
         {
             // Capacity eviction: this buffer no longer has complete history before its oldest sample,
             // and coverage is store-wide, so the global floor advances to that boundary.
@@ -211,17 +238,20 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         }
 
         var legs = new List<ChainLeg>();
-        var visited = new HashSet<string>(StringComparer.Ordinal);
         var path = currentPath;
         var validTo = DateTimeOffset.MaxValue;
 
-        while (visited.Add(path))
+        // Bounded by the move count rather than by distinct paths: a subject that moves away and later
+        // returns visits the same path twice, in two disjoint validity windows. Stopping at the repeat
+        // dropped the earlier window, hiding samples that are still retained and inside coverage. Each
+        // step strictly lowers validTo, so the walk cannot cycle.
+        for (var step = 0; step <= snapshot.Length; step++)
         {
             // Latest move INTO this path before validTo gives the time the subject arrived here.
             MoveRecord? arrival = null;
             foreach (var move in snapshot)
             {
-                if (StringComparer.Ordinal.Equals(move.ToPath, path) && move.Timestamp <= validTo &&
+                if (StringComparer.Ordinal.Equals(move.ToPath, path) && move.Timestamp < validTo &&
                     (arrival is null || move.Timestamp > arrival.Value.Timestamp))
                 {
                     arrival = move;
@@ -401,11 +431,12 @@ public sealed class InMemoryHistoryStore : IHistoryStore
             query.From, query.To, bucket, query.MaxPoints);
         var bucketStart = firstBucketStart;
 
-        // When work was clipped to the newest buckets, advance carry to the clipped boundary.
-        // Otherwise TWA falls back to this store's held value when the merger supplied no seed.
+        // When work was clipped to the newest buckets, advance carry to the clipped boundary. Otherwise
+        // fall back to this store's own held value when the merger supplied no seed, for Last as well as
+        // TimeWeightedAverage: both carry forward, and restricting the look-back to one of them left a
+        // direct Last query returning nulls for a value the store was holding all along.
         if (InMemoryHistoryAggregation.IsCarryDependent(aggregation) &&
-            (bucketStart > alignedFrom ||
-             aggregation == HistoryAggregations.TimeWeightedAverage && query.CarrySeed is null))
+            (bucketStart > alignedFrom || query.CarrySeed is null))
         {
             var prior = GetSampleAtOrBefore(query.PropertyPath, bucketStart);
             if (prior is not null)
@@ -475,6 +506,22 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         {
             AdvanceEvictionCoverageFrom(cutoff.UtcTicks);
         }
-    }
 
+        // Moves describing samples that no longer exist only slow down chain resolution, which every
+        // query and look-back performs. Keep the first move at or after the cutoff so the leg that
+        // covers the cutoff instant still resolves.
+        lock (_movesLock)
+        {
+            var obsolete = 0;
+            while (obsolete + 1 < _moves.Count && _moves[obsolete + 1].Timestamp <= cutoff)
+            {
+                obsolete++;
+            }
+
+            if (obsolete > 0)
+            {
+                _moves.RemoveRange(0, obsolete);
+            }
+        }
+    }
 }
