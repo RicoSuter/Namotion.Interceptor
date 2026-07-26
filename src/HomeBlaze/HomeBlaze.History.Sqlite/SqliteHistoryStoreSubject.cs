@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -37,7 +38,10 @@ public partial class SqliteHistoryStoreSubject :
     // returned path to the stored one detects a move without depending on lifecycle event delivery.
     // The per-property inner map ensures the first changed property after a move does not consume the
     // move detection for sibling history properties.
-    private readonly Dictionary<IInterceptorSubject, Dictionary<string, string>> _lastSubjectPath = new();
+    // Weak keys: a detached subject's entry disappears when it becomes unreachable. Lifecycle detach
+    // is dispatched through the detaching subject's own context, which never reaches a sibling store,
+    // so this cannot rely on being told when a subject goes away.
+    private readonly ConditionalWeakTable<IInterceptorSubject, Dictionary<string, string>> _lastSubjectPath = new();
     private readonly object _pathCacheLock = new();
 
     private SqliteHistoryStore? _engine;
@@ -278,9 +282,6 @@ public partial class SqliteHistoryStoreSubject :
         engine.BeginCoverageSession();
         _engine = engine;
 
-        // Drop detached subjects from the move-detection cache (memory hygiene).
-        context.AddService(this);
-
         _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
 
         LastError = null;
@@ -346,11 +347,8 @@ public partial class SqliteHistoryStoreSubject :
 
             lock (_pathCacheLock)
             {
-                if (!_lastSubjectPath.TryGetValue(subject, out var pathsByProperty))
-                {
-                    pathsByProperty = new Dictionary<string, string>(StringComparer.Ordinal);
-                    _lastSubjectPath[subject] = pathsByProperty;
-                }
+                var pathsByProperty = _lastSubjectPath.GetValue(
+                    subject, _ => new Dictionary<string, string>(StringComparer.Ordinal));
 
                 if (pathsByProperty.TryGetValue(propertyName, out var previousSubjectPath) &&
                     !string.Equals(previousSubjectPath, subjectPath, StringComparison.Ordinal))

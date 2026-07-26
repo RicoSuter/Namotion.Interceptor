@@ -4,7 +4,8 @@ namespace HomeBlaze.History.Sqlite;
 
 /// <summary>
 /// The time span a single partition file covers. Public because it is the type of the
-/// <see cref="SqliteHistoryStore.PartitionInterval"/> configuration property.
+/// partition interval accepted by <see cref="SqliteHistoryStore"/> and exposed as a configuration
+/// property by its subject adapter.
 /// </summary>
 public enum PartitionInterval
 {
