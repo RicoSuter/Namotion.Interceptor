@@ -117,7 +117,9 @@ public partial class HueBridge : BackgroundService,
     {
         _logger = logger;
 
-        PollingInterval = TimeSpan.FromMilliseconds(500);
+        // The event stream carries state changes; this poll only reconciles the device set, so it is
+        // deliberately slow. This is the interval the loop hardcoded while the setting was ignored.
+        PollingInterval = TimeSpan.FromSeconds(60);
         RetryInterval = TimeSpan.FromSeconds(30);
 
         Lights = new();
@@ -323,11 +325,21 @@ public partial class HueBridge : BackgroundService,
         }
     }
 
+    /// <summary>
+    /// The poll only reconciles the device set (the event stream carries state), so it needs a floor.
+    /// The setting was ignored while the loop hardcoded 60s, and its old default of 500ms was persisted
+    /// into existing configurations, so honouring those verbatim would now poll bridges twice a second.
+    /// </summary>
+    private TimeSpan EffectivePollingInterval =>
+        PollingInterval > MinimumPollingInterval ? PollingInterval : MinimumPollingInterval;
+
+    private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(10);
+
     private async Task RunPollingLoopAsync(LocalHueApi client, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            await Task.Delay(TimeSpan.FromSeconds(60), cancellationToken);
+            await Task.Delay(EffectivePollingInterval, cancellationToken);
             await PollDevicesAsync(client, cancellationToken);
         }
     }
@@ -678,8 +690,21 @@ public partial class HueBridge : BackgroundService,
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         IsConnected = false;
-        _client = null;
-        _httpClient?.Dispose();
+
+        // Route through ResetClient so the event stream is stopped and the HttpClient is released as
+        // a pair. Clearing _client alone left _httpClient non-null and alive, so a disposal racing an
+        // in-flight operation let GetOrCreateClient build a replacement into abandoned fields.
+        LocalHueApi? client;
+        lock (_clientLock)
+        {
+            client = _client;
+        }
+
+        if (client is not null)
+        {
+            ResetClient(client);
+        }
+
         _configChangedSignal.Dispose();
         base.Dispose();
     }
