@@ -20,7 +20,7 @@ public partial class HueLightbulb : HueDevice,
     IColorTemperatureState, IColorTemperatureController,
     IPowerSensor
 {
-    internal Light LightResource { get; set; }
+    internal partial Light LightResource { get; set; }
 
     /// <summary>
     /// The light resource ID, used for room/zone child matching.

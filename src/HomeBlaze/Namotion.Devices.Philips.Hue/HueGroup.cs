@@ -22,9 +22,9 @@ public partial class HueGroup :
     IIconProvider,
     ILastUpdatedProvider
 {
-    internal HueResource Group { get; set; }
+    internal partial HueResource Group { get; set; }
 
-    internal GroupedLight? GroupedLight { get; set; }
+    internal partial GroupedLight? GroupedLight { get; set; }
 
     public HueBridge Bridge { get; }
 
