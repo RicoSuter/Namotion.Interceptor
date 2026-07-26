@@ -23,8 +23,8 @@ Verified against the code on `master`.
 | There is no way to tell whether a property is in sync (#195) | Source state reports connection lifecycle, not value agreement |
 | Polling and subscription produce different value representations | `SubscriptionManager.cs:204` converts; `PollingManager.cs:390` passes the raw node value to `:423` |
 | Read-after-write is enabled by default but tracks nothing | `ReadAfterWriteManager.cs:90-94` registers only when the requested sampling interval is exactly `0` and the server revised it upward; the default is `null` (`OpcUaClientConfiguration.cs:118`) |
-| Read-after-write mis-dates or throws on servers that omit source timestamps | `ReadAfterWriteManager.cs:329` casts `DataValue.SourceTimestamp` to `DateTimeOffset`. The SDK returns `DateTimeKind.Unspecified`, so the cast applies the local offset: values are silently shifted, and the SDK's "not supplied" `DateTime.MinValue` throws in any positive-offset timezone. Note this row is unreachable while the row above holds, since nothing registers by default |
-| Read-after-write discards the observation that would prove divergence | `ReadAfterWriteManager.cs:331-337` skips a readback whose source timestamp predates the local write timestamp |
+| Source timestamps are converted without normalising `DateTimeKind`, at four sites | `ReadAfterWriteManager.cs:329` casts explicitly; `SubscriptionManager.cs:205`, `PollingManager.cs:413` and `OpcUaSubjectClientSource.cs:244` take the same implicit `DateTime` to `DateTimeOffset` conversion. There is no `DateTimeKind` handling anywhere in the project. An unsupplied timestamp is `default(DateTime)`, whose `Kind` is `Unspecified`, so the conversion applies the local offset and **throws** in any positive-offset timezone. Whether a *supplied* timestamp is also shifted depends on the SDK's decoded `Kind`, which is unverified. This is a data-fidelity and crash bug, not a convergence bug: by P3a no decision reads these values |
+| Read-after-write discards the observation that would prove divergence, using a cross-clock comparison | `ReadAfterWriteManager.cs:331-337` skips a readback whose source timestamp predates the local write timestamp, comparing a local clock against a device clock (P3a) |
 
 Two structural facts the design must respect:
 
@@ -51,6 +51,10 @@ Not guaranteed:
 **P2a. Freshness of the observation is not sufficient: the apply must also be guarded.** A readback is taken at a point in time, and a local write can commit while it is in flight. A destructive apply is therefore vetoed when a local commit newer than the observation exists, enforced by compare-and-set at the terminal. Without this, a write issued during the readback round trip is silently overwritten and the property reports `InSync` while permanently diverged, satisfying every other rule.
 
 **P3. Sequencing orders local events only.** A local counter answers "did this local write commit after that point". It cannot rank two source observations, and no transport here offers a portable source-side sequence.
+
+**P3a. No decision may depend on a remote clock.** A device's clock can be arbitrarily wrong, so a comparison between a local timestamp and a source timestamp is unsound. Ordering is by `commitSeq` (local) and by arrival (local); grace windows, deadlines and the staleness bound are local elapsed time. Source timestamps are carried as metadata for display and history and are never read by a convergence decision.
+
+This is not hypothetical: `ReadAfterWriteManager.cs:331-337` skips a readback when the local write timestamp is newer than the remote source timestamp, which is exactly such a comparison, and it discards the observation that proves divergence. That code is **removed**, not guarded.
 
 **P4. The machine decides, a separate layer acts.** Every external fact (gate acquired, quiescent, belief age, readback outcome) enters as an event parameter, never an ambient read. Actions are queued and performed outside the transition, because dispatch is synchronous on the writing thread and an inline model write would re-enter the machine before the transition settles.
 
@@ -220,7 +224,11 @@ MQTT has no load (`LoadInitialStateAsync` returns `null`, `:211-215`) and retain
 
 ### Step 1: outcomes and confirmed bugs
 
-**1a. Standalone, land first.** `PollingManager` value conversion (convert at publish; leave `LastValue` raw so dedup semantics match the subscription path). The read-after-write timestamp fix: guard `DateTime.MinValue` **and** apply `DateTimeKind.Utc` before converting, since the missing `Kind` silently shifts every readback by the local offset; fall back to the received timestamp when absent.
+**1a. Standalone, land first.**
+
+- `PollingManager` value conversion: convert at publish, leaving `LastValue` raw so dedup semantics match the subscription path.
+- **Timestamp normalisation at all four sites**, not one: a shared helper that treats an unsupplied `default(DateTime)` as absent (falling back to the received timestamp) and specifies `DateTimeKind.Utc` otherwise. `ReadAfterWriteManager.cs:329` is the only explicit cast, but `SubscriptionManager.cs:205`, `PollingManager.cs:413` and `OpcUaSubjectClientSource.cs:244` take the same implicit conversion and the same crash. Fixing only the explicit one would leave three live paths, and would fix the one path that is unreachable under default configuration.
+- **Delete the read-after-write stale-skip** (`ReadAfterWriteManager.cs:331-337`) rather than guarding it. It compares a local clock against a device clock, which P3a forbids, and it suppresses exactly the observation that proves divergence.
 
 **1b. Atomic: per-change outcomes, retry disposition and the dropped signal.** These are **one change, not three**. Enumerating previously-skipped changes as failures without the disposition and queue fixes turns a silent drop into a head-of-line block that wedges every other property. Contents:
 
@@ -319,7 +327,29 @@ Before step 3 starts it also needs: the declared state record; where `≈sync` a
 
 **Unrelated**: #282, #228, #200 (lossless delivery is a separate projection with opposite overflow semantics), #373 (inbound ordering), #342 (this is an input to that contract, not a definition of it), #367, #369, #378 (independent refactors).
 
-## Part 10: open items
+## Part 10: known issues found by implementation review
+
+Two independent agents were given this document alone and asked to produce an implementation plan. Both stopped short of "yes, implementable". The first round's blockers are resolved above (counter hosting, the `NotAttempted` split, `writeRetryQueueSize = 0`, and the unstated atomicity of 1b). The second round got further and found these, which are recorded rather than pre-solved, because they are the kind a compiler and a first test run answer faster than prose.
+
+**Blocking, must be answered while implementing step 1:**
+
+1. **`WriteChangeOutcome` cannot live in `Namotion.Interceptor.Connectors` if the transaction path must carry it.** `ITransactionWriter` and `SourceWriteResult` are in `Namotion.Interceptor.Tracking`, and Tracking cannot reference Connectors: the dependency runs the other way. Either the enum moves to Tracking, or the transaction path carries something else, or it does not carry outcomes in step 1.
+2. **Multi-batch abort collides with non-retriable outcomes.** `SubjectSourceExtensions.WriteChangesInBatchesCoreAsync:86-115` stops at the first batch with a non-null `Error` and condemns the unprocessed remainder. Once one unmappable property makes batch 1 of 5 fail, batches 2 to 5 are never attempted and are requeued as retriable: a permanent spin, worse than the head-of-line block 1b exists to fix. Decide whether the loop continues past a batch whose failures are all non-retriable, or whether such a result carries a null `Error` and a separate flag.
+3. **A transiently unregistered property must not be classified `Unsupported`.** `OutboundWriter.TryGetWritableNodeId:130` returns false when the registered property cannot be resolved, and `ChangeQueueProcessor.cs:60-63` documents that this legitimately happens during a concurrent structural mutation. Dropping it permanently is wrong; it needs `NotAttempted`. The same applies to `MqttSubjectClientSource.cs:250`.
+4. **The 1c mechanism as described does not compile.** `SessionManager` is `internal sealed` in a different assembly, so a `protected` member is unreachable and needs an internal wrapper on `OpcUaSubjectClientSource`. `_flushSemaphore` is private on `WriteRetryQueue`, so acquiring it from `SubjectSourceBase` requires either moving the drain inside `WriteRetryQueue` or exposing an async drain, which makes the method async and contradicts the synchronous shape described.
+5. **`IsFullySuccessful` and `IsPartialFailure` have no defined meaning once `Outcomes` exists.** Every existing caller branches on them (`SubjectSourceBase.cs:131`, `:160`; `WriteRetryQueue.cs:154`; `OutboundWriter.cs:53`; `SourceTransactionWriter.cs:165`, `:377`). This is the mechanical root of issue 2.
+6. **WebSocket is absent from step 1.** `WebSocketSubjectClientSource.WriteChangesAsync:340-396` returns `Success` for the whole batch after one send, and `CreatePartialUpdateFromChanges` can silently omit changes: the same defect class Part 1 documents for OPC UA and MQTT.
+
+**Blocking for step 2:**
+
+7. **The replacement reconcile is unspecified.** Step 2 removes `ReapplyRetryQueue` and says reconcile is re-implemented, without giving its algorithm, baseline or call sites. Note the four connector sites added in 1c call the method being deleted.
+8. **The merge rule when a failed send is requeued into a slot a newer local write already occupies** is the most load-bearing rule in step 2 and is not stated.
+9. **Whether the dequeue loop runs continuously for the source lifetime, or only inside each retry iteration.** If only per iteration, nothing drains the subscription during the retry delay and the memory bound (and therefore the claim to close #281 for sources) does not hold.
+10. **Whether `commitSeq` lands in step 2 at all**, given that every rule and invariant reading it is step 3, and the house rule forbids adding public API whose callers land later.
+
+**Test seams**: `OutboundWriter`, `PollingManager` and `ReadAfterWriteManager` are `internal`, and `Namotion.Interceptor.OpcUa` declares no `InternalsVisibleTo` for its test project, unlike Connectors and Tracking. Every unit-level acceptance criterion in step 1 needs either that attribute, a pure-function extraction, or an integration test on port 4840.
+
+## Part 11: open items
 
 1. The transition table, by design (Part 7).
 2. Whether belief needs bounded history rather than a single slot. Arrival order plus P2 and P2a is believed sufficient; the enumerator is where to find out.
