@@ -4,433 +4,325 @@ Status: proposed
 Scope: the outbound path from the local model to an external source, and the verification that the two agree
 Supersedes: PR #355
 
-## Summary
+This document states what is broken today with evidence, what we intend to build, and the decisions needed to start. Steps 1 and 2 are specified to hand-off detail with acceptance criteria. Step 3 specifies a model, rules and invariants but deliberately not a transition table; Part 7 explains why and what makes that gate trustworthy.
 
-Local writes to a source-bound property are lost, silently dropped, or retried forever, and there is no way to tell whether a property's value actually matches its source. This design replaces the outbound write path with three pieces: a bounded per-property **intent** map holding what we want the source to have, a **belief** register holding what we last observed the source to have, and a **convergence check** that compares the model against belief once writing settles and either repairs the difference or reports it.
+## Part 1: where we are today
 
-The organising rule is that **send outcomes update intent, observations update belief, and a send outcome never updates belief**. An acknowledgement proves a request was accepted; it does not prove what the source now holds, and on two of three transports it does not even prove transmission.
-
-The work lands in three steps. Step 1 fixes confirmed data-loss bugs and needs no new design. Step 2 replaces the write retry queue without changing reconnect semantics. Step 3 adds belief and the convergence guarantee, and is gated on exhaustive enumeration of its state machine rather than on further review.
-
-## Problems this addresses
-
-All confirmed against the code on `master`.
+Verified against the code on `master`.
 
 | Problem | Evidence |
 |---|---|
-| Connectors report `Success` for changes they never transmitted, so writes are silently lost | OPC UA returns `WriteResult.Success` when every change was skipped as unmapped or unwritable, and skipped changes appear in neither the success count nor `FailedChanges`; MQTT skips unmapped and unserialisable changes the same way |
-| Permanently rejected writes are retried for the lifetime of the process (#332) | The transient/permanent classification is computed but fed only to log counters; `WriteRetryQueue.FlushAsync` requeues everything |
-| Queued writes are **never retried** after an in-place reconnect (#362, liveness) | `ReapplyRetryQueue` is called only from the base retry loop; the OPC UA, WebSocket and MQTT in-place reconnect paths do not call it, so queued writes move only as a side effect of the next local write |
-| A chatty property evicts an unrelated pending write | `WriteRetryQueue` is a fixed drop-oldest ring |
-| Writes during the connect and reconnect-delay windows are lost | The outbound subscription is created inside the change-queue processor, after listen and load |
-| Outbound memory is unbounded under a slow transport (#281) | The change-queue buffer grows in proportion to flush duration times mutation rate |
-| A stale local write can overwrite a source value that changed during an outage (#362, correctness) | The reconcile runs only on the base-loop path |
+| Connectors report success for changes they never transmitted, so writes are silently lost | `OutboundWriter.cs:45-49` returns `WriteResult.Success` when the filtered batch is empty. Skipped changes appear in neither the success count nor `FailedChanges`: `ProcessWriteResults` re-applies the same filter (`:95-96`) and computes `successCount` over post-filter results (`:107`). `WriteResult`'s contract says unlisted changes count as written (`WriteResult.cs:14-18`). MQTT does the same for unmapped and unserialisable changes (`MqttSubjectClientSource.cs:257`, `:268`, `:295`) |
+| The transient versus permanent classification never reaches a retry decision (#332) | Computed at `OutboundWriter.cs:101-114`, consumed only by a log line and exception counts. `OpcUaStatusCodeClassifier.cs:20-27` says so in its own remarks. `WriteRetryQueue.FlushAsync` requeues all failures unconditionally (`:170`) |
+| A permanently failing write blocks every other queued write | `FlushAsync` aborts the whole loop on the first failing batch (`WriteRetryQueue.cs:172`) and requeues failures at the head (`:214`). Head-of-line blocking, worse than "retried forever" |
+| Queued writes are never retried after an in-place reconnect (#362, liveness) | `ReapplyRetryQueue` has one call site, `SubjectSourceBase.cs:99`, in the base retry loop. The four connector reconnect paths call only `LoadInitialStateAndResumeAsync` (`OpcUaSubjectClientSource.cs:491`, `SessionManager.cs:80`, `WebSocketSubjectClientSource.cs:659`, `MqttSubjectClientSource.cs:549`) |
+| Source-wins reconciliation is not enforced on those four paths (#362, correctness) | Same evidence |
+| A chatty property evicts an unrelated pending write | `WriteRetryQueue` is a `List` with global eviction by `RemoveRange(0, over)` (`:71-76`) |
+| Writes during the connect and reconnect-delay windows are lost | The outbound subscription is created in the `ChangeQueueProcessor` constructor (`:88`), instantiated at `SubjectSourceBase.cs:87-94`, after listen and load |
+| Outbound memory is unbounded under a slow transport (#281) | `maxQueueDepth: null` at `SubjectSourceBase.cs:93` |
 | There is no way to tell whether a property is in sync (#195) | Source state reports connection lifecycle, not value agreement |
-| The same property yields different value types depending on the inbound path | `PollingManager` omits the `ConvertToPropertyValue` call that `SubscriptionManager` performs |
-| Read-after-write is enabled by default but tracks nothing | It registers a property only when the requested sampling interval is exactly `0` and the server revised it upward; the default interval is `null` |
-| Reading back a value from a server that omits source timestamps throws | Unguarded `(DateTimeOffset)result.SourceTimestamp` cast in `ReadAfterWriteManager` |
+| Polling and subscription produce different value representations | `SubscriptionManager.cs:204` converts; `PollingManager.cs:390` passes the raw node value to `:423` |
+| Read-after-write is enabled by default but tracks nothing | `ReadAfterWriteManager.cs:90-94` registers only when the requested sampling interval is exactly `0` and the server revised it upward; the default is `null` (`OpcUaClientConfiguration.cs:118`) |
+| Read-after-write mis-dates or throws on servers that omit source timestamps | `ReadAfterWriteManager.cs:329` casts `DataValue.SourceTimestamp` to `DateTimeOffset`. The SDK returns `DateTimeKind.Unspecified`, so the cast applies the local offset: values are silently shifted, and the SDK's "not supplied" `DateTime.MinValue` throws in any positive-offset timezone. Note this row is unreachable while the row above holds, since nothing registers by default |
+| Read-after-write discards the observation that would prove divergence | `ReadAfterWriteManager.cs:331-337` skips a readback whose source timestamp predates the local write timestamp |
 
-## Guarantee
+Two structural facts the design must respect:
+
+- **Equality-vetoed writes produce nothing.** `PropertyValueEqualityCheckHandler` is `[RunsFirst]` and does not call `next` on equality (`:10-20`), so no terminal write, no sequence, no publication. An inbound value equal to the model is therefore invisible downstream, and it is the most valuable observation there is.
+- **Commit and dispatch are separated.** The terminal commits under `SyncRoot` (`WriteInterceptorFactory.cs:29-36`); dispatch happens on the unwind after the lock is released (`PropertyChangeInterceptor.cs:163`, `:185-202`). Anything treating "no queued change" as "no pending write" is wrong.
+
+## Part 2: where we want to go
 
 **Quiescent convergence.** Once local writing stops and the transport is healthy, the local model and the source agree, or the property is visibly marked as not in sync.
 
-Explicitly **not** guaranteed:
+Not guaranteed:
 
-- **Instantaneous agreement.** A local-first write is applied locally before the source sees it. Consumers needing agreement before the local model changes use source transactions, which already exist and are write-through.
-- **Exactly-once delivery.** Every transport can accept a write whose response is lost, so a retry may duplicate the operation. Final-value writes are idempotent; the promise is eventual final-value convergence with bounded retries.
-- **Convergence on transports that cannot be observed.** Those properties report `NotVerifiable` rather than claiming to be in sync.
+- **Instantaneous agreement.** Local-first applies before the source sees it. Write-through remains the job of source transactions.
+- **Exactly-once delivery.** Any transport can accept a write whose response is lost. Final-value writes are idempotent; the promise is eventual final-value convergence with bounded retries.
+- **Convergence where the source cannot be observed.** Those properties report `NotVerifiable`.
+- **Preservation of a local write racing an inbound change.** Under the default policy the source wins, so a local write can be discarded when inbound latency exceeds capture latency. Inherent to local-first with source authority, stated rather than hidden.
 
-## Why belief must be observed, not inferred
+## Part 3: principles
 
-An earlier version of this design maintained belief by inference: advance a register from "I sent B and the write returned success," then order those inferences with local sequence numbers. That cannot work, and the reason is worth recording so it is not re-proposed.
+**P1. Send outcomes update intent. Observations update belief. A send outcome never updates belief.** An acknowledgement proves a request was accepted, not what the source holds, and on two of three transports not even that it was transmitted.
 
-The only clock available locally is the commit counter. It answers "did a local write happen after point X." It cannot answer whether one source observation is fresher than another (the counter does not move when the remote changes), nor whether a write landed at the source before or after a source update (that is remote causality, and no transport here provides a portable source-side sequence). Connectors compound the problem by reporting success for untransmitted changes.
+**P2. Belief is a hint. No destructive action on belief alone.** Overwriting the local model requires a fresh observation, obtained by readback where the transport supports one. Where it does not, the policy degrades to keeping the local value and reporting divergence.
 
-The decisive property: **an inferred belief is not self-healing; an observed belief is.** A wrong inference persists forever. A wrong observation is corrected by the next observation.
+**P2a. Freshness of the observation is not sufficient: the apply must also be guarded.** A readback is taken at a point in time, and a local write can commit while it is in flight. A destructive apply is therefore vetoed when a local commit newer than the observation exists, enforced by compare-and-set at the terminal. Without this, a write issued during the readback round trip is silently overwritten and the property reports `InSync` while permanently diverged, satisfying every other rule.
 
-What this does **not** eliminate is sequencing. Commit, dispatch and capture are asynchronous in this codebase, so ordering local commits against each other, and against the moment an observation was recorded, remains necessary. That is a property of the write pipeline and survives any belief model.
+**P3. Sequencing orders local events only.** A local counter answers "did this local write commit after that point". It cannot rank two source observations, and no transport here offers a portable source-side sequence.
 
-## Model
+**P4. The machine decides, a separate layer acts.** Every external fact (gate acquired, quiescent, belief age, readback outcome) enters as an event parameter, never an ambient read. Actions are queued and performed outside the transition, because dispatch is synchronous on the writing thread and an inline model write would re-enter the machine before the transition settles.
 
-### Clocks and identifiers
+## Part 4: the model
 
-- **`commitSeq`** is a per-subject monotonic counter stamped at the terminal write inside `Subject.SyncRoot` and threaded through `PropertyWriteContext`. This is the near-term half of #385.
+### Clocks
 
-  *Decision: per-subject, not process-wide.* Every comparison this design makes is between events on a single property, hence a single subject: local commits against each other, and belief against intent. A process-wide counter would add a contended cache line to the hottest write path in the library and buy nothing.
+**`commitSeq`** is a monotonic counter stamped at the terminal write, threaded through `PropertyWriteContext`, used only to order local commits and to ask whether an observation was staged after a given commit.
 
-- **`observedAtSeq`** is the value of that same counter read when an observation is staged. It places observations on the same timeline as commits, which is what lets the machine ask "did the source report something after this local write committed?" without needing source-side causality.
+**Decision (was open): the counter is per context, not per subject.** A per-subject counter needs a new `IInterceptorSubject` member, which is source-breaking for the generator, `DynamicSubject`, every hand-written subject in this repository and every external one. A per-context counter is a single `Interlocked.Increment`, requires no interface change, and is a strict superset for the only two uses above, both of which need ordering rather than density. The cost is one contended increment per committed write; the stamp PR is benchmark-gated, and if contention proves material, per-subject remains available as an explicit breaking change with approval. `IInterceptorSubject` already exposes `SyncRoot`, `Context`, `Data`, `Properties` and `AddProperties`, so `Data` is a third option, at the cost of a dictionary lookup per write inside the lock, which the timestamp path already pays once.
 
-- **`epoch`** is a per-property pair of counters, `ownershipEpoch` and `connectionEpoch`, **carried on the observation itself**, captured when the subscription, poll or load that produced it was created. A per-property epoch alone cannot reject a callback from an abandoned session or an observation from an older overlapping load, so the epoch must travel with the event.
+**Belief is ordered by arrival**, because P3 forbids ranking observations by a local counter and no source-side order exists. Combined with P2 and P2a this is safe: a stale or out-of-order belief causes a redundant verification, never a destructive action.
+
+**`ownershipEpoch`** changes when a property's binding changes (claim, release, or a NodeId rebind while ownership persists). **`connectionEpoch`** changes per session. Both are carried on the observation, captured when the subscription, poll or load producing it was created, so an observation from an abandoned session or superseded load is discarded on arrival.
+
+The two are handled differently: an **ownership** change invalidates outstanding intent, because it targeted a different binding. A **connection** change must not, because the property is the same one and discarding intent would drop queued writes on every reconnect.
 
 ### Per-property state
 
 ```
-belief (present once observed)
-    observedValue
-    observedAtSeq
-    epoch
+belief
+    observedValue, observedAt, epoch      last observation, arrival ordered
+    verifiedAt                            when last confirmed by a fresh read
 
-intent (present while a local write is outstanding)
-    desiredValue, desiredSeq        latest local intent
-    attemptValue, attemptSeq        the in-flight or awaiting attempt, if any
-    baselineValue, baselineSeq      belief as of the FIRST local commit of this intent
-    attempts                        retry budget consumed
-    epoch                           epoch when the intent was created
+intent (while a local write is outstanding)
+    desiredValue, desiredSeq              latest local intent
+    outbox                                bounded list of sent values not yet accounted for,
+                                          each with its sequence, send time and expiry
+    attempts                              retry budget consumed by the current desired value
+    ownershipEpoch                        binding this intent targets
 
-fault (persistent, survives intent resolution)
-    lastRejection                   value, status, timestamp; acknowledgeable
+fault (persistent, acknowledgeable)
+    lastRejection                         value, status, timestamp, reason
+
+decisions                                 bounded ledger of recorded discard decisions (see I5)
 ```
 
-Three of these fields exist for reasons that are easy to miss:
+The **outbox replaces a single attempt slot**. One slot cannot distinguish our own delayed echo from a third-party change once overwritten or cleared, which loses a newer local write while reporting `InSync`. `attempts` resets whenever `desiredValue` changes.
 
-- **`attemptValue`/`attemptSeq` are separate from `desired`** because a local write can commit while an earlier attempt is in flight. An acknowledgement or echo concerns the attempt, and must neither clear nor reject the newer intent.
-- **`baselineSeq` is belief at the first local commit, not at capture.** Capture is asynchronous, so an observation can arrive between commit and capture. Recording belief at capture time would conclude "the source has not moved" about a value that arrived *after* our write, and push a stale local value over newer source state.
-- **The fault record is persistent storage.** A permanent rejection resolves the intent but must stay visible, and under the default divergence policy the model is made equal to belief, so the fault cannot be derived from a value comparison.
+**Outbox expiry (was deferred, now settled because R2 depends on it).** An entry expires at the later of: the transport's confirmation grace window, or the connection epoch in which it was sent. Entries never survive a connection epoch change, because a dead session can no longer echo them. Without expiry, a third party setting a value we sent earlier would have its change classified as our echo and divergence suppressed.
 
-### States
+### Two comparison predicates
 
-| State | Meaning |
-|---|---|
-| `Clean` | No intent outstanding |
-| `Dirty` | Intent captured, not currently being sent |
-| `InFlight` | An attempt is being sent |
-| `Awaiting` | An attempt was accepted; waiting for an observation confirming the source holds it |
+- **`≈sync`**: tolerant, decides whether model and source agree. Per mapping; for OPC UA at least as wide as the configured deadband.
+- **`≈confirm`**: decides whether an observation is the echo of a value we sent. It is **not** exact equality. The echo is our value after a round trip through the value converter (`OutboundWriter.cs:154-156` out, `SubscriptionManager.cs:204` back), which is not the identity for `decimal`, `float` narrowed from `double`, `DateTimeOffset` to `DateTime`, or asymmetric enum conversions. `≈confirm` therefore uses a **representation epsilon**: tight, and a different quantity from `≈sync`'s deadband tolerance. Exact comparison here would fail confirmation on correctly applied writes, exhaust the budget, and revert a value the device accepted.
 
-`Diverged` is not a state: it is a derived report, because a property can be diverged with or without an intent and with or without a fault.
+Convergence is scoped to leaf value properties. Subject-valued and collection-valued properties are `NotVerifiable`.
 
-## State machine
+### Observability classification
 
-The machine is specified per state with explicit guards, because the recurring defect in earlier drafts was an event occurring in a state nobody had considered. Every state lists every event; there are no implicit cells.
+Per property, maintained across reconnects: `Subscribed`, `Polled`, `LoadOnly`, `Unobservable`. A property whose monitored item failed but which remains readable is `LoadOnly`. `Unobservable` means neither push nor readback.
 
-The decision logic is a **pure function** `(state, event) -> (state', actions)` with no I/O, no clocks and no async, so it can be exhaustively enumerated in tests (see Validation). Performing the actions (sending, writing the model, arming timers) is a separate layer.
+Load bearing in four places:
 
-### Alphabet
+1. A property with no confirmation channel never waits for an echo, so it cannot burn its budget on grace expiries and cannot be faulted for silence.
+2. `Unobservable` properties never take a destructive policy action.
+3. The idle convergence interval defaults on for OPC UA and **covers `Subscribed` properties too, not only `LoadOnly`**. A lost notification (deadband, queue overwrite, sampling straddle) leaves belief and model agreeing on a stale value with no divergence signal; the idle readback is the only thing that heals it. Scoping the idle check to `LoadOnly` would void the guarantee for the largest class of properties.
+4. Readbacks are budgeted and batched (`LoadInitialStateAsync` already batches by `MaxNodesPerRead`, `OpcUaSubjectClientSource.cs:202`). After a mass-divergence event this is one read per diverged property; without a budget it is a storm.
 
-`S`/`V` are the sequence and value of a local change; `O`/`P` the value and `observedAtSeq` of an observation; `A` an attempt sequence. `≈` is the value comparer. `budget` is the retry budget.
+### States and reported states
 
-Events: `LocalCommit(S,V)`, `Observation(O,P)`, `SendPicked`, `Accepted(A)`, `Transient(A)`, `PermanentlyRejected(A,status)`, `NotAttempted(A)`, `GraceExpiry(A)`, `EpochChange`, `LoadComplete`, `TransactionConfirmed(S,T)`, `ConvergenceTick`.
+Internal states: `Clean`, `Dirty`, `InFlight`, `Awaiting`.
 
-**Precondition applied to every event:** an event whose epoch differs from the property's current epoch is discarded before it reaches the machine. An `Observation` with `P <= belief.observedAtSeq` updates nothing, because belief never regresses.
+Reported states, and the mapping, which the rest of the system consumes (#195, PR #354):
 
-### State: `Clean` (no intent; belief and fault may exist)
+| Internal | Belief and fault | Reported |
+|---|---|---|
+| `Clean` | belief present, `model ≈sync belief`, no unacknowledged fault | `InSync` |
+| `Clean` | belief present, `model ≉sync belief` | `Diverged` |
+| `Clean` | unacknowledged fault, regardless of value agreement | `Diverged` |
+| `Clean` | no belief, or classification `Unobservable` | `NotVerifiable` |
+| `Dirty`, `InFlight`, `Awaiting` | any | `Pending` |
 
-| Event | Guard | Actions | Next |
-|---|---|---|---|
-| `LocalCommit(S,V)` | always | create intent `{desired=V, desiredSeq=S, baseline=belief.value, baselineSeq=belief.observedAtSeq, attempts=0, epoch=current}` | `Dirty` |
-| `Observation(O,P)` | always | `belief=(O,P)` | `Clean` |
-| `SendPicked` | no intent | ignore | `Clean` |
-| `Accepted` / `Transient` / `PermanentlyRejected` / `NotAttempted` / `GraceExpiry` | always | ignore (orphaned outcome for a resolved intent) | `Clean` |
-| `EpochChange` | always | invalidate belief; fault is retained | `Clean` |
-| `LoadComplete` | always | apply staged observations as `Observation`; then `ConvergenceTick` | `Clean` |
-| `TransactionConfirmed(S,T)` | always | create verification intent `{desired=T, desiredSeq=S, attempt=(S,T), attempts=0}` | `Awaiting` |
-| `ConvergenceTick` | not quiescent | report `Pending` | `Clean` |
-| `ConvergenceTick` | quiescent | run the convergence check below | `Clean` or `Dirty` |
+Events: `LocalCommit`, `Observation`, `SendPicked(selection)`, `SendOutcome(attemptSeq, kind)`, `InFlightDeadline(attemptSeq)`, `GraceExpiry(attemptSeq)`, `ReadbackCompleted(value)`, `ReadbackFailed`, `OwnershipEpochChange`, `ConnectionEpochChange`, `LoadComplete`, `TransactionConfirmed`, `FaultAcknowledged`, `OwnershipReleased`, `ConvergenceTick(quiescent, beliefAge)`.
 
-### State: `Dirty` (intent exists, not being sent)
+### Rules
 
-| Event | Guard | Actions | Next |
-|---|---|---|---|
-| `LocalCommit(S,V)` | `S > desiredSeq` | `desired=V`, `desiredSeq=S`; baseline unchanged | `Dirty` |
-| `LocalCommit(S,V)` | `S <= desiredSeq` | ignore (reordered or duplicate) | `Dirty` |
-| `Observation(O,P)` | `P > baselineSeq` and `O ≉ baselineValue` | `belief=(O,P)`; source moved since our write; **resolve by policy** | `Clean` |
-| `Observation(O,P)` | `O ≈ desiredValue` | `belief=(O,P)`; source already holds our value; clear intent | `Clean` |
-| `Observation(O,P)` | otherwise | `belief=(O,P)` | `Dirty` |
-| `SendPicked` | write gate held, `desiredSeq` unchanged since selection | `attempt=(desiredSeq, desiredValue)`; emit send | `InFlight` |
-| `Accepted` / `Transient` / `PermanentlyRejected` / `NotAttempted` / `GraceExpiry` | always | ignore (orphaned) | `Dirty` |
-| `EpochChange` | always | drop intent (it targets a stale binding); invalidate belief | `Clean` |
-| `LoadComplete` | always | apply staged observations as `Observation`, then evaluate as above | `Dirty` or `Clean` |
-| `TransactionConfirmed(S,T)` | `S > desiredSeq` | replace intent with verification intent | `Awaiting` |
-| `TransactionConfirmed(S,T)` | `S <= desiredSeq` | ignore | `Dirty` |
-| `ConvergenceTick` | always | report `Pending`; no check | `Dirty` |
+Each prevents a specific failure that a review constructed.
 
-### State: `InFlight` (an attempt is being sent)
-
-| Event | Guard | Actions | Next |
-|---|---|---|---|
-| `LocalCommit(S,V)` | `S > desiredSeq` | `desired=V`, `desiredSeq=S`; attempt untouched | `InFlight` |
-| `LocalCommit(S,V)` | `S <= desiredSeq` | ignore | `InFlight` |
-| `Observation(O,P)` | `P > baselineSeq` and `O ≉ baselineValue` | `belief=(O,P)`; mark intent for policy resolution when the attempt completes | `InFlight` |
-| `Observation(O,P)` | otherwise | `belief=(O,P)` | `InFlight` |
-| `SendPicked` | attempt already in flight | ignore | `InFlight` |
-| `Accepted(A)` | `desiredSeq > A` | successor pending; do not await this attempt | `Dirty` |
-| `Accepted(A)` | `desiredSeq == A` | arm the grace timer | `Awaiting` |
-| `Transient(A)` | `attempts + 1 <= budget` | `attempts++`; schedule backoff | `Dirty` |
-| `Transient(A)` | `attempts + 1 > budget` | record fault; **resolve by policy** | `Clean` |
-| `PermanentlyRejected(A,status)` | `desiredSeq > A` | record fault; retry the newer value | `Dirty` |
-| `PermanentlyRejected(A,status)` | `desiredSeq == A` | record fault; **resolve by policy** | `Clean` |
-| `NotAttempted(A)` | always | never transmitted; do not consume budget | `Dirty` |
-| `GraceExpiry(A)` | always | ignore (not awaiting yet) | `InFlight` |
-| `EpochChange` | always | abandon attempt; drop intent; invalidate belief | `Clean` |
-| `LoadComplete` | always | apply staged observations; attempt completes normally | `InFlight` |
-| `TransactionConfirmed(S,T)` | always | abandon attempt (the transaction wrote under the gate); register verification | `Awaiting` |
-| `ConvergenceTick` | always | report `Pending`; no check | `InFlight` |
-
-### State: `Awaiting` (attempt accepted, awaiting a confirming observation)
-
-| Event | Guard | Actions | Next |
-|---|---|---|---|
-| `LocalCommit(S,V)` | `S > desiredSeq` | `desired=V`, `desiredSeq=S`; the outstanding attempt now only updates belief | `Dirty` |
-| `LocalCommit(S,V)` | `S <= desiredSeq` | ignore | `Awaiting` |
-| `Observation(O,P)` | `O ≈ attemptValue` and `desiredSeq > attemptSeq` | `belief=(O,P)`; attempt confirmed; successor pending | `Dirty` |
-| `Observation(O,P)` | `O ≈ attemptValue` and `desiredSeq == attemptSeq` | `belief=(O,P)`; attempt confirmed; clear intent | `Clean` |
-| `Observation(O,P)` | `O ≉ attemptValue` and `P > attemptSeq` | `belief=(O,P)`; source moved after our attempt; **resolve by policy** | `Clean` |
-| `Observation(O,P)` | otherwise (older or unrelated) | `belief=(O,P)` | `Awaiting` |
-| `SendPicked` | attempt outstanding | ignore | `Awaiting` |
-| `Accepted` / `Transient` / `PermanentlyRejected` / `NotAttempted` | always | ignore (duplicate or late) | `Awaiting` |
-| `GraceExpiry(A)` | `A != attemptSeq` | ignore (stale timer) | `Awaiting` |
-| `GraceExpiry(A)` | `A == attemptSeq`, `attempts + 1 <= budget` | `attempts++`; force a readback where the transport supports one | `Dirty` |
-| `GraceExpiry(A)` | `A == attemptSeq`, `attempts + 1 > budget` | record fault; **resolve by policy** | `Clean` |
-| `EpochChange` | always | drop intent; invalidate belief | `Clean` |
-| `LoadComplete` | always | apply staged observations, then evaluate as above | per `Observation` |
-| `TransactionConfirmed(S,T)` | `S > desiredSeq` | replace attempt with the transaction's | `Awaiting` |
-| `TransactionConfirmed(S,T)` | `S <= desiredSeq` | ignore | `Awaiting` |
-| `ConvergenceTick` | always | report `Pending`; no check | `Awaiting` |
-
-### Sub-machine: resolve by policy
-
-| Policy | Actions |
-|---|---|
-| `RevertToSource` (default) | sequence-guarded write of `belief.observedValue` to the model, which fails if a local commit newer than `desiredSeq` exists, so adoption cannot clobber a concurrent newer write; clear intent; retain any fault |
-| `KeepLocal` | clear intent; leave the model; record the divergence |
-
-In both cases the intent is cleared, so the machine lands in `Clean`. A failed guarded write means a newer local commit exists, whose own `LocalCommit` event creates a fresh intent.
+| | Rule | Prevents |
+|---|---|---|
+| R1 | Every send outcome is matched to its own attempt sequence, never the current desired sequence | A late outcome for a superseded attempt destroying the live one |
+| R2 | An observation matching an unexpired outbox entry is our echo, not a source change | A newer local write discarded as "the source moved", then reported `InSync` |
+| R3 | No destructive action without a fresh observation | Stale belief overwriting the model with an old value |
+| R4 | Agreement uses `≈sync`; confirmation uses `≈confirm` with a representation epsilon | An unchanged value confirming a write, and a converted echo failing to |
+| R5 | Properties with no confirmation channel never enter a confirmation wait | Budget exhaustion and reverting a write the device accepted |
+| R6 | Every non-terminal state has a deadline that eventually resolves it to a reported state | Properties reporting `Pending` forever, which also makes I7 vacuous |
+| R7 | Connection epoch changes preserve intent; ownership epoch changes discard it with a recorded decision | Reconnects silently dropping queued writes |
+| R8 | A send outcome distinguishes retriable non-attempt from structurally impossible; the latter faults | An unmappable property retrying forever, which is #332 renamed |
+| R9 | Adoption writes carry a source origin | The adopted value echoing back to the device as fresh local intent |
+| R10 | Quiescence is per property; misreading it is non-destructive by R3 and R12 | One chatty property starving convergence for its whole subject |
+| R11 | Actions are queued, not executed inside a transition | Re-entrancy, since dispatch is synchronous on the writing thread |
+| R12 | A destructive apply is vetoed by compare-and-set when a local commit newer than the observation exists | A write committed during the readback round trip being silently overwritten |
 
 ### Invariants
 
-These are the properties the enumeration in Validation asserts after every event.
+| | Invariant | How asserted |
+|---|---|---|
+| I1 | An intent exists if and only if the state is not `Clean` | per step |
+| I2 | `desiredSeq` is at least every outbox entry's sequence | per step |
+| I3 | `attempts` never exceeds the budget and resets when `desiredValue` changes | per step |
+| I4 | Belief changes only by adopting an arriving observation; no rule may reorder or reject one by comparing it to another observation | per step, as a transition property rather than a monotonicity claim |
+| I5 | Every local commit reaches exactly one accounted outcome: delivered, superseded, discarded with an entry in the decisions ledger, or faulted | over the run, using the ledger; not per step |
+| I6 | No destructive model write occurs without a fresh observation and a passing R12 guard | per step, given a formal freshness predicate over `verifiedAt` and the staleness bound |
+| I7 | With no further local commits and a healthy transport, every property reaches `InSync`, `Diverged` or `NotVerifiable` within a bounded number of events | liveness, bounded horizon, with the premise encoded as an enumerator constraint |
 
-| | Invariant |
+I4 replaces the previous "belief never regresses", which was false: OPC UA has several concurrent observation channels, so a slow readback can legitimately land after a fast notification. What matters is not monotonicity but that nothing tries to order two observations against each other.
+
+## Part 5: integration
+
+### Staging observations
+
+Belief cannot be fed from the change stream, because an inbound value equal to the model is vetoed before publishing anything. It must be staged at the point of application, before the interceptor chain runs.
+
+`SetValueFromOrigin` covers the OPC UA read-after-write and loader value paths but is **not** a universal funnel. These bypass it and need explicit handling:
+
+| Path | Location | Handling |
+|---|---|---|
+| Transaction commit replay and rollback | `SubjectPropertyChangeOperations.cs:126-138` | Must stage; transaction verification depends on it |
+| `ApplySubjectUpdate` with local origin | `SubjectUpdateApplyContext.cs:52-58` | Must stage |
+| Path applies with a null source | `PathExtensions.cs:88-97` | Must stage. `PathExtensions.cs:286` sets a subject-valued property, which is out of convergence scope and needs no staging |
+
+**Staging must be serialised per property.** `SubjectPropertyWriter.Write` takes no lock once buffering ends (`:97-125`), and subscription, polling, read-after-write and idle readback are different threads. Serialisation is new machinery on the inbound path, not a property that holds today.
+
+An earlier revision listed the OPC UA loader's dynamic property creation as a defect that would write loaded values back to the server. That was misdiagnosed: the write at `RegisteredSubject.cs:348` is `null` to `null` and is equality-vetoed, and the property is not source-bound until `ClaimSource` runs later in `MonitorValueNode` (`OpcUaSubjectLoader.cs:400-405`). No action needed.
+
+### Reconnect and reload paths
+
+| Path | Reapplies queued writes today |
 |---|---|
-| I1 | An intent exists if and only if the state is not `Clean` |
-| I2 | In `InFlight` or `Awaiting`, an attempt is set; in `Clean` or `Dirty`, none is |
-| I3 | `desiredSeq >= attemptSeq` |
-| I4 | `belief.observedAtSeq` never decreases, and `attempts` never exceeds `budget` |
-| I5 | Every local commit is eventually delivered, superseded by a newer commit, resolved by policy, or recorded as a fault. It is never silently dropped |
-| I6 | Once quiescent with an observable property, the report is `InSync` or `Diverged`, and `InSync` implies `model ≈ belief.observedValue` |
-| I7 | No send is emitted whose value is older than an observation the source produced after it, unless policy chose it |
+| `SubjectSourceBase.ExecuteAsync` (base retry loop) | yes, at `:99` |
+| `OpcUaSubjectClientSource.ReconnectSessionAsync` | no |
+| `SessionManager.PerformFullStateSyncIfNeededAsync` | no |
+| `WebSocketSubjectClientSource.ReconnectAndResumeAsync` | no |
+| `MqttSubjectClientSource.OnReconnectedAsync` | no |
 
-## Convergence check
+`StartBuffering` replaces the pending list (`SubjectPropertyWriter.cs:39-45`), so belief is invalidated at buffer start rather than carried across.
 
-Runs per property when quiescent, reached only from `Clean`.
+### Transactions
 
-| Condition | Report |
-|---|---|
-| No belief, or classified `Unobservable` | `NotVerifiable` |
-| Belief older than the staleness bound and the transport supports readback | force a readback, then re-evaluate |
-| `model ≈ observedValue` | `InSync` (any fault record remains until acknowledged) |
-| `model ≉ observedValue` | `Diverged`: create an intent to re-send, unless a fault already records this value, in which case report and do not retry |
+`WriteToSourcesAsync` returns before the local apply and the source write lock is scoped to a single call, so a pending send can interleave between a transaction's external write and its local apply.
 
-The idle check must **produce a fresh observation before comparing** wherever readback exists. Comparing a stale model against equally stale belief reports `InSync` and detects nothing; this applies to the idle interval exactly as it does to reconnect.
+- The transaction holds the per-source gate from before its external write through local apply, rollback and registration. The send loop acquires the same gate and re-checks liveness after acquiring it. Multi-source transactions acquire in a deterministic order.
+- A send already on the wire is **not abandoned**; it stays in the outbox until accounted for, because abandoning it lets its later echo revert the transaction and report `InSync`.
+- Writes inside an open transaction never reach a terminal (`SubjectTransactionInterceptor.cs:85`), so commit replay is the point of sequence issue.
 
-### Quiescence fence
+### Transports
 
-Quiescence is not "the intent map is empty and the change queue is empty." A write commits under `SyncRoot` and dispatches later, during interceptor unwind, so a committed write can be invisible to both. Adopting a source value in that window would overwrite a newer local commit.
+**OPC UA, the reference tier.** Per-item status gives an exact per-write outcome. `LoadInitialStateAsync` is the readback mechanism: a complete batched read at `maxAge: 0`. Monitored items give push observations for successfully created, non-deadbanded items. `SourceTimestamp` is optional and omitted by some servers, so no rule may depend on it.
 
-The fence is a **commit-to-dispatch watermark**: the terminal records, per subject, the highest `commitSeq` whose dispatch has completed. A property is quiescent when it has no intent, the capture queue is drained, and the watermark has reached the subject's latest issued `commitSeq`. Adoption is additionally sequence-guarded, so even a misread of quiescence cannot lose a newer write.
+`ReadAfterWriteManager` is not the readback path: it tracks nothing under default configuration and discards exactly the observation that proves divergence.
 
-This watermark is new core surface and is the single most important thing for model checking to validate.
-
-## Value comparison
-
-The guarantee rests on `≈`, so the comparer is part of the design. Exact equality is wrong here: `OpcUaValueConverter` means representations differ across paths, arrays need structural comparison, and deadbanded properties differ by design.
-
-A per-source comparer with per-mapping tolerance: exact for reference and integral types, structural for arrays, configurable tolerance for floating point, and for OPC UA a tolerance that must be **at least the configured deadband**. Convergence is scoped to **leaf value properties**; subject-valued and collection-valued properties are `NotVerifiable`.
-
-## Constraints on source-bound properties
-
-Two property shapes cannot participate and are rejected at claim time with a clear error.
-
-**Transforming or vetoing properties.** If the source reports `S` and a hook or validator stores `F`, belief records `S`, the model holds `F`, and `FinalizeOrigin` demotes the origin to `Local`. The property then never converges: adopting `S` produces `F` again, forever. Treating the transformed value as deliberate correction intent is expressible but doubles the semantics of every state above, and no connector needs it.
-
-**Derived properties.** `FinalizeOrigin` unconditionally demotes derived writes to `Local`, so every inbound apply would register as local intent and echo back, and the property would never quiesce. `GetFinalValue()` additionally re-evaluates derived getters outside `SyncRoot`, so the published value is not the value committed at that sequence.
-
-## Staging observations
-
-Belief cannot be fed from the change stream. `PropertyValueEqualityCheckHandler` runs `[RunsFirst]` and vetoes writes equal to the current model, publishing nothing, and an inbound value **equal** to the model is the single most valuable observation, because it is the source confirming we agree. Buffering additionally delays applies, and `StartBuffering` replaces the pending list.
-
-All inbound paths funnel through `SubjectChangeContextExtensions.SetValueFromOrigin`, which sits below `SubjectPropertyWriter` and therefore also covers the paths that bypass it (OPC UA read-after-write, the loader's structural applies). **Belief is staged there, unconditionally, before the interceptor chain runs**, recording value, `observedAtSeq` and epoch. The observation APIs gain an epoch parameter. It lives in `Namotion.Interceptor.Tracking` while the register lives in `Namotion.Interceptor.Connectors`, so it needs a context-registered abstraction, and it is on a hot path and must not allocate per call.
-
-## Observability classification
-
-Per property, maintained across reconnects: `Subscribed`, `Polled`, `LoadOnly`, `Unobservable`.
-
-A property whose monitored item failed but which remains **readable** is `LoadOnly`, not `Unobservable`, because the idle readback still observes it. `Unobservable` is reserved for properties with neither readback nor push channel: a `DataChangeTrigger` suppressing values, or a deadband wider than the comparer tolerance with no read path.
-
-Because `LoadOnly` properties produce no steady-state observations, the **idle convergence interval defaults on for OPC UA**. Asserting divergence detection while defaulting it off would be a contradiction.
-
-## Reported state and divergence policy
-
-| Report | Condition |
-|---|---|
-| `InSync` | Quiescent, belief present, `model ≈ observedValue` |
-| `Pending` | Intent outstanding in any state |
-| `Diverged` | Quiescent and `model ≉ observedValue`, or an unacknowledged fault exists |
-| `NotVerifiable` | No belief and no observation channel |
-
-This is a **different axis** from the source state proposed in #354, which answers a connection-lifecycle question. They diverge exactly where it matters: a permanently rejected write leaves a property `Diverged` while its source is legitimately synchronized. This design computes the per-property truth; #354 is the natural way to publish it.
-
-**Divergence policy**, per source with a per-property override:
-
-- **`RevertToSource` (default)**: adopt the observed value through the sequence-guarded write. The model then tells the truth about the device, and the fault records that the write was rejected. This is the safe default for industrial control, where an HMI showing a setpoint the PLC never accepted is the dangerous failure mode, and it preserves today's source-wins behaviour, making it migration-compatible.
-- **`KeepLocal`**: retain the local value and stay `Diverged`.
-
-Faults are acknowledgeable; acknowledgement clears the record but not a live value difference.
-
-## Transports
-
-**OPC UA, the reference tier.** Per-item `StatusCode` gives an exact per-write outcome including transient versus permanent. `LoadInitialStateAsync` is the readback mechanism: a complete, batched read of every owned property at `maxAge: 0`. Monitored items give push observations for successfully created, non-deadbanded items. The connector uses `SourceTimestamp`, which is optional in OPC UA and omitted by some servers, so **no rule may depend on it being present**.
-
-`ReadAfterWriteManager` is not the readback path and must not be built on: it registers a property only when the requested sampling interval is exactly `0` and the server revised it upward, so under default configuration it tracks nothing, and where it is active it discards a readback whose source timestamp predates the local write, precisely the observation that proves divergence.
-
-**WebSocket.** Sender-inclusive broadcast gives echoes; the server snapshot gives readback at connect. No per-item rejection, so faults are reached only through the retry budget.
+**WebSocket.** Sender-inclusive broadcast gives echoes; the server snapshot gives readback at connect, when a `welcome` frame supplies it (`WebSocketSubjectClientSource.cs:262`, `:288-291`). No per-item rejection, so faults arrive only through the retry budget.
 
 **MQTT**, per topic mapping, since QoS is mapping-specific:
 
 | Configuration | Convergence |
 |---|---|
 | QoS 1 or 2, retained | Full: acknowledgement plus readback from the retained message |
-| QoS 1 or 2, not retained | Acknowledged delivery, no readback; steady-state verification unavailable → `NotVerifiable` for the idle check |
-| QoS 0, retained | `NotVerifiable` unless periodic retained readback is enabled. A dropped publish alone self-heals, but a dropped echo concurrent with a third-party write leaves model and belief agreeing while the broker retains a different value, with nothing to re-observe on a healthy connection |
-| QoS 0, not retained | `NotVerifiable`: no retention means no observable source state |
+| QoS 1 or 2, not retained | Acknowledged delivery, no readback; `NotVerifiable` for the idle check |
+| QoS 0, retained | `NotVerifiable` unless periodic retained readback is enabled |
+| QoS 0, not retained | `NotVerifiable` |
 
-MQTT has no load (`LoadInitialStateAsync` returns null) and retained arrival has no completion signal, so the load-complete event does not occur there; MQTT relies on the idle interval and echo grace.
+MQTT has no load (`LoadInitialStateAsync` returns `null`, `:211-215`) and retained arrival has no completion signal.
 
-## Epochs
-
-- **`ownershipEpoch`** increments on claim, release and **rebind**. The real trigger is not release-and-reclaim (`SourceOwnershipManager.ReleaseSource` has no production caller) but a **NodeId rebind across reload while ownership persists**: `Reset()` clears node-id property data but leaves properties owned, and a later load can bind a different NodeId and re-claim idempotently.
-- **`connectionEpoch`** increments per session or connection, so a callback from an abandoned session is discarded.
-
-A local change queued before an epoch change is rejected at capture by comparing its `commitSeq` against the epoch's fence sequence.
-
-## Transactions
-
-A transaction writes the source directly, so it must coordinate with the send loop. Today `WriteToSourcesAsync` returns before the local apply and the source write lock is scoped to a single call, so a pending send can interleave between a transaction's external write and its local apply, leaving the source holding the older value.
-
-1. The transaction holds the per-source write gate from before its external write through local apply, rollback, and its map registration. The send loop acquires the same gate and performs its liveness re-check **after** acquiring it, so a send approved before a waiting transaction cannot emit a superseded value. Multi-source transactions acquire gates in a deterministic order.
-2. On commit, the transaction registers an `Awaiting` verification intent per written property, so the convergence check does not revert a successful transaction before its echo arrives.
-
-Rule 1 is not expressible on the current `ITransactionWriter` contract and requires an explicit lease API. That is new public surface, in step 3.
-
-## Reconnect and reload paths
-
-The convergence check plus a fresh readback must run on all of them:
-
-| Path | Reapplies queued writes today |
-|---|---|
-| `SubjectSourceBase.ExecuteAsync` (base retry loop) | yes |
-| `OpcUaSubjectClientSource.ReconnectSessionAsync` | no |
-| `SessionManager.PerformFullStateSyncIfNeededAsync` | no |
-| `WebSocketSubjectClientSource.ReconnectAndResumeAsync` | no |
-| `MqttSubjectClientSource.OnReconnectedAsync` | no |
-
-`SessionManager.AbandonCurrentSession` is not itself a reload; it buffers and clears the session, and a later path performs the load. Two hazards: `StartBuffering` replaces the pending list, so belief is invalidated at buffer start rather than carried across; and overlapping loads can apply out of order, which the load generation in `epoch` rejects.
-
-## What we build
-
-Three steps, each release-safe alone. Whether they ship as one pull request or several is decided at implementation time.
+## Part 6: the plan
 
 ### Step 1: outcomes and confirmed bugs
 
-- **Per-change write outcomes**: `Accepted`, `PermanentlyRejected`, `Transient`, `NotAttempted` for every submitted change. The representation must not allocate per successful change. External `ISubjectSource` implementations get a default mapping from the old all-or-nothing shape so they compile and behave as today.
-- **Two-predicate OPC UA status classification.** The existing classifier is tuned for subscriptions, where `BadUserAccessDenied` is deliberately transient because access levels are mutable and a monitored item can heal; for a write it is exactly the permanent case.
-- **Flush the retry queue after an in-place reconnect.** All reload paths funnel through `LoadInitialStateAndResumeAsync`, and `SubjectSourceBase` owns the writer, so a post-resume hook covers them with no connector edits. It calls the existing semaphore-guarded, empty-short-circuited flush, performing promptly what the next local write would have performed anyway.
-- **`PollingManager`'s missing `ConvertToPropertyValue`.**
-- **The unguarded source-timestamp cast** in `ReadAfterWriteManager`.
+**1a. Standalone, land first.** `PollingManager` value conversion (convert at publish; leave `LastValue` raw so dedup semantics match the subscription path). The read-after-write timestamp fix: guard `DateTime.MinValue` **and** apply `DateTimeKind.Utc` before converting, since the missing `Kind` silently shifts every readback by the local offset; fall back to the received timestamp when absent.
 
-Closes #332, stops silent loss of skipped writes, and fixes the never-retried production bug. No dependency on the rest of this design.
+**1b. Atomic: per-change outcomes, retry disposition and the dropped signal.** These are **one change, not three**. Enumerating previously-skipped changes as failures without the disposition and queue fixes turns a silent drop into a head-of-line block that wedges every other property. Contents:
 
-### Step 2: intent, behaviour-preserving
+- `WriteChangeOutcome`: `Accepted`, `Transient`, `PermanentlyRejected`, `NotAttempted`, `Unsupported`. **Decision (was open): `NotAttempted` splits.** `NotAttempted` means the transport did not get to it and it must be retried (a batch remainder). `Unsupported` means it can never be attempted as bound (unmapped node, no setter) and must fault. Both arise on the same code path today, so one value cannot carry both and R8 cannot be satisfied.
+- `WriteResult` gains outcomes aligned with `FailedChanges`, empty meaning all `Transient` so pre-existing `ISubjectSource` implementations keep working. `WriteResult.Success` stays a zero-allocation singleton and a fully successful batch allocates nothing.
+- `WriteRetryQueue`: continue past a failing batch instead of aborting; requeue at the **tail** with per-property coalescing so requeueing cannot invert two writes to one property; requeue only `Transient` and `NotAttempted`; drop `PermanentlyRejected` and `Unsupported`, counting them.
+- `OutboundWriter`: build an index map in `CreateWriteValuesCollection` so `ProcessWriteResults` no longer re-runs the filter, which today can misattribute a status if a structural change lands between the two passes. Empty filtered batch returns every change as `Unsupported`, not `Success`.
+- `SubjectSourceBase.DroppedWriteCount`, plus rate-limited logging. Without it, closing #332 replaces a noisy-but-visible failure with a silent one, since faults do not arrive until step 3.
+- `WriteResult`'s contract text ("consumers may retry a failed change but never revert it") becomes false here, not in step 3, and must change with it.
+- `SourceTransactionWriter` now sees unmapped changes in `FailedChanges`, so a transaction over an unmapped property fails where it silently succeeded. Correct, and the transaction tests must be swept.
 
-The per-property intent map replaces `WriteRetryQueue` and `ReapplyRetryQueue`, with capture live from source start, plus the `commitSeq` stamp. **Explicitly preserves today's reconcile semantics** (the existing old-value heuristic as baseline) and makes no convergence claim, so it cannot regress source-wins behaviour.
+**1c. Reconcile on in-place reconnects.** Call `ReapplyRetryQueue()`, not `FlushAsync`: the two have opposite semantics, and a flush would install local-wins where the base loop uses source-wins.
 
-Closes the connect-window loss, the drop-oldest eviction, and source-side unbounded memory.
+**Decision (was open): the call site is the four connector paths, not a post-resume hook.** A hook inside `LoadInitialStateAndResumeAsync` fires on the base loop's own call at `SubjectSourceBase.cs:85`, which precedes both the `ChangeQueueProcessor` construction at `:87-94` and the reconcile at `:99`. Since `ReapplyRetryQueue` writes locally and relies on the running processor to transmit, a hook there would apply values with nothing listening and drain the queue before `:99` could run, deleting the one reconcile that works today. So: make it `protected`, keep `:99`, and call it explicitly after the load at each of the four sites. Drain and reapply under `_flushSemaphore`, since `DrainForLocalReapply` is unguarded today and races a concurrent flush's requeue.
+
+Residual, accepted for step 1 and closed by step 2: the connector reconnect loops are spawned from `StartListeningAsync`, which returns before the processor exists, so a reconnect in that narrow window still re-applies with nothing listening.
+
+**Scope of the #362 claim.** Both halves close for **OPC UA**, and for WebSocket when a snapshot is supplied. **Not for MQTT**: there is no load, so the reconcile compares against unrefreshed local values and resolves local-wins, racing retained delivery.
+
+**1d. Deferred: the two-predicate status classifier.** Splitting `IsTransientError` into a write predicate is correct in principle, but making `BadUserAccessDenied` permanent on writes is a production regression: access levels are mutable server-side (`OpcUaStatusCodeClassifier.cs:12-18` documents exactly this), so the common "connect anonymously, operator grants a role, writes begin succeeding" flow currently heals and would instead drop writes permanently. Defer until step 3's faults can drive an operator-visible retry, or narrow the write-permanent set to codes that cannot heal within a session.
+
+**Acceptance criteria.** Outcome propagation through single-batch, multi-batch, partial-failure and mid-batch-throw; a permanently rejected change does not block later queued writes; per-property ordering survives requeue; the `OutboundWriter` index map attributes a failure to the correct change when an earlier change was filtered out; per connector, a queued write reaches the server after an in-place reconnect and a server-changed property drops its queued write.
+
+### Step 2: intent
+
+The per-property intent map replaces `WriteRetryQueue` and `ReapplyRetryQueue`, with capture live from source start and the `commitSeq` stamp.
+
+- **Intent record**: the coalesced change per property using the existing `MergeWithNewer`, which keeps the earliest old value as the reconcile baseline and the newest new value, plus `attempts` and first-queued time. An A to B to A burst therefore collapses to one intent whose baseline is the original A.
+- **Live capture**: hoist the `ChangeQueueProcessor` to the `SubjectSourceBase` lifetime so the subscription exists from source start, with `ProcessAsync` called per iteration. This requires the processor to survive cancel and restart, which needs a test.
+- **Retry budget**: not enforced in step 2. There is no fault state to move an exhausted property into until step 3, so transients retry as today.
+- **Decision (was open): `writeRetryQueueSize = 0` keeps its meaning.** It currently means "do not buffer; drop writes made while disconnected". The map is inherently bounded and cannot be "sized", but the operator's intent is honoured by not retaining intent across a disconnect for that source. Silently converting an explicit drop into buffering would be an unannounced behaviour change.
+- Bound: one entry per owned property, so memory is proportional to owned property count and `WriteRetryQueueSize` becomes a no-op for all other values.
+
+**Stated changes, not claimed away**: reconcile is re-implemented; coalescing changes A to B to A replay; `PendingWriteCount` becomes "properties with outstanding intent", routinely non-zero, so alerts on greater than zero will fire.
+
+**Acceptance criterion**: the connect-window regression test. A source whose `StartListeningAsync` blocks on a gate, a write issued while blocked, and the write must reach the source once the gate opens. No existing test covers this; the current retry-queue test works around the window with a probe loop.
 
 ### Step 3: belief and convergence
 
-The belief register and staging hook, the commit-to-dispatch watermark, epochs on observation APIs, the sequence-guarded write, the transition table, the convergence check and quiescence fence, the comparer, observability classification, reported state and faults, and transaction coordination. Delivers the guarantee.
-
-**Gated on exhaustive enumeration of the state machine**, not on further review.
+Belief register and staging, observability classification, the convergence check, reported state and faults, divergence policy, transaction coordination, and the machine satisfying R1 to R12 and I1 to I7.
 
 ### Step 4: servers
 
-The same capture and coalescing split for servers, with no belief and no convergence, since a server publishes rather than synchronises. Closes the server half of #281.
+The same capture and coalescing split without belief or convergence. Closes the server half of #281.
 
-## Validation
+## Part 7: method and gate for step 3
 
-A state table removes undefined cases, but it cannot establish correctness under concurrent interleavings, which is where earlier drafts of this design were repeatedly wrong. Step 3 is therefore gated on **exhaustive enumeration of the state machine**, in the repository, not on further review.
+The transition table is not frozen here. It has been written in prose twice and both times review found defects by hand-constructing event sequences, which is what an enumerator does automatically. So: **build the harness and the invariants first, then evolve the machine until it passes.**
 
-Because the decision logic is a pure `(state, event) -> (state', actions)` function, a test can enumerate every event sequence up to a bounded depth from every reachable starting state and assert invariants I1 to I7 after each step. With four states and twelve events this is fast, and unlike an external model it exercises **the shipped code**, so it cannot drift from the implementation.
+The gate is a clean enumeration run rather than a review, but a clean run only means something if the oracle is strong. The previous version of this document made the invariants the whole oracle, and a review then found a permanent-divergence scenario that satisfied every one of them. So the gate requires all of:
 
-The interleavings to cover explicitly, expressed as event sequences: a commit whose dispatch is delayed past an observation; an observation arriving between commit and capture; an outcome for an obsolete attempt; overlapping loads producing out-of-order observations; an epoch change mid-flight; and a transaction confirming while a send is in flight.
+1. **A refinement oracle**, not only safety assertions: a reference single-register model with an explicit serialisation point, checking each enumerated run for observational equivalence to some reference run. This catches classes of bug nobody thought to write an invariant for.
+2. **Transition coverage plus mutation testing** of the transition function. A clean run at low coverage proves nothing.
+3. **A generated adversarial parameter space** (out-of-order outcomes, expired and unexpired outbox entries, epoch changes at every point), rather than a hand-listed set fitted to the bugs previous reviews happened to find.
+4. **An explicit abstract domain and horizon**: finite value, epoch and time domains, and a stated stopping condition. I7's premise ("no further local commits, healthy transport") is an enumerator constraint, not an assertion.
+5. **A test that no production path bypasses the transition function**, or the claim to test shipped code is unearned.
 
-This replaces an earlier plan to model the machine in TLA+ via #358. That is an unmerged experiment, and depending on it for a production gate would be fragile, would require TLA+ fluency to maintain, and would verify a model that can silently diverge from the code. If #358 lands independently, modelling the same machine there is a useful complement, but nothing here waits on it.
+Bounded enumeration proves less than a model checker: no violation within a horizon, rather than a general proof, and it cannot fully discharge I7. Accepted, in exchange for testing the shipped implementation rather than a model that can drift. This does not depend on the unmerged formal-model work in #358; if that lands, modelling the same machine there is a complement.
 
-Bounded enumeration proves less than a model checker: it establishes "no violation within N events" rather than a general temporal proof. For a machine this small that is an acceptable trade for testing the real implementation.
+Before step 3 starts it also needs: the declared state record; where `≈sync` and `≈confirm` live and how the OPC UA deadband feeds `≈sync`; a prerequisite-or-stub decision on PRs #370 (write lock), #313 (batched read) and #354 (reported-state publisher); and a seed transition table, even a knowingly imperfect one, so the enumerator grades something rather than a third prose specification.
 
-### Tests
-
-Two harness gaps close first. `FaultType` offers only `Kill` and `Disconnect`, so reject-write and read-only-node faults do not exist. A getter-only server property against a setter-bearing client property yields a genuine `BadNotWritable` with no new machinery. `ConvergenceChecker` compares whole snapshots and cannot express a legitimately diverged property, so it needs an expected-state channel.
-
-Then: writes during an outage all land after recovery, with more distinct properties than the old queue bound; an in-place reconnect with **no** subsequent local write still delivers queued writes (fails today); an A→B→A sequence does not push a stale local value over a changed server value; a dropped monitored item is classified `LoadOnly` and caught by the idle readback; a sub-tolerance deadband change does not report a false `Diverged`; a read-only server node yields exactly one `PermanentlyRejected`, is not retried, records a fault, and honours both policies; every reload path runs the check; a write in flight during a kill converges to the final value with bounded retries; and a long chaos run shows bounded intent-map size with every owned property in exactly one reported state.
-
-## Public API and configuration changes
+## Part 8: API and breaking changes
 
 | Change | Notes |
 |---|---|
-| `WriteResult` gains per-change outcomes | Public, snapshot-pinned; touches all connectors; default mapping provided for external implementations |
+| `WriteChangeOutcome` enum, `WriteResult` outcomes | Public, snapshot-pinned in Connectors. Contract text changes in step 1 |
+| `SubjectSourceBase.DroppedWriteCount` | Public, new |
+| `SubjectSourceBase.ReapplyRetryQueue` becomes `protected` | Snapshot |
+| `SubjectSourceExtensions.WriteChangesInBatchesAsync` | Public; encodes the normalisation that outcomes replace |
+| `ITransactionWriter.WriteToSourcesAsync`, `SourceWriteResult` | Carry write outcomes on the transaction path; must move in lockstep |
 | `SubjectPropertyChange` gains `commitSeq` | Public struct, snapshot; benchmark-gated, since it is copied on every enqueue and dedup pass |
-| Commit-to-dispatch watermark and sequence-guarded write | New core surface |
-| Observation APIs gain an epoch parameter | Connectors updated |
-| Staging abstraction registered on the context | New service in Tracking |
-| Transaction lease API | New public surface on `ITransactionWriter`, step 3 |
-| `WriteRetryQueueSize` obsoleted | Public and snapshot-pinned on OPC UA, MQTT **and WebSocket**, and a `SubjectSourceBase` constructor parameter. Keep it, mark it `[Obsolete]`, document it as a no-op, land separately |
-| New configuration | Divergence policy and per-property override; comparer tolerance; grace window and retry budget; idle interval and staleness bound; observability overrides |
+| Per-context commit counter | No interface change (see Part 4 decision) |
+| `PropertyWriteContext` carries the sequence | Internal setter |
+| Sequence-guarded terminal write (R12) | New core surface, compare-and-set in the existing lock |
+| `ChangeQueueProcessor` | Public with a public constructor; step 2 changes how sources drive it |
+| `SubjectSourceBase.PendingWriteCount` | Public; meaning changes in step 2 |
+| Observation APIs gain an epoch parameter | Connector churn |
+| Staging abstraction on the context | New service in Tracking; hot path, must not allocate, must serialise per property |
+| Transaction lease API | New public surface, step 3 |
+| `WriteRetryQueueSize` obsoleted | Public on OPC UA, MQTT and WebSocket configurations and a `SubjectSourceBase` constructor parameter. Snapshot-pinned on **OPC UA and MQTT only**; WebSocket has no public-API snapshot test. Keep, mark obsolete, honour `0`, land separately |
+| New configuration | Divergence policy with per-property override; `≈sync` tolerance and `≈confirm` epsilon; retry budget; grace, in-flight and resolution deadlines; idle interval, staleness bound and readback budget; observability overrides |
 
-**Defaults**: retry budget 3 attempts; grace window derived from the revised sampling interval plus a buffer on OPC UA, and a configurable round-trip estimate elsewhere; idle interval on for OPC UA, off where it cannot help (MQTT unretained); divergence policy `RevertToSource`.
+**Defaults**: retry budget 3; grace derived from the revised sampling interval on OPC UA and a configured round trip elsewhere; idle interval on for OPC UA covering `Subscribed` and `LoadOnly`; policy `RevertToSource`.
 
-**Diagnostics**, which the connector currently lacks entirely (only source-level counters, no `Meter` or `ActivitySource`): counts by reported state, an enumeration of diverged properties with model value, observed value, observation age and last rejection, and rate limiting so a storm across thousands of properties does not flood logs.
+**Not implementable as previously promised.** Rejecting transforming or vetoing source-bound properties at claim time is not statically decidable for a conditional veto inside a user interceptor. Derived properties **are** detectable (`Metadata.IsDerived`) and are rejected at claim time, since `FinalizeOrigin` demotes derived writes to `Local` and they would never quiesce. A transforming hook is detected at runtime instead: the origin is already demoted when the stored value differs from the sent value, and a property failing to converge for that reason is faulted with a specific diagnosis.
 
-## Related work
+**Diagnostics**: the connector has only source-level counters and no `Meter` or `ActivitySource`. Needed: counts by reported state, an enumeration of diverged properties with model value, observed value, observation age and last rejection, the step-1 dropped counter, and rate limiting.
 
-### Superseded or closed by this design
+## Part 9: related work
 
-| Item | Disposition |
-|---|---|
-| **PR #355** capture user writes during connect | Close as superseded; step 2 solves it |
-| **PR #333** drop permanent OPC UA write failures | Close as superseded by step 1, which fixes the cause rather than filtering the symptom |
-| **PR #372** correction origin kind | Close: divergence is detected by observation, not provenance, so no fourth `ChangeOrigin` kind is needed |
-| **#332** permanent failures retried forever | Closes in step 1 |
-| **#362** in-place reconnect skips reconcile | Liveness half closes in step 1, correctness half in step 3 |
-| **#281** unbounded memory | Sources in step 2, servers in step 4 |
-| **#363** source-inert supersede path | Close with #355; it describes a #355-only artifact |
-| **#195** connected plus in-sync state | Served by step 3 together with #354 |
+**Superseded or closed**: PR #355 (step 2), PR #333 (step 1b), PR #372 (no fourth origin kind), #332 (step 1b, see 1d for the classifier caveat), #362 (step 1c for OPC UA and WebSocket; MQTT correctness in step 3), #281 (sources step 2, servers step 4), #363 (with #355), #195 (step 3 with #354).
 
-### Coordinate before landing
+**Coordinate**: PR #354 (a different axis, connection lifecycle versus value agreement; it publishes what step 3 computes, and `PendingWriteCount` changes meaning in step 2), PR #370 (write lock ownership), PR #313 (shared read path), #385 (the stamp half is a step 2 prerequisite), #299 and #277 (diagnostics overlap). PR #358 is not a dependency.
 
-| Item | Why |
-|---|---|
-| **PR #354** source sync state | Different axis; it publishes what step 3 computes. Note that `PendingWriteCount` changes meaning after step 2 (from "writes that failed" to "properties with outstanding intent", routinely non-zero), so existing alerts on `> 0` will fire |
-| **PR #370** sources own their write lock | Step 3's transaction gate depends on where the lock lives |
-| **PR #358** TLA+ model | **Not a dependency.** Step 3 is gated on in-repo enumeration instead. If #358 lands, modelling this machine there is a useful complement |
-| **PR #313** batch browse and read | Step 3's readback uses the same path |
-| **#385** commit sequence numbers | The stamp half is a step 2 prerequisite; in-order delivery stays out of scope |
-| **#299** data value status codes in diagnostics | Overlaps per-change outcomes |
-| **#277** retry and queue depth diagnostics | Those depths change meaning; re-scope to the new state |
+**Re-scope**: PR #349 (repair becomes automatic; keep the transaction-layer classification), PR #375 (verify whether staging before the equality handler subsumes its detection, then close if so), PR #353 and #352 (overflow moves to servers and history stores), PR #209 (subsumed for sources).
 
-### Re-scope
+**Unrelated**: #282, #228, #200 (lossless delivery is a separate projection with opposite overflow semantics), #373 (inbound ordering), #342 (this is an input to that contract, not a definition of it), #367, #369, #378 (independent refactors).
 
-| Item | Why |
-|---|---|
-| **PR #349** transaction divergence repair | The repair action becomes automatic; keep the transaction-layer failure classification and reporting |
-| **PR #375** value assertion writes | With belief staged before the equality handler, the equality-suppressed divergence it targets is detected by the convergence check. Verify, then close if it holds |
-| **PR #353 / #352** overflow policy | Coalescing removes overflow from the source path; re-scope to servers and history stores |
-| **PR #209** burst flattening | Subsumed for sources; only the server path may still need it |
+## Part 10: open items
 
-### Unrelated, explicitly out of scope
-
-| Item | Why it is not addressed here |
-|---|---|
-| **#282**, **#228**, **#200** lossless and non-deduplicating delivery | This design converges *current values*; delivering every intermediate value for signal, alarm and audit properties is a separate projection over the same subscription, with opposite overflow semantics |
-| **#373** inbound ordering | A delayed inbound notification reverting a just-written value is an inbound-path concern; this design is outbound only |
-| **#342** source consistency contract | The transport tiers and reported states are inputs to that contract, but defining it is a separate piece of work |
-| **#367**, **#369**, **#378** plumbing consolidations | Independent refactors; no interaction beyond ordinary merge conflicts |
+1. The transition table, by design (Part 7).
+2. Whether belief needs bounded history rather than a single slot. Arrival order plus P2 and P2a is believed sufficient; the enumerator is where to find out.
+3. Outbox bound, given expiry is now settled.
+4. Migration guidance for external `ISubjectSource` implementations beyond the default outcome mapping.
+5. Benchmark baseline and threshold for the `commitSeq` gate.

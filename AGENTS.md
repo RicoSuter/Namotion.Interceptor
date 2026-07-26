@@ -48,15 +48,18 @@ Only run integration tests when changing connector implementations (OPC UA, MQTT
 
 ### Project Structure
 ```
-src/
+src/                                # Flat: every project is a direct child
 ├── Namotion.Interceptor/           # Core library with base interfaces
 ├── Namotion.Interceptor.Generator/ # Source generator for [InterceptorSubject]
-├── Namotion.Interceptor.{Feature}/ # Extension libraries (Tracking, Registry, etc.)
-├── Extensions/                     # Integration packages (AspNetCore, Blazor, etc.)
-├── Samples/                        # Example applications
-└── Tests/                          # Unit test projects
+├── Namotion.Interceptor.{Feature}/ # Extension libraries (Tracking, Registry, Connectors, ...)
+├── Namotion.Interceptor.{Feature}.Tests/ # Test project alongside each library
+├── Namotion.Interceptor.{Protocol}/      # Connectors (OpcUa, Mqtt, WebSocket, ...)
+├── Namotion.Devices.{Vendor}/      # Device libraries
+├── HomeBlaze/                      # HomeBlaze application and its libraries
+└── Namotion.Interceptor.Sample*/   # Example applications
 docs/                               # Feature and connector documentation
 ├── design/                         # Internal design documents
+└── superpowers/specs/              # Working design specs (temporary; see below)
 ```
 
 ## Language Requirements
