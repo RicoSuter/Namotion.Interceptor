@@ -1,3 +1,4 @@
+@using System.Globalization
 @using HomeBlaze.History
 @using HomeBlaze.History.Abstractions
 @using Namotion.Interceptor.Registry.Abstractions
@@ -51,19 +52,82 @@
             {
                 <MudAlert Severity="Severity.Warning">@_error</MudAlert>
             }
+            else if (_segments is { Count: > 0 })
+            {
+                <div style="width:100%; height:100%; display:flex; flex-direction:column; gap:8px;">
+                    <div style="display:flex; flex:0 0 56px; width:100%; border-radius:4px; overflow:hidden;">
+                        @foreach (var segment in _segments)
+                        {
+                            <div title="@SegmentTooltip(segment)"
+                                 style="@SegmentStyle(segment)"></div>
+                        }
+                    </div>
+
+                    <div style="display:flex; justify-content:space-between;">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.ToZoned(_windowFrom).ToString("g")</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.ToZoned(_windowTo).ToString("g")</MudText>
+                    </div>
+
+                    @if (_truncated)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            Too many changes for this range: the oldest ones are not shown.
+                        </MudText>
+                    }
+
+                    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+                        @foreach (var label in _segments.Where(segment => !segment.IsUnknown)
+                                                        .Select(segment => segment.Label!)
+                                                        .Distinct())
+                        {
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span style="@($"width:12px; height:12px; border-radius:2px; background:{ColorFor(label)};")"></span>
+                                <MudText Typo="Typo.caption">@label</MudText>
+                            </div>
+                        }
+                        @if (_segments.Any(segment => segment.IsUnknown))
+                        {
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span style="@($"width:12px; height:12px; border-radius:2px; background:{UnknownFill};")"></span>
+                                <MudText Typo="Typo.caption">No data</MudText>
+                            </div>
+                        }
+                    </div>
+
+                    <MudSimpleTable Dense="true" Style="flex:1 1 auto; min-height:0; overflow:auto;">
+                        <thead><tr><th>Time</th><th>Value</th><th>Duration</th></tr></thead>
+                        <tbody>
+                        @foreach (var segment in _segments.Reverse())
+                        {
+                            <tr>
+                                <td>@TimeZone.ToZoned(segment.Start).ToString("g")</td>
+                                <td>@(segment.Label ?? "No data")</td>
+                                <td>@FormatDuration(segment.Duration)</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </MudSimpleTable>
+                </div>
+            }
             else if (_chartSeries is { Count: > 0 })
             {
-                <div style="width:100%; max-width:1200px; height:100%; max-height:min(600px, 70vh);">
+                @* MatchBoundsToSize sizes the SVG viewBox to the rendered box, so labels and strokes
+                   keep their own size instead of being scaled by a fixed 700x350 viewBox. The chart
+                   then derives its height from its width at 2:1, so the wrapper carries that ratio:
+                   without it the SVG is taller than the dialog and the x-axis labels and the lowest
+                   part of the plot are clipped. *@
+                <div style="height:100%; aspect-ratio:2 / 1; max-width:100%;">
                     <MudChart ChartType="ChartType.Timeseries"
                               T="double"
                               ChartSeries="_chartSeries"
                               ChartOptions="_chartOptions"
+                              MatchBoundsToSize="true"
                               Width="100%" Height="100%" />
                 </div>
             }
             else if (_tableRows is { Count: > 0 })
             {
-                <MudSimpleTable Dense="true" Style="max-height:100%; overflow:auto;">
+                <MudSimpleTable Dense="true" Style="width:100%; max-height:100%; overflow:auto;">
                     <thead><tr><th>Time</th><th>Value</th></tr></thead>
                     <tbody>
                     @foreach (var row in _tableRows)
@@ -93,6 +157,7 @@
     [Parameter] public ISubjectRegistry Registry { get; set; } = default!;
     [Parameter] public Type PropertyType { get; set; } = typeof(double);
     [Parameter] public bool IsCumulative { get; set; }
+    [Parameter] public bool IsDiscreteState { get; set; }
 
     private static readonly (string Label, TimeSpan? Range)[] Presets =
     {
@@ -114,6 +179,12 @@
 
     private int _periodIndex; // default: Auto (first entry)
 
+    // "None (raw samples)": the entry with no bucket that is not Auto.
+    private static readonly int RawPeriodIndex = PropertyHistoryChartModel.Periods
+        .Select((period, index) => (period, index))
+        .First(entry => !entry.period.IsAuto && entry.period.Bucket is null)
+        .index;
+
     // Short helper lines under each select, refreshed in LoadAsync so the controls row stays balanced.
     private string? _rangeHint;
     private string? _aggregationHint;
@@ -128,13 +199,35 @@
     private string? _error;
     private List<ChartSeries<double>>? _chartSeries;
     private List<(DateTimeOffset Time, string Value)>? _tableRows;
+    private IReadOnlyList<PropertyHistoryChartModel.StateSegment>? _segments;
+    private DateTimeOffset _windowFrom;
+    private DateTimeOffset _windowTo;
+    private bool _truncated;
+
+    // Palette for the state timeline. Assigned per distinct value in first-seen order, with the common
+    // boolean pair pinned so "Yes" is always the highlighted state rather than whichever appeared first.
+    private const string UnknownFill =
+        "repeating-linear-gradient(45deg, #BDBDBD, #BDBDBD 4px, #E0E0E0 4px, #E0E0E0 8px)";
+
+    private static readonly string[] StatePalette =
+        ["#2979FF", "#00B8A9", "#F6A609", "#8E44AD", "#E4572E", "#3D5A80"];
+
+    private readonly Dictionary<string, string> _stateColors = new(StringComparer.Ordinal);
+
+    // A discrete property renders as a state timeline, except under Count, which is a numeric
+    // aggregate of a discrete value and so belongs on the chart.
+    private bool UseStateTimeline =>
+        PropertyHistoryChartModel.IsDiscrete(PropertyType, IsDiscreteState) &&
+        (IsRawPeriodSelected || _aggregation is HistoryAggregations.Last or HistoryAggregations.First);
     private CancellationTokenSource? _loadCts;
+
+    private const string SeriesColor = "#2979FF";
 
     // Single-color palette so the gap-split runs of one logical series share one color
     // (visual continuity with breaks). TimeLabelFormat / TimeLabelSpacing are updated per range in LoadAsync.
     private readonly TimeSeriesChartOptions _chartOptions = new()
     {
-        ChartPalette = new[] { "#2979FF" },
+        ChartPalette = new[] { SeriesColor },
         LineDisplayType = LineDisplayType.Line,
         // Single-property chart: the legend is redundant and was getting clipped, so hide it.
         ShowLegend = false,
@@ -152,8 +245,17 @@
             union.UnionWith(store.SupportedAggregations);
         }
 
-        _aggregations = PropertyHistoryChartModel.GateAggregations(column, IsCumulative, union);
+        var isDiscrete = PropertyHistoryChartModel.IsDiscrete(PropertyType, IsDiscreteState);
+        _aggregations = PropertyHistoryChartModel.GateAggregations(column, IsCumulative, union, isDiscrete);
         _aggregation = _aggregations.Count > 0 ? _aggregations[0] : HistoryAggregations.Last;
+
+        // A discrete property defaults to raw samples: its transitions are the data, and bucketing would
+        // only round them to the bucket edge. The period select stays available for long ranges.
+        if (isDiscrete)
+        {
+            _periodIndex = RawPeriodIndex;
+        }
+
         await LoadAsync();
     }
 
@@ -211,6 +313,7 @@
                 _error = "The 'to' time must be after 'from'.";
                 _chartSeries = null;
                 _tableRows = null;
+                _segments = null;
                 return;
             }
 
@@ -245,19 +348,29 @@
                 new HistoryQuery(PropertyPath, from, to, bucket, _aggregation, MaxPoints: 1000),
                 cancellationToken);
 
+            // The value held entering the window: a raw query returns only the samples inside it, so a
+            // property that last changed before 'from' would otherwise render as an empty timeline.
+            var valueAtStart = UseStateTimeline
+                ? await Registry.GetValueAtAsync(PropertyPath, from, cancellationToken)
+                : null;
+
             // Superseded by a newer load while this query ran; leave the newer result in place.
             if (cancellationToken.IsCancellationRequested)
             {
                 return;
             }
 
-            BuildView(series);
+            _windowFrom = from;
+            _windowTo = to;
+            _truncated = series.Truncated;
+            BuildView(series, valueAtStart);
         }
         catch (HistoryAggregationNotSupportedException exception)
         {
             _error = exception.Message;
             _chartSeries = null;
             _tableRows = null;
+            _segments = null;
         }
         catch (OperationCanceledException)
         {
@@ -268,6 +381,7 @@
             _error = "Could not load history: " + exception.Message;
             _chartSeries = null;
             _tableRows = null;
+            _segments = null;
         }
         finally
         {
@@ -280,8 +394,23 @@
         }
     }
 
-    private void BuildView(HistorySeries series)
+    private void BuildView(HistorySeries series, HistoryPoint? valueAtStart)
     {
+        if (UseStateTimeline)
+        {
+            _segments = PropertyHistoryChartModel.BuildStateSegments(
+                series.Points,
+                valueAtStart,
+                _windowFrom,
+                _windowTo,
+                series.CoverageRanges,
+                point => PropertyHistoryChartModel.FormatDiscreteValue(point, PropertyType));
+            _chartSeries = null;
+            _tableRows = null;
+            return;
+        }
+
+        _segments = null;
         if (series.Points.Any(point => point.Number is not null))
         {
             var runs = PropertyHistoryChartModel.SplitIntoGapRuns(series.Points);
@@ -294,6 +423,29 @@
                         run.Select(point => (TimeZone.ToZoned(point.Timestamp), point.Number!.Value)).ToList())
                 })
                 .ToList();
+
+            // The time axis is derived from the series extent, so fifteen minutes of data in a six hour
+            // range would otherwise stretch across the full width and read as six hours of recording.
+            // An invisible series pinned to the window ends holds the axis to the range that was asked
+            // for, leaving the real data occupying only its own share of it. Its value is taken from the
+            // data so it cannot widen the value axis.
+            var anchorValue = runs[0][0].Number!.Value;
+            _chartSeries.Add(new ChartSeries<double>
+            {
+                Name = string.Empty,
+                Visible = true,
+                Data = new ChartData<double>(
+                [
+                    (TimeZone.ToZoned(_windowFrom), anchorValue),
+                    (TimeZone.ToZoned(_windowTo), anchorValue)
+                ])
+            });
+
+            _chartOptions.ChartPalette = Enumerable
+                .Repeat(SeriesColor, _chartSeries.Count - 1)
+                .Append("transparent")
+                .ToArray();
+
             _tableRows = null;
         }
         else
@@ -304,6 +456,47 @@
                 .Select(point => (point.Timestamp, point.Json!.Value.ToString()))
                 .ToList();
         }
+    }
+
+    private string SegmentStyle(PropertyHistoryChartModel.StateSegment segment)
+    {
+        // Percentage widths keep every run proportional to its duration; a flex-grow layout would
+        // collapse a short state (a light toggled for seconds) to nothing.
+        var window = (_windowTo - _windowFrom).Ticks;
+        var share = window <= 0 ? 0d : segment.Duration.Ticks * 100d / window;
+        var fill = segment.IsUnknown ? UnknownFill : ColorFor(segment.Label!);
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"width:{share:0.####}%; background:{fill}; min-width:1px;");
+    }
+
+    private string SegmentTooltip(PropertyHistoryChartModel.StateSegment segment) =>
+        $"{segment.Label ?? "No data"}\n{TimeZone.ToZoned(segment.Start):g} for {FormatDuration(segment.Duration)}";
+
+    private string ColorFor(string label)
+    {
+        if (_stateColors.TryGetValue(label, out var existing))
+        {
+            return existing;
+        }
+
+        var color = label switch
+        {
+            "Yes" or "True" or "On" => StatePalette[0],
+            "No" or "False" or "Off" => "#9E9E9E",
+            _ => StatePalette[_stateColors.Count % StatePalette.Length]
+        };
+
+        _stateColors[label] = color;
+        return color;
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalMinutes < 1) return $"{duration.TotalSeconds:0}s";
+        if (duration.TotalHours < 1) return $"{duration.TotalMinutes:0}m";
+        if (duration.TotalDays < 1) return $"{duration.TotalHours:0.#}h";
+        return $"{duration.TotalDays:0.#}d";
     }
 
     private static string Label(string aggregation) => aggregation switch
@@ -333,7 +526,8 @@
         string displayName,
         Type propertyType,
         bool isCumulative,
-        string? unit = null)
+        string? unit = null,
+        bool isDiscreteState = false)
     {
         var parameters = new DialogParameters<PropertyHistoryDialog>
         {
@@ -341,7 +535,8 @@
             { dialog => dialog.PropertyPath, propertyPath },
             { dialog => dialog.DisplayName, displayName },
             { dialog => dialog.PropertyType, propertyType },
-            { dialog => dialog.IsCumulative, isCumulative }
+            { dialog => dialog.IsCumulative, isCumulative },
+            { dialog => dialog.IsDiscreteState, isDiscreteState }
         };
 
         var options = new DialogOptions { FullScreen = true, CloseButton = true };

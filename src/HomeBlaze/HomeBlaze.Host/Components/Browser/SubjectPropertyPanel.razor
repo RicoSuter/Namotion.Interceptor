@@ -449,7 +449,8 @@
             ? null
             : StateUnitExtensions.GetUnitSuffix(metadata.Unit);
         await PropertyHistoryDialog.ShowAsync(
-            DialogService, SubjectRegistry, path, property.Name, property.Type, metadata?.IsCumulative ?? false, unit);
+            DialogService, SubjectRegistry, path, property.Name, property.Type, metadata?.IsCumulative ?? false, unit,
+            metadata?.IsDiscrete ?? false);
     }
 
     private IReadOnlyList<MethodMetadata> GetMethods() =>

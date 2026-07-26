@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using HomeBlaze.History.Abstractions;
 
 namespace HomeBlaze.History.Blazor;
@@ -134,12 +136,27 @@ public static class PropertyHistoryChartModel
     }
 
     /// <summary>
-    /// The aggregations to offer, in display order (time-weighted average first for numeric), gated by:
-    /// cumulative counters offer only Last/First/Minimum/Maximum/Count; JSON columns offer only Last/First/Count;
-    /// numeric columns offer the full set; then intersected with the union of stores' SupportedAggregations
-    /// (plus the AlwaysAvailable set, which is never filtered out).
+    /// Returns true when a property holds a discrete state rather than a measurement, so its history
+    /// reads as a sequence of steps between named values instead of a curve. Booleans, enums, and
+    /// strings qualify by type; anything else opts in with <c>[State(IsDiscrete = true)]</c>.
     /// </summary>
-    public static IReadOnlyList<string> GateAggregations(ValueColumn column, bool isCumulative, IReadOnlySet<string> storeUnion)
+    public static bool IsDiscrete(Type propertyType, bool isDiscreteState)
+    {
+        var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        return isDiscreteState || type == typeof(bool) || type == typeof(string) || type.IsEnum;
+    }
+
+    /// <summary>
+    /// The aggregations to offer, in display order (time-weighted average first for numeric), gated by:
+    /// cumulative counters offer only Last/First/Minimum/Maximum/Count; discrete values and JSON columns
+    /// offer only Last/First/Count; numeric columns offer the full set; then intersected with the union of
+    /// stores' SupportedAggregations (plus the AlwaysAvailable set, which is never filtered out).
+    ///
+    /// A mean of a discrete value is not wrong so much as unanswerable: averaging "On" and "Off" yields a
+    /// duty cycle, which is a different question from the one the history dialog asks.
+    /// </summary>
+    public static IReadOnlyList<string> GateAggregations(
+        ValueColumn column, bool isCumulative, IReadOnlySet<string> storeUnion, bool isDiscrete = false)
     {
         IReadOnlyList<string> ordered = isCumulative
             ? new[]
@@ -147,13 +164,115 @@ public static class PropertyHistoryChartModel
                 HistoryAggregations.Last, HistoryAggregations.First,
                 HistoryAggregations.Minimum, HistoryAggregations.Maximum, HistoryAggregations.Count
             }
-            : column == ValueColumn.Json
+            : isDiscrete || column == ValueColumn.Json
                 ? new[] { HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count }
                 : HistoryAggregations.All;
 
         var allowed = new HashSet<string>(storeUnion, StringComparer.Ordinal);
         allowed.UnionWith(HistoryAggregations.AlwaysAvailable);
         return ordered.Where(allowed.Contains).ToArray();
+    }
+
+    /// <summary>
+    /// One constant-value run of a discrete property's history. <see cref="Label"/> is null exactly when
+    /// <see cref="IsUnknown"/> is true, which covers both an uncovered span (no store vouches for it) and
+    /// a covered span whose value was never observed.
+    /// </summary>
+    public readonly record struct StateSegment(
+        DateTimeOffset Start, DateTimeOffset End, string? Label, bool IsUnknown)
+    {
+        public TimeSpan Duration => End - Start;
+    }
+
+    /// <summary>
+    /// Builds the state timeline for a discrete property: the [from, to) window split into constant-value
+    /// runs. A value holds until the next sample (the same last-observation-carried-forward rule the
+    /// stores use), so <paramref name="valueAtStart"/> supplies what was held entering the window, which a
+    /// raw query cannot return.
+    ///
+    /// Spans outside <paramref name="coverage"/> become unknown segments rather than extending the
+    /// neighbouring value across them: a gap means no store can say whether the value changed, which is
+    /// precisely the distinction a line chart cannot draw.
+    /// </summary>
+    public static IReadOnlyList<StateSegment> BuildStateSegments(
+        IReadOnlyList<HistoryPoint> points,
+        HistoryPoint? valueAtStart,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        IReadOnlyList<HistoryCoverage> coverage,
+        Func<HistoryPoint, string?> format)
+    {
+        if (to <= from)
+        {
+            return [];
+        }
+
+        // Every instant where the rendered run can change: a new sample, or a coverage edge.
+        var boundaries = new SortedSet<DateTimeOffset> { from, to };
+        foreach (var point in points)
+        {
+            if (point.Timestamp > from && point.Timestamp < to)
+            {
+                boundaries.Add(point.Timestamp);
+            }
+        }
+
+        foreach (var range in coverage)
+        {
+            if (range.From > from && range.From < to) boundaries.Add(range.From);
+            if (range.To > from && range.To < to) boundaries.Add(range.To);
+        }
+
+        var segments = new List<StateSegment>();
+        var ordered = boundaries.ToArray();
+        for (var index = 0; index < ordered.Length - 1; index++)
+        {
+            var start = ordered[index];
+            var end = ordered[index + 1];
+
+            var held = points
+                .Where(point => point.Timestamp <= start)
+                .LastOrDefault() ?? (valueAtStart is { } seed && seed.Timestamp <= start ? seed : null);
+
+            var label = held is null ? null : format(held);
+            var isCovered = coverage.Any(range => range.Contains(new HistoryCoverage(start, end)));
+            var isUnknown = !isCovered || label is null;
+
+            // Merge into the previous run when nothing observable changed at this boundary.
+            if (segments.Count > 0 &&
+                segments[^1].IsUnknown == isUnknown &&
+                segments[^1].Label == (isUnknown ? null : label))
+            {
+                segments[^1] = segments[^1] with { End = end };
+            }
+            else
+            {
+                segments.Add(new StateSegment(start, end, isUnknown ? null : label, isUnknown));
+            }
+        }
+
+        return segments;
+    }
+
+    /// <summary>
+    /// Formats a point as the display value of a discrete property: booleans read as Yes/No (matching the
+    /// subject browser), everything else as its recorded JSON or numeric value. Returns null for a point
+    /// carrying no value at all, which the timeline renders as unknown.
+    /// </summary>
+    public static string? FormatDiscreteValue(HistoryPoint point, Type propertyType)
+    {
+        var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (point.Json is { } json)
+        {
+            return json.ValueKind == JsonValueKind.String ? json.GetString() : json.ToString();
+        }
+
+        if (point.Number is not { } number)
+        {
+            return null;
+        }
+
+        return type == typeof(bool) ? (number != 0 ? "Yes" : "No") : number.ToString(CultureInfo.CurrentCulture);
     }
 
     /// <summary>

@@ -42,6 +42,38 @@ public static class HistoryStoreMerger
         registry.KnownSubjects.Keys.OfType<IHistoryStore>().QueryHistoryAsync(query, cancellationToken);
 
     /// <summary>
+    /// Gets the value held at <paramref name="asOf"/> for a property path: the newest sample at or
+    /// before it, taking the first hit in priority order. A raw query only returns the samples inside
+    /// its window, so a caller that renders a held value (the state timeline) needs this to know what
+    /// the value was entering the window. Returns null when no store has a sample it can vouch for.
+    /// </summary>
+    private static async Task<HistoryPoint?> GetValueAtAsync(
+        this IEnumerable<IHistoryStore> stores, string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
+    {
+        foreach (var store in stores.OrderByDescending(store => store.Priority))
+        {
+            var sample = await store
+                .GetSampleAtOrBeforeAsync(propertyPath, asOf, cancellationToken)
+                .ConfigureAwait(false);
+            if (sample is not null)
+            {
+                return sample;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Gets the value held at <paramref name="asOf"/> from the registry's history stores.
+    /// Convenience overload over the store-set entry point.
+    /// </summary>
+    public static Task<HistoryPoint?> GetValueAtAsync(
+        this ISubjectRegistry registry, string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken) =>
+        registry.KnownSubjects.Keys.OfType<IHistoryStore>()
+            .GetValueAtAsync(propertyPath, asOf, cancellationToken);
+
+    /// <summary>
     /// Fans the query out across multiple property paths that share the same time range, bucket,
     /// aggregation, and point cap. Returns one <see cref="HistorySeries"/> per path, in input order.
     /// The per-path queries may run concurrently. This is a thin fan-out, not an engine change.
