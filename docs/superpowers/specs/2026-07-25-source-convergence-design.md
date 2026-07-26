@@ -10,7 +10,7 @@ Local writes to a source-bound property are lost, silently dropped, or retried f
 
 The organising rule is that **send outcomes update intent, observations update belief, and a send outcome never updates belief**. An acknowledgement proves a request was accepted; it does not prove what the source now holds, and on two of three transports it does not even prove transmission.
 
-The work lands in three steps. Step 1 fixes confirmed data-loss bugs and needs no new design. Step 2 replaces the write retry queue without changing reconnect semantics. Step 3 adds belief and the convergence guarantee, and is gated on model checking rather than review.
+The work lands in three steps. Step 1 fixes confirmed data-loss bugs and needs no new design. Step 2 replaces the write retry queue without changing reconnect semantics. Step 3 adds belief and the convergence guarantee, and is gated on exhaustive enumeration of its state machine rather than on further review.
 
 ## Problems this addresses
 
@@ -349,7 +349,7 @@ Closes the connect-window loss, the drop-oldest eviction, and source-side unboun
 
 The belief register and staging hook, the commit-to-dispatch watermark, epochs on observation APIs, the sequence-guarded write, the transition table, the convergence check and quiescence fence, the comparer, observability classification, reported state and faults, and transaction coordination. Delivers the guarantee.
 
-**Gated on model checking**, not on further review.
+**Gated on exhaustive enumeration of the state machine**, not on further review.
 
 ### Step 4: servers
 
