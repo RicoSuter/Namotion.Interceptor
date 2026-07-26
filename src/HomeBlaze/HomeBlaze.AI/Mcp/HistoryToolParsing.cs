@@ -59,25 +59,43 @@ public static class HistoryToolParsing
         if (splitIndex > 0 && unit.Length > 0 && unit.All(char.IsLetter)
             && double.TryParse(text[..splitIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
         {
-            if (value <= 0)
+            // double.TryParse succeeds on an overflowing literal by returning infinity, and the
+            // TimeSpan factories then throw OverflowException, which the caller does not catch.
+            if (value <= 0 || !double.IsFinite(value))
             {
-                throw new FormatException("Bucket size must be positive.");
+                throw new FormatException("Bucket size must be positive and finite.");
             }
 
-            return unit.ToLowerInvariant() switch
+            try
             {
-                "ms" => TimeSpan.FromMilliseconds(value),
-                "s" => TimeSpan.FromSeconds(value),
-                "m" => TimeSpan.FromMinutes(value),
-                "h" => TimeSpan.FromHours(value),
-                "d" => TimeSpan.FromDays(value),
-                _ => throw new FormatException($"Unknown bucket unit '{unit}'.")
-            };
+                return unit.ToLowerInvariant() switch
+                {
+                    "ms" => TimeSpan.FromMilliseconds(value),
+                    "s" => TimeSpan.FromSeconds(value),
+                    "m" => TimeSpan.FromMinutes(value),
+                    "h" => TimeSpan.FromHours(value),
+                    "d" => TimeSpan.FromDays(value),
+                    _ => throw new FormatException($"Unknown bucket unit '{unit}'.")
+                };
+            }
+            catch (OverflowException)
+            {
+                throw new FormatException($"Bucket size '{text}' is out of range.");
+            }
         }
 
         if (text.Contains(':'))
         {
-            var span = TimeSpan.Parse(text, CultureInfo.InvariantCulture);
+            TimeSpan span;
+            try
+            {
+                span = TimeSpan.Parse(text, CultureInfo.InvariantCulture);
+            }
+            catch (OverflowException)
+            {
+                throw new FormatException($"Bucket size '{text}' is out of range.");
+            }
+
             if (span <= TimeSpan.Zero)
             {
                 throw new FormatException("Bucket size must be positive.");

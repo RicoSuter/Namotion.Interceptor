@@ -25,6 +25,81 @@ public class GetPropertyHistoryToolTests
     }
 
     [Fact]
+    public async Task WhenToIsNotAfterFrom_ThenStructuredError()
+    {
+        // Act: a swapped range, which is a routine mistake when composing timestamps.
+        var json = await InvokeAsync(new
+        {
+            paths = new[] { "/a/Value" },
+            from = "2026-06-24T12:00:00Z",
+            to = "2026-06-24T06:00:00Z"
+        });
+
+        // Assert: a structured error, not an exception surfaced from inside the stores.
+        Assert.True(json.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task WhenBucketIsNotAString_ThenStructuredErrorRatherThanSilentRawQuery()
+    {
+        // Act: a caller expressing seconds as a number. Ignoring it turned this into a raw query with
+        // ten times the point budget, with nothing telling the caller its bucket was dropped.
+        var json = await InvokeAsync(new
+        {
+            paths = new[] { "/a/Value" },
+            from = "2026-06-24T00:00:00Z",
+            bucket = 300
+        });
+
+        // Assert
+        Assert.True(json.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task WhenAggregationIsNotAString_ThenStructuredError()
+    {
+        // Act
+        var json = await InvokeAsync(new
+        {
+            paths = new[] { "/a/Value" },
+            from = "2026-06-24T00:00:00Z",
+            aggregation = 0
+        });
+
+        // Assert: previously an InvalidOperationException escaped the handler entirely.
+        Assert.True(json.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task WhenBucketOverflows_ThenStructuredError()
+    {
+        // Act
+        var json = await InvokeAsync(new
+        {
+            paths = new[] { "/a/Value" },
+            from = "2026-06-24T00:00:00Z",
+            bucket = "99999999999d"
+        });
+
+        // Assert: OverflowException is not a FormatException, so it used to escape the parse handler.
+        Assert.True(json.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task WhenTooManyPaths_ThenStructuredError()
+    {
+        // Act
+        var json = await InvokeAsync(new
+        {
+            paths = Enumerable.Range(0, 50).Select(index => $"/a/Value{index}").ToArray(),
+            from = "2026-06-24T00:00:00Z"
+        });
+
+        // Assert: each path costs a full query per store, so the list has to be bounded.
+        Assert.True(json.TryGetProperty("error", out _));
+    }
+
+    [Fact]
     public async Task WhenFromMissing_ThenError()
     {
         // Act

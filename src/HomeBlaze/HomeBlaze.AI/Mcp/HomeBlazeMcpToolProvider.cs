@@ -191,7 +191,44 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         }
     }
 
+    private const int MaxHistoryPaths = 10;
+
+    // Recorded timestamps keep whatever offset their source supplied, so formatting them verbatim can
+    // emit mixed offsets and break a caller that compares or sorts the strings, as the documented
+    // all-UTC contract invites.
+    private static string FormatUtc(DateTimeOffset value) =>
+        value.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Returns a structured error when an optional parameter is present but is neither a string nor
+    /// null, so a wrong-typed value is reported rather than silently falling back to its default.
+    /// </summary>
+    private static object? HasWrongType(JsonElement input, string name) =>
+        input.TryGetProperty(name, out var element) &&
+        element.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)
+            ? new { error = $"Parameter '{name}' must be a string." }
+            : null;
+
     private async Task<object?> HandleGetPropertyHistoryAsync(JsonElement input, CancellationToken cancellationToken)
+    {
+        // Mirrors invoke_method: anything unexpected becomes a structured error rather than reaching the
+        // MCP layer, which returns the raw exception message and so leaks internals to the caller.
+        try
+        {
+            return await GetPropertyHistoryAsync(input, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "The get_property_history tool failed.");
+            return new { error = "Could not read history. Check server logs for details." };
+        }
+    }
+
+    private async Task<object?> GetPropertyHistoryAsync(JsonElement input, CancellationToken cancellationToken)
     {
         if (!input.TryGetProperty("paths", out var pathsElement) || pathsElement.ValueKind != JsonValueKind.Array)
         {
@@ -203,6 +240,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             .Select(element => element.GetString())
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path => path!)
+            .Distinct(StringComparer.Ordinal)
             .ToArray();
 
         if (paths.Length == 0)
@@ -210,9 +248,34 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return new { error = "Parameter 'paths' must contain at least one path." };
         }
 
+        // Every path costs a full query against every store, and the budget below is per path, so an
+        // unbounded list multiplies both the work and the response size.
+        if (paths.Length > MaxHistoryPaths)
+        {
+            return new { error = $"Parameter 'paths' must contain at most {MaxHistoryPaths} paths." };
+        }
+
         if (!input.TryGetProperty("from", out var fromElement) || fromElement.ValueKind != JsonValueKind.String)
         {
             return new { error = "Parameter 'from' is required (ISO 8601 timestamp)." };
+        }
+
+        // A present-but-wrong-typed parameter is rejected rather than ignored. Silently dropping a
+        // numeric 'bucket' turned a bucketed request into a raw one with ten times the point budget,
+        // and a numeric 'to' silently extended the range, both with no signal to the caller.
+        if (HasWrongType(input, "to") is { } toTypeError)
+        {
+            return toTypeError;
+        }
+
+        if (HasWrongType(input, "bucket") is { } bucketTypeError)
+        {
+            return bucketTypeError;
+        }
+
+        if (HasWrongType(input, "aggregation") is { } aggregationTypeError)
+        {
+            return aggregationTypeError;
         }
 
         DateTimeOffset from;
@@ -231,6 +294,14 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         catch (FormatException exception)
         {
             return new { error = $"Could not parse a time parameter: {exception.Message}" };
+        }
+
+        // The stores validate this too, but there it throws from inside the fan-out and surfaces as an
+        // unstructured failure naming an internal parameter. A swapped or empty range is a routine
+        // mistake for a caller composing timestamps, so it gets a structured answer.
+        if (from >= to)
+        {
+            return new { error = "Parameter 'from' must be earlier than 'to'." };
         }
 
         var aggregation = HistoryToolParsing.NormalizeAggregation(
@@ -281,12 +352,12 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
                 truncated = series.Truncated,
                 coverage = series.CoverageRanges.Select(range => new
                 {
-                    from = range.From.ToString("o", CultureInfo.InvariantCulture),
-                    to = range.To.ToString("o", CultureInfo.InvariantCulture)
+                    from = FormatUtc(range.From),
+                    to = FormatUtc(range.To)
                 }).ToArray(),
                 points = series.Points.Select(point => new
                 {
-                    t = point.Timestamp.ToString("o", CultureInfo.InvariantCulture),
+                    t = FormatUtc(point.Timestamp),
                     value = point.Number is { } number ? (object?)number
                           : point.Json is { } json ? json
                           : null
