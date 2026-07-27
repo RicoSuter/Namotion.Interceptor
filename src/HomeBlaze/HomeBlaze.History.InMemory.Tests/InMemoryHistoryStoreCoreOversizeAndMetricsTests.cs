@@ -119,10 +119,10 @@ public class InMemoryHistoryStoreCoreOversizeAndMetricsTests
         now = now.AddMinutes(5);
         store.Sweep();
 
-        // Assert
+        // Assert - the exact total, not merely "not smaller". A >= assertion cannot tell a count that
+        // was carried over from one that was counted twice.
         Assert.Equal(0, store.TrackedPropertyCount);
-        Assert.True(store.EvictedCount >= beforeSweep,
-            $"cumulative evictions fell from {beforeSweep} to {store.EvictedCount}");
+        Assert.Equal(beforeSweep + 2, store.EvictedCount); // 3 capacity evictions, then 2 aged out
     }
 
     [Fact]

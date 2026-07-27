@@ -142,6 +142,33 @@ public partial class HueBridge : BackgroundService,
     {
         lock (_clientLock)
         {
+            // Disposal is reported as such rather than as a disconnection, even though Dispose clears
+            // IsConnected on its way past: "the bridge is gone" and "the bridge is not up yet" are
+            // different answers to a caller deciding whether to retry.
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            // An operation may only use a connection the loop is maintaining. Building its own would
+            // reach the bridge and physically succeed, but nothing would be streaming or polling it,
+            // so every derived value stayed at its pre-command reading for as long as the loop was
+            // failing to connect. Refusing is honest, and the caller surfaces it.
+            if (!IsConnected)
+            {
+                throw new InvalidOperationException(
+                    "Bridge is not connected. " + (StatusMessage ?? "Waiting for the connection to be established."));
+            }
+
+            return ConnectClient();
+        }
+    }
+
+    /// <summary>
+    /// The connection loop's own entry point. It is what establishes the connection, so unlike an
+    /// operation it is not subject to the connected check.
+    /// </summary>
+    private LocalHueApi ConnectClient()
+    {
+        lock (_clientLock)
+        {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
             if (_client is not null)
@@ -266,7 +293,7 @@ public partial class HueBridge : BackgroundService,
 
                 _bridge = bridge;
 
-                client = GetOrCreateClient();
+                client = ConnectClient();
 
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
@@ -338,8 +365,8 @@ public partial class HueBridge : BackgroundService,
         }
     }
 
-    // Task.Delay rejects a non-positive delay, and a zero interval would spin the loop, so fall back
-    // to the default rather than trusting a hand-edited configuration file.
+    // A zero interval would spin the loop and a negative one is rejected outright, so fall back to the
+    // default rather than trusting a hand-edited configuration file.
     private TimeSpan EffectivePollingInterval =>
         PollingInterval > TimeSpan.Zero ? PollingInterval : TimeSpan.FromSeconds(60);
 
@@ -705,6 +732,12 @@ public partial class HueBridge : BackgroundService,
         // The disposed flag is set under the same lock that reads the client, which is what makes the
         // pair a snapshot. Reading the client and then closing the door separately let an operation
         // racing the shutdown install a replacement in between, and nothing was left to release it.
+        // Cancel first. base.Dispose() is what cancels the stopping token, and running it last let the
+        // loop start a fresh iteration after the door was closed: it would spend up to half a minute
+        // rediscovering the bridge, then fail on the disposed check and overwrite the Stopped status
+        // written above with an Error one.
+        base.Dispose();
+
         LocalHueApi? client;
         lock (_clientLock)
         {
@@ -718,6 +751,5 @@ public partial class HueBridge : BackgroundService,
         }
 
         _configChangedSignal.Dispose();
-        base.Dispose();
     }
 }

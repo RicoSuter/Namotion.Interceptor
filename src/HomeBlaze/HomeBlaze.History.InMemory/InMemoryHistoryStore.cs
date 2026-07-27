@@ -206,22 +206,18 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
             }
 
             // A sweep retired this buffer between the lookup and the append. Drop it and take a fresh
-            // one rather than losing the sample.
-            Retire(propertyPath, buffer);
+            // one rather than losing the sample. Its count was already transferred by TryRetire.
+            Retire(_buffers, propertyPath, buffer);
         }
 
         Interlocked.Increment(ref _recordedCount);
     }
 
-    // Removes a retired buffer, carrying its eviction count over to the store. Only whoever wins the
-    // removal folds the count in, so it is never double counted.
-    private void Retire(string propertyPath, PropertyBuffer buffer)
-    {
-        if (_buffers.TryRemove(new KeyValuePair<string, PropertyBuffer>(propertyPath, buffer)))
-        {
-            Interlocked.Add(ref _retiredEvictedCount, buffer.EvictedCount);
-        }
-    }
+    // Unmaps a retired buffer. The eviction count moved to the store inside TryRetire, which happens
+    // exactly once per buffer, so this is a pure removal.
+    private static void Retire(
+        ConcurrentDictionary<string, PropertyBuffer> buffers, string propertyPath, PropertyBuffer buffer) =>
+        buffers.TryRemove(new KeyValuePair<string, PropertyBuffer>(propertyPath, buffer));
 
     private void AdvanceEvictionCoverageFrom(long candidateUtcTicks)
     {
@@ -567,9 +563,10 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
             // A path whose samples have all aged out is reclaimed outright. Canonical paths embed
             // collection indices, so a reorder abandons one path per renamed subject and nothing else
             // would ever free them.
-            if (entry.Value.TryRetire(out _))
+            if (entry.Value.TryRetire(out var retiredEvictions))
             {
-                Retire(entry.Key, entry.Value);
+                Interlocked.Add(ref _retiredEvictedCount, retiredEvictions);
+                Retire(_buffers, entry.Key, entry.Value);
             }
         }
 

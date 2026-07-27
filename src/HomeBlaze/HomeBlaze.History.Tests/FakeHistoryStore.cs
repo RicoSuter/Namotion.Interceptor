@@ -112,7 +112,11 @@ public sealed class FakeHistoryStore : IHistoryStore
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<HistoryPoint?>(SampleAtOrBefore(asOf));
+    }
 
+    private HistoryPoint? SampleAtOrBefore(DateTimeOffset asOf)
+    {
         HistoryCoverage? containingRange = null;
         for (var index = CoverageRanges.Length - 1; index >= 0; index--)
         {
@@ -126,9 +130,12 @@ public sealed class FakeHistoryStore : IHistoryStore
 
         if (containingRange is null)
         {
-            return new ValueTask<HistoryPoint?>((HistoryPoint?)null);
+            return null;
         }
 
+        // Restricted to the containing range, matching both real engines: a sample from before the
+        // range this store vouches for must not seed a carry, which is what stops a held value being
+        // synthesized across a restart or a drop gap.
         HistoryPoint? result = null;
         foreach (var sample in _samples)
         {
@@ -138,7 +145,7 @@ public sealed class FakeHistoryStore : IHistoryStore
             }
         }
 
-        return new ValueTask<HistoryPoint?>(result);
+        return result;
     }
 
     private List<HistoryPoint> QueryRaw(HistoryQuery query)
@@ -158,6 +165,20 @@ public sealed class FakeHistoryStore : IHistoryStore
         // value_json properties (string or enum) exactly as it does for numeric ones.
         var carriedNumber = carryDependent ? query.CarrySeed?.Number : null;
         var carriedJson = carryDependent ? query.CarrySeed?.Json : null;
+
+        // Both real engines fall back to their own held value when the merger supplied no seed, so a
+        // double without it models a store that does not exist. The fallback goes through the same
+        // coverage-gated lookup they use: reading raw samples instead would carry a value straight
+        // across a gap this store does not vouch for.
+        if (carryDependent && query.CarrySeed is null)
+        {
+            var prior = SampleAtOrBefore(BucketAlignment.BucketStart(query.From, bucket));
+            if (prior is not null)
+            {
+                carriedNumber = prior.Number;
+                carriedJson = prior.Json;
+            }
+        }
 
         var points = new List<HistoryPoint>();
         var bucketStart = BucketAlignment.BucketStart(query.From, bucket);

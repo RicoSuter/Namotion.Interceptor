@@ -184,7 +184,9 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
         store.Record("/a/Value", new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero), 3d, typeof(double));
 
         // Assert: a change that far outside the session claims nothing back, from either session.
-        Assert.Equal(beforeStaleSample, store.CoverageRanges);
+        // Compared as arrays: ImmutableArray equality is backing-array identity, so comparing the
+        // snapshots directly would pass on reference sameness rather than on the values.
+        Assert.Equal(beforeStaleSample.ToArray(), store.CoverageRanges.ToArray());
     }
 
     [Fact]
@@ -196,9 +198,11 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
         now = Base.AddSeconds(10);
         await store.FlushAsync(CancellationToken.None);
 
-        // Act
-        store.Record("/a/Value", new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero), 1d, typeof(double));
+        // Act - the in-session change is recorded first on purpose. With the stale one first there is
+        // no accumulated watermark for it to damage, so a filter that erased the running minimum
+        // instead of ignoring the candidate would go unnoticed.
         store.Record("/a/Value", Base.AddSeconds(5), 2d, typeof(double));
+        store.Record("/a/Value", new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero), 1d, typeof(double));
 
         // Assert: ignoring the stale change must not also hide the in-session one behind it. This is
         // the guard against "fixing" the stale case by letting the watermark claim past real pending
@@ -247,6 +251,33 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
         // Arrange, Act & Assert
         Assert.Throws<ArgumentOutOfRangeException>(
             () => NewStore(() => Base, maxPendingSamples: 0));
+    }
+
+    [Fact]
+    public async Task WhenAStaleChangeWasDropped_ThenCoverageStillRetracts()
+    {
+        // Arrange: a queue of one, so the second change is dropped rather than queued. A dropped
+        // change is lost for good, unlike a queued one that is merely late, so it has to keep
+        // constraining coverage however old it is. Filtering it by session start let the flush publish
+        // a range over permanently missing data and then advance the session start past that range's
+        // own start, after which changes inside the range stopped constraining it at all.
+        var now = Base;
+        using var store = NewStore(() => now, maxPendingSamples: 1);
+
+        store.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        store.Record("/a/Value", new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero), 2d, typeof(double));
+        Assert.Equal(1, store.DropCount);
+
+        now = Base.AddSeconds(30);
+        await store.FlushAsync(CancellationToken.None);
+
+        // Act: a later change, queued and unwritten.
+        store.Record("/a/Value", Base.AddSeconds(25), 3d, typeof(double));
+
+        // Assert: nothing may claim an instant still sitting in the queue.
+        Assert.DoesNotContain(
+            store.CoverageRanges,
+            range => range.From <= Base.AddSeconds(25) && range.To > Base.AddSeconds(25));
     }
 
     private SqliteHistoryStore NewStore(

@@ -126,13 +126,20 @@ internal sealed class PropertyBuffer
     {
         lock (_lock)
         {
-            evictedCount = _evictedCount;
-            if (_count > 0)
+            evictedCount = 0;
+            if (_isRetired || _count > 0)
             {
                 return false;
             }
 
             _isRetired = true;
+
+            // Handed over rather than copied. Folding a copy into the store while the buffer is still
+            // in the dictionary double counts, and folding after removal leaves a window where the
+            // count is in neither, which is how the total went backwards. Transferring under the same
+            // lock that retires means a reader sees it exactly once, wherever it looks.
+            evictedCount = _evictedCount;
+            _evictedCount = 0;
             return true;
         }
     }

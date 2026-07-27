@@ -235,19 +235,50 @@ public class PropertyBufferTests
     [Fact]
     public void WhenGrowthWrappedTheRingFirst_ThenOrderIsStillPreserved()
     {
-        // Arrange - fill to the ceiling so the ring wraps, evict from the front, then append again.
-        // Growth has to read through the wrap, not straight off the array.
-        var buffer = NewBuffer(capacity: 4);
-        for (var second = 0; second < 6; second++)
+        // Arrange - growth has to read through the wrap rather than straight off the array. Reaching
+        // that needs the ring's start to have moved off zero *before* it grows, which an age sweep
+        // does: it evicts from the front, and the next refill then grows a wrapped ring. A capacity at
+        // or below the initial allocation never grows at all, so this test previously proved nothing.
+        var buffer = NewBuffer(capacity: 1000);
+        for (var second = 0; second < 16; second++)
         {
-            buffer.Append(LongSample(second, second)); // wraps: keeps 2,3,4,5
+            buffer.Append(LongSample(second, second));
+        }
+
+        buffer.EvictOlderThan(Base.AddSeconds(3)); // _start moves off zero, ring is now wrapped
+        for (var second = 16; second < 24; second++)
+        {
+            buffer.Append(LongSample(second, second)); // refills past the allocation, forcing growth
         }
 
         // Act
         var range = buffer.Range(Base, Base.AddSeconds(100));
 
         // Assert
-        Assert.Equal(new long?[] { 2, 3, 4, 5 }, range.Select(sample => sample.Long).ToArray());
+        Assert.Equal(
+            Enumerable.Range(3, 21).Select(value => (long?)value).ToArray(),
+            range.Select(sample => sample.Long).ToArray());
+    }
+
+    [Fact]
+    public void WhenALateSampleForcesGrowth_ThenTheInsertLandsInOrder()
+    {
+        // Arrange - the late-arrival path can also trigger growth, which is the one place the shift
+        // loop runs against a freshly re-linearized array. A ring already at its ceiling takes the
+        // evict branch instead, so this needs a ceiling well above the current allocation.
+        var buffer = NewBuffer(capacity: 1000);
+        buffer.Append(LongSample(0, 0));
+        buffer.Append(LongSample(2, 2));
+        buffer.Append(LongSample(4, 4));
+        buffer.Append(LongSample(6, 6)); // ring is now full at its current allocation, not its ceiling
+
+        // Act
+        buffer.Append(LongSample(3, 3));
+
+        // Assert
+        var range = buffer.Range(Base, Base.AddSeconds(100));
+        Assert.Equal(new long?[] { 0, 2, 3, 4, 6 }, range.Select(sample => sample.Long).ToArray());
+        Assert.Equal(0, buffer.EvictedCount);
     }
 
     [Fact]

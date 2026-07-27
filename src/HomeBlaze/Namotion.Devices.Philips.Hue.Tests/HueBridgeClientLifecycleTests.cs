@@ -13,6 +13,7 @@ public class HueBridgeClientLifecycleTests
         var bridge = TestHelpers.CreateTestBridge();
         bridge.AppKey = "test-key";
         SetPrivateField(bridge, "_bridge", new LocatedBridge("test-bridge-id", "127.0.0.1", null));
+        bridge.IsConnected = true; // the connection loop's precondition for serving operations
 
         var firstClient = bridge.GetOrCreateClient();
         var firstHttpClient = GetPrivateField<HttpClient>(bridge, "_httpClient");
@@ -44,6 +45,7 @@ public class HueBridgeClientLifecycleTests
         var bridge = TestHelpers.CreateTestBridge();
         bridge.AppKey = "test-key";
         SetPrivateField(bridge, "_bridge", new LocatedBridge("test-bridge-id", "127.0.0.1", null));
+        bridge.IsConnected = true; // the connection loop's precondition for serving operations
 
         var stale = bridge.GetOrCreateClient();
         bridge.ResetClient(stale);
@@ -69,6 +71,7 @@ public class HueBridgeClientLifecycleTests
         var bridge = TestHelpers.CreateTestBridge();
         bridge.AppKey = "test-key";
         SetPrivateField(bridge, "_bridge", new LocatedBridge("test-bridge-id", "127.0.0.1", null));
+        bridge.IsConnected = true; // the connection loop's precondition for serving operations
 
         var client = bridge.GetOrCreateClient();
         var httpClient = GetPrivateField<HttpClient>(bridge, "_httpClient");
@@ -95,5 +98,20 @@ public class HueBridgeClientLifecycleTests
         var field = typeof(HueBridge).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException($"Field '{fieldName}' was not found.");
         field.SetValue(bridge, value);
+    }
+
+    [Fact]
+    public void WhenTheBridgeIsNotConnected_ThenAnOperationIsRefusedRatherThanHalfWorking()
+    {
+        // Arrange - discovery can keep failing while the bridge is still reachable at its last known
+        // address. An operation that built its own client then physically succeeded, but nothing was
+        // streaming or polling, so every derived value stayed at its pre-command reading indefinitely.
+        var bridge = TestHelpers.CreateTestBridge();
+        bridge.AppKey = "test-key";
+        SetPrivateField(bridge, "_bridge", new LocatedBridge("test-bridge-id", "127.0.0.1", null));
+
+        // Act & Assert
+        Assert.False(bridge.IsConnected);
+        Assert.Throws<InvalidOperationException>(() => bridge.GetOrCreateClient());
     }
 }

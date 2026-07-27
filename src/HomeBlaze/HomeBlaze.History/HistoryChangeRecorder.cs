@@ -22,9 +22,8 @@ public sealed class HistoryChangeRecorder(IHistoryRecorder engine, ISubjectPathR
     // returns against the stored one detects a move without this class subscribing to anything; it
     // inherits whatever freshness the resolver's own cache has (that cache is invalidated from
     // lifecycle changes, so a reordering that attaches and detaches nothing can leave it stale). The
-    // per-property inner
-    // map lets each history property of a renamed subject detect the move independently, so the first
-    // property to change does not consume the rename for its siblings.
+    // per-property inner map lets each history property of a renamed subject detect the move
+    // independently, so the first property to change does not consume the rename for its siblings.
     //
     // Weak keys: a detached subject's entry disappears when it becomes unreachable. Lifecycle detach is
     // dispatched through the detaching subject's own context, which never reaches a sibling store, so

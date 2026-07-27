@@ -5,6 +5,7 @@ using HomeBlaze.Abstractions.Devices.Light;
 using HueApi.Models;
 using HueApi.Models.Requests;
 using Namotion.Interceptor.Attributes;
+using static Namotion.Devices.Philips.Hue.HueCommandResult;
 
 namespace Namotion.Devices.Philips.Hue;
 
@@ -111,7 +112,7 @@ public partial class HueGroup :
                 .TurnOn();
 
             var client = Bridge.GetOrCreateClient();
-            await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
+            ThrowOnError(await client.GroupedLight.UpdateAsync(GroupedLight.Id, command));
         }
     }
 
@@ -124,7 +125,7 @@ public partial class HueGroup :
                 .TurnOff();
 
             var client = Bridge.GetOrCreateClient();
-            await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
+            ThrowOnError(await client.GroupedLight.UpdateAsync(GroupedLight.Id, command));
         }
     }
 
@@ -146,7 +147,7 @@ public partial class HueGroup :
                 .SetBrightness((double)(brightness * 100m));
 
             var client = Bridge.GetOrCreateClient();
-            await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
+            ThrowOnError(await client.GroupedLight.UpdateAsync(GroupedLight.Id, command));
 
             if (turnOffAfterChange)
             {

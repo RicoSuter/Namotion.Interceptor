@@ -209,7 +209,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             if (_droppingNewSamples || PendingCount >= _maxPendingSamples)
             {
                 _droppingNewSamples = true;
-                _firstDroppedTimestamp = EarlierInSession(_firstDroppedTimestamp, timestamp);
+                _firstDroppedTimestamp = Earlier(_firstDroppedTimestamp, timestamp);
                 Interlocked.Increment(ref _dropCount);
                 PublishUncommittedWatermark();
                 return false;
@@ -240,7 +240,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             if (_droppingNewSamples || PendingCount >= _maxPendingSamples)
             {
                 _droppingNewSamples = true;
-                _firstDroppedTimestamp = EarlierInSession(_firstDroppedTimestamp, timestamp);
+                _firstDroppedTimestamp = Earlier(_firstDroppedTimestamp, timestamp);
                 Interlocked.Increment(ref _dropCount);
                 PublishUncommittedWatermark();
                 return;
@@ -577,21 +577,20 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             }
         }
 
-        if (_firstDroppedTimestamp < value)
-        {
-            // The lost change predates anything this session can still claim, so it no longer
-            // constrains coverage. Drop mode itself stays on until a flush clears the queue.
-            _firstDroppedTimestamp = null;
-        }
-
         PublishUncommittedWatermark();
     }
 
-    // Folds an uncommitted change's instant into a watermark input, ignoring anything before this
-    // session's coverage start. Such a change cannot describe an instant this session claims, and
-    // letting it through blanks the snapshot outright: the watermark is subtracted from the durable
-    // ranges onwards, and this session's own range starts at exactly the coverage start. One device
-    // reporting an uninitialised 1601 timestamp is enough to reach that.
+    // Folds a *queued* change's instant into a watermark input, ignoring anything before this session's
+    // coverage start. Such a change cannot describe an instant this session claims, and letting it
+    // through blanks the snapshot outright: the watermark is subtracted from the durable ranges
+    // onwards, and this session's own range starts at exactly the coverage start. One device reporting
+    // an uninitialised 1601 timestamp is enough to reach that.
+    //
+    // Deliberately not applied to a dropped change. A queued one will still be written, so ignoring it
+    // only defers what coverage says; a dropped one is gone for good, so it has to keep constraining
+    // coverage no matter how old it is. Filtering it let a flush publish a range over permanently
+    // missing data, and drop recovery then advanced the session start past that range's own start,
+    // after which every change inside it was filtered out while the range still claimed it.
     private DateTimeOffset? EarlierInSession(DateTimeOffset? current, DateTimeOffset candidate) =>
         candidate < _pendingCoverageStart ? current : Earlier(current, candidate);
 

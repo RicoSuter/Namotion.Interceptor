@@ -245,19 +245,24 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         int maxPoints,
         CancellationToken cancellationToken)
     {
-        var resolved = rootRegistered is null ? null : _pathProvider.TryGetPropertyFromPath(rootRegistered, path);
-
-        // Null rather than a guess when the type is not one history records: reporting an unrecordable
-        // property as "number" invites the caller to chart something that will never have samples.
+        // Resolution runs inside the boundary too: walking a path invokes property getters, so one
+        // throwing getter would otherwise fault the whole fan-out before any query started.
         string? valueType = null;
-        if (resolved is { } match && HistoryColumns.IsRecordable(match.Property.Type))
-        {
-            valueType = HistoryToolParsing.ValueType(match.Property.Type);
-        }
-
         HistorySeries result;
         try
         {
+            var resolved = rootRegistered is null
+                ? null
+                : _pathProvider.TryGetPropertyFromPath(rootRegistered, path);
+
+            // Null rather than a guess when the type is not one history records: reporting an
+            // unrecordable property as "number" invites the caller to chart something that will never
+            // have samples.
+            if (resolved is { } match && HistoryColumns.IsRecordable(match.Property.Type))
+            {
+                valueType = HistoryToolParsing.ValueType(match.Property.Type);
+            }
+
             result = await stores
                 .QueryHistoryAsync(
                     new HistoryQuery(path, from, to, bucket, aggregation, maxPoints), cancellationToken)
@@ -272,8 +277,10 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 available = exception.Available.OrderBy(name => name).ToArray()
             });
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // The caller gave up on the whole request; there is nothing to isolate. A cancellation
+            // raised by a store's own internal timeout is a store failure and is isolated below.
             throw;
         }
         catch (Exception exception)

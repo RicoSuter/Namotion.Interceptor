@@ -6,6 +6,7 @@ using HueApi.ColorConverters.Original.Extensions;
 using HueApi.Models;
 using HueApi.Models.Requests;
 using Namotion.Interceptor.Attributes;
+using static Namotion.Devices.Philips.Hue.HueCommandResult;
 
 namespace Namotion.Devices.Philips.Hue;
 
@@ -217,7 +218,7 @@ public partial class HueLightbulb : HueDevice,
             .TurnOn();
 
         var client = Bridge.GetOrCreateClient();
-        await client.Light.UpdateAsync(LightResource.Id, command);
+        ThrowOnError(await client.Light.UpdateAsync(LightResource.Id, command));
     }
 
     [Operation]
@@ -227,7 +228,7 @@ public partial class HueLightbulb : HueDevice,
             .TurnOff();
 
         var client = Bridge.GetOrCreateClient();
-        await client.Light.UpdateAsync(LightResource.Id, command);
+        ThrowOnError(await client.Light.UpdateAsync(LightResource.Id, command));
     }
 
     [Operation]
@@ -246,7 +247,7 @@ public partial class HueLightbulb : HueDevice,
             .SetBrightness((double)(brightness * 100m));
 
         var client = Bridge.GetOrCreateClient();
-        await client.Light.UpdateAsync(LightResource.Id, command);
+        ThrowOnError(await client.Light.UpdateAsync(LightResource.Id, command));
 
         if (turnOffAfterChange)
         {
@@ -263,7 +264,7 @@ public partial class HueLightbulb : HueDevice,
             .SetColor(rgbColor, Model ?? "LCT001");
 
         var client = Bridge.GetOrCreateClient();
-        await client.Light.UpdateAsync(LightResource.Id, command);
+        ThrowOnError(await client.Light.UpdateAsync(LightResource.Id, command));
     }
 
     [Operation]
@@ -285,7 +286,7 @@ public partial class HueLightbulb : HueDevice,
             };
 
             var client = Bridge.GetOrCreateClient();
-            await client.Light.UpdateAsync(LightResource.Id, command);
+            ThrowOnError(await client.Light.UpdateAsync(LightResource.Id, command));
         }
     }
 }
