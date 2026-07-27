@@ -29,7 +29,57 @@ public class HueBridgeClientLifecycleTests
         Assert.NotSame(firstClient, secondClient);
         Assert.NotSame(firstHttpClient, secondHttpClient);
 
+        // The identity assertions alone hold whether or not the old HttpClient was released: a reset
+        // that only nulled the field would still yield a fresh one. Releasing it is the point.
+        Assert.Throws<ObjectDisposedException>(() => firstHttpClient.Timeout = TimeSpan.FromSeconds(5));
+
         bridge.ResetClient(secondClient);
+    }
+
+    [Fact]
+    public void WhenAStaleClientIsReset_ThenTheLiveOneIsUntouched()
+    {
+        // Arrange - ResetClient is called from the connection loop, from Dispose and after a failure,
+        // so it can be handed a client that has already been replaced.
+        var bridge = TestHelpers.CreateTestBridge();
+        bridge.AppKey = "test-key";
+        SetPrivateField(bridge, "_bridge", new LocatedBridge("test-bridge-id", "127.0.0.1", null));
+
+        var stale = bridge.GetOrCreateClient();
+        bridge.ResetClient(stale);
+        var live = bridge.GetOrCreateClient();
+        var liveHttpClient = GetPrivateField<HttpClient>(bridge, "_httpClient");
+
+        // Act
+        bridge.ResetClient(stale);
+
+        // Assert - the live client survives, still usable.
+        Assert.Same(live, bridge.GetOrCreateClient());
+        liveHttpClient.Timeout = TimeSpan.FromSeconds(5);
+
+        bridge.ResetClient(live);
+    }
+
+    [Fact]
+    public void WhenTheBridgeIsDisposed_ThenNoFurtherClientCanBeBuilt()
+    {
+        // Arrange - an operation can be in flight while the host shuts the bridge down. Without a
+        // disposed flag, GetOrCreateClient happily built a replacement that nothing was left to
+        // release, so the HttpClient leaked for the lifetime of the process.
+        var bridge = TestHelpers.CreateTestBridge();
+        bridge.AppKey = "test-key";
+        SetPrivateField(bridge, "_bridge", new LocatedBridge("test-bridge-id", "127.0.0.1", null));
+
+        var client = bridge.GetOrCreateClient();
+        var httpClient = GetPrivateField<HttpClient>(bridge, "_httpClient");
+
+        // Act
+        bridge.Dispose();
+
+        // Assert
+        Assert.Throws<ObjectDisposedException>(() => httpClient.Timeout = TimeSpan.FromSeconds(5));
+        Assert.Throws<ObjectDisposedException>(() => bridge.GetOrCreateClient());
+        Assert.NotNull(client);
     }
 
     private static T GetPrivateField<T>(HueBridge bridge, string fieldName) where T : class

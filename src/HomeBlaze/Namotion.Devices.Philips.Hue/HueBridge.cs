@@ -45,6 +45,10 @@ public partial class HueBridge : BackgroundService,
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
     private readonly Lock _clientLock = new();
 
+    // Set under _clientLock once the bridge is disposed, so no operation can build a client that
+    // nothing is left to release.
+    private bool _disposed;
+
     private LocatedBridge? _bridge;
     private HttpClient? _httpClient;
     private LocalHueApi? _client;
@@ -138,6 +142,8 @@ public partial class HueBridge : BackgroundService,
     {
         lock (_clientLock)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
             if (_client is not null)
             {
                 return _client;
@@ -696,9 +702,13 @@ public partial class HueBridge : BackgroundService,
         // Route through ResetClient so the event stream is stopped and the HttpClient is released as
         // a pair. Clearing _client alone left _httpClient non-null and alive, so a disposal racing an
         // in-flight operation let GetOrCreateClient build a replacement into abandoned fields.
+        // The disposed flag is set under the same lock that reads the client, which is what makes the
+        // pair a snapshot. Reading the client and then closing the door separately let an operation
+        // racing the shutdown install a replacement in between, and nothing was left to release it.
         LocalHueApi? client;
         lock (_clientLock)
         {
+            _disposed = true;
             client = _client;
         }
 
