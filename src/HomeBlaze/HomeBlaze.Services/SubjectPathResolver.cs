@@ -17,7 +17,7 @@ namespace HomeBlaze.Services;
 /// </summary>
 public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
 {
-    private readonly RootManager _rootManager;
+    private readonly Func<IInterceptorSubject?> _getRoot;
 
     // Subject → canonical paths cache (with leading /)
     private readonly ConcurrentDictionary<IInterceptorSubject, IReadOnlyList<string>> _canonicalPathsCache = new();
@@ -25,10 +25,15 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     // (path, style) → Subject resolve cache (absolute paths only)
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> _resolveCache = new();
 
-    public SubjectPathResolver(RootManager rootManager, IInterceptorSubjectContext context)
+    /// <param name="getRoot">
+    /// Resolves the current graph root. A delegate rather than the RootManager itself, because
+    /// RootManager needs this resolver registered in the context before it loads the graph, and taking
+    /// RootManager here would make that a constructor cycle. Nothing is read from it until a path is
+    /// actually resolved.
+    /// </param>
+    public SubjectPathResolver(Func<IInterceptorSubject?> getRoot)
     {
-        _rootManager = rootManager;
-        context.AddService(this);
+        _getRoot = getRoot;
     }
 
     /// <summary>
@@ -45,7 +50,7 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
         PathStyle style,
         IInterceptorSubject? relativeTo = null)
     {
-        var root = _rootManager.Root;
+        var root = _getRoot();
 
         if (string.IsNullOrEmpty(path))
             return relativeTo ?? root;
@@ -293,7 +298,7 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
 
     private IReadOnlyList<string> ComputeCanonicalPaths(IInterceptorSubject subject)
     {
-        var root = _rootManager.Root;
+        var root = _getRoot();
 
         // Root subject's canonical path is "/"
         if (subject == root)

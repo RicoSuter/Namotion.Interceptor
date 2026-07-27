@@ -200,7 +200,7 @@ Subjects can also carry user-defined metadata — annotations, tags, and links t
 
 **How each consumer accesses the knowledge graph:**
 
-The knowledge graph is accessed through two layers of MCP tools. The base layer (`Namotion.Interceptor.Mcp`) provides subject browsing (`query`), property read/write (`get_property`, `set_property`), type listing (`list_types`), method discovery (`list_methods`), and method invocation (`invoke_method`) — usable with any Namotion.Interceptor application. The HomeBlaze layer (`HomeBlaze.AI`) enriches these tools with domain-specific metadata (`$type`, `$icon`, `$title`, units via `[State]`, methods via `[Operation]`/`[Query]`) and adds history queries (`get_property_history`). Event and command history tools remain planned.
+The knowledge graph is accessed through two layers of MCP tools. The base layer (`Namotion.Interceptor.Mcp`) provides subject browsing (`query`), property read/write (`get_property`, `set_property`), type listing (`list_types`), method discovery (`list_methods`), and method invocation (`invoke_method`) — usable with any Namotion.Interceptor application. The HomeBlaze layer (`HomeBlaze.AI`) enriches these tools with domain-specific metadata (`$type`, `$icon`, `$title`, units via `[State]`, methods via `[Operation]`/`[Query]`). History queries ship with the history packages instead: `HomeBlaze.History.Mcp` provides `get_property_history`, with `get_event_history` and `get_command_history` planned.
 
 | Consumer | Access Pattern |
 |----------|---------------|

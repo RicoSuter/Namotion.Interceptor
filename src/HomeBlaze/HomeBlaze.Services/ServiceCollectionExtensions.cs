@@ -25,19 +25,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        services.AddSingleton<SubjectPathResolver>();
+        // The root accessor is deferred so constructing the resolver does not pull in RootManager,
+        // which depends on the resolver.
+        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<DeveloperModeService>();
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
-        services.AddHostedService(sp =>
-        {
-            // SubjectPathResolver registers itself as a context service in its constructor, and
-            // subjects attached by RootManager (history stores) need it the moment their hosted
-            // service starts. Force the singleton before RootManager loads the graph; otherwise the
-            // resolver would first be constructed by whichever Blazor component injects it, which
-            // happens after startup.
-            sp.GetRequiredService<SubjectPathResolver>();
-            return sp.GetRequiredService<RootManager>();
-        });
+        services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 
         return services;
     }

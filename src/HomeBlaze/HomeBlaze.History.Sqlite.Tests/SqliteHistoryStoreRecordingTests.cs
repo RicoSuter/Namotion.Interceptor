@@ -36,9 +36,12 @@ public class SqliteHistoryStoreRecordingTests
             .WithFullPropertyTracking()
             .WithRegistry();
 
-        var rootManager = new RootManager(typeRegistry, serializer, context, null);
+        // The resolver reads the root lazily, so it can be built before the manager that owns it,
+        // and RootManager registers it into the context.
+        RootManager? rootManager = null;
+        var pathResolver = new SubjectPathResolver(() => rootManager!.Root);
+        rootManager = new RootManager(typeRegistry, serializer, context, pathResolver, null);
         context.WithService(() => rootManager);
-        context.WithPathResolver();
 
         // PropertyAttributeInitializer turns the C# [State] attribute into the KnownAttributes.State
         // registry attribute that HasHistory() checks. Without it, HasHistory() is always false.

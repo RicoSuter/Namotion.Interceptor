@@ -35,7 +35,7 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 |---------|-------|-------|
 | `Namotion.Interceptor.Mcp` | `query`, `get_property`, `set_property`, `list_types` | Any Namotion.Interceptor application |
 | `HomeBlaze.AI` | `list_methods`, `invoke_method` (via `IMcpToolProvider`) + subject enrichment (`$type`, `$icon`, `$title` via `IMcpSubjectEnricher`) + concrete type discovery (via `IMcpTypeProvider`) | HomeBlaze-specific features |
-| `HomeBlaze.History.Mcp` | `get_property_history`. Event and command history tools remain planned | Ships with the history packages |
+| `HomeBlaze.History.Mcp` | `get_property_history`, and the planned `get_event_history` and `get_command_history` (see [Messages](messages.md)) | Ships with the history packages |
 
 This keeps the interceptor library independently usable. Method tools are HomeBlaze-specific because method discovery uses `MethodMetadata` with `[Operation]`/`[Query]` registry attributes — a HomeBlaze convention, not a core interceptor concept. Property-level metadata (units, position) is already in the registry as `StateMetadata` attributes — included directly in `query` responses when `includeAttributes=true`.
 
