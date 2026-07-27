@@ -230,7 +230,7 @@ Numeric aggregations on JSON properties throw `HistoryAggregationNotSupportedExc
 The merger orders stores by descending priority and snapshots coverage once. It uses two planners:
 
 - Raw queries use coverage subtraction. Higher-priority ranges claim their overlap first and lower-priority stores fill uncovered pieces.
-- Bucketed queries assign each complete bucket to one highest-priority store that both covers the full bucket and supports the aggregation. A bucket is never split across stores, avoiding invalid combinations such as an average of averages.
+- Bucketed queries assign each bucket to one highest-priority store that both covers the bucket and supports the aggregation. A bucket is never split across stores, avoiding invalid combinations such as an average of averages. The newest bucket is clipped to the end of the requested range for both purposes, so it is still served when the range ends mid-bucket and its point never aggregates samples from after that end.
 
 Consecutive buckets with the same owner become one store query. Coverage gaps break segments even when the same store owns both sides.
 

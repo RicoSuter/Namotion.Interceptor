@@ -82,16 +82,17 @@ internal static class HistoryDispatchPlanner
         {
             var bucketEnd = bucketStart + bucket;
 
-            // Ownership is tested against the bucket clipped to the query window. The newest bucket
-            // runs past To whenever To is not bucket-aligned, which it never is for a live query
-            // ending at "now", and no store's coverage can reach into the future. Testing the
-            // unclipped bucket would leave that bucket unowned and blank out the live edge.
-            var ownedRange = new HistoryCoverage(bucketStart, bucketEnd < query.To ? bucketEnd : query.To);
+            // The newest bucket runs past To whenever To is not bucket-aligned. It is clipped for both
+            // purposes: ownership is tested against the clipped range, because testing the unclipped
+            // bucket would leave it unowned and blank out the live edge, and the segment ends there
+            // too, so the sub-query cannot aggregate samples from after To into the trailing point.
+            var clippedEnd = bucketEnd < query.To ? bucketEnd : query.To;
+            var ownedRange = new HistoryCoverage(bucketStart, clippedEnd);
             var owner = FindOwner(stores, query.Aggregation, isAlwaysAvailable, ownedRange);
 
             if (ReferenceEquals(owner, currentOwner) && owner is not null)
             {
-                segmentEnd = bucketEnd;
+                segmentEnd = clippedEnd;
                 segmentBucketCount++;
             }
             else
@@ -104,7 +105,7 @@ internal static class HistoryDispatchPlanner
 
                 currentOwner = owner;
                 segmentStart = bucketStart;
-                segmentEnd = bucketEnd;
+                segmentEnd = clippedEnd;
                 segmentBucketCount = 1;
             }
 

@@ -243,21 +243,26 @@ public class HistoryStoreMergerTests
     [Fact]
     public async Task WhenRangeEndsMidBucket_ThenRightEdgeBucketIsStillOwned()
     {
-        // Arrange: To at 25 minutes with 10-minute buckets; the bucket [20,30) extends past To.
+        // Arrange: To at 25 minutes with 10-minute buckets, so the bucket [20,30) extends past To. The
+        // sample at 27 is inside that bucket but outside the requested window, and it is far enough
+        // from the one at 22 that averaging them in would be unmistakable.
         var store = new FakeHistoryStore
         {
             Priority = 100,
             CurrentCoverage = new HistoryCoverage(At(0), At(30))
-        }.AddSample(At(5), 1).AddSample(At(22), 2);
+        }.AddSample(At(5), 1).AddSample(At(22), 2).AddSample(At(27), 100);
         var query = new HistoryQuery("temp", At(0), At(25), TimeSpan.FromMinutes(10), HistoryAggregations.SampleAverage);
 
         // Act
-        await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
 
-        // Assert: the sub-query spans the aligned buckets [0,30) covering the partial right edge.
+        // Assert: the right-edge bucket is still owned and served, but only up to To, so the sample at
+        // 27 cannot reach the result. Fetching the full bucket made the trailing point an aggregate
+        // over data the caller never asked for, silently.
         Assert.Single(store.ReceivedQueries);
         Assert.Equal(At(0), store.ReceivedQueries[0].From);
-        Assert.Equal(At(30), store.ReceivedQueries[0].To);
+        Assert.Equal(At(25), store.ReceivedQueries[0].To);
+        Assert.Equal(2d, series.Points.Last().Number);
     }
 
     [Fact]
@@ -711,8 +716,8 @@ public class HistoryStoreMergerTests
         // The bucketed planner enumerates the bucket-aligned span, not the raw [From,To). With 10-minute
         // buckets and From/To at minutes 5 and 25, the aligned buckets are [0,10), [10,20), [20,30).
         // A store edge-tight to [5,25) does not cover the leading bucket, which genuinely reaches back
-        // before the store has data. The trailing bucket only spills past To, and ownership is tested
-        // against the bucket clipped to To, so it is served from the data that does exist.
+        // before the store has data. The trailing bucket only spills past To, and both ownership and
+        // the dispatched range are clipped to To, so it is served from the data that does exist.
         //
         // Arrange: a single Minimum-capable store covering exactly the non-aligned [5,25).
         var store = new FakeHistoryStore
@@ -729,7 +734,7 @@ public class HistoryStoreMergerTests
         // Assert: the two owned buckets coalesce into one sub-query; the leading bucket is a null gap.
         Assert.Single(store.ReceivedQueries);
         Assert.Equal(At(10), store.ReceivedQueries[0].From);
-        Assert.Equal(At(30), store.ReceivedQueries[0].To);
+        Assert.Equal(At(25), store.ReceivedQueries[0].To);
         Assert.Equal(3, series.Points.Length);
         Assert.Null(series.Points[0].Number);
         Assert.Equal(At(10), series.Points[1].Timestamp);

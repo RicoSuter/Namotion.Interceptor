@@ -164,8 +164,12 @@ public sealed class FakeHistoryStore : IHistoryStore
         while (bucketStart < query.To)
         {
             var bucketEnd = bucketStart + bucket;
+
+            // Clipped to the query window, matching the real engines: a trailing bucket that runs past
+            // To must not aggregate samples from after To into its point.
+            var sliceEnd = bucketEnd < query.To ? bucketEnd : query.To;
             var inBucket = _samples
-                .Where(sample => sample.Timestamp >= bucketStart && sample.Timestamp < bucketEnd)
+                .Where(sample => sample.Timestamp >= bucketStart && sample.Timestamp < sliceEnd)
                 .ToList();
 
             if (inBucket.Count > 0)
