@@ -114,7 +114,7 @@ public partial class HueGroup :
             var response = await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
             if (!response.Errors.Any())
             {
-                GroupedLight = HueResourceEcho.With(GroupedLight, group => group.On.IsOn = true);
+                GroupedLight = HueResourceMutation.With(GroupedLight, group => group.On.IsOn = true);
                 LastUpdated = DateTimeOffset.Now;
             }
         }
@@ -132,7 +132,7 @@ public partial class HueGroup :
             var response = await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
             if (!response.Errors.Any())
             {
-                GroupedLight = HueResourceEcho.With(GroupedLight, group => group.On.IsOn = false);
+                GroupedLight = HueResourceMutation.With(GroupedLight, group => group.On.IsOn = false);
                 LastUpdated = DateTimeOffset.Now;
             }
         }
@@ -159,7 +159,7 @@ public partial class HueGroup :
             var response = await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
             if (!response.Errors.Any() && GroupedLight.Dimming is not null)
             {
-                GroupedLight = HueResourceEcho.With(
+                GroupedLight = HueResourceMutation.With(
                     GroupedLight, group => group.Dimming!.Brightness = (double)(brightness * 100m));
                 LastUpdated = DateTimeOffset.Now;
             }

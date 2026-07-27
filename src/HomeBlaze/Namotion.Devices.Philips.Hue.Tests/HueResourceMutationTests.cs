@@ -12,7 +12,7 @@ namespace Namotion.Devices.Philips.Hue.Tests;
 /// cover: mutating the resource in place changed no intercepted property, so nothing recomputed the
 /// derived state, nothing notified and no history sample was recorded.
 /// </summary>
-public class HueResourceEchoTests
+public class HueResourceMutationTests
 {
     [Fact]
     public void WhenAResourceIsEchoed_ThenTheCopyCarriesTheChangeAndTheOriginalDoesNot()
@@ -21,7 +21,7 @@ public class HueResourceEchoTests
         var light = TestHelpers.CreateLight(isOn: false, brightness: 42d);
 
         // Act
-        var updated = HueResourceEcho.With(light, copy => copy.On.IsOn = true);
+        var updated = HueResourceMutation.With(light, copy => copy.On.IsOn = true);
 
         // Assert - a distinct instance, or the equality check would veto the write as unchanged.
         Assert.NotSame(light, updated);
@@ -36,7 +36,7 @@ public class HueResourceEchoTests
         var light = TestHelpers.CreateLight(isOn: true, brightness: 42d, mirek: 300);
 
         // Act
-        var updated = HueResourceEcho.With(light, copy => copy.On.IsOn = false);
+        var updated = HueResourceMutation.With(light, copy => copy.On.IsOn = false);
 
         // Assert - the copy replaces the resource wholesale, so anything it loses is lost from the model.
         Assert.Equal(light.Id, updated.Id);
@@ -56,7 +56,7 @@ public class HueResourceEchoTests
         ((INotifyPropertyChanged)lightbulb).PropertyChanged += (_, args) => firedEvents.Add(args.PropertyName!);
 
         // Act - the assignment an [Operation] performs after the bridge confirms the command.
-        lightbulb.LightResource = HueResourceEcho.With(lightbulb.LightResource, light => light.On.IsOn = true);
+        lightbulb.LightResource = HueResourceMutation.With(lightbulb.LightResource, light => light.On.IsOn = true);
 
         // Assert
         Assert.True(lightbulb.IsOn);
