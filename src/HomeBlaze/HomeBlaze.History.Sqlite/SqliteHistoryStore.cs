@@ -321,9 +321,14 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                         ? successfulAt
                         : successfulAt.AddTicks(1);
 
+                    // A change from before this range's own start cannot limit how far the range
+                    // reaches, because the range never claimed that instant. Taking the raw minimum
+                    // let one backdated sample sitting in the queue during a flush drive the end below
+                    // the start, so the guard below skipped the write and durable coverage silently
+                    // stopped advancing while the rows themselves kept landing on disk.
                     foreach (var sample in _pending)
                     {
-                        if (sample.Timestamp < coverageEnd)
+                        if (sample.Timestamp >= coverageStart && sample.Timestamp < coverageEnd)
                         {
                             coverageEnd = sample.Timestamp;
                         }
@@ -331,7 +336,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
                     foreach (var move in _pendingMoves)
                     {
-                        if (move.Timestamp < coverageEnd)
+                        if (move.Timestamp >= coverageStart && move.Timestamp < coverageEnd)
                         {
                             coverageEnd = move.Timestamp;
                         }
@@ -610,20 +615,17 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         {
             var cutoff = _getUtcNow() - _maxAge;
 
-            lock (_pendingLock)
-            {
-                if (_pendingCoverageStart < cutoff)
-                {
-                    SetPendingCoverageStart(cutoff);
-                }
-            }
-
             lock (_connectionLock)
             {
                 // Give up the claim before deleting the data behind it. Deleting first leaves the store
                 // claiming a window whose partitions are gone if a delete throws (a locked file) or the
                 // process dies mid-sweep, and inside claimed coverage the merger will not fall back to
                 // another store, so those queries return empty rather than the other store's data.
+                //
+                // The claim is also trimmed before the coverage start is advanced below. Advancing it
+                // first lifts the constraint that stops an untrimmed range being claimed, and this lock
+                // is held for the whole of every query, so the window between the two is as wide as the
+                // slowest read.
                 _coverageStore.Trim(EpochTicks.ToEpochTicks(cutoff));
 
                 foreach (var key in _readContext.EnumeratePartitionFileKeys().ToArray())
@@ -651,6 +653,14 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                 foreach (var connection in _connections.Values)
                 {
                     Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
+                }
+            }
+
+            lock (_pendingLock)
+            {
+                if (_pendingCoverageStart < cutoff)
+                {
+                    SetPendingCoverageStart(cutoff);
                 }
             }
         }

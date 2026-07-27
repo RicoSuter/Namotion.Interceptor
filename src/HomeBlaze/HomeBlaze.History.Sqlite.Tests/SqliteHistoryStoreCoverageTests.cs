@@ -280,6 +280,78 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
             range => range.From <= Base.AddSeconds(25) && range.To > Base.AddSeconds(25));
     }
 
+    [Fact]
+    public async Task WhenAStaleChangeArrivesDuringAFlush_ThenDurableCoverageStillAdvances()
+    {
+        // Arrange: the flush swaps the queue out, then computes how far the new range may reach from
+        // whatever is queued at that moment. A change arriving in that window is not in the batch being
+        // written, so it is genuinely uncommitted -- but one from before the range's own start never
+        // claimed that instant, so it must not limit the range. Taking the raw minimum drove the end
+        // below the start, the write was skipped, and durable coverage froze while rows kept landing.
+        //
+        // The window is only reachable concurrently, hence the recorder thread.
+        var now = Base;
+        using var store = NewStore(() => now);
+        var stale = new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Bounded well below the pending limit: overflowing it starts dropping, and a dropped change
+        // constrains coverage from its own instant however old it is, which empties the snapshot for a
+        // different reason and would mask what this test is measuring.
+        var stop = false;
+        var recorder = Task.Run(() =>
+        {
+            for (var written = 0; written < 20_000 && !Volatile.Read(ref stop); written++)
+            {
+                store.Record("/a/Value", stale, 1d, typeof(double));
+                Thread.Yield();
+            }
+        });
+
+        // Act: several flushes, each advancing the clock, with the stale recorder running throughout.
+        var ends = new List<DateTimeOffset>();
+        for (var step = 1; step <= 8; step++)
+        {
+            now = Base.AddSeconds(step * 10);
+            await store.FlushAsync(CancellationToken.None);
+            ends.Add(store.CoverageRanges.Length > 0 ? store.CoverageRanges[^1].To : Base);
+        }
+
+        Volatile.Write(ref stop, true);
+        await recorder;
+
+        // Assert: every flush moved the claim forward. A frozen end means a flush skipped its write.
+        Assert.Equal(0, store.DropCount);
+        for (var index = 1; index < ends.Count; index++)
+        {
+            Assert.True(
+                ends[index] > ends[index - 1],
+                $"durable coverage stalled at flush {index + 1}: {ends[index - 1]:o} -> {ends[index]:o}");
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheSweepAdvancesTheCoverageStart_ThenTheTrimmedRangeIsGoneFirst()
+    {
+        // Arrange: retention narrows both the claim and the constraint that protects it. Advancing the
+        // start before trimming lifts the constraint while the untrimmed range is still published, and
+        // the connection lock the trim needs is held for the whole of every query, so the window is as
+        // wide as the slowest read.
+        var now = Base;
+        using var store = NewStore(() => now);
+        store.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        now = Base.AddSeconds(10);
+        await store.FlushAsync(CancellationToken.None);
+
+        // Act: move well past the retention window so the sweep trims everything.
+        now = Base.AddDays(400);
+        store.Sweep();
+
+        // Assert: nothing is left claiming the swept window.
+        Assert.DoesNotContain(
+            store.CoverageRanges,
+            range => range.From <= Base.AddSeconds(1) && range.To > Base.AddSeconds(1));
+    }
+
     private SqliteHistoryStore NewStore(
         Func<DateTimeOffset> getUtcNow,
         int maxPendingSamples = SqliteHistoryStore.DefaultMaxPendingSamples) =>
