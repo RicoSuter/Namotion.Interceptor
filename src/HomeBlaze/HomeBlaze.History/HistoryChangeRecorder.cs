@@ -18,9 +18,11 @@ namespace HomeBlaze.History;
 /// </summary>
 public sealed class HistoryChangeRecorder(IHistoryRecorder engine, ISubjectPathResolver resolver)
 {
-    // Last canonical subject path seen per subject and property. The resolver's own cache is cleared on
-    // every structural change, so GetPath() is always current; comparing the returned path to the
-    // stored one detects a move without depending on lifecycle event delivery. The per-property inner
+    // Last canonical subject path seen per subject and property. Comparing the path the resolver
+    // returns against the stored one detects a move without this class subscribing to anything; it
+    // inherits whatever freshness the resolver's own cache has (that cache is invalidated from
+    // lifecycle changes, so a reordering that attaches and detaches nothing can leave it stale). The
+    // per-property inner
     // map lets each history property of a renamed subject detect the move independently, so the first
     // property to change does not consume the rename for its siblings.
     //

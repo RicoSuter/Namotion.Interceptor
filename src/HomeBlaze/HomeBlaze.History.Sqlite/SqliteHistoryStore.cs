@@ -152,9 +152,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
     }
 
-    // Everything queued for the next flush. Moves count: they are flushed in the same batch and held
-    // in memory until then, so leaving them out under-reported the depth and let an unbounded move
-    // stream grow the queue without ever reaching the drop guard.
+    // Everything queued for the next flush, including the batch a flush currently has in flight.
+    // Moves count: they are flushed in the same batch and held in memory until then, so leaving them
+    // out under-reported the depth and let an unbounded move stream grow the queue without ever
+    // reaching the drop guard.
     private int PendingCount => _pending.Count + _inFlightSampleCount + _pendingMoves.Count;
 
     public DateTimeOffset? LastFlushUtc
@@ -276,7 +277,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                 // skipped or failed coverage update cannot silently swallow a gap marker.
                 startsNewCoverageRange = _pendingStartsNewCoverageRange;
                 coverageStart = _pendingCoverageStart;
-                _inFlightSampleCount = batch.Length;
+                _inFlightSampleCount = batch.Length + moveBatch.Length;
                 PublishUncommittedWatermark();
             }
 

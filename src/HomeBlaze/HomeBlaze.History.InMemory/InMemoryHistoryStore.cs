@@ -162,8 +162,9 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
 
     /// <inheritdoc />
     /// <remarks>
-    /// Always true: the ring buffer accepts every sample, making room by evicting the oldest, and the
-    /// resulting loss is reported through coverage rather than by refusing the write.
+    /// Always true: the engine never refuses a write. It can still discard the sample, when a late
+    /// arrival is older than everything a full ring retains; that loss is reported through coverage
+    /// rather than through this return value.
     /// </remarks>
     public bool TryRecord(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
     {
@@ -542,8 +543,8 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
         }
 
         // Moves describing samples that no longer exist only slow down chain resolution, which every
-        // query and look-back performs. Keep the first move at or after the cutoff so the leg that
-        // covers the cutoff instant still resolves.
+        // query and look-back performs. The newest move at or before the cutoff is kept, because that
+        // is the one bounding the leg that covers the cutoff instant.
         lock (_movesLock)
         {
             var obsolete = 0;

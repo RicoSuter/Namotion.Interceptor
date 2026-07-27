@@ -20,17 +20,17 @@ HomeBlaze runs as Blazor Server, so C# `DateTime.Now` and `TimeZoneInfo.Local` r
 
 ### Architecture
 
-Resolution and formatting are split between a pure, framework-free core in `HomeBlaze.Services` and the web and JavaScript wiring in `HomeBlaze.Host`.
+Resolution and formatting are split between a pure, framework-free core in `HomeBlaze.Components.Abstractions` (so any UI package can format a timestamp without referencing the backend) and the web and JavaScript wiring in `HomeBlaze.Host`. Only the DI registration lives in `HomeBlaze.Services`.
 
 #### Components
 
 | Type | Package | Role |
 |---|---|---|
-| `ITimeZoneDisplay` / `TimeZoneDisplayService` | `HomeBlaze.Services` | Scoped (per circuit) holder of the resolved zone. Formats `DateTimeOffset` and `DateTime`, converts an instant to wall-clock (`ToZoned`), parses picker input back to UTC (`ToUtc`), and raises `Changed`. Returns a placeholder while unresolved. |
-| `TimeZonePreference` | `HomeBlaze.Services` | The choice: Automatic (follow browser) or a specific IANA id. Round-trips to a cookie value. |
-| `TimeZoneResolver` | `HomeBlaze.Services` | Resolves an IANA (or Windows) id to a `TimeZoneInfo`, never throwing (IANA to Windows fallback, then UTC). |
-| `TimeZoneCatalog` | `HomeBlaze.Services` | Builds the selectable IANA zone list from the OS zones, dropping zones that have no IANA mapping. |
-| `timezone.js` + `TimeZoneInterop` | `HomeBlaze.Host` | Reads the browser zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`) and writes the preference cookie. |
+| `ITimeZoneDisplay` / `TimeZoneDisplayService` | `HomeBlaze.Components.Abstractions` | Scoped (per circuit) holder of the resolved zone. Formats `DateTimeOffset` and `DateTime`, converts an instant to wall-clock (`ToZoned`), parses picker input back to UTC (`ToUtc`), and raises `Changed`. Returns a placeholder while unresolved. |
+| `TimeZonePreference` | `HomeBlaze.Components.Abstractions` | The choice: Automatic (follow browser) or a specific IANA id. Round-trips to a cookie value. |
+| `TimeZoneResolver` | `HomeBlaze.Components.Abstractions` | Resolves an IANA (or Windows) id to a `TimeZoneInfo`, never throwing (IANA to Windows fallback, then UTC). |
+| `TimeZoneCatalog` | `HomeBlaze.Components.Abstractions` | Builds the selectable IANA zone list from the OS zones, dropping zones that have no IANA mapping. |
+| `TimeZoneInterop` (`HomeBlaze.Host`) + `timezone.js` (`HomeBlaze` app `wwwroot`) | `HomeBlaze.Host` | Reads the browser zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`) and writes the preference cookie. |
 | `TimeZoneInitializer` | `HomeBlaze.Host` | Resolves the zone on load (see the flow below). Rendered once in `MainLayout`. |
 | `TimeZoneSelector` | `HomeBlaze.Host` | Toolbar control: Automatic plus a searchable zone list, marks the active zone, and persists the choice. |
 

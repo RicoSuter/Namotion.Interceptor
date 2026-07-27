@@ -121,13 +121,11 @@ public static class HistoryStoreMerger
     /// previous (older) segment left held.
     ///
     /// Reconciliation. Carry only applies to bucketed queries (raw queries never set <c>CarrySeed</c>),
-    /// and a bucketed segment's point count is its deterministic bucket count (one point per bucket,
-    /// empty or not), known from the plan without querying. So for carry-dependent queries the served
-    /// set and cutoff are decided newest-first from those bucket counts, then the served segments are
-    /// queried oldest-to-newest with the carry threaded. Each served segment also gets one at-or-before
-    /// lookup for its ending raw event. The newest segments are guaranteed served and the carry threads
-    /// correctly. Non-carry queries run newest-first in a single pass, shrinking the budget by each
-    /// returned count.
+    /// and the bucketed grid is already clipped to the newest <c>MaxPoints</c> buckets before planning,
+    /// so a bucketed plan cannot exceed the budget. Carry-dependent queries therefore serve every
+    /// segment and thread the carry oldest-to-newest, with one at-or-before lookup per segment for its
+    /// ending raw event. Only raw queries can actually exhaust the budget, and those run newest-first
+    /// in a single pass, shrinking it by each returned count.
     /// </summary>
     internal static Task<HistorySeries> ExecuteWithBudget(
         IReadOnlyList<IHistoryStore> ordered,

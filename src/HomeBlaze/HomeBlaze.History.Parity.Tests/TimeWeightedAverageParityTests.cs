@@ -64,6 +64,27 @@ public class TimeWeightedAverageParityTests
 
     [Theory]
     [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenLastHasNoSeedAndTheHeldValuePredatesFrom_ThenBothStoresLookBack(ParityStoreFactory factory)
+    {
+        // Arrange - the Last twin of WhenStoreOwnLookBackHoldsValue_ThenEmptyBucketUsesIt. Last carries
+        // forward exactly like TimeWeightedAverage, so a store asked directly (no merger CarrySeed) must
+        // fall back to its own held value rather than reporting the bucket as empty. One engine did and
+        // the other did not, so the same query answered differently depending on which store served it.
+        using var store = factory.Create();
+        store.Record("/a/Value", Base.AddSeconds(-5), 4d, typeof(double));
+        await store.FlushAsync();
+
+        // Act
+        var point = store.Query(new HistoryQuery(
+            "/a/Value", Base, Base.AddSeconds(10), TimeSpan.FromSeconds(10),
+            HistoryAggregations.Last, MaxPoints: 1000)).Points.Single();
+
+        // Assert
+        Assert.Equal(4d, point.Number!.Value, 6);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
     public async Task WhenTwoBuckets_ThenHeldValueThreadsAcross(ParityStoreFactory factory)
     {
         // Arrange - one sample (value 6) at t=2 in bucket0 [0,10); bucket1 [10,20) empty carries 6.

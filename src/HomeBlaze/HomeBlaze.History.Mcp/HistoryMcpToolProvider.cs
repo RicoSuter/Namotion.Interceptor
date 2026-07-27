@@ -272,6 +272,22 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                 available = exception.Available.OrderBy(name => name).ToArray()
             });
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // Any other store failure is isolated to its own path too. Letting it escape faulted the
+            // whole fan-out and discarded the results for every sibling path that had already
+            // succeeded, which is exactly what this tool promises not to do.
+            _logger.LogError(exception, "Reading history for '{PropertyPath}' failed.", path);
+            return (path, new
+            {
+                value_type = valueType,
+                error = "Could not read history for this path. Check server logs for details."
+            });
+        }
 
         return (path, new
         {

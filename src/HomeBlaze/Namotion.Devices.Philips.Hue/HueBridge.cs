@@ -325,15 +325,10 @@ public partial class HueBridge : BackgroundService,
         }
     }
 
-    /// <summary>
-    /// The poll only reconciles the device set (the event stream carries state), so it needs a floor.
-    /// The setting was ignored while the loop hardcoded 60s, and its old default of 500ms was persisted
-    /// into existing configurations, so honouring those verbatim would now poll bridges twice a second.
-    /// </summary>
+    // Task.Delay rejects a non-positive delay, and a zero interval would spin the loop, so fall back
+    // to the default rather than trusting a hand-edited configuration file.
     private TimeSpan EffectivePollingInterval =>
-        PollingInterval > MinimumPollingInterval ? PollingInterval : MinimumPollingInterval;
-
-    private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(10);
+        PollingInterval > TimeSpan.Zero ? PollingInterval : TimeSpan.FromSeconds(60);
 
     private async Task RunPollingLoopAsync(LocalHueApi client, CancellationToken cancellationToken)
     {

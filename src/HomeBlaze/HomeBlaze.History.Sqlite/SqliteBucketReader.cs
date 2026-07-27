@@ -87,10 +87,12 @@ internal static class SqliteBucketReader
         var originalAlignedFrom = BucketAlignment.BucketStart(query.From, bucket);
 
         // When MaxPoints clipped older buckets, advance the held value to the clipped boundary.
-        // TWA also falls back to the store's own look-back when the merger supplied no seed.
+        // Otherwise fall back to this store's own held value when the merger supplied no seed, for Last
+        // as well as TimeWeightedAverage: both carry forward, and restricting the look-back to one of
+        // them made a direct Last query answer differently here than in the in-memory engine, which the
+        // two are meant to be interchangeable for.
         if (isCarryDependent &&
-            (alignedFrom > originalAlignedFrom ||
-             aggregation == HistoryAggregations.TimeWeightedAverage && query.CarrySeed is null))
+            (alignedFrom > originalAlignedFrom || query.CarrySeed is null))
         {
             var prior = getSampleAtOrBefore(query.PropertyPath, alignedFrom);
             if (prior is not null)

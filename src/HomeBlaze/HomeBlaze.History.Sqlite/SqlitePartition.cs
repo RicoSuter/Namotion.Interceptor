@@ -20,13 +20,19 @@ public enum PartitionInterval
 internal static class SqlitePartition
 {
     // Stable file-name key for the partition containing the timestamp.
+    //
+    // Formatted with the invariant culture, matching how the keys are parsed back. An interpolated
+    // string formats through the current culture, so under a non-Gregorian default calendar (th-TH,
+    // ar-SA) the file names carried a different era's year than the reader expected: every query
+    // returned nothing while coverage still claimed the range, and the sweep either never deleted the
+    // files or deleted all of them at once.
     public static string PartitionKey(DateTimeOffset timestamp, PartitionInterval interval)
     {
         var utc = timestamp.ToUniversalTime();
         return interval switch
         {
-            PartitionInterval.Daily => $"{utc:yyyy-MM-dd}",
-            PartitionInterval.Monthly => $"{utc:yyyy-MM}",
+            PartitionInterval.Daily => utc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            PartitionInterval.Monthly => utc.ToString("yyyy-MM", CultureInfo.InvariantCulture),
             _ => WeeklyKey(utc) // Weekly: ISO-week-anchored on Monday
         };
     }
@@ -59,17 +65,24 @@ internal static class SqlitePartition
 
     private static bool TryInferRange(string key, out (DateTimeOffset Start, DateTimeOffset End) range)
     {
+        // The end is clamped rather than added blindly: a device reporting DateTime.MaxValue produces a
+        // year-9999 key, and an unguarded AddDays/AddMonths then threw out of what is documented as a
+        // predicate. That poisoned every read and the sweep that would have removed the file, leaving
+        // the store unusable until it was deleted by hand.
         if (DateTimeOffset.TryParseExact(key, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var day))
         {
-            range = (day, day.AddDays(day.DayOfWeek == DayOfWeek.Monday ? 7 : 1));
+            range = (day, AddClamped(day, day.DayOfWeek == DayOfWeek.Monday ? 7 : 1));
             return true;
         }
 
         if (DateTimeOffset.TryParseExact(key + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var month))
         {
-            range = (month, month.AddMonths(1));
+            var monthEnd = month.Month == 12
+                ? AddClamped(month, DateTime.DaysInMonth(month.Year, 12))
+                : month.AddMonths(1);
+            range = (month, monthEnd);
             return true;
         }
 
@@ -77,11 +90,16 @@ internal static class SqlitePartition
         return false;
     }
 
+    private static DateTimeOffset AddClamped(DateTimeOffset value, int days) =>
+        DateTimeOffset.MaxValue - value < TimeSpan.FromDays(days)
+            ? DateTimeOffset.MaxValue
+            : value.AddDays(days);
+
     private static string WeeklyKey(DateTimeOffset utc)
     {
         var date = utc.Date;
         var deltaToMonday = ((int)date.DayOfWeek + 6) % 7; // Monday=0
         var monday = date.AddDays(-deltaToMonday);
-        return $"{monday:yyyy-MM-dd}";
+        return monday.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     }
 }

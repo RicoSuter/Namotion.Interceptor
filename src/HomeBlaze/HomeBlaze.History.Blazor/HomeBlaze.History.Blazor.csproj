@@ -10,6 +10,7 @@
         <ProjectReference Include="..\HomeBlaze.History\HomeBlaze.History.csproj" />
         <ProjectReference Include="..\HomeBlaze.History.Abstractions\HomeBlaze.History.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
         <PackageReference Include="MudBlazor" Version="9.2.*" />
     </ItemGroup>
 
