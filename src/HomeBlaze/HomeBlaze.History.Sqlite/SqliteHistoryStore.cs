@@ -56,9 +56,6 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     private bool _pendingStartsNewCoverageRange = true;
     private DateTimeOffset _pendingCoverageStart;
 
-    // _pendingCoverageStart republished for the lock-free coverage read, which must not take
-    // _pendingLock: a flush holds it across the durable coverage write.
-    private long _sessionCoverageStartTicks;
     private DateTimeOffset? _firstDroppedTimestamp;
 
     // The earliest instant this store holds an uncommitted (pending, in-flight, or dropped) change for,
@@ -212,14 +209,14 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             if (_droppingNewSamples || PendingCount >= _maxPendingSamples)
             {
                 _droppingNewSamples = true;
-                _firstDroppedTimestamp = Earlier(_firstDroppedTimestamp, timestamp);
+                _firstDroppedTimestamp = EarlierInSession(_firstDroppedTimestamp, timestamp);
                 Interlocked.Increment(ref _dropCount);
                 PublishUncommittedWatermark();
                 return false;
             }
 
             _pending.Add(new PendingSample(propertyPath, timestamp, routed.Row, column, isUlong));
-            _earliestPendingTimestamp = Earlier(_earliestPendingTimestamp, timestamp);
+            _earliestPendingTimestamp = EarlierInSession(_earliestPendingTimestamp, timestamp);
             PublishUncommittedWatermark();
         }
 
@@ -243,14 +240,14 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             if (_droppingNewSamples || PendingCount >= _maxPendingSamples)
             {
                 _droppingNewSamples = true;
-                _firstDroppedTimestamp = Earlier(_firstDroppedTimestamp, timestamp);
+                _firstDroppedTimestamp = EarlierInSession(_firstDroppedTimestamp, timestamp);
                 Interlocked.Increment(ref _dropCount);
                 PublishUncommittedWatermark();
                 return;
             }
 
             _pendingMoves.Add(new HistoryMove(timestamp, fromPath, toPath));
-            _earliestPendingTimestamp = Earlier(_earliestPendingTimestamp, timestamp);
+            _earliestPendingTimestamp = EarlierInSession(_earliestPendingTimestamp, timestamp);
             PublishUncommittedWatermark();
         }
     }
@@ -523,20 +520,12 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             return ranges;
         }
 
-        var sessionStart = new DateTimeOffset(Interlocked.Read(ref _sessionCoverageStartTicks), TimeSpan.Zero);
-
         // Everything from the watermark onwards is dropped rather than merely clipped, because the
         // watermark is only the earliest uncommitted instant: later pending changes may fall anywhere
-        // after it, so no later range can be vouched for. That makes a wildly backdated sample
-        // destructive, and one is reachable (a device reporting an uninitialized 1601 timestamp), so
-        // the watermark is floored at this session's coverage start. A change older than that cannot
-        // be describing work this session is responsible for, and without the floor a single such
-        // sample empties the snapshot and drops the store out of every query until it restarts.
+        // after it, so no later range can be vouched for. That is safe only because the watermark
+        // never precedes this session's coverage start, which the fold sites guarantee; flooring it
+        // here instead landed it exactly on the active range's own start and dropped that range.
         var uncommittedFrom = new DateTimeOffset(uncommittedFromTicks, TimeSpan.Zero);
-        if (uncommittedFrom < sessionStart)
-        {
-            uncommittedFrom = sessionStart;
-        }
 
         var builder = ImmutableArray.CreateBuilder<HistoryCoverage>(ranges.Length);
         foreach (var range in ranges)
@@ -564,11 +553,47 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             ref _uncommittedFromTicks, uncommittedFrom?.UtcTicks ?? long.MaxValue);
     }
 
+    // Advances this session's coverage start. Called under _pendingLock, except from the constructor,
+    // where the store is not reachable yet.
     private void SetPendingCoverageStart(DateTimeOffset value)
     {
         _pendingCoverageStart = value;
-        Interlocked.Exchange(ref _sessionCoverageStartTicks, value.UtcTicks);
+
+        // Advancing the start can strand an instant the watermark accepted under the previous one,
+        // which would blank the snapshot exactly as an out-of-session change does, so the minima are
+        // recomputed from the queues. Every caller either runs before the first flush or holds
+        // _flushLock, so no batch is in flight and _earliestInFlightTimestamp is null.
+        if (_earliestPendingTimestamp < value)
+        {
+            _earliestPendingTimestamp = null;
+            foreach (var sample in _pending)
+            {
+                _earliestPendingTimestamp = EarlierInSession(_earliestPendingTimestamp, sample.Timestamp);
+            }
+
+            foreach (var move in _pendingMoves)
+            {
+                _earliestPendingTimestamp = EarlierInSession(_earliestPendingTimestamp, move.Timestamp);
+            }
+        }
+
+        if (_firstDroppedTimestamp < value)
+        {
+            // The lost change predates anything this session can still claim, so it no longer
+            // constrains coverage. Drop mode itself stays on until a flush clears the queue.
+            _firstDroppedTimestamp = null;
+        }
+
+        PublishUncommittedWatermark();
     }
+
+    // Folds an uncommitted change's instant into a watermark input, ignoring anything before this
+    // session's coverage start. Such a change cannot describe an instant this session claims, and
+    // letting it through blanks the snapshot outright: the watermark is subtracted from the durable
+    // ranges onwards, and this session's own range starts at exactly the coverage start. One device
+    // reporting an uninitialised 1601 timestamp is enough to reach that.
+    private DateTimeOffset? EarlierInSession(DateTimeOffset? current, DateTimeOffset candidate) =>
+        candidate < _pendingCoverageStart ? current : Earlier(current, candidate);
 
     private static DateTimeOffset? Earlier(DateTimeOffset? left, DateTimeOffset? right)
     {

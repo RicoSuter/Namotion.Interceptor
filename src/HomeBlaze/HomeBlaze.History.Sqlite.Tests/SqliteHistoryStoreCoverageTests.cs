@@ -167,17 +167,43 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
             await first.FlushAsync(CancellationToken.None);
         }
 
+        // The second session must own a durable range of its own before the stale sample arrives.
+        // Without this flush the only row on disk belongs to session one, whose start is strictly
+        // below the current session's, so the case this test is named for never arises and every
+        // assertion below passes for an unrelated reason.
         now = Base.AddSeconds(20);
         using var store = NewStore(() => now);
-        var beforeStaleSample = store.CoverageRanges.Length;
+        store.Record("/a/Value", Base.AddSeconds(21), 2d, typeof(double));
+        now = Base.AddSeconds(30);
+        await store.FlushAsync(CancellationToken.None);
+
+        var beforeStaleSample = store.CoverageRanges;
+        Assert.Equal(2, beforeStaleSample.Length);
 
         // Act: a device reporting an uninitialized timestamp, which is reachable from OPC UA sources.
-        store.Record("/a/Value", new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero), 2d, typeof(double));
+        store.Record("/a/Value", new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero), 3d, typeof(double));
 
-        // Assert: one stale sample must not blank the snapshot and drop the store out of every query.
-        Assert.NotEmpty(store.CoverageRanges);
-        Assert.Equal(beforeStaleSample, store.CoverageRanges.Length);
-        Assert.Equal(Base, store.CoverageRanges[0].From);
+        // Assert: a change that far outside the session claims nothing back, from either session.
+        Assert.Equal(beforeStaleSample, store.CoverageRanges);
+    }
+
+    [Fact]
+    public async Task WhenAStaleAndARecentTimestampArePending_ThenCoverageStillStopsAtTheRecentOne()
+    {
+        // Arrange: one flush, so this session owns a durable range starting at its coverage start.
+        var now = Base;
+        using var store = NewStore(() => now);
+        now = Base.AddSeconds(10);
+        await store.FlushAsync(CancellationToken.None);
+
+        // Act
+        store.Record("/a/Value", new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero), 1d, typeof(double));
+        store.Record("/a/Value", Base.AddSeconds(5), 2d, typeof(double));
+
+        // Assert: ignoring the stale change must not also hide the in-session one behind it. This is
+        // the guard against "fixing" the stale case by letting the watermark claim past real pending
+        // data, which would have the merger answer "covered, no data" for a change still in the queue.
+        Assert.Equal(Base.AddSeconds(5), Assert.Single(store.CoverageRanges).To);
     }
 
     [Fact]
