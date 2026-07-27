@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
+using HomeBlaze.Components.Abstractions.TimeZones;
 
 namespace HomeBlaze.Host.Services.Display;
 

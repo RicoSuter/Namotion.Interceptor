@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace HomeBlaze.Services;
+namespace HomeBlaze.Components.Abstractions.TimeZones;
 
 /// <inheritdoc />
 public sealed class TimeZoneDisplayService : ITimeZoneDisplay

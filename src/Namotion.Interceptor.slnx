@@ -51,6 +51,7 @@
   <Folder Name="/HomeBlaze/Abstractions/">
     <Project Path="HomeBlaze/HomeBlaze.Abstractions/HomeBlaze.Abstractions.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Components.Abstractions/HomeBlaze.Components.Abstractions.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Components.Tests/HomeBlaze.Components.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Abstractions/HomeBlaze.Storage.Abstractions.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Devices/">

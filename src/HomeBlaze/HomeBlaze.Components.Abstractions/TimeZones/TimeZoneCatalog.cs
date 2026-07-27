@@ -1,4 +1,4 @@
-namespace HomeBlaze.Services;
+namespace HomeBlaze.Components.Abstractions.TimeZones;
 
 /// <summary>A selectable timezone entry: an IANA id and a human label with its base offset.</summary>
 public readonly record struct TimeZoneOption(string Id, string DisplayName);

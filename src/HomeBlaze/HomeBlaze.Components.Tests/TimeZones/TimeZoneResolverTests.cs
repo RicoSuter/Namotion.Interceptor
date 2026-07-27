@@ -1,7 +1,7 @@
-using HomeBlaze.Services;
 using Xunit;
+using HomeBlaze.Components.Abstractions.TimeZones;
 
-namespace HomeBlaze.Services.Tests.TimeZones;
+namespace HomeBlaze.Components.Tests.TimeZones;
 
 public class TimeZoneResolverTests
 {

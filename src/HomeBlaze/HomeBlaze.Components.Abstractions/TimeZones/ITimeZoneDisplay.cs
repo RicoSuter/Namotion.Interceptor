@@ -1,4 +1,4 @@
-namespace HomeBlaze.Services;
+namespace HomeBlaze.Components.Abstractions.TimeZones;
 
 /// <summary>
 /// Per-circuit display timezone. Formats absolute timestamps into the user's chosen zone and parses

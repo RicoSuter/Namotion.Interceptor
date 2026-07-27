@@ -1,4 +1,4 @@
-namespace HomeBlaze.Services;
+namespace HomeBlaze.Components.Abstractions.TimeZones;
 
 /// <summary>
 /// A user's display timezone choice: either "follow this browser" or a specific IANA zone.

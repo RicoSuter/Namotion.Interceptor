@@ -1,4 +1,4 @@
-namespace HomeBlaze.Services;
+namespace HomeBlaze.Components.Abstractions.TimeZones;
 
 /// <summary>
 /// Resolves an IANA (or Windows) zone id to a <see cref="TimeZoneInfo"/>, never throwing.
