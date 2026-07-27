@@ -26,10 +26,26 @@ public static class HistoryColumns
     /// </summary>
     public static ValueColumn GetValueColumnFor(Type propertyType)
     {
-        var t = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
-        if (t == typeof(double) || t == typeof(float) || t == typeof(decimal)) return ValueColumn.Double;
-        if (IsBigIntCompatible(t)) return ValueColumn.Long;
+        var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (type == typeof(double) || type == typeof(float) || type == typeof(decimal)) return ValueColumn.Double;
+        if (IsBigIntCompatible(type)) return ValueColumn.Long;
         return ValueColumn.Json; // string, enum, (v1.1) path references
+    }
+
+    /// <summary>
+    /// Returns true if a value of <paramref name="propertyType"/> can be recorded as a scalar sample;
+    /// complex types are deferred. This is the type half of history eligibility. The graph half (is it
+    /// a scalar [State] property) needs the registry and so lives in <c>HomeBlaze.History</c>.
+    /// </summary>
+    public static bool IsRecordable(Type propertyType)
+    {
+        var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (type == typeof(double) || type == typeof(float)) return true; // value_double
+        if (IsBigIntCompatible(type)) return true;                        // value_long
+        if (type == typeof(decimal)) return true;                         // value_double (exact text in value_json)
+        if (type == typeof(string)) return true;                          // value_json
+        if (type.IsEnum) return true;                                     // value_json (enum name)
+        return false;                                                     // complex types deferred
     }
 
     /// <summary>
@@ -43,8 +59,8 @@ public static class HistoryColumns
     /// Returns true for integer types and bool, which all store losslessly in value_long.
     /// Shared by column dispatch and eligibility so both agree on what lands in value_long.
     /// </summary>
-    internal static bool IsBigIntCompatible(Type t) =>
-        t == typeof(long) || t == typeof(int) || t == typeof(short) ||
-        t == typeof(sbyte) || t == typeof(byte) || t == typeof(ushort) ||
-        t == typeof(uint) || t == typeof(ulong) || t == typeof(bool);
+    private static bool IsBigIntCompatible(Type type) =>
+        type == typeof(long) || type == typeof(int) || type == typeof(short) ||
+        type == typeof(sbyte) || type == typeof(byte) || type == typeof(ushort) ||
+        type == typeof(uint) || type == typeof(ulong) || type == typeof(bool);
 }

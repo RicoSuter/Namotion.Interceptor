@@ -13,7 +13,7 @@ namespace HomeBlaze.History.Sqlite;
 /// <c>InMemoryHistoryStore</c> so query results are identical, but persists rows into
 /// partitioned SQLite database files with <c>value_json</c> stored as TEXT.
 /// </summary>
-public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
+public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDisposable
 {
     public const int DefaultMaxPendingSamples = 100_000;
 
@@ -48,7 +48,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
     private readonly object _pendingLock = new();
     private readonly object _flushLock = new();
     private readonly List<PendingSample> _pending = new();
-    private readonly List<MoveRecord> _pendingMoves = new();
+    private readonly List<HistoryMove> _pendingMoves = new();
     private int _inFlightSampleCount;
     private DateTimeOffset? _earliestPendingTimestamp;
     private DateTimeOffset? _earliestInFlightTimestamp;
@@ -107,7 +107,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
         _getUtcNow = getUtcNow;
         SetPendingCoverageStart(getUtcNow());
         _readContext = new SqliteReadContext(
-            _databaseDirectory, _partitionInterval, MetadataKey, OpenPartition, OpenMetadata);
+            _databaseDirectory, MetadataKey, OpenPartition, OpenMetadata);
         _coverageStore = new SqliteCoverageStore(OpenMetadata);
 
         Directory.CreateDirectory(_databaseDirectory);
@@ -147,10 +147,15 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
         {
             lock (_pendingLock)
             {
-                return _pending.Count + _inFlightSampleCount;
+                return PendingCount;
             }
         }
     }
+
+    // Everything queued for the next flush. Moves count: they are flushed in the same batch and held
+    // in memory until then, so leaving them out under-reported the depth and let an unbounded move
+    // stream grow the queue without ever reaching the drop guard.
+    private int PendingCount => _pending.Count + _inFlightSampleCount + _pendingMoves.Count;
 
     public DateTimeOffset? LastFlushUtc
     {
@@ -194,7 +199,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
         TryRecord(propertyPath, timestamp, value, propertyType);
     }
 
-    internal bool TryRecord(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
+    /// <inheritdoc />
+    public bool TryRecord(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
     {
         var column = HistoryColumns.GetValueColumnFor(propertyType);
         var isUlong = HistoryColumns.IsUlongProperty(propertyType);
@@ -202,7 +208,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
 
         lock (_pendingLock)
         {
-            if (_droppingNewSamples || _pending.Count + _inFlightSampleCount >= _maxPendingSamples)
+            if (_droppingNewSamples || PendingCount >= _maxPendingSamples)
             {
                 _droppingNewSamples = true;
                 _firstDroppedTimestamp = Earlier(_firstDroppedTimestamp, timestamp);
@@ -230,7 +236,19 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
         // Queue the move like a pending sample; FlushAsync persists it into the metadata database.
         lock (_pendingLock)
         {
-            _pendingMoves.Add(new MoveRecord(timestamp, fromPath, toPath));
+            // Bounded like samples are. A lost move is worse than a lost sample (the queried path can
+            // no longer reach the samples recorded under the old one), so it is recorded as a drop and
+            // clamps coverage from its instant rather than being silently discarded.
+            if (_droppingNewSamples || PendingCount >= _maxPendingSamples)
+            {
+                _droppingNewSamples = true;
+                _firstDroppedTimestamp = Earlier(_firstDroppedTimestamp, timestamp);
+                Interlocked.Increment(ref _dropCount);
+                PublishUncommittedWatermark();
+                return;
+            }
+
+            _pendingMoves.Add(new HistoryMove(timestamp, fromPath, toPath));
             _earliestPendingTimestamp = Earlier(_earliestPendingTimestamp, timestamp);
             PublishUncommittedWatermark();
         }
@@ -243,7 +261,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
         lock (_flushLock)
         {
             PendingSample[] batch;
-            MoveRecord[] moveBatch;
+            HistoryMove[] moveBatch;
             bool startsNewCoverageRange;
             DateTimeOffset coverageStart;
             lock (_pendingLock)
@@ -329,7 +347,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
                         coverageEnd = droppedAt;
                     }
 
-                    var recoveredFromDrops = _droppingNewSamples && _pending.Count == 0;
+                    var recoveredFromDrops = _droppingNewSamples && _pending.Count == 0 && _pendingMoves.Count == 0;
 
                     lock (_connectionLock)
                     {
@@ -585,7 +603,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IDisposable
 
                 foreach (var key in _readContext.EnumeratePartitionFileKeys().ToArray())
                 {
-                    var (_, end) = SqlitePartition.PartitionRange(key, _partitionInterval);
+                    var (_, end) = SqlitePartition.InferredRange(key);
                     if (end >= cutoff)
                     {
                         continue;

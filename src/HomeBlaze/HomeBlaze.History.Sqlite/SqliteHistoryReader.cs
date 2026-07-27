@@ -4,9 +4,6 @@ using Microsoft.Data.Sqlite;
 
 namespace HomeBlaze.History.Sqlite;
 
-/// <summary>One leg of a queried path's move chain: the path it used during [ValidFrom, ValidTo).</summary>
-internal readonly record struct ChainLeg(string Path, DateTimeOffset ValidFrom, DateTimeOffset ValidTo);
-
 /// <summary>
 /// One leg's slice over a single existing partition file: the leg's path, the partition key, and the
 /// intersection of the query window with the leg's validity, expressed in epoch ticks.
@@ -24,7 +21,6 @@ internal readonly record struct ColumnMeta(ValueColumn Column, bool IsUlong);
 /// </summary>
 internal readonly struct SqliteReadContext(
     string databaseDirectory,
-    PartitionInterval partitionInterval,
     string metadataKey,
     Func<string, SqliteConnection> openPartition,
     Func<SqliteConnection> openMetadata)
@@ -50,27 +46,32 @@ internal readonly struct SqliteReadContext(
         foreach (var file in Directory.EnumerateFiles(databaseDirectory, "*.db"))
         {
             var key = Path.GetFileNameWithoutExtension(file);
-            if (SqlitePartition.IsPartitionKey(key, partitionInterval))
+            if (SqlitePartition.IsPartitionKey(key))
             {
                 yield return key; // skip non-partition files such as the metadata database
             }
         }
     }
 
-    // Every partition key whose range overlaps [from, to), in ascending time order.
-    public IEnumerable<string> PartitionKeysOverlapping(DateTimeOffset from, DateTimeOffset to)
-    {
-        return SqlitePartition.EnumeratePartitionKeys(from, to, partitionInterval);
-    }
+    // Existing partition files whose range overlaps [from, to), in ascending time order.
+    //
+    // Driven by what is on disk rather than by generating the configured interval's keys across the
+    // window: after the interval is reconfigured the generated keys no longer name the existing files,
+    // so every earlier partition silently read as empty.
+    public IEnumerable<string> PartitionKeysOverlapping(DateTimeOffset from, DateTimeOffset to) =>
+        EnumeratePartitionFileKeys()
+            .Select(key => (Key: key, Range: SqlitePartition.InferredRange(key)))
+            .Where(entry => entry.Range.Start < to && entry.Range.End > from)
+            .OrderBy(entry => entry.Range.Start)
+            .Select(entry => entry.Key);
 
     // Existing partition files at or before asOf, newest first (look-back across files stops at the first hit).
-    public IEnumerable<string> PartitionKeysAtOrBefore(DateTimeOffset asOf)
-    {
-        var asOfKey = SqlitePartition.PartitionKey(asOf, partitionInterval);
-        return EnumeratePartitionFileKeys()
-            .Where(key => string.CompareOrdinal(key, asOfKey) <= 0)
-            .OrderByDescending(key => key, StringComparer.Ordinal);
-    }
+    public IEnumerable<string> PartitionKeysAtOrBefore(DateTimeOffset asOf) =>
+        EnumeratePartitionFileKeys()
+            .Select(key => (Key: key, Range: SqlitePartition.InferredRange(key)))
+            .Where(entry => entry.Range.Start <= asOf)
+            .OrderByDescending(entry => entry.Range.Start)
+            .Select(entry => entry.Key);
 }
 
 /// <summary>
@@ -175,7 +176,7 @@ internal static class SqliteHistoryReader
     // The stored column kind and ulong flag for a (possibly moved) property: the first path along its chain
     // that has path_meta. The SQLite equivalent of InMemoryHistoryStore.ResolveBuffer (which returns the
     // first buffer in the chain), used for the numeric-on-json-non-ulong guard and ulong-overflow folding.
-    public static ColumnMeta? ResolveColumnMeta(SqliteReadContext context, List<ChainLeg> chain)
+    public static ColumnMeta? ResolveColumnMeta(SqliteReadContext context, List<HistoryChainLeg> chain)
     {
         foreach (var leg in chain)
         {
@@ -188,52 +189,16 @@ internal static class SqliteHistoryReader
         return null;
     }
 
-    // Builds the path chain for a queried (current) path by walking moves backward; returns legs each
-    // scoped to [ValidFrom, ValidTo). With no moves a single unbounded leg [MinValue, MaxValue), so the
-    // query path is unchanged. Identical algorithm to InMemoryHistoryStore.ResolveChain, but the move
-    // set is read from the metadata database.
-    public static List<ChainLeg> ResolveChain(SqliteReadContext context, string currentPath)
-    {
-        var snapshot = ReadMoves(context);
-
-        var legs = new List<ChainLeg>();
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        var path = currentPath;
-        var validTo = DateTimeOffset.MaxValue;
-
-        while (visited.Add(path))
-        {
-            // Latest move INTO this path before validTo gives the time the subject arrived here.
-            MoveRecord? arrival = null;
-            foreach (var move in snapshot)
-            {
-                if (StringComparer.Ordinal.Equals(move.ToPath, path) && move.Timestamp <= validTo &&
-                    (arrival is null || move.Timestamp > arrival.Value.Timestamp))
-                {
-                    arrival = move;
-                }
-            }
-
-            var validFrom = arrival?.Timestamp ?? DateTimeOffset.MinValue;
-            legs.Add(new ChainLeg(path, validFrom, validTo));
-
-            if (arrival is null)
-            {
-                break; // reached the original path
-            }
-
-            path = arrival.Value.FromPath;
-            validTo = arrival.Value.Timestamp;
-        }
-
-        return legs;
-    }
+    // The queried (current) path's move chain, resolved from the moves in the metadata database by the
+    // same walk the in-memory engine uses, so both stores answer a moved path identically.
+    public static List<HistoryChainLeg> ResolveChain(SqliteReadContext context, string currentPath) =>
+        HistoryMoveChain.Resolve(ReadMoves(context), currentPath);
 
     // Reads every move from the metadata database into memory (the move set is small). Empty when it has no
     // rows or does not exist yet.
-    private static List<MoveRecord> ReadMoves(SqliteReadContext context)
+    private static List<HistoryMove> ReadMoves(SqliteReadContext context)
     {
-        var result = new List<MoveRecord>();
+        var result = new List<HistoryMove>();
         if (!File.Exists(context.PartitionFilePath(context.MetadataKey)))
         {
             return result; // no moves recorded yet -> single unbounded leg in ResolveChain
@@ -245,7 +210,7 @@ internal static class SqliteHistoryReader
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            result.Add(new MoveRecord(
+            result.Add(new HistoryMove(
                 EpochTicks.FromEpochTicks(reader.GetInt64(0)), reader.GetString(1), reader.GetString(2)));
         }
 
@@ -285,9 +250,14 @@ internal static class SqliteHistoryReader
 
     // The stored column kind and ulong flag for a single path, read from path_meta (written at flush time).
     // Returns null when the path has never been written.
+    //
+    // Newest partition first, and stops at the first hit. Directory enumeration order is not specified,
+    // so scanning in that order let an arbitrary partition answer: after a property's type changed, the
+    // reader could pick up the superseded column kind and route a numeric read at the wrong column.
+    // Newest-first also means the common case opens one partition instead of every one of them.
     private static ColumnMeta? ResolveColumnMetaForPath(SqliteReadContext context, string propertyPath)
     {
-        foreach (var key in context.EnumeratePartitionFileKeys())
+        foreach (var key in context.EnumeratePartitionFileKeys().OrderByDescending(key => key, StringComparer.Ordinal))
         {
             var connection = context.OpenPartition(key);
             using var command = connection.CreateCommand();
@@ -303,23 +273,8 @@ internal static class SqliteHistoryReader
         return null;
     }
 
-    private static bool ResolveIsUlong(SqliteReadContext context, string propertyPath)
-    {
-        foreach (var key in context.EnumeratePartitionFileKeys())
-        {
-            var connection = context.OpenPartition(key);
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT is_ulong FROM path_meta WHERE path = @path;";
-            command.Parameters.AddWithValue("@path", propertyPath);
-            var result = command.ExecuteScalar();
-            if (result is long value)
-            {
-                return value != 0;
-            }
-        }
-
-        return false;
-    }
+    private static bool ResolveIsUlong(SqliteReadContext context, string propertyPath) =>
+        ResolveColumnMetaForPath(context, propertyPath)?.IsUlong ?? false;
 
     private static RawRow ReadRawRow(SqliteDataReader reader)
     {

@@ -11,8 +11,11 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
+        <ProjectReference Include="..\HomeBlaze.History\HomeBlaze.History.csproj" />
+        <ProjectReference Include="..\HomeBlaze.History.Abstractions\HomeBlaze.History.Abstractions.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Mcp\Namotion.Interceptor.Mcp.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
     </ItemGroup>
 
 </Project>

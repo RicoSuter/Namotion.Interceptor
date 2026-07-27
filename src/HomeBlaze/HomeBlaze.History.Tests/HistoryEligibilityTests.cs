@@ -1,5 +1,4 @@
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.History.Abstractions;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -8,59 +7,10 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
-namespace HomeBlaze.History.Abstractions.Tests;
+namespace HomeBlaze.History.Tests;
 
 public class HistoryEligibilityTests
 {
-    private enum SampleEnum
-    {
-        A,
-        B
-    }
-
-    [Theory]
-    [InlineData(typeof(double))]
-    [InlineData(typeof(float))]
-    [InlineData(typeof(long))]
-    [InlineData(typeof(int))]
-    [InlineData(typeof(short))]
-    [InlineData(typeof(sbyte))]
-    [InlineData(typeof(byte))]
-    [InlineData(typeof(ushort))]
-    [InlineData(typeof(uint))]
-    [InlineData(typeof(ulong))]
-    [InlineData(typeof(bool))]
-    [InlineData(typeof(decimal))]
-    [InlineData(typeof(string))]
-    [InlineData(typeof(SampleEnum))]
-    [InlineData(typeof(double?))]
-    [InlineData(typeof(int?))]
-    [InlineData(typeof(decimal?))]
-    [InlineData(typeof(SampleEnum?))]
-    public void WhenTypeIsRecordable_ThenIsRecordableTypeIsTrue(Type type)
-    {
-        // Arrange & Act
-        var result = HistoryEligibility.IsRecordableType(type);
-
-        // Assert
-        Assert.True(result);
-    }
-
-    [Theory]
-    [InlineData(typeof(object))]
-    [InlineData(typeof(Guid))]
-    [InlineData(typeof(List<int>))]
-    [InlineData(typeof(HistoryEligibilityTests))]
-    [InlineData(typeof(EligibilityTestSubject))]
-    public void WhenTypeIsNotRecordable_ThenIsRecordableTypeIsFalse(Type type)
-    {
-        // Arrange & Act
-        var result = HistoryEligibility.IsRecordableType(type);
-
-        // Assert
-        Assert.False(result);
-    }
-
     [Fact]
     public void WhenPropertyIsRecordableScalarState_ThenHasHistoryIsTrue()
     {

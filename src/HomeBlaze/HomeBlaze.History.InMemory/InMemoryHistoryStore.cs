@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Globalization;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using HomeBlaze.History.Abstractions;
 
@@ -12,7 +14,7 @@ namespace HomeBlaze.History.InMemory;
 /// <see cref="IHistoryStore"/> directly so a future generic host can drive it without graph coupling;
 /// the <see cref="InMemoryHistoryStoreSubject"/> [InterceptorSubject] adapter delegates to it.
 /// </summary>
-public sealed class InMemoryHistoryStore : IHistoryStore
+public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
 {
     /// <summary>
     /// The aggregations every in-memory store path supports (the full set, independent of column type).
@@ -42,7 +44,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
 
     private readonly ConcurrentDictionary<string, PropertyBuffer> _buffers = new(StringComparer.Ordinal);
 
-    private readonly List<MoveRecord> _moves = new();
+    private readonly List<HistoryMove> _moves = new();
     private readonly Lock _movesLock = new();
 
     private long _recordedCount;
@@ -89,8 +91,34 @@ public sealed class InMemoryHistoryStore : IHistoryStore
     public int TrackedPropertyCount => _buffers.Count;
     public long TotalSampleCount => _buffers.Values.Sum(buffer => (long)buffer.Count);
 
-    // Rough estimate: 4 references/values per Sample (~40 bytes) plus dictionary/key overhead.
-    public long EstimatedMemoryBytes => TotalSampleCount * 40 + _buffers.Count * 64;
+    // Per path: the PropertyBuffer and its Lock, the dictionary entry, and the key string's object
+    // header. The key's characters are counted separately.
+    private const int PerPathOverheadBytes = 160;
+
+    /// <summary>
+    /// Rough estimate of the heap the retained samples hold. Counted per buffer rather than per
+    /// sample: the ring is allocated at full capacity when a path is first seen, so its cost does not
+    /// depend on how many samples are currently in it. JSON values are counted from their tracked
+    /// payload size, because the JsonDocument behind a JsonElement lives outside the Sample struct and
+    /// a per-sample struct size misses it entirely.
+    /// </summary>
+    public long EstimatedMemoryBytes
+    {
+        get
+        {
+            var sampleSize = Unsafe.SizeOf<Sample>();
+            var total = 0L;
+            foreach (var entry in _buffers)
+            {
+                total += entry.Value.Capacity * (long)sampleSize
+                    + entry.Value.RetainedValueBytes
+                    + entry.Key.Length * sizeof(char)
+                    + PerPathOverheadBytes;
+            }
+
+            return total;
+        }
+    }
 
     public ImmutableArray<HistoryCoverage> CoverageRanges
     {
@@ -132,11 +160,28 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Always true: the ring buffer accepts every sample, making room by evicting the oldest, and the
+    /// resulting loss is reported through coverage rather than by refusing the write.
+    /// </remarks>
+    public bool TryRecord(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
+    {
+        Record(propertyPath, timestamp, value, propertyType);
+        return true;
+    }
+
     public void Record(string propertyPath, DateTimeOffset timestamp, object? value, Type propertyType)
     {
         var column = HistoryColumns.GetValueColumnFor(propertyType);
         var isUlong = HistoryColumns.IsUlongProperty(propertyType);
-        var buffer = _buffers.GetOrAdd(propertyPath, _ => new PropertyBuffer(_maxPointsPerProperty, column, isUlong));
+
+        // Static factory over a struct state rather than a capturing lambda: the capturing form built
+        // a closure object and a delegate on every recorded change, not just the first one per path.
+        var buffer = _buffers.GetOrAdd(
+            propertyPath,
+            static (_, state) => new PropertyBuffer(state.Capacity, state.Column, state.IsUlong),
+            (Capacity: _maxPointsPerProperty, Column: column, IsUlong: isUlong));
 
         if (buffer.Append(CreateSample(timestamp, value, column, isUlong), out var oldest) &&
             oldest is { } oldestRetained)
@@ -180,18 +225,24 @@ public sealed class InMemoryHistoryStore : IHistoryStore
             case ValueColumn.Long:
                 if (isUlong && value is ulong unsigned and > long.MaxValue)
                 {
-                    return new Sample(timestamp, null, null, JsonSerializer.SerializeToElement(unsigned));
+                    return new Sample(
+                        timestamp, null, null, JsonSerializer.SerializeToElement(unsigned), JsonDocumentOverheadBytes);
                 }
 
                 return new Sample(timestamp, Convert.ToInt64(value, CultureInfo.InvariantCulture), null, null);
 
             case ValueColumn.Json:
             default:
-                return new Sample(timestamp, null, null, SerializeJson(value));
+                var json = SerializeJson(value, out var textLength);
+                return new Sample(timestamp, null, null, json, JsonDocumentOverheadBytes + textLength);
         }
     }
 
-    private JsonElement SerializeJson(object value)
+    // Rough fixed cost of the JsonDocument each JsonElement sample keeps alive (the document object,
+    // its metadata database and the pooled UTF-8 buffer), on top of the value's own text.
+    private const int JsonDocumentOverheadBytes = 128;
+
+    private JsonElement SerializeJson(object value, out int textLength)
     {
         // enum -> name; string -> native JSON; oversize string -> placeholder.
         JsonElement element = value is Enum
@@ -204,10 +255,16 @@ public sealed class InMemoryHistoryStore : IHistoryStore
             if (size > _maxJsonSize)
             {
                 Interlocked.Increment(ref _oversizeCount);
-                return JsonSerializer.SerializeToElement(new OversizePlaceholder(true, size));
+                var placeholder = JsonSerializer.SerializeToElement(new OversizePlaceholder(true, size));
+                textLength = placeholder.GetRawText().Length;
+                return placeholder;
             }
+
+            textLength = size;
+            return element;
         }
 
+        textLength = element.GetRawText().Length;
         return element;
     }
 
@@ -215,62 +272,23 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         [property: System.Text.Json.Serialization.JsonPropertyName("$oversize")] bool Oversize,
         [property: System.Text.Json.Serialization.JsonPropertyName("size")] int Size);
 
-    private readonly record struct MoveRecord(DateTimeOffset Timestamp, string FromPath, string ToPath);
-
     public void RecordMove(DateTimeOffset timestamp, string fromPath, string toPath)
     {
         lock (_movesLock)
         {
-            _moves.Add(new MoveRecord(timestamp, fromPath, toPath));
+            _moves.Add(new HistoryMove(timestamp, fromPath, toPath));
         }
     }
 
-    private readonly record struct ChainLeg(string Path, DateTimeOffset ValidFrom, DateTimeOffset ValidTo);
-
-    // Builds the path chain for a queried (current) path by walking moves backwards; returns legs each
-    // scoped to [ValidFrom, ValidTo). With no moves, a single unbounded leg [MinValue, MaxValue).
-    private List<ChainLeg> ResolveChain(string currentPath)
+    private List<HistoryChainLeg> ResolveChain(string currentPath)
     {
-        MoveRecord[] snapshot;
+        HistoryMove[] snapshot;
         lock (_movesLock)
         {
             snapshot = _moves.ToArray();
         }
 
-        var legs = new List<ChainLeg>();
-        var path = currentPath;
-        var validTo = DateTimeOffset.MaxValue;
-
-        // Bounded by the move count rather than by distinct paths: a subject that moves away and later
-        // returns visits the same path twice, in two disjoint validity windows. Stopping at the repeat
-        // dropped the earlier window, hiding samples that are still retained and inside coverage. Each
-        // step strictly lowers validTo, so the walk cannot cycle.
-        for (var step = 0; step <= snapshot.Length; step++)
-        {
-            // Latest move INTO this path before validTo gives the time the subject arrived here.
-            MoveRecord? arrival = null;
-            foreach (var move in snapshot)
-            {
-                if (StringComparer.Ordinal.Equals(move.ToPath, path) && move.Timestamp < validTo &&
-                    (arrival is null || move.Timestamp > arrival.Value.Timestamp))
-                {
-                    arrival = move;
-                }
-            }
-
-            var validFrom = arrival?.Timestamp ?? DateTimeOffset.MinValue;
-            legs.Add(new ChainLeg(path, validFrom, validTo));
-
-            if (arrival is null)
-            {
-                break; // reached the original path
-            }
-
-            path = arrival.Value.FromPath;
-            validTo = arrival.Value.Timestamp;
-        }
-
-        return legs;
+        return HistoryMoveChain.Resolve(snapshot, currentPath);
     }
 
     // Column/IsUlong for a (possibly moved) property: the first buffer found along its chain.
@@ -287,7 +305,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore
         return null;
     }
 
-    private List<Sample> RangeAcrossChain(List<ChainLeg> chain, DateTimeOffset from, DateTimeOffset to)
+    private List<Sample> RangeAcrossChain(List<HistoryChainLeg> chain, DateTimeOffset from, DateTimeOffset to)
     {
         var result = new List<Sample>();
         foreach (var leg in chain)
@@ -446,10 +464,28 @@ public sealed class InMemoryHistoryStore : IHistoryStore
             }
         }
 
+        // The whole window is read once, then walked with a cursor. Querying per bucket took the
+        // buffer's lock and allocated a fresh list for every bucket, so a 1000-bucket chart cost 1000
+        // lock acquisitions and 1000 allocations to read samples that one pass already has in order.
+        var windowSamples = CollectionsMarshal.AsSpan(RangeAcrossChain(chain, firstBucketStart, query.To));
+        var cursor = 0;
+
         var allPoints = new List<HistoryPoint>();
         while (bucketStart < query.To)
         {
             var bucketEnd = bucketStart + bucket;
+
+            // Samples are ascending, so the bucket's slice starts at the cursor and runs to the first
+            // sample at or after bucketEnd. The cursor advances past skipped buckets too, so an
+            // uncovered stretch cannot leave older samples in the next bucket's slice.
+            var sliceEnd = cursor;
+            while (sliceEnd < windowSamples.Length && windowSamples[sliceEnd].Timestamp < bucketEnd)
+            {
+                sliceEnd++;
+            }
+
+            var bucketSamples = windowSamples[cursor..sliceEnd];
+            cursor = sliceEnd;
 
             // Clipped to the query window: the newest bucket runs past To whenever To is not
             // bucket-aligned, and coverage cannot reach into the future (see HistoryDispatchPlanner).
@@ -463,13 +499,11 @@ public sealed class InMemoryHistoryStore : IHistoryStore
                 continue;
             }
 
-            var samples = RangeAcrossChain(chain, bucketStart, bucketEnd);
-
             var point = InMemoryHistoryAggregation.AggregateBucket(
                 aggregation,
                 bucketStart,
                 bucketEnd,
-                samples,
+                bucketSamples,
                 isUlong,
                 ref carriedNumber,
                 ref carriedJson);

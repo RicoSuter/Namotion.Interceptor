@@ -57,11 +57,6 @@ public readonly record struct HistoryCoverage(DateTimeOffset From, DateTimeOffse
     public bool Contains(HistoryCoverage other) => other.From >= From && other.To <= To;
 
     /// <summary>
-    /// Gets a value indicating whether this coverage overlaps <paramref name="other"/>.
-    /// </summary>
-    public bool Overlaps(HistoryCoverage other) => other.From < To && other.To > From;
-
-    /// <summary>
     /// Returns the intersection with <paramref name="other"/>, or null when they do not overlap.
     /// </summary>
     public HistoryCoverage? Intersect(HistoryCoverage other)

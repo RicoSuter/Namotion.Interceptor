@@ -31,55 +31,50 @@ internal static class SqlitePartition
         };
     }
 
-    // [start, end) of the partition with this key.
-    public static (DateTimeOffset Start, DateTimeOffset End) PartitionRange(string key, PartitionInterval interval)
-    {
-        switch (interval)
-        {
-            case PartitionInterval.Daily:
-            {
-                var start = DateTimeOffset.ParseExact(key, "yyyy-MM-dd", null, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
-                return (start, start.AddDays(1));
-            }
-            case PartitionInterval.Monthly:
-            {
-                var start = DateTimeOffset.ParseExact(key + "-01", "yyyy-MM-dd", null, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
-                return (start, start.AddMonths(1));
-            }
-            default:
-            {
-                // key is the Monday (yyyy-MM-dd) of the ISO week start.
-                var start = DateTimeOffset.ParseExact(key, "yyyy-MM-dd", null, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
-                return (start, start.AddDays(7));
-            }
-        }
-    }
-
-    // All partition keys whose ranges overlap [from, to), in ascending order.
-    public static IEnumerable<string> EnumeratePartitionKeys(DateTimeOffset from, DateTimeOffset to, PartitionInterval interval)
-    {
-        var cursorKey = PartitionKey(from, interval);
-        var guard = 0;
-        while (true)
-        {
-            yield return cursorKey;
-            var (_, end) = PartitionRange(cursorKey, interval);
-            if (end >= to || ++guard > 100_000)
-            {
-                yield break;
-            }
-
-            cursorKey = PartitionKey(end, interval); // next partition starts at this end
-        }
-    }
-
-    // Returns true when the key is a valid partition key for the interval. Used to filter out
+    // Returns true when the key is a valid partition key under any interval. Used to filter out
     // non-partition database files in the same directory (for example the metadata database).
-    public static bool IsPartitionKey(string key, PartitionInterval interval)
+    //
+    // Deliberately interval-independent. Matching only the configured interval's shape made every file
+    // written under a previous interval invisible: unreadable by queries and, worse, skipped by the
+    // sweep, so it was never deleted and its data stayed inside a coverage claim it could not serve.
+    public static bool IsPartitionKey(string key) => TryInferRange(key, out _);
+
+    // The half-open range a key covers, inferred from the key's own shape rather than the configured
+    // interval, so a directory holding files from more than one interval still resolves correctly.
+    //
+    // "yyyy-MM" is a month. "yyyy-MM-dd" is a single day under Daily and a Monday-anchored week under
+    // Weekly; a date that is not a Monday can only be Daily, and a Monday is genuinely ambiguous, so
+    // the wider reading (a week) is assumed there. That errs safely in both directions: a read opens a
+    // file whose rows the SQL range then filters out anyway, and a sweep holds a partition a few days
+    // past its retention instead of deleting data that is still inside a coverage claim.
+    public static (DateTimeOffset Start, DateTimeOffset End) InferredRange(string key)
     {
-        var candidate = interval == PartitionInterval.Monthly ? key + "-01" : key;
-        return DateTimeOffset.TryParseExact(candidate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out _);
+        if (!TryInferRange(key, out var range))
+        {
+            throw new ArgumentException($"'{key}' is not a partition key.", nameof(key));
+        }
+
+        return range;
+    }
+
+    private static bool TryInferRange(string key, out (DateTimeOffset Start, DateTimeOffset End) range)
+    {
+        if (DateTimeOffset.TryParseExact(key, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var day))
+        {
+            range = (day, day.AddDays(day.DayOfWeek == DayOfWeek.Monday ? 7 : 1));
+            return true;
+        }
+
+        if (DateTimeOffset.TryParseExact(key + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var month))
+        {
+            range = (month, month.AddMonths(1));
+            return true;
+        }
+
+        range = default;
+        return false;
     }
 
     private static string WeeklyKey(DateTimeOffset utc)

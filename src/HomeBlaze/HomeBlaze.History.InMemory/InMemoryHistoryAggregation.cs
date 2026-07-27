@@ -20,7 +20,7 @@ internal static class InMemoryHistoryAggregation
         string aggregation,
         DateTimeOffset bucketStart,
         DateTimeOffset bucketEnd,
-        List<Sample> samples,
+        ReadOnlySpan<Sample> samples,
         bool isUlong,
         ref double? carriedNumber,
         ref JsonElement? carriedJson)
@@ -28,10 +28,10 @@ internal static class InMemoryHistoryAggregation
         switch (aggregation)
         {
             case HistoryAggregations.Count:
-                return new HistoryPoint(bucketStart, samples.Count, null);
+                return new HistoryPoint(bucketStart, samples.Length, null);
 
             case HistoryAggregations.Last:
-                if (samples.Count > 0)
+                if (samples.Length > 0)
                 {
                     var lastPoint = ToPoint(samples[^1], isUlong);
                     carriedNumber = lastPoint.Number;
@@ -41,7 +41,7 @@ internal static class InMemoryHistoryAggregation
                 return new HistoryPoint(bucketStart, carriedNumber, carriedJson);
 
             case HistoryAggregations.First:
-                return samples.Count > 0
+                return samples.Length > 0
                     ? ToPoint(samples[0], isUlong) with { Timestamp = bucketStart }
                     : new HistoryPoint(bucketStart, null, null);
 
@@ -80,7 +80,7 @@ internal static class InMemoryHistoryAggregation
     private static HistoryPoint TimeWeightedAverage(
         DateTimeOffset bucketStart,
         DateTimeOffset bucketEnd,
-        List<Sample> samples,
+        ReadOnlySpan<Sample> samples,
         bool isUlong,
         ref double? carriedNumber)
     {
@@ -117,30 +117,56 @@ internal static class InMemoryHistoryAggregation
             null);
     }
 
+    // One pass over the bucket's samples, accumulating everything the numeric aggregations need. The
+    // previous version materialized a List<double> of the numeric values for every bucket, which for a
+    // 1000-bucket query is 1000 list allocations plus the LINQ chain that fills them.
     private static HistoryPoint AggregateNumeric(
         string aggregation,
         DateTimeOffset bucketStart,
-        List<Sample> samples,
+        ReadOnlySpan<Sample> samples,
         bool isUlong)
     {
-        var values = samples
-            .Select(sample => Numeric(sample, isUlong))
-            .Where(number => number.HasValue)
-            .Select(number => number!.Value)
-            .ToList();
+        var count = 0;
+        var sum = 0d;
+        var minimum = double.PositiveInfinity;
+        var maximum = double.NegativeInfinity;
 
-        if (values.Count == 0)
+        // Welford: running mean plus the sum of squared deviations from it. Numerically steadier than
+        // summing the squares and subtracting, and it needs no second pass over the samples.
+        var mean = 0d;
+        var sumOfSquaredDeviations = 0d;
+
+        foreach (var sample in samples)
+        {
+            if (Numeric(sample, isUlong) is not { } value)
+            {
+                continue;
+            }
+
+            count++;
+            sum += value;
+            if (value < minimum) minimum = value;
+            if (value > maximum) maximum = value;
+
+            var delta = value - mean;
+            mean += delta / count;
+            sumOfSquaredDeviations += delta * (value - mean);
+        }
+
+        if (count == 0)
         {
             return new HistoryPoint(bucketStart, null, null);
         }
 
-        var result = aggregation switch
+        double? result = aggregation switch
         {
-            HistoryAggregations.SampleAverage => values.Average(),
-            HistoryAggregations.Minimum => values.Min(),
-            HistoryAggregations.Maximum => values.Max(),
-            HistoryAggregations.Sum => values.Sum(),
-            HistoryAggregations.StandardDeviation => SampleStandardDeviation(values),
+            HistoryAggregations.SampleAverage => sum / count,
+            HistoryAggregations.Minimum => minimum,
+            HistoryAggregations.Maximum => maximum,
+            HistoryAggregations.Sum => sum,
+            HistoryAggregations.StandardDeviation => count < 2
+                ? null
+                : Math.Sqrt(sumOfSquaredDeviations / (count - 1)),
             _ => throw new HistoryAggregationNotSupportedException(
                 aggregation,
                 new HashSet<string>(StringComparer.Ordinal)
@@ -152,18 +178,6 @@ internal static class InMemoryHistoryAggregation
         };
 
         return new HistoryPoint(bucketStart, result, null);
-    }
-
-    private static double? SampleStandardDeviation(List<double> values)
-    {
-        if (values.Count < 2)
-        {
-            return null;
-        }
-
-        var mean = values.Average();
-        var sumSquares = values.Sum(value => (value - mean) * (value - mean));
-        return Math.Sqrt(sumSquares / (values.Count - 1));
     }
 
     private static double? Numeric(Sample sample, bool isUlong)

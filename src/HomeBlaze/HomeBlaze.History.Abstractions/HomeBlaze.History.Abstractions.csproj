@@ -6,9 +6,9 @@
         <ImplicitUsings>enable</ImplicitUsings>
     </PropertyGroup>
 
-    <ItemGroup>
-        <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
-        <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
-    </ItemGroup>
+    <!-- No project references by design. The query contract, coverage algebra, bucket alignment, move
+         chain and value routing stay free of object-graph coupling, so a future generic engine can
+         implement IHistoryStore without depending on the interceptor registry or on HomeBlaze. The one
+         piece of eligibility that does need the graph lives in HomeBlaze.History. -->
 
 </Project>

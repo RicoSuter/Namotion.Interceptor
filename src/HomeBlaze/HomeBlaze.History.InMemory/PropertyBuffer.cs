@@ -10,6 +10,7 @@ internal sealed class PropertyBuffer
     private int _start;   // index of the oldest sample
     private int _count;
     private long _evictedCount;
+    private long _retainedValueBytes;
 
     public PropertyBuffer(int capacity, ValueColumn column, bool isUlong)
     {
@@ -22,6 +23,18 @@ internal sealed class PropertyBuffer
     public ValueColumn Column { get; }
 
     public bool IsUlong { get; }
+
+    // The ring is allocated at full capacity up front, so this is what the buffer costs from the
+    // first sample onwards rather than what it grows into.
+    public int Capacity => _capacity;
+
+    // Heap held by the retained samples' JSON values, which live outside the Sample struct and so are
+    // invisible to a per-sample size estimate. Maintained incrementally: recomputing it would mean
+    // re-serializing every retained value on every metrics refresh.
+    public long RetainedValueBytes
+    {
+        get { lock (_lock) { return _retainedValueBytes; } }
+    }
 
     public long EvictedCount
     {
@@ -80,7 +93,7 @@ internal sealed class PropertyBuffer
 
             if (sample.Timestamp == newestTimestamp)
             {
-                _items[newestIndex] = sample;
+                Replace(newestIndex, sample);
                 return false;
             }
         }
@@ -88,12 +101,11 @@ internal sealed class PropertyBuffer
         var capacityEvicted = _count == _capacity;
         if (capacityEvicted)
         {
-            _start = (_start + 1) % _capacity; // overwrite oldest
-            _count--;
+            DropOldest(); // overwrite oldest
             _evictedCount++;
         }
 
-        _items[Index(_count)] = sample;
+        Store(Index(_count), sample);
         _count++;
         return capacityEvicted;
     }
@@ -105,14 +117,33 @@ internal sealed class PropertyBuffer
             var dropped = 0;
             while (_count > 0 && _items[_start].Timestamp < cutoff)
             {
-                _start = (_start + 1) % _capacity;
-                _count--;
+                DropOldest();
                 dropped++;
             }
 
             _evictedCount += dropped;
             return dropped;
         }
+    }
+
+    private void Store(int index, Sample sample)
+    {
+        _items[index] = sample;
+        _retainedValueBytes += sample.ValueBytes;
+    }
+
+    private void Replace(int index, Sample sample)
+    {
+        _retainedValueBytes -= _items[index].ValueBytes;
+        Store(index, sample);
+    }
+
+    private void DropOldest()
+    {
+        _retainedValueBytes -= _items[_start].ValueBytes;
+        _items[_start] = default; // release the JsonDocument the evicted sample was holding
+        _start = (_start + 1) % _capacity;
+        _count--;
     }
 
     public List<Sample> Range(DateTimeOffset from, DateTimeOffset to)
@@ -197,7 +228,7 @@ internal sealed class PropertyBuffer
         var position = LowerBound(sample.Timestamp); // first index with Timestamp >= sample.Timestamp
         if (position < _count && _items[Index(position)].Timestamp == sample.Timestamp)
         {
-            _items[Index(position)] = sample; // same (path, timestamp) replaces, matching SQLite
+            Replace(Index(position), sample); // same (path, timestamp) replaces, matching SQLite
             return false;
         }
 
@@ -210,8 +241,7 @@ internal sealed class PropertyBuffer
                 return true; // the late sample itself is the one dropped
             }
 
-            _start = (_start + 1) % _capacity;
-            _count--;
+            DropOldest();
             position--;
         }
 
@@ -220,7 +250,7 @@ internal sealed class PropertyBuffer
             _items[Index(logical)] = _items[Index(logical - 1)];
         }
 
-        _items[Index(position)] = sample;
+        Store(Index(position), sample);
         _count++;
         return capacityEvicted;
     }

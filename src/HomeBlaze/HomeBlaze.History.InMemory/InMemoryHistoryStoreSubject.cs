@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Runtime.CompilerServices;
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -30,20 +29,7 @@ public partial class InMemoryHistoryStoreSubject :
 {
     private readonly ILogger<InMemoryHistoryStoreSubject> _logger;
 
-    private readonly ThroughputCounter _incomingThroughput = new();
-    private readonly ThroughputCounter _recordedThroughput = new();
-
-    // Last canonical subject path seen per subject and property, used for move detection. The resolver's
-    // own cache is cleared on every structural change, so GetPath() is always current; comparing the
-    // returned path to the stored one detects a move without depending on lifecycle event delivery.
-    // The per-property inner map lets each history property of a renamed subject detect the move
-    // independently, so the first property to change does not consume the rename for its siblings.
-    // Weak keys: a detached subject's entry disappears when it becomes unreachable. Lifecycle detach
-    // is dispatched through the detaching subject's own context, which never reaches a sibling store,
-    // so this cannot rely on being told when a subject goes away.
-    private readonly ConditionalWeakTable<IInterceptorSubject, Dictionary<string, string>> _lastSubjectPath = new();
-    private readonly Lock _pathCacheLock = new();
-
+    private HistoryChangeRecorder? _recorder;
     private InMemoryHistoryStore? _engine;
 
     public InMemoryHistoryStoreSubject(ILogger<InMemoryHistoryStoreSubject> logger)
@@ -223,11 +209,14 @@ public partial class InMemoryHistoryStoreSubject :
         // The change-queue subscription is live from construction, before the first await
         // (BackgroundService.StartAsync returns at that point). The coverage session starts only
         // afterwards, so no change can fall inside claimed coverage without reaching the engine.
+        var recorder = new HistoryChangeRecorder(engine, resolver);
+        _recorder = recorder;
+
         using var processor = new ChangeQueueProcessor(
             this,
             context,
-            propertyReference => propertyReference.TryGetRegisteredProperty() is { } registered && registered.HasHistory(),
-            (changes, _) => RecordBatch(engine, resolver, changes),
+            HistoryChangeRecorder.IsEligible,
+            (changes, _) => recorder.RecordBatch(changes),
             TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
             maxQueueDepth: null,
             logger: _logger);
@@ -254,57 +243,6 @@ public partial class InMemoryHistoryStoreSubject :
             engine.EndCoverageSession();
             Status = "Stopped";
         }
-    }
-
-    private ValueTask RecordBatch(
-        InMemoryHistoryStore engine, ISubjectPathResolver resolver, ReadOnlyMemory<SubjectPropertyChange> changes)
-    {
-        var span = changes.Span;
-        for (var index = 0; index < span.Length; index++)
-        {
-            var change = span[index];
-
-            var registered = change.Property.TryGetRegisteredProperty();
-            if (registered is null || !registered.HasHistory())
-            {
-                continue;
-            }
-
-            _incomingThroughput.Add(1);
-
-            var subject = change.Property.Subject;
-            var subjectPath = resolver.GetPath(subject, PathStyle.Canonical);
-            if (subjectPath is null)
-            {
-                // Subject is no longer reachable (detached between change and flush); skip.
-                continue;
-            }
-
-            var propertyName = change.Property.Name;
-            var fullPath = JoinPath(subjectPath, propertyName);
-
-            lock (_pathCacheLock)
-            {
-                var pathsByProperty = _lastSubjectPath.GetValue(
-                    subject, _ => new Dictionary<string, string>(StringComparer.Ordinal));
-
-                if (pathsByProperty.TryGetValue(propertyName, out var previousSubjectPath) &&
-                    !string.Equals(previousSubjectPath, subjectPath, StringComparison.Ordinal))
-                {
-                    engine.RecordMove(
-                        change.ChangedTimestamp,
-                        JoinPath(previousSubjectPath, propertyName),
-                        fullPath);
-                }
-
-                pathsByProperty[propertyName] = subjectPath;
-            }
-
-            engine.Record(fullPath, change.ChangedTimestamp, change.GetNewValue<object>(), registered.Type);
-            _recordedThroughput.Add(1);
-        }
-
-        return ValueTask.CompletedTask;
     }
 
     private async Task RunSweepLoopAsync(InMemoryHistoryStore engine, CancellationToken stoppingToken)
@@ -336,14 +274,9 @@ public partial class InMemoryHistoryStoreSubject :
         TrackedPropertyCount = engine.TrackedPropertyCount;
         TotalSampleCount = engine.TotalSampleCount;
         EstimatedMemorySize = engine.EstimatedMemoryBytes;
-        IncomingChangesPerSecond = _incomingThroughput.CurrentRate;
-        RecordedChangesPerSecond = _recordedThroughput.CurrentRate;
+        IncomingChangesPerSecond = _recorder?.IncomingChangesPerSecond ?? 0;
+        RecordedChangesPerSecond = _recorder?.RecordedChangesPerSecond ?? 0;
     }
-
-    // Joins a canonical subject path with a property name. The root subject path is "/", so a root
-    // property is "/Temperature" (not "//Temperature"); a child at "/Child" yields "/Child/Pressure".
-    private static string JoinPath(string subjectPath, string propertyName) =>
-        subjectPath == "/" ? "/" + propertyName : subjectPath + "/" + propertyName;
 
     // ILifecycleHandler
 
@@ -352,10 +285,7 @@ public partial class InMemoryHistoryStoreSubject :
     {
         if (change.IsContextDetach)
         {
-            lock (_pathCacheLock)
-            {
-                _lastSubjectPath.Remove(change.Subject);
-            }
+            _recorder?.Forget(change.Subject);
         }
     }
 

@@ -22,7 +22,7 @@ public static class HistoryStoreMerger
     {
         query.Validate();
         cancellationToken.ThrowIfCancellationRequested();
-        var ordered = stores.OrderByDescending(store => store.Priority).ToArray();
+        var ordered = OrderByPriority(stores);
         HistoryDispatchPlanner.EnsureAggregationSupported(ordered, query);
         var snapshots = ordered
             .Select(store => new StoreCoverageSnapshot(store, store.CoverageRanges))
@@ -42,36 +42,32 @@ public static class HistoryStoreMerger
         registry.KnownSubjects.Keys.OfType<IHistoryStore>().QueryHistoryAsync(query, cancellationToken);
 
     /// <summary>
-    /// Gets the value held at <paramref name="asOf"/> for a property path: the newest sample at or
-    /// before it, taking the first hit in priority order. A raw query only returns the samples inside
-    /// its window, so a caller that renders a held value (the state timeline) needs this to know what
-    /// the value was entering the window. Returns null when no store has a sample it can vouch for.
-    /// </summary>
-    private static async Task<HistoryPoint?> GetValueAtAsync(
-        this IEnumerable<IHistoryStore> stores, string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
-    {
-        foreach (var store in stores.OrderByDescending(store => store.Priority))
-        {
-            var sample = await store
-                .GetSampleAtOrBeforeAsync(propertyPath, asOf, cancellationToken)
-                .ConfigureAwait(false);
-            if (sample is not null)
-            {
-                return sample;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Gets the value held at <paramref name="asOf"/> from the registry's history stores.
-    /// Convenience overload over the store-set entry point.
+    /// Gets the value held at <paramref name="asOf"/> from the registry's history stores: the newest
+    /// sample at or before it, taking the first hit in priority order. A raw query only returns the
+    /// samples inside its window, so a caller that renders a held value (the state timeline) needs
+    /// this to know what the value was entering the window. Returns null when no store has a sample
+    /// it can vouch for.
     /// </summary>
     public static Task<HistoryPoint?> GetValueAtAsync(
         this ISubjectRegistry registry, string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken) =>
-        registry.KnownSubjects.Keys.OfType<IHistoryStore>()
-            .GetValueAtAsync(propertyPath, asOf, cancellationToken);
+        ResolveHeldValueAsync(
+            OrderByPriority(registry.KnownSubjects.Keys.OfType<IHistoryStore>()),
+            propertyPath,
+            asOf,
+            cancellationToken);
+
+    /// <summary>
+    /// Orders the stores highest priority first. The store set comes from a dictionary's key
+    /// enumeration, whose order is not guaranteed, so equal priorities are broken by type name:
+    /// without it, which of two equally ranked stores won an overlap could differ between runs and
+    /// the same query would answer from a different store each time. Two instances of the same store
+    /// type at the same priority remain genuinely ambiguous; give them distinct priorities.
+    /// </summary>
+    private static IHistoryStore[] OrderByPriority(IEnumerable<IHistoryStore> stores) =>
+        stores
+            .OrderByDescending(store => store.Priority)
+            .ThenBy(store => store.GetType().FullName, StringComparer.Ordinal)
+            .ToArray();
 
     /// <summary>
     /// Fans the query out across multiple property paths that share the same time range, bucket,
@@ -155,7 +151,6 @@ public static class HistoryStoreMerger
     private static async Task<HistorySeries> ExecuteNewestFirst(
         IReadOnlyList<PlannedSegment> segments, HistoryQuery query, CancellationToken cancellationToken)
     {
-        var served = new bool[segments.Count];
         var remainingBudget = query.MaxPoints;
         var budgetExhaustedBeforeAllPlanned = false;
 
@@ -167,22 +162,27 @@ public static class HistoryStoreMerger
                 break;
             }
 
-            served[index] = true;
             var subSeries = await QuerySegment(segments[index], query, remainingBudget, carrySeed: null, cancellationToken)
                 .ConfigureAwait(false);
             segments[index].Result = subSeries;
             remainingBudget -= subSeries.Points.Length;
         }
 
-        return MergeResults(segments, served, query, budgetExhaustedBeforeAllPlanned);
+        return MergeResults(segments, query, budgetExhaustedBeforeAllPlanned);
     }
 
     /// <summary>
-    /// Carry-threaded execution for bucketed <c>Last</c> / <c>TimeWeightedAverage</c>. Selects the
-    /// served set newest-first from deterministic bucket counts, resolves the initial cross-store
-    /// carry seed at the oldest served segment, then queries the served segments oldest-to-newest,
-    /// advancing the carried value to each segment's last raw event so the next segment's leftmost
-    /// bucket continues the held value. An explicit null event clears that value.
+    /// Carry-threaded execution for bucketed <c>Last</c> / <c>TimeWeightedAverage</c>. Resolves the
+    /// initial cross-store carry seed at the oldest segment, then queries the segments
+    /// oldest-to-newest, advancing the carried value to each segment's last raw event so the next
+    /// segment's leftmost bucket continues the held value. An explicit null event clears that value.
+    ///
+    /// Every planned segment is served. <c>PlanBucketed</c> walks the grid from
+    /// <see cref="BucketAlignment.FirstBucketStart"/>, which is already clipped to the newest
+    /// <c>MaxPoints</c> buckets, so the segments' bucket counts sum to at most <c>MaxPoints</c> and
+    /// the budget cannot run out part-way through the plan. Raw queries, where it can, take the
+    /// newest-first path instead. <c>WhenTheRangeHasMoreBucketsThanTheBudget_ThenThePlanStaysWithinTheBudget</c>
+    /// guards the invariant.
     /// </summary>
     private static async Task<HistorySeries> ExecuteCarryThreaded(
         IReadOnlyList<IHistoryStore> ordered,
@@ -190,45 +190,20 @@ public static class HistoryStoreMerger
         HistoryQuery query,
         CancellationToken cancellationToken)
     {
-        // Newest-first served-set selection using the deterministic per-segment bucket count.
-        var served = new bool[segments.Count];
-        var allocations = new int[segments.Count];
-        var remainingBudget = query.MaxPoints;
-        var budgetExhaustedBeforeAllPlanned = false;
-        for (var index = segments.Count - 1; index >= 0; index--)
-        {
-            if (remainingBudget <= 0)
-            {
-                budgetExhaustedBeforeAllPlanned = true;
-                break;
-            }
-
-            served[index] = true;
-            allocations[index] = remainingBudget;
-            remainingBudget -= segments[index].BucketCount;
-        }
-
         HistoryPoint? carry = null;
-        PlannedSegment? previousServedSegment = null;
+        PlannedSegment? previousSegment = null;
 
         // Oldest-to-newest pass threading the carry only across adjacent covered segments.
-        for (var index = 0; index < segments.Count; index++)
+        foreach (var segment in segments)
         {
-            if (!served[index])
+            if (previousSegment is null || previousSegment.To != segment.From)
             {
-                continue;
-            }
-
-            var segment = segments[index];
-            if (previousServedSegment is null || previousServedSegment.To != segment.From)
-            {
-                carry = await ResolveCarryAsync(
+                carry = await ResolveHeldValueAsync(
                     ordered, query.PropertyPath, segment.From, cancellationToken).ConfigureAwait(false);
             }
 
-            var subSeries = await QuerySegment(segment, query, allocations[index], carry, cancellationToken)
+            segment.Result = await QuerySegment(segment, query, query.MaxPoints, carry, cancellationToken)
                 .ConfigureAwait(false);
-            segment.Result = subSeries;
 
             // Aggregate output is not the ending held value (a TWA point is an average). Resolve the
             // segment's last raw event instead. Restrict it to [segment.From, segment.To), otherwise a
@@ -242,13 +217,15 @@ public static class HistoryStoreMerger
                 carry = lastEvent;
             }
 
-            previousServedSegment = segment;
+            previousSegment = segment;
         }
 
-        return MergeResults(segments, served, query, budgetExhaustedBeforeAllPlanned);
+        return MergeResults(segments, query, budgetExhaustedBeforeAllPlanned: false);
     }
 
-    private static async ValueTask<HistoryPoint?> ResolveCarryAsync(
+    // The newest sample at or before asOf across the ordered stores, taking the first hit. Serves both
+    // the carry seed and the public held-value lookup: the two differed only in who ordered the stores.
+    private static async Task<HistoryPoint?> ResolveHeldValueAsync(
         IReadOnlyList<IHistoryStore> ordered,
         string propertyPath,
         DateTimeOffset asOf,
@@ -294,21 +271,22 @@ public static class HistoryStoreMerger
     /// timestamp with the higher-priority store's value winning, rather than a duplicate.
     /// </summary>
     private static HistorySeries MergeResults(
-        IReadOnlyList<PlannedSegment> segments, bool[] served, HistoryQuery query, bool budgetExhaustedBeforeAllPlanned)
+        IReadOnlyList<PlannedSegment> segments, HistoryQuery query, bool budgetExhaustedBeforeAllPlanned)
     {
         var truncated = budgetExhaustedBeforeAllPlanned;
 
         // Fill highest priority first so TryAdd keeps the higher-priority value if two segments ever
-        // collide on a timestamp (defensive; segments are non-overlapping by construction).
-        var ordering = Enumerable.Range(0, segments.Count)
-            .Where(index => served[index] && segments[index].Result is not null)
-            .OrderByDescending(index => segments[index].Store.Priority)
+        // collide on a timestamp (defensive; segments are non-overlapping by construction). A segment
+        // with no result is one the budget dropped before it was queried.
+        var served = segments
+            .Where(segment => segment.Result is not null)
+            .OrderByDescending(segment => segment.Store.Priority)
             .ToArray();
 
         var byTimestamp = new Dictionary<DateTimeOffset, HistoryPoint>();
-        foreach (var index in ordering)
+        foreach (var segment in served)
         {
-            var result = segments[index].Result!;
+            var result = segment.Result!;
             if (result.Truncated)
             {
                 truncated = true;
@@ -350,7 +328,7 @@ public static class HistoryStoreMerger
             query.PropertyPath,
             points,
             truncated,
-            EffectiveCoverage(segments, served, query));
+            EffectiveCoverage(served, query));
     }
 
     /// <summary>
@@ -359,10 +337,8 @@ public static class HistoryStoreMerger
     /// those as covered would tell a caller "no samples here" for a range that was never read.
     /// </summary>
     private static ImmutableArray<HistoryCoverage> EffectiveCoverage(
-        IReadOnlyList<PlannedSegment> segments, bool[] served, HistoryQuery query) =>
+        IReadOnlyList<PlannedSegment> served, HistoryQuery query) =>
         HistoryCoverage.Clip(
-            segments
-                .Where((_, index) => served[index])
-                .Select(segment => new HistoryCoverage(segment.From, segment.To)),
+            served.Select(segment => new HistoryCoverage(segment.From, segment.To)),
             new HistoryCoverage(query.From, query.To));
 }

@@ -11,12 +11,6 @@ internal readonly record struct PendingSample(
     string Path, DateTimeOffset Timestamp, Row Row, ValueColumn Column, bool IsUlong);
 
 /// <summary>
-/// A recorded path move queued for flush, persisted in the metadata database (<c>moves.db</c>) and replayed when resolving a
-/// queried path's move chain.
-/// </summary>
-internal readonly record struct MoveRecord(DateTimeOffset Timestamp, string FromPath, string ToPath);
-
-/// <summary>
 /// Pure write SQL for the SQLite history engine: the batched <c>INSERT OR REPLACE</c> into a partition
 /// file (with its <c>path_meta</c> upsert) and the moves insert. These helpers operate on connections
 /// the engine opens and passes in; they never lock, never open or cache connections, and hold no state.
@@ -26,8 +20,8 @@ internal readonly record struct MoveRecord(DateTimeOffset Timestamp, string From
 internal static class SqliteHistoryWriter
 {
     // Writes one partition's batch in a single transaction: each sample's row into history and its
-    // column metadata into path_meta. Returns the maximum committed epoch-tick timestamp in the batch.
-    public static long WritePartition(SqliteConnection connection, IReadOnlyList<PendingSample> samples)
+    // column metadata into path_meta.
+    public static void WritePartition(SqliteConnection connection, IReadOnlyList<PendingSample> samples)
     {
         using var transaction = connection.BeginTransaction();
 
@@ -50,11 +44,9 @@ internal static class SqliteHistoryWriter
         var metaColumnParameter = meta.Parameters.Add("@column", SqliteType.Integer);
         var metaUlongParameter = meta.Parameters.Add("@is_ulong", SqliteType.Integer);
 
-        var maxTicks = long.MinValue;
         foreach (var sample in samples)
         {
-            var ticks = EpochTicks.ToEpochTicks(sample.Timestamp);
-            tsParameter.Value = ticks;
+            tsParameter.Value = EpochTicks.ToEpochTicks(sample.Timestamp);
             pathParameter.Value = sample.Path;
             longParameter.Value = (object?)sample.Row.Long ?? DBNull.Value;
             doubleParameter.Value = (object?)sample.Row.Double ?? DBNull.Value;
@@ -65,19 +57,13 @@ internal static class SqliteHistoryWriter
             metaColumnParameter.Value = (int)sample.Column;
             metaUlongParameter.Value = sample.IsUlong ? 1 : 0;
             meta.ExecuteNonQuery();
-
-            if (ticks > maxTicks)
-            {
-                maxTicks = ticks;
-            }
         }
 
         transaction.Commit();
-        return maxTicks;
     }
 
     // Persists queued moves into the metadata database in a single transaction.
-    public static void WriteMoves(SqliteConnection movesConnection, IReadOnlyList<MoveRecord> moves)
+    public static void WriteMoves(SqliteConnection movesConnection, IReadOnlyList<HistoryMove> moves)
     {
         using var transaction = movesConnection.BeginTransaction();
         using var insert = movesConnection.CreateCommand();

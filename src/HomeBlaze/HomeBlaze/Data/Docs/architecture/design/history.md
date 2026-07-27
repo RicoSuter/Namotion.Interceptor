@@ -34,13 +34,17 @@ The package responsibilities are:
 
 | Package | Responsibility |
 |---|---|
-| `HomeBlaze.History.Abstractions` | Store interface, query and result records, aggregations, eligibility, column routing, bucket alignment |
-| `HomeBlaze.History` | Stateless cross-store query planner and merger |
+| `HomeBlaze.History.Abstractions` | Store and recorder interfaces, query and result records, aggregations, column routing, bucket alignment, move-chain resolution |
+| `HomeBlaze.History` | Cross-store query planner and merger, recording glue, graph eligibility |
 | `HomeBlaze.History.InMemory` | In-memory engine and subject |
 | `HomeBlaze.History.Sqlite` | SQLite engine and subject |
 | `HomeBlaze.History.Blazor` | Property history dialog |
+| `HomeBlaze.History.Mcp` | `get_property_history` MCP tool |
 | Store-specific `.Blazor` packages | Store configuration components |
-| `HomeBlaze.AI` | `get_property_history` MCP tool |
+
+`HomeBlaze.History.Abstractions` has no project references at all. That is enforced by its own csproj and, indirectly, by its test project, which references nothing else either. Everything that needs the object graph, meaning `HasHistory` and the recording glue, lives one layer up in `HomeBlaze.History`.
+
+The MCP tool ships with the history packages rather than with `HomeBlaze.AI`, so installing history brings its tool along and the AI package does not reference the history stack. The host composes the two by passing the provider into `WithHomeBlazeMcpTools`.
 
 ## Store contract
 

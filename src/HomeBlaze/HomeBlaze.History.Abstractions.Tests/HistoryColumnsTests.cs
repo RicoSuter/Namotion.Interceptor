@@ -88,4 +88,46 @@ public class HistoryColumnsTests
         // Assert
         Assert.False(result);
     }
+
+    [Theory]
+    [InlineData(typeof(double))]
+    [InlineData(typeof(float))]
+    [InlineData(typeof(long))]
+    [InlineData(typeof(int))]
+    [InlineData(typeof(short))]
+    [InlineData(typeof(sbyte))]
+    [InlineData(typeof(byte))]
+    [InlineData(typeof(ushort))]
+    [InlineData(typeof(uint))]
+    [InlineData(typeof(ulong))]
+    [InlineData(typeof(bool))]
+    [InlineData(typeof(decimal))]
+    [InlineData(typeof(string))]
+    [InlineData(typeof(SampleEnum))]
+    [InlineData(typeof(double?))]
+    [InlineData(typeof(int?))]
+    [InlineData(typeof(decimal?))]
+    [InlineData(typeof(SampleEnum?))]
+    public void WhenTypeMapsToAValueColumn_ThenItIsRecordable(Type type)
+    {
+        // Arrange & Act
+        var result = HistoryColumns.IsRecordable(type);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Theory]
+    [InlineData(typeof(object))]
+    [InlineData(typeof(Guid))]
+    [InlineData(typeof(List<int>))]
+    [InlineData(typeof(HistoryColumnsTests))]
+    public void WhenTypeMapsToNoValueColumn_ThenItIsNotRecordable(Type type)
+    {
+        // Arrange & Act
+        var result = HistoryColumns.IsRecordable(type);
+
+        // Assert
+        Assert.False(result);
+    }
 }

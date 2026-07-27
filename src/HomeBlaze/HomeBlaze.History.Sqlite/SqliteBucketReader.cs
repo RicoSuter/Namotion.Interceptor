@@ -109,7 +109,7 @@ internal static class SqliteBucketReader
     // intersection is split across the partition files it overlaps. With no moves this is the single-path,
     // multi-partition segment set used before move routing.
     private static List<ChainSegment> BuildChainSegments(
-        SqliteReadContext context, List<ChainLeg> chain, DateTimeOffset from, DateTimeOffset to)
+        SqliteReadContext context, List<HistoryChainLeg> chain, DateTimeOffset from, DateTimeOffset to)
     {
         var segments = new List<ChainSegment>();
         foreach (var leg in chain)

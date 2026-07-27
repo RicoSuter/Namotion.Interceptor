@@ -1,17 +1,119 @@
 using System.Text.Json;
+using HomeBlaze.AI.Mcp;
+using HomeBlaze.Services.Lifecycle;
+using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Xunit;
 
-namespace HomeBlaze.AI.Tests.Mcp;
+namespace HomeBlaze.History.Mcp.Tests;
 
 public class GetPropertyHistoryToolTests
 {
-    private static async Task<JsonElement> InvokeAsync(object inputObject)
+    private static Task<JsonElement> InvokeAsync(object inputObject) =>
+        InvokeAsync(inputObject, unsupportedPath: null, withStore: false);
+
+    private static async Task<JsonElement> InvokeAsync(object inputObject, string? unsupportedPath, bool withStore)
     {
-        var (_, _, factory) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: true);
-        var tool = factory.CreateTools().First(candidate => candidate.Name == "get_property_history");
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
+
+        var root = new HistoryToolTestSubject(context) { Name = "Test Room" };
+        if (withStore)
+        {
+            // Registered in the same context, so the merger picks it up from the registry's subjects.
+            _ = new TestHistoryStore(context) { UnsupportedPath = unsupportedPath };
+        }
+
+        var provider = new HistoryMcpToolProvider(
+            () => root, new StateAttributePathProvider(), NullLogger<HistoryMcpToolProvider>.Instance);
+
+        var tool = provider.GetTools().First(candidate => candidate.Name == "get_property_history");
         var input = JsonSerializer.SerializeToElement(inputObject);
         var result = await tool.Handler(input, CancellationToken.None);
         return JsonSerializer.SerializeToElement(result);
+    }
+
+    [Fact]
+    public async Task WhenOnePathCannotBeServed_ThenOnlyThatPathCarriesAnErrorAndTheOthersReturnData()
+    {
+        // Arrange - a store that rejects the aggregation for one path only, the way a real store does
+        // when a numeric aggregation is asked of a string column.
+        var json = await InvokeAsync(
+            new
+            {
+                paths = new[] { "/a/Text", "/b/Value" },
+                from = "2026-06-24T00:00:00Z",
+                to = "2026-06-24T01:00:00Z",
+                aggregation = "SampleAverage"
+            },
+            unsupportedPath: "/a/Text",
+            withStore: true);
+
+        // Assert - the whole call used to fail, throwing away the paths that could be served.
+        Assert.False(json.TryGetProperty("error", out _));
+        var series = json.GetProperty("series");
+        Assert.True(series.GetProperty("/a/Text").TryGetProperty("error", out _));
+        Assert.False(series.GetProperty("/b/Value").TryGetProperty("error", out _));
+        Assert.True(series.GetProperty("/b/Value").TryGetProperty("points", out _));
+    }
+
+    [Fact]
+    public async Task WhenMaxPointsIsNotAnInteger_ThenStructuredError()
+    {
+        // Act
+        var json = await InvokeAsync(new
+        {
+            paths = new[] { "/a/Value" },
+            from = "2026-06-24T00:00:00Z",
+            to = "2026-06-24T01:00:00Z",
+            max_points = "many"
+        });
+
+        // Assert
+        Assert.True(json.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task WhenMaxPointsIsZeroOrNegative_ThenStructuredError()
+    {
+        // Act - the stores reject a non-positive budget from inside the fan-out, which surfaces
+        // unstructured and naming an internal parameter.
+        var json = await InvokeAsync(new
+        {
+            paths = new[] { "/a/Value" },
+            from = "2026-06-24T00:00:00Z",
+            to = "2026-06-24T01:00:00Z",
+            max_points = 0
+        });
+
+        // Assert
+        Assert.True(json.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task WhenPropertyTypeIsNotRecordable_ThenValueTypeIsNullRatherThanNumber()
+    {
+        // Arrange - Child is a subject-valued property: nothing records it, so claiming a value type
+        // for it invites the caller to chart a series that can never have samples.
+        var json = await InvokeAsync(new
+        {
+            paths = new[] { "/Child" },
+            from = "2026-06-24T00:00:00Z",
+            to = "2026-06-24T01:00:00Z"
+        });
+
+        // Assert
+        Assert.Equal(
+            JsonValueKind.Null,
+            json.GetProperty("series").GetProperty("/Child").GetProperty("value_type").ValueKind);
     }
 
     [Fact]
@@ -137,7 +239,7 @@ public class GetPropertyHistoryToolTests
 
         // Assert
         Assert.False(json.TryGetProperty("error", out _));
-        Assert.True(json.TryGetProperty("/a/Value", out _));
+        Assert.True(json.GetProperty("series").TryGetProperty("/a/Value", out _));
     }
 
     [Fact]
@@ -186,9 +288,10 @@ public class GetPropertyHistoryToolTests
 
         // Assert
         Assert.False(json.TryGetProperty("error", out _));
+        var series = json.GetProperty("series");
         foreach (var path in new[] { "/a/Value", "/b/Value" })
         {
-            Assert.True(json.TryGetProperty(path, out var entry));
+            Assert.True(series.TryGetProperty(path, out var entry));
             Assert.True(entry.TryGetProperty("value_type", out _));     // present (null when unresolved)
             Assert.Empty(entry.GetProperty("coverage").EnumerateArray());
             Assert.Empty(entry.GetProperty("points").EnumerateArray());
@@ -211,6 +314,6 @@ public class GetPropertyHistoryToolTests
 
         // Assert
         Assert.False(json.TryGetProperty("error", out _));
-        Assert.True(json.TryGetProperty("/a/Value", out _));
+        Assert.True(json.GetProperty("series").TryGetProperty("/a/Value", out _));
     }
 }

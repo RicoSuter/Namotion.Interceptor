@@ -1,6 +1,7 @@
 using HomeBlaze.AI;
 using HomeBlaze.Components;
 using HomeBlaze.History.InMemory.Blazor;
+using HomeBlaze.History.Mcp;
 using HomeBlaze.History.Sqlite.Blazor;
 using HomeBlaze.Host;
 using HomeBlaze.Samples;
@@ -44,7 +45,13 @@ if (mcpEnabled)
 {
     builder.Services.AddMcpServer()
         .WithHttpTransport(options => options.Stateless = true)
-        .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
+        .WithHomeBlazeMcpTools(
+            isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true),
+            // The history package contributes its own tool; the AI package knows nothing about it.
+            context => new HistoryMcpToolProvider(
+                context.RootSubjectProvider,
+                context.PathProvider,
+                context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
 }
 
 // Add services to the container.

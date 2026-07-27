@@ -1,7 +1,7 @@
 using System.Globalization;
 using HomeBlaze.History.Abstractions;
 
-namespace HomeBlaze.AI.Mcp;
+namespace HomeBlaze.History.Mcp;
 
 /// <summary>
 /// Pure parsing and normalization for the <c>get_property_history</c> MCP tool. Kept separate so

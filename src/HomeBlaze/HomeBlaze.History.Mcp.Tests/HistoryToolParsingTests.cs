@@ -1,8 +1,7 @@
-using HomeBlaze.AI.Mcp;
 using HomeBlaze.History.Abstractions;
 using Xunit;
 
-namespace HomeBlaze.AI.Tests.Mcp;
+namespace HomeBlaze.History.Mcp.Tests;
 
 public class HistoryToolParsingTests
 {

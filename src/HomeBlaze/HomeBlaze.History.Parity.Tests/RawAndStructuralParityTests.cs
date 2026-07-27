@@ -73,6 +73,29 @@ public class RawAndStructuralParityTests
 
     [Theory]
     [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenPathMovedAwayAndBack_ThenBothOfItsWindowsResolveAcrossStores(ParityStoreFactory factory)
+    {
+        // Arrange - /a/Value -> /b/Value at t=5 and back at t=10, so /a/Value owns two disjoint windows.
+        // A chain walk that stops when it revisits a path drops the earlier one and silently loses the
+        // samples recorded in it, even though they are still stored and inside coverage.
+        using var store = factory.Create();
+        store.Record("/a/Value", Base.AddSeconds(1), 10d, typeof(double));
+        store.RecordMove(Base.AddSeconds(5), "/a/Value", "/b/Value");
+        store.Record("/b/Value", Base.AddSeconds(7), 20d, typeof(double));
+        store.RecordMove(Base.AddSeconds(10), "/b/Value", "/a/Value");
+        store.Record("/a/Value", Base.AddSeconds(12), 30d, typeof(double));
+        await store.FlushAsync();
+
+        // Act
+        var series = store.Query(new HistoryQuery(
+            "/a/Value", Base, Base.AddSeconds(15), Bucket: null, Aggregation: HistoryAggregations.Last, MaxPoints: 1000));
+
+        // Assert
+        ParityAssert.NumbersEqual(new double?[] { 10d, 20d, 30d }, series);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
     public async Task WhenStringExceedsMaxJsonSize_ThenOversizePlaceholderAcrossStores(ParityStoreFactory factory)
     {
         // Arrange - a string longer than the 8 KB cap records a {"$oversize":true,"size":n} placeholder row.

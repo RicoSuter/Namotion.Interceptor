@@ -31,13 +31,26 @@ public sealed class SqlitePartitionTests
     }
 
     [Fact]
-    public void WhenWeeklyPartitionRange_ThenRoundTripsToMondayWeek()
+    public void WhenMonthlyKey_ThenAnchorsOnMonthStart()
     {
         // Arrange
+        var timestamp = new DateTimeOffset(2026, 6, 24, 14, 0, 0, TimeSpan.Zero);
+
+        // Act
+        var key = SqlitePartition.PartitionKey(timestamp, PartitionInterval.Monthly);
+
+        // Assert
+        Assert.Equal("2026-06", key);
+    }
+
+    [Fact]
+    public void WhenKeyIsAMonday_ThenInferredRangeSpansTheWeek()
+    {
+        // Arrange - a Monday could have been written by either Daily or Weekly, so the wider reading wins
         const string key = "2026-06-22";
 
         // Act
-        var (start, end) = SqlitePartition.PartitionRange(key, PartitionInterval.Weekly);
+        var (start, end) = SqlitePartition.InferredRange(key);
 
         // Assert
         Assert.Equal(new DateTimeOffset(2026, 6, 22, 0, 0, 0, TimeSpan.Zero), start);
@@ -45,62 +58,50 @@ public sealed class SqlitePartitionTests
     }
 
     [Fact]
-    public void WhenDailyPartitionRange_ThenRoundTripsToSingleDay()
+    public void WhenKeyIsNotAMonday_ThenInferredRangeSpansOneDay()
     {
-        // Arrange
-        var timestamp = new DateTimeOffset(2026, 6, 24, 14, 0, 0, TimeSpan.Zero);
+        // Arrange - only Daily produces a non-Monday key, so there is nothing to be conservative about
+        const string key = "2026-06-24";
 
         // Act
-        var key = SqlitePartition.PartitionKey(timestamp, PartitionInterval.Daily);
-        var (start, end) = SqlitePartition.PartitionRange(key, PartitionInterval.Daily);
+        var (start, end) = SqlitePartition.InferredRange(key);
 
         // Assert
-        Assert.Equal("2026-06-24", key);
         Assert.Equal(new DateTimeOffset(2026, 6, 24, 0, 0, 0, TimeSpan.Zero), start);
         Assert.Equal(new DateTimeOffset(2026, 6, 25, 0, 0, 0, TimeSpan.Zero), end);
     }
 
     [Fact]
-    public void WhenMonthlyPartitionRange_ThenRoundTripsToSingleMonth()
+    public void WhenKeyIsAMonth_ThenInferredRangeSpansTheMonth()
     {
         // Arrange
-        var timestamp = new DateTimeOffset(2026, 6, 24, 14, 0, 0, TimeSpan.Zero);
+        const string key = "2026-06";
 
         // Act
-        var key = SqlitePartition.PartitionKey(timestamp, PartitionInterval.Monthly);
-        var (start, end) = SqlitePartition.PartitionRange(key, PartitionInterval.Monthly);
+        var (start, end) = SqlitePartition.InferredRange(key);
 
         // Assert
-        Assert.Equal("2026-06", key);
         Assert.Equal(new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero), start);
         Assert.Equal(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero), end);
     }
 
-    [Fact]
-    public void WhenRangeSpansTwoWeeks_ThenEnumerateReturnsBothKeys()
+    [Theory]
+    [InlineData("2026-06-22")]
+    [InlineData("2026-06-24")]
+    [InlineData("2026-06")]
+    public void WhenKeyWasWrittenByAnyInterval_ThenItIsRecognised(string key)
     {
-        // Arrange - from a Tuesday in one week to a Tuesday in the next week
-        var from = new DateTimeOffset(2026, 6, 23, 8, 0, 0, TimeSpan.Zero); // week of 2026-06-22
-        var to = new DateTimeOffset(2026, 6, 30, 8, 0, 0, TimeSpan.Zero);   // week of 2026-06-29
-
-        // Act
-        var keys = SqlitePartition.EnumeratePartitionKeys(from, to, PartitionInterval.Weekly).ToArray();
-
-        // Assert
-        Assert.Equal(new[] { "2026-06-22", "2026-06-29" }, keys);
+        // Act & Assert - reconfiguring the interval must not make existing partition files invisible
+        Assert.True(SqlitePartition.IsPartitionKey(key));
     }
 
-    [Fact]
-    public void WhenRangeWithinSingleWeek_ThenEnumerateReturnsOneKey()
+    [Theory]
+    [InlineData("moves")]
+    [InlineData("2026")]
+    [InlineData("2026-13")]
+    public void WhenKeyIsNotAPartition_ThenItIsRejected(string key)
     {
-        // Arrange
-        var from = new DateTimeOffset(2026, 6, 23, 8, 0, 0, TimeSpan.Zero);
-        var to = new DateTimeOffset(2026, 6, 25, 8, 0, 0, TimeSpan.Zero);
-
-        // Act
-        var keys = SqlitePartition.EnumeratePartitionKeys(from, to, PartitionInterval.Weekly).ToArray();
-
-        // Assert
-        Assert.Equal(new[] { "2026-06-22" }, keys);
+        // Act & Assert
+        Assert.False(SqlitePartition.IsPartitionKey(key));
     }
 }
