@@ -1,10 +1,7 @@
 <Project>
-  <!-- MSBuild stops at the nearest Directory.Build.props, so without this import the HomeBlaze tree
-       silently opts out of the repository defaults, including TreatWarningsAsErrors. -->
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
 
   <PropertyGroup>
-    <!-- Disable NuGet package generation for all HomeBlaze projects -->
     <IsPackable>false</IsPackable>
 
     <!-- Keep the default 1.0.0 rather than inheriting the library version. Plugins are compiled
