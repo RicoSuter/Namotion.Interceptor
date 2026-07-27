@@ -220,7 +220,7 @@ public partial class HueLightbulb : HueDevice,
         var response = await client.Light.UpdateAsync(LightResource.Id, command);
         if (!response.Errors.Any())
         {
-            LightResource.On.IsOn = true;
+            LightResource = HueResourceEcho.With(LightResource, light => light.On.IsOn = true);
             LastUpdated = DateTimeOffset.Now;
         }
     }
@@ -235,7 +235,7 @@ public partial class HueLightbulb : HueDevice,
         var response = await client.Light.UpdateAsync(LightResource.Id, command);
         if (!response.Errors.Any())
         {
-            LightResource.On.IsOn = false;
+            LightResource = HueResourceEcho.With(LightResource, light => light.On.IsOn = false);
             LastUpdated = DateTimeOffset.Now;
         }
     }
@@ -259,7 +259,8 @@ public partial class HueLightbulb : HueDevice,
         var response = await client.Light.UpdateAsync(LightResource.Id, command);
         if (!response.Errors.Any() && LightResource.Dimming is not null)
         {
-            LightResource.Dimming.Brightness = (double)(brightness * 100m);
+            LightResource = HueResourceEcho.With(
+                LightResource, light => light.Dimming!.Brightness = (double)(brightness * 100m));
             LastUpdated = DateTimeOffset.Now;
         }
 
@@ -281,7 +282,7 @@ public partial class HueLightbulb : HueDevice,
         var response = await client.Light.UpdateAsync(LightResource.Id, command);
         if (!response.Errors.Any())
         {
-            LightResource.Color = rgbColor.ToColor();
+            LightResource = HueResourceEcho.With(LightResource, light => light.Color = rgbColor.ToColor());
             LastUpdated = DateTimeOffset.Now;
         }
     }
@@ -308,7 +309,8 @@ public partial class HueLightbulb : HueDevice,
             var response = await client.Light.UpdateAsync(LightResource.Id, command);
             if (!response.Errors.Any() && LightResource.ColorTemperature is not null)
             {
-                LightResource.ColorTemperature.Mirek = newColorTemperature;
+                LightResource = HueResourceEcho.With(
+                    LightResource, light => light.ColorTemperature!.Mirek = newColorTemperature);
                 LastUpdated = DateTimeOffset.Now;
             }
         }
