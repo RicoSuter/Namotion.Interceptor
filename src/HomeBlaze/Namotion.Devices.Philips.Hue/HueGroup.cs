@@ -111,12 +111,7 @@ public partial class HueGroup :
                 .TurnOn();
 
             var client = Bridge.GetOrCreateClient();
-            var response = await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
-            if (!response.Errors.Any())
-            {
-                GroupedLight = HueResourceMutation.With(GroupedLight, group => group.On.IsOn = true);
-                LastUpdated = DateTimeOffset.Now;
-            }
+            await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
         }
     }
 
@@ -129,12 +124,7 @@ public partial class HueGroup :
                 .TurnOff();
 
             var client = Bridge.GetOrCreateClient();
-            var response = await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
-            if (!response.Errors.Any())
-            {
-                GroupedLight = HueResourceMutation.With(GroupedLight, group => group.On.IsOn = false);
-                LastUpdated = DateTimeOffset.Now;
-            }
+            await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
         }
     }
 
@@ -156,13 +146,7 @@ public partial class HueGroup :
                 .SetBrightness((double)(brightness * 100m));
 
             var client = Bridge.GetOrCreateClient();
-            var response = await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
-            if (!response.Errors.Any() && GroupedLight.Dimming is not null)
-            {
-                GroupedLight = HueResourceMutation.With(
-                    GroupedLight, group => group.Dimming!.Brightness = (double)(brightness * 100m));
-                LastUpdated = DateTimeOffset.Now;
-            }
+            await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
 
             if (turnOffAfterChange)
             {

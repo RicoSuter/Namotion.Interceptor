@@ -275,6 +275,13 @@ public partial class HueBridge : BackgroundService,
                 var eventStreamTask = RunEventStreamAsync(client, linkedCts.Token);
                 var pollingTask = RunPollingLoopAsync(client, linkedCts.Token);
 
+                // Either one finishing means the connection is no longer whole, so the other is
+                // cancelled and both are observed. Awaiting them together instead let a faulted event
+                // stream sit unobserved behind the polling loop, which never returns: the stream stayed
+                // dead, the reconnect below never ran, and the bridge went on reporting Running while
+                // state changes only arrived at the poll interval.
+                await Task.WhenAny(eventStreamTask, pollingTask);
+                await linkedCts.CancelAsync();
                 await Task.WhenAll(eventStreamTask, pollingTask);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
