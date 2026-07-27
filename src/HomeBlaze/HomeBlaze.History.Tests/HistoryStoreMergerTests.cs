@@ -356,6 +356,14 @@ public class HistoryStoreMergerTests
         // Assert: newest two kept, truncated flagged.
         Assert.Equal(new double?[] { 2d, 3d }, series.Points.Select(point => point.Number).ToArray());
         Assert.True(series.Truncated);
+
+        // And coverage retreats to the oldest point actually returned. The store covers [0,60) and was
+        // asked about all of it, but the sample at t=10 was dropped, so nothing in this result stands
+        // behind [0,20). Reporting the full window there tells a caller "covered, and nothing happened",
+        // which a state timeline draws as a held value and an agent reads as fact.
+        Assert.Equal(
+            new[] { new HistoryCoverage(At(20), At(60)) },
+            series.CoverageRanges.ToArray());
     }
 
     [Fact]

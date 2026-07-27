@@ -330,13 +330,38 @@ public static class HistoryStoreMerger
     }
 
     /// <summary>
-    /// The coverage the returned series actually stands behind: only the segments that were served.
+    /// The coverage the returned series actually stands behind: only the segments that were served,
+    /// and within each of those, only the part the returned points can vouch for.
     /// A budget shortfall drops the oldest planned segments without querying them, and reporting
     /// those as covered would tell a caller "no samples here" for a range that was never read.
     /// </summary>
     private static ImmutableArray<HistoryCoverage> EffectiveCoverage(
         IReadOnlyList<PlannedSegment> served, HistoryQuery query) =>
         HistoryCoverage.Clip(
-            served.Select(segment => new HistoryCoverage(segment.From, segment.To)),
+            served.Select(SegmentCoverage).OfType<HistoryCoverage>(),
             new HistoryCoverage(query.From, query.To));
+
+    /// <summary>
+    /// What one served segment stands behind. A store that truncated returned its newest points and
+    /// dropped the older ones inside the very range it was asked about, so the segment's own start is
+    /// no longer vouched for: the oldest returned point is. Claiming otherwise reads as "covered, and
+    /// nothing happened here", which a state timeline renders as a held value and an agent reads as
+    /// fact, when the truth is that the samples were never fetched.
+    /// </summary>
+    private static HistoryCoverage? SegmentCoverage(PlannedSegment segment)
+    {
+        var result = segment.Result!;
+        if (!result.Truncated)
+        {
+            return new HistoryCoverage(segment.From, segment.To);
+        }
+
+        if (result.Points.IsDefaultOrEmpty)
+        {
+            return null;
+        }
+
+        var oldestServed = result.Points[0].Timestamp;
+        return new HistoryCoverage(oldestServed > segment.From ? oldestServed : segment.From, segment.To);
+    }
 }
