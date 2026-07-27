@@ -193,4 +193,103 @@ public class PropertyBufferTests
         Assert.Null(buffer.Oldest);
         Assert.Null(buffer.Newest);
     }
+    [Fact]
+    public void WhenOnlyAFewSamplesAreHeld_ThenTheRingDoesNotAllocateItsFullCapacity()
+    {
+        // Arrange - the configured capacity is a ceiling, not an up-front cost. Paths embed collection
+        // indices, so a single list reorder abandons one buffer per renamed subject; allocating the
+        // whole ring on the first sample made each of those cost the full array forever.
+        var buffer = NewBuffer(capacity: 1000);
+
+        // Act
+        buffer.Append(LongSample(0, 10));
+        buffer.Append(LongSample(1, 11));
+        buffer.Append(LongSample(2, 12));
+
+        // Assert
+        Assert.True(buffer.Capacity < 1000, $"ring allocated {buffer.Capacity} slots for 3 samples");
+        Assert.Equal(1000, buffer.MaxCapacity);
+        Assert.Equal(3, buffer.Count);
+    }
+
+    [Fact]
+    public void WhenTheRingGrows_ThenEverySampleSurvivesInOrder()
+    {
+        // Arrange - growth re-linearizes the ring, which is where the index arithmetic could drop or
+        // reorder samples.
+        var buffer = NewBuffer(capacity: 1000);
+        for (var second = 0; second < 50; second++)
+        {
+            buffer.Append(LongSample(second, second));
+        }
+
+        // Act
+        var range = buffer.Range(Base, Base.AddSeconds(100));
+
+        // Assert
+        Assert.Equal(Enumerable.Range(0, 50).Select(value => (long?)value).ToArray(),
+            range.Select(sample => sample.Long).ToArray());
+        Assert.True(buffer.Capacity >= 50 && buffer.Capacity < 1000);
+    }
+
+    [Fact]
+    public void WhenGrowthWrappedTheRingFirst_ThenOrderIsStillPreserved()
+    {
+        // Arrange - fill to the ceiling so the ring wraps, evict from the front, then append again.
+        // Growth has to read through the wrap, not straight off the array.
+        var buffer = NewBuffer(capacity: 4);
+        for (var second = 0; second < 6; second++)
+        {
+            buffer.Append(LongSample(second, second)); // wraps: keeps 2,3,4,5
+        }
+
+        // Act
+        var range = buffer.Range(Base, Base.AddSeconds(100));
+
+        // Assert
+        Assert.Equal(new long?[] { 2, 3, 4, 5 }, range.Select(sample => sample.Long).ToArray());
+    }
+
+    [Fact]
+    public void WhenASweepEmptiesTheRing_ThenItReleasesTheGrownArray()
+    {
+        // Arrange - this is what actually reclaims an abandoned path: the samples age out and the ring
+        // hands back the array it grew into, leaving only a small husk in the dictionary.
+        var buffer = NewBuffer(capacity: 1000);
+        for (var second = 0; second < 200; second++)
+        {
+            buffer.Append(LongSample(second, second));
+        }
+
+        var grown = buffer.Capacity;
+
+        // Act
+        buffer.EvictOlderThan(Base.AddSeconds(1000));
+
+        // Assert
+        Assert.Equal(0, buffer.Count);
+        Assert.True(buffer.Capacity < grown, $"ring still holds {buffer.Capacity} slots after emptying");
+    }
+
+    [Fact]
+    public void WhenALateSampleLandsInsideAFullRing_ThenTheOldestIsDroppedAndOrderHolds()
+    {
+        // Arrange - the late-arrival branch that both evicts and shifts: a full ring plus an insert
+        // strictly inside the retained range. It combines dropping the oldest, the position fixup and
+        // the shift loop, which is the densest index arithmetic in the buffer.
+        var buffer = NewBuffer(capacity: 3);
+        buffer.Append(LongSample(10, 10));
+        buffer.Append(LongSample(20, 20));
+        buffer.Append(LongSample(30, 30));
+
+        // Act
+        buffer.Append(LongSample(15, 15));
+
+        // Assert
+        var range = buffer.Range(Base, Base.AddSeconds(100));
+        Assert.Equal(new long?[] { 15, 20, 30 }, range.Select(sample => sample.Long).ToArray());
+        Assert.Equal(3, buffer.Count);
+        Assert.Equal(1, buffer.EvictedCount);
+        Assert.Equal(Base.AddSeconds(15), buffer.OldestTimestamp);
+    }
 }

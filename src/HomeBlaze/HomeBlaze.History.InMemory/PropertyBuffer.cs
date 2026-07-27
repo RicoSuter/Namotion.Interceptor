@@ -5,8 +5,16 @@ namespace HomeBlaze.History.InMemory;
 internal sealed class PropertyBuffer
 {
     private readonly Lock _lock = new();
-    private readonly Sample[] _items;
-    private readonly int _capacity;
+    // Grown on demand rather than allocated at full size. A path that only ever holds a handful of
+    // samples used to cost the whole configured capacity from its first change, and nothing ever
+    // reclaims a path: a collection reorder renames every subject after the removed index, so each
+    // reorder mints a fresh set of buffers and abandons the old ones. Growing, and shrinking again
+    // once a sweep empties the ring, makes an abandoned path cost a few hundred bytes instead of the
+    // full array.
+    private Sample[] _items;
+    private readonly int _maxCapacity;
+
+    private const int InitialCapacity = 4;
     private int _start;   // index of the oldest sample
     private int _count;
     private long _evictedCount;
@@ -14,8 +22,8 @@ internal sealed class PropertyBuffer
 
     public PropertyBuffer(int capacity, ValueColumn column, bool isUlong)
     {
-        _capacity = Math.Max(1, capacity);
-        _items = new Sample[_capacity];
+        _maxCapacity = Math.Max(1, capacity);
+        _items = new Sample[Math.Min(InitialCapacity, _maxCapacity)];
         Column = column;
         IsUlong = isUlong;
     }
@@ -24,9 +32,14 @@ internal sealed class PropertyBuffer
 
     public bool IsUlong { get; }
 
-    // The ring is allocated at full capacity up front, so this is what the buffer costs from the
-    // first sample onwards rather than what it grows into.
-    public int Capacity => _capacity;
+    // The ring's current allocation, which is what the buffer actually costs right now.
+    public int Capacity
+    {
+        get { lock (_lock) { return _items.Length; } }
+    }
+
+    /// <summary>The configured ceiling; the ring never grows past it and evicts instead.</summary>
+    public int MaxCapacity => _maxCapacity;
 
     // Heap held by the retained samples' JSON values, which live outside the Sample struct and so are
     // invisible to a per-sample size estimate. Maintained incrementally: recomputing it would mean
@@ -98,11 +111,15 @@ internal sealed class PropertyBuffer
             }
         }
 
-        var capacityEvicted = _count == _capacity;
+        var capacityEvicted = _count == _maxCapacity;
         if (capacityEvicted)
         {
             DropOldest(); // overwrite oldest
             _evictedCount++;
+        }
+        else
+        {
+            GrowIfFull();
         }
 
         Store(Index(_count), sample);
@@ -122,8 +139,33 @@ internal sealed class PropertyBuffer
             }
 
             _evictedCount += dropped;
+            if (_count == 0 && _items.Length > InitialCapacity)
+            {
+                _items = new Sample[Math.Min(InitialCapacity, _maxCapacity)];
+                _start = 0;
+            }
+
             return dropped;
         }
+    }
+
+    // Doubles the ring, re-linearizing it so the logical order starts at index 0. Only called with
+    // room left below the ceiling, so it never has to drop a sample.
+    private void GrowIfFull()
+    {
+        if (_count < _items.Length)
+        {
+            return;
+        }
+
+        var grown = new Sample[Math.Min(_maxCapacity, Math.Max(InitialCapacity, _items.Length * 2))];
+        for (var logical = 0; logical < _count; logical++)
+        {
+            grown[logical] = _items[Index(logical)];
+        }
+
+        _items = grown;
+        _start = 0;
     }
 
     private void Store(int index, Sample sample)
@@ -142,7 +184,7 @@ internal sealed class PropertyBuffer
     {
         _retainedValueBytes -= _items[_start].ValueBytes;
         _items[_start] = default; // release the JsonDocument the evicted sample was holding
-        _start = (_start + 1) % _capacity;
+        _start = (_start + 1) % _items.Length;
         _count--;
     }
 
@@ -176,7 +218,7 @@ internal sealed class PropertyBuffer
         }
     }
 
-    private int Index(int logical) => (_start + logical) % _capacity;
+    private int Index(int logical) => (_start + logical) % _items.Length;
 
     // first logical index whose Timestamp >= target (binary search over the logical order)
     private int LowerBound(DateTimeOffset target)
@@ -222,7 +264,7 @@ internal sealed class PropertyBuffer
 
     private bool InsertOrdered(Sample sample)
     {
-        // Rare late-arrival path. Keep the newest _capacity timestamps, matching the ring's
+        // Rare late-arrival path. Keep the newest _maxCapacity timestamps, matching the ring's
         // normal in-order behavior. A late sample older than everything retained is discarded
         // rather than evicting a newer retained sample to make room for it.
         var position = LowerBound(sample.Timestamp); // first index with Timestamp >= sample.Timestamp
@@ -232,7 +274,7 @@ internal sealed class PropertyBuffer
             return false;
         }
 
-        var capacityEvicted = _count == _capacity;
+        var capacityEvicted = _count == _maxCapacity;
         if (capacityEvicted)
         {
             _evictedCount++;
@@ -243,6 +285,10 @@ internal sealed class PropertyBuffer
 
             DropOldest();
             position--;
+        }
+        else
+        {
+            GrowIfFull();
         }
 
         for (var logical = _count; logical > position; logical--)

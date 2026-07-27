@@ -96,11 +96,10 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
     private const int PerPathOverheadBytes = 160;
 
     /// <summary>
-    /// Rough estimate of the heap the retained samples hold. Counted per buffer rather than per
-    /// sample: the ring is allocated at full capacity when a path is first seen, so its cost does not
-    /// depend on how many samples are currently in it. JSON values are counted from their tracked
-    /// payload size, because the JsonDocument behind a JsonElement lives outside the Sample struct and
-    /// a per-sample struct size misses it entirely.
+    /// Rough estimate of the heap the retained samples hold. Counted from each ring's current
+    /// allocation rather than its sample count, because a ring holds whole slots and grows in steps.
+    /// JSON values are counted from their tracked payload size, because the JsonDocument behind a
+    /// JsonElement lives outside the Sample struct and a per-sample struct size misses it entirely.
     /// </summary>
     public long EstimatedMemoryBytes
     {
