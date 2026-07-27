@@ -1,5 +1,6 @@
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Sqlite;
+using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.History.Sqlite.Tests;
 
@@ -352,9 +353,63 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
             range => range.From <= Base.AddSeconds(1) && range.To > Base.AddSeconds(1));
     }
 
+    [Fact]
+    public async Task WhenCoverageRetractsToNothing_ThenItIsReportedOnceAndOnRecovery()
+    {
+        // Arrange: a dropped change older than every recorded range retracts all of them, and the store
+        // then just stops appearing in query results. Silent, so it reads as "no history recorded"
+        // rather than as a fault. It stays silent by design for now -- see the coverage-precision
+        // follow-up -- so at least say so.
+        var now = Base;
+        var logger = new CapturingLogger();
+        using var store = NewStore(() => now, maxPendingSamples: 1, logger: logger);
+
+        store.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        now = Base.AddSeconds(10);
+        await store.FlushAsync(CancellationToken.None);
+        Assert.NotEmpty(store.CoverageRanges);
+
+        // Act: fill the queue, then drop a change predating every range.
+        store.Record("/a/Value", Base.AddSeconds(11), 2d, typeof(double));
+        store.Record("/a/Value", new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero), 3d, typeof(double));
+
+        // Assert: reported exactly once, not once per recorded change.
+        Assert.Empty(store.CoverageRanges);
+        Assert.Contains("retracted to nothing", Assert.Single(logger.Errors));
+
+        store.Record("/a/Value", new DateTimeOffset(1601, 1, 1, 0, 0, 1, TimeSpan.Zero), 4d, typeof(double));
+        Assert.Single(logger.Errors);
+
+        // And recovery is reported too, so the condition can be seen to have cleared.
+        now = Base.AddSeconds(20);
+        await store.FlushAsync(CancellationToken.None);
+        Assert.NotEmpty(store.CoverageRanges);
+        Assert.Contains(logger.Information, message => message.Contains("recovered"));
+    }
+
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<string> Errors { get; } = [];
+
+        public List<string> Information { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var target = logLevel == LogLevel.Error ? Errors : Information;
+            target.Add(formatter(state, exception));
+        }
+    }
+
     private SqliteHistoryStore NewStore(
         Func<DateTimeOffset> getUtcNow,
-        int maxPendingSamples = SqliteHistoryStore.DefaultMaxPendingSamples) =>
+        int maxPendingSamples = SqliteHistoryStore.DefaultMaxPendingSamples,
+        ILogger? logger = null) =>
         new(
             priority: 50,
             databaseDirectory: _directory,
@@ -362,5 +417,6 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
             TimeSpan.FromDays(365),
             maxJsonSize: 8192,
             getUtcNow,
-            maxPendingSamples);
+            maxPendingSamples,
+            logger);
 }

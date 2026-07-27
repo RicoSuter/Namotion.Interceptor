@@ -13,7 +13,7 @@ namespace HomeBlaze.History.Sqlite
     {
         public const int DefaultMaxPendingSamples = 100000;
         public static readonly System.Collections.Generic.IReadOnlySet<string> AllAggregations;
-        public SqliteHistoryStore(int priority, string databaseDirectory, HomeBlaze.History.Sqlite.PartitionInterval partitionInterval, System.TimeSpan maxAge, int maxJsonSize, System.Func<System.DateTimeOffset> getUtcNow, int maxPendingSamples = 100000) { }
+        public SqliteHistoryStore(int priority, string databaseDirectory, HomeBlaze.History.Sqlite.PartitionInterval partitionInterval, System.TimeSpan maxAge, int maxJsonSize, System.Func<System.DateTimeOffset> getUtcNow, int maxPendingSamples = 100000, Microsoft.Extensions.Logging.ILogger? logger = null) { }
         public System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges { get; }
         public long DropCount { get; }
         public long EstimatedStorageBytes { get; }

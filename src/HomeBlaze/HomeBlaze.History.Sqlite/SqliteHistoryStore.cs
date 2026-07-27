@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using HomeBlaze.History.Abstractions;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.History.Sqlite;
 
@@ -40,6 +41,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     private readonly int _maxJsonSize;
     private readonly int _maxPendingSamples;
     private readonly Func<DateTimeOffset> _getUtcNow;
+    private readonly ILogger? _logger;
+
+    // Whether the store has already reported that its coverage retracted to nothing. Under _pendingLock.
+    private bool _reportedBlankedCoverage;
 
     // Keep the existing moves.db filename for compatibility. It is now the metadata database and
     // contains both move records and coverage ranges. "moves" is never a valid partition key.
@@ -87,7 +92,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         TimeSpan maxAge,
         int maxJsonSize,
         Func<DateTimeOffset> getUtcNow,
-        int maxPendingSamples = DefaultMaxPendingSamples)
+        int maxPendingSamples = DefaultMaxPendingSamples,
+        ILogger? logger = null)
     {
         if (maxPendingSamples <= 0)
         {
@@ -102,10 +108,13 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         _maxJsonSize = maxJsonSize;
         _maxPendingSamples = maxPendingSamples;
         _getUtcNow = getUtcNow;
-        SetPendingCoverageStart(getUtcNow());
+        _logger = logger;
         _readContext = new SqliteReadContext(
             _databaseDirectory, MetadataKey, OpenPartition, OpenMetadata);
         _coverageStore = new SqliteCoverageStore(OpenMetadata);
+
+        // After the coverage store exists: publishing the watermark compares against its snapshot.
+        SetPendingCoverageStart(getUtcNow());
 
         Directory.CreateDirectory(_databaseDirectory);
         lock (_connectionLock)
@@ -556,6 +565,31 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
         Interlocked.Exchange(
             ref _uncommittedFromTicks, uncommittedFrom?.UtcTicks ?? long.MaxValue);
+
+        // A change older than every recorded range retracts all of them at once, and the store then
+        // simply stops appearing in query results. Nothing else reports that, so it reads to an
+        // operator as "there is no history" rather than as a fault worth investigating. Reported on
+        // the transition only, so a stuck device does not fill the log.
+        var ranges = _coverageStore.Snapshot;
+        var isBlanked = uncommittedFrom is { } from && !ranges.IsDefaultOrEmpty && ranges[0].From >= from;
+        if (isBlanked == _reportedBlankedCoverage)
+        {
+            return;
+        }
+
+        _reportedBlankedCoverage = isBlanked;
+        if (isBlanked)
+        {
+            _logger?.LogError(
+                "History coverage retracted to nothing: an uncommitted change at {UncommittedFrom:o} predates " +
+                "every recorded range, so this store cannot serve any query until that change is flushed. " +
+                "A device reporting an uninitialised timestamp is the usual cause.",
+                uncommittedFrom);
+        }
+        else
+        {
+            _logger?.LogInformation("History coverage recovered and this store is serving queries again.");
+        }
     }
 
     // Advances this session's coverage start. Called under _pendingLock, except from the constructor,

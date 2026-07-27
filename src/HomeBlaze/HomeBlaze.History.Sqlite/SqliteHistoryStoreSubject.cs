@@ -243,7 +243,8 @@ public partial class SqliteHistoryStoreSubject :
                 partitionInterval: PartitionInterval,
                 maxAge: TimeSpan.FromDays(MaxAgeDays),
                 maxJsonSize: MaxJsonSize,
-                getUtcNow: () => DateTimeOffset.UtcNow);
+                getUtcNow: () => DateTimeOffset.UtcNow,
+                logger: _logger);
         }
         catch (Exception exception)
         {
