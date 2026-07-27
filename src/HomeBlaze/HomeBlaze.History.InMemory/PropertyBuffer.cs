@@ -20,6 +20,10 @@ internal sealed class PropertyBuffer
     private long _evictedCount;
     private long _retainedValueBytes;
 
+    // Set under _lock when the store retires this buffer, so an append that raced the retirement is
+    // refused rather than landing in a buffer nobody can read any more.
+    private bool _isRetired;
+
     public PropertyBuffer(int capacity, ValueColumn column, bool isUlong)
     {
         _maxCapacity = Math.Max(1, capacity);
@@ -85,11 +89,51 @@ internal sealed class PropertyBuffer
     /// <inheritdoc cref="Append(Sample)"/>
     public bool Append(Sample sample, out DateTimeOffset? oldestRetained)
     {
+        TryAppend(sample, out var evicted, out oldestRetained);
+        return evicted;
+    }
+
+    /// <summary>
+    /// Appends unless this buffer has been retired, in which case the caller must take a fresh one and
+    /// retry. Retirement is checked under the same lock as the append, so a sample can never land in a
+    /// buffer the store has already dropped: losing it there would be invisible, and the in-memory
+    /// store claims the live edge at the highest priority, so the merger would serve the gap from here
+    /// rather than falling back to a durable store.
+    /// </summary>
+    public bool TryAppend(Sample sample, out bool evicted, out DateTimeOffset? oldestRetained)
+    {
         lock (_lock)
         {
-            var evicted = AppendCore(sample);
+            if (_isRetired)
+            {
+                evicted = false;
+                oldestRetained = null;
+                return false;
+            }
+
+            evicted = AppendCore(sample);
             oldestRetained = _count == 0 ? null : _items[_start].Timestamp;
-            return evicted;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Retires the buffer if it holds nothing, reporting the evictions it accumulated so the store can
+    /// keep its cumulative count monotonic. Returns false when a sample arrived after the sweep
+    /// emptied it, which leaves the buffer in service.
+    /// </summary>
+    public bool TryRetire(out long evictedCount)
+    {
+        lock (_lock)
+        {
+            evictedCount = _evictedCount;
+            if (_count > 0)
+            {
+                return false;
+            }
+
+            _isRetired = true;
+            return true;
         }
     }
 

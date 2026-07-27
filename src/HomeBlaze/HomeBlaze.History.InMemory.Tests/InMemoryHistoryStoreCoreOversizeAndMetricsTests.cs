@@ -75,4 +75,92 @@ public class InMemoryHistoryStoreCoreOversizeAndMetricsTests
         Assert.Equal(3, core.EvictedCount);
         Assert.Equal(2, core.TotalSampleCount);
     }
+    [Fact]
+    public void WhenEverySampleForAPathAgesOut_ThenThePathIsReclaimed()
+    {
+        // Arrange - the in-memory store is bounded by time, but nothing used to free the per-path
+        // bookkeeping. Canonical paths embed collection indices, so reordering a list renames every
+        // subject after the removed element and abandons one path each time.
+        var now = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        var store = new InMemoryHistoryStore(
+            priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromSeconds(60),
+            maxJsonSize: 8192, getUtcNow: () => now);
+
+        store.Record("/Devices[0]/Value", now, 1d, typeof(double));
+        store.Record("/Devices[1]/Value", now, 2d, typeof(double));
+        Assert.Equal(2, store.TrackedPropertyCount);
+
+        // Act - both paths fall out of the retention window and the sweep runs.
+        now = now.AddMinutes(5);
+        store.Sweep();
+
+        // Assert
+        Assert.Equal(0, store.TrackedPropertyCount);
+    }
+
+    [Fact]
+    public void WhenAPathIsReclaimed_ThenTheCumulativeEvictionCountDoesNotGoBackwards()
+    {
+        // Arrange - eviction counts live on the buffer, so dropping one must carry its total over.
+        var now = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        var store = new InMemoryHistoryStore(
+            priority: 100, maxPointsPerProperty: 2, maxAge: TimeSpan.FromSeconds(60),
+            maxJsonSize: 8192, getUtcNow: () => now);
+
+        for (var second = 0; second < 5; second++)
+        {
+            store.Record("/a/Value", now.AddSeconds(second), second, typeof(double));
+        }
+
+        var beforeSweep = store.EvictedCount;
+        Assert.True(beforeSweep > 0);
+
+        // Act
+        now = now.AddMinutes(5);
+        store.Sweep();
+
+        // Assert
+        Assert.Equal(0, store.TrackedPropertyCount);
+        Assert.True(store.EvictedCount >= beforeSweep,
+            $"cumulative evictions fell from {beforeSweep} to {store.EvictedCount}");
+    }
+
+    [Fact]
+    public async Task WhenARecordRacesTheSweepThatReclaimsItsPath_ThenTheSampleIsNotLost()
+    {
+        // Arrange - a buffer is empty for the instant between being created and taking its first
+        // sample, so a concurrent sweep can retire it right out from under the recorder. Losing the
+        // sample there would be invisible: this store claims the live edge at the highest priority, so
+        // the merger serves the gap from here rather than falling back to a durable store.
+        //
+        // maxAge is long, so nothing ages out and every accepted sample must still be held at the end.
+        // Each path is distinct, so every single write goes through that create-then-append window.
+        const int pathCount = 5000;
+        var now = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        var store = new InMemoryHistoryStore(
+            priority: 100, maxPointsPerProperty: 1000, maxAge: TimeSpan.FromHours(1),
+            maxJsonSize: 8192, getUtcNow: () => now);
+
+        var stop = false;
+        var sweeper = Task.Run(() =>
+        {
+            while (!Volatile.Read(ref stop))
+            {
+                store.Sweep();
+            }
+        });
+
+        // Act
+        for (var index = 0; index < pathCount; index++)
+        {
+            store.Record($"/Devices[{index}]/Value", now, index, typeof(double));
+        }
+
+        Volatile.Write(ref stop, true);
+        await sweeper;
+
+        // Assert - not one write ended up in a buffer the sweep had already dropped.
+        Assert.Equal(pathCount, store.TotalSampleCount);
+        Assert.Equal(pathCount, store.TrackedPropertyCount);
+    }
 }

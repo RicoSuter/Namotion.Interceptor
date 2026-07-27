@@ -49,6 +49,10 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
 
     private long _recordedCount;
     private long _oversizeCount;
+
+    // Evictions accumulated by buffers that have since been retired. Without this the cumulative
+    // count would go backwards the moment a path is reclaimed.
+    private long _retiredEvictedCount;
     private long _evictionCoverageFromUtcTicks = DateTimeOffset.MinValue.UtcTicks;
 
     public InMemoryHistoryStore(
@@ -87,7 +91,8 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
 
     public long RecordedCount => Interlocked.Read(ref _recordedCount);
     public long OversizeCount => Interlocked.Read(ref _oversizeCount);
-    public long EvictedCount => _buffers.Values.Sum(buffer => buffer.EvictedCount);
+    public long EvictedCount =>
+        Interlocked.Read(ref _retiredEvictedCount) + _buffers.Values.Sum(buffer => buffer.EvictedCount);
     public int TrackedPropertyCount => _buffers.Count;
     public long TotalSampleCount => _buffers.Values.Sum(buffer => (long)buffer.Count);
 
@@ -176,22 +181,46 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
         var column = HistoryColumns.GetValueColumnFor(propertyType);
         var isUlong = HistoryColumns.IsUlongProperty(propertyType);
 
-        // Static factory over a struct state rather than a capturing lambda: the capturing form built
-        // a closure object and a delegate on every recorded change, not just the first one per path.
-        var buffer = _buffers.GetOrAdd(
-            propertyPath,
-            static (_, state) => new PropertyBuffer(state.Capacity, state.Column, state.IsUlong),
-            (Capacity: _maxPointsPerProperty, Column: column, IsUlong: isUlong));
+        var sample = CreateSample(timestamp, value, column, isUlong);
 
-        if (buffer.Append(CreateSample(timestamp, value, column, isUlong), out var oldest) &&
-            oldest is { } oldestRetained)
+        while (true)
         {
-            // Capacity eviction: this buffer no longer has complete history before its oldest sample,
-            // and coverage is store-wide, so the global floor advances to that boundary.
-            AdvanceEvictionCoverageFrom(oldestRetained.UtcTicks);
+            // Static factory over a struct state rather than a capturing lambda: the capturing form
+            // built a closure object and a delegate on every recorded change, not just the first one
+            // per path.
+            var buffer = _buffers.GetOrAdd(
+                propertyPath,
+                static (_, state) => new PropertyBuffer(state.Capacity, state.Column, state.IsUlong),
+                (Capacity: _maxPointsPerProperty, Column: column, IsUlong: isUlong));
+
+            if (buffer.TryAppend(sample, out var evicted, out var oldest))
+            {
+                if (evicted && oldest is { } oldestRetained)
+                {
+                    // Capacity eviction: this buffer no longer has complete history before its oldest
+                    // sample, and coverage is store-wide, so the global floor advances to that boundary.
+                    AdvanceEvictionCoverageFrom(oldestRetained.UtcTicks);
+                }
+
+                break;
+            }
+
+            // A sweep retired this buffer between the lookup and the append. Drop it and take a fresh
+            // one rather than losing the sample.
+            Retire(propertyPath, buffer);
         }
 
         Interlocked.Increment(ref _recordedCount);
+    }
+
+    // Removes a retired buffer, carrying its eviction count over to the store. Only whoever wins the
+    // removal folds the count in, so it is never double counted.
+    private void Retire(string propertyPath, PropertyBuffer buffer)
+    {
+        if (_buffers.TryRemove(new KeyValuePair<string, PropertyBuffer>(propertyPath, buffer)))
+        {
+            Interlocked.Add(ref _retiredEvictedCount, buffer.EvictedCount);
+        }
     }
 
     private void AdvanceEvictionCoverageFrom(long candidateUtcTicks)
@@ -528,11 +557,19 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
     {
         var cutoff = _getUtcNow() - _maxAge;
         var anyEvicted = false;
-        foreach (var buffer in _buffers.Values)
+        foreach (var entry in _buffers)
         {
-            if (buffer.EvictOlderThan(cutoff) > 0)
+            if (entry.Value.EvictOlderThan(cutoff) > 0)
             {
                 anyEvicted = true;
+            }
+
+            // A path whose samples have all aged out is reclaimed outright. Canonical paths embed
+            // collection indices, so a reorder abandons one path per renamed subject and nothing else
+            // would ever free them.
+            if (entry.Value.TryRetire(out _))
+            {
+                Retire(entry.Key, entry.Value);
             }
         }
 
