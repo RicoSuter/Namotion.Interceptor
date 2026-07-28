@@ -46,7 +46,7 @@
         @if (_truncated && !_loading && _error is null)
         {
             <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="flex:0 0 auto; margin-top:8px;">
-                Too much history for this range: the oldest data is not shown.
+                @_truncationHint
             </MudText>
         }
 
@@ -191,6 +191,8 @@
     private DateTimeOffset _windowFrom;
     private DateTimeOffset _windowTo;
     private bool _truncated;
+
+    private string? _truncationHint;
 
     // Palette for the state timeline. Assigned per distinct value in first-seen order, with the common
     // boolean pair pinned so "Yes" is always the highlighted state rather than whichever appeared first.
@@ -347,7 +349,7 @@
                 bucket is null ? rangeSpacingTicks : Math.Max(rangeSpacingTicks, bucket.Value.Ticks));
 
             var series = await Registry.QueryHistoryAsync(
-                new HistoryQuery(PropertyPath, from, to, bucket, _aggregation, MaxPoints: 1000),
+                new HistoryQuery(PropertyPath, from, to, bucket, _aggregation, PropertyHistoryChartModel.MaxPoints),
                 cancellationToken);
 
             // The value held entering the window: a raw query returns only the samples inside it, so a
@@ -367,6 +369,13 @@
             _windowFrom = from;
             _windowTo = to;
             _truncated = series.Truncated;
+
+            // A raw query truncates because the window genuinely holds more samples than the cap. A bucketed
+            // one truncates because the range divided by the bucket exceeds it, which says nothing about how
+            // much was recorded: a fixed period far finer than the range reports it over an empty store.
+            _truncationHint = bucket is null
+                ? "Too many samples in this range: the oldest are not shown."
+                : $"Bucket too small for this range: only the newest {PropertyHistoryChartModel.MaxPoints} intervals are shown.";
             BuildView(series, valueAtStart);
         }
         catch (HistoryAggregationNotSupportedException exception)

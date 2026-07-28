@@ -4,6 +4,7 @@ namespace HomeBlaze.History.Blazor
 {
     public static class PropertyHistoryChartModel
     {
+        public const int MaxPoints = 1000;
         public static readonly System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod> Periods;
         public static System.TimeSpan AutoBucket(System.TimeSpan range, System.TimeSpan? availableCoverage = default) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> BuildStateSegments(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, HomeBlaze.History.Abstractions.HistoryPoint? valueAtStart, System.DateTimeOffset from, System.DateTimeOffset to, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryCoverage> coverage, System.Func<HomeBlaze.History.Abstractions.HistoryPoint, string?> format) { }

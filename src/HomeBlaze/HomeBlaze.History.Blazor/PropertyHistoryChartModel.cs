@@ -10,6 +10,13 @@ namespace HomeBlaze.History.Blazor;
 /// </summary>
 public static class PropertyHistoryChartModel
 {
+    /// <summary>
+    /// The most points a chart query asks for. <see cref="AutoBucket"/> sizes against this as well, so the
+    /// two cannot disagree: a bucket chosen without knowing the cap can divide the range into more intervals
+    /// than the query will ever return, which the chart then reports as truncated history.
+    /// </summary>
+    public const int MaxPoints = 1000;
+
     // "Nice" bucket sizes in ascending order; auto-bucket picks the smallest >= range/200.
     private static readonly TimeSpan[] Ladder =
     {
@@ -118,12 +125,23 @@ public static class PropertyHistoryChartModel
     /// bucket small enough to fit the data (otherwise the buckets would be larger than any store's coverage and
     /// nothing would render).
     /// </summary>
+    /// <remarks>
+    /// The result is never small enough to divide <paramref name="range"/> into more than <see cref="MaxPoints"/>
+    /// intervals. Sizing from the coverage alone satisfies the clamp above but ignores that the query still spans
+    /// the whole range, so a system recording for five minutes asked for an hour picked a one-second bucket, and
+    /// every such chart reported truncation for having too little data rather than too much.
+    /// </remarks>
     public static TimeSpan AutoBucket(TimeSpan range, TimeSpan? availableCoverage = null)
     {
         var target = availableCoverage is { } coverage && coverage > TimeSpan.Zero && coverage < range
             ? coverage
             : range;
-        var targetTicks = TimeSpan.FromTicks(Math.Max(target.Ticks / 200, TimeSpan.TicksPerSecond));
+
+        // Rounded up, and against one fewer than the cap: the first bucket starts at or before the query's
+        // start, so a range can span one interval more than dividing it by the bucket suggests.
+        var capTicks = (range.Ticks + MaxPoints - 2) / (MaxPoints - 1);
+        var targetTicks = TimeSpan.FromTicks(
+            Math.Max(Math.Max(target.Ticks / 200, capTicks), TimeSpan.TicksPerSecond));
         foreach (var candidate in Ladder)
         {
             if (candidate >= targetTicks)

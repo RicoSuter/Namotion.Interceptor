@@ -20,7 +20,7 @@ public class PropertyHistoryChartModelTests
     }
 
     [Fact]
-    public void WhenAutoBucketCoverageNarrowerThanRange_ThenClampsBucketToCoverage()
+    public void WhenAutoBucketCoverageNarrowerThanRange_ThenClampsBucketTowardsCoverage()
     {
         // Arrange - 24h range but only 5 minutes of recorded data.
         var range = TimeSpan.FromHours(24);
@@ -29,8 +29,10 @@ public class PropertyHistoryChartModelTests
         // Act
         var bucket = PropertyHistoryChartModel.AutoBucket(range, coverage);
 
-        // Assert - the bucket clamps to the coverage span, much smaller than the 24h-only choice.
-        Assert.Equal(PropertyHistoryChartModel.AutoBucket(coverage), bucket);
+        // Assert - finer than the 24h-only choice so the recorded data still fills buckets, but not so
+        // fine that the range needs more intervals than the query returns. 24h / 999 = ~86s, which rounds
+        // up to the 2m rung; the coverage's own 5m / 200 = 1.5s is the floor this deliberately overrides.
+        Assert.Equal(TimeSpan.FromMinutes(2), bucket);
         Assert.True(bucket < PropertyHistoryChartModel.AutoBucket(range));
     }
 
@@ -46,6 +48,52 @@ public class PropertyHistoryChartModelTests
         // Assert: 1h / 200 = 18s, which rounds up to the 30s rung. A golden value, because
         // comparing against AutoBucket would move with the code and pass even if the clamp were gone.
         Assert.Equal(TimeSpan.FromSeconds(30), bucket);
+    }
+
+    [Theory]
+    [InlineData(1, 2)]        // a store recording for two minutes, asked for an hour
+    [InlineData(1, 30)]
+    [InlineData(24, 5)]       // the case that shipped a "too much history" notice over an empty chart
+    [InlineData(24, 60)]
+    [InlineData(168, 5)]
+    [InlineData(720, 1)]      // 30 days requested after one minute of recording
+    public void WhenCoverageIsFarNarrowerThanTheRange_ThenAutoStillFitsThePointCap(
+        int rangeHours, int coverageMinutes)
+    {
+        // Arrange - the clamp to coverage exists so a fresh system renders at all, but the query still
+        // spans the whole range, so a bucket sized from coverage alone divided that range into far more
+        // intervals than the cap. Every such chart then reported truncated history while holding almost none.
+        var range = TimeSpan.FromHours(rangeHours);
+        var coverage = TimeSpan.FromMinutes(coverageMinutes);
+
+        // Act
+        var bucket = PropertyHistoryChartModel.AutoBucket(range, coverage);
+
+        // Assert - mirrors BucketAlignment.FirstBucketStart: the first bucket starts at or before the
+        // query's start, so the range can span one interval more than the division alone suggests.
+        var bucketCount = 1 + (range.Ticks - 1) / bucket.Ticks + 1;
+        Assert.True(
+            bucketCount <= PropertyHistoryChartModel.MaxPoints,
+            $"{rangeHours}h range over {coverageMinutes}m coverage chose a {bucket} bucket, " +
+            $"which needs {bucketCount} intervals for a cap of {PropertyHistoryChartModel.MaxPoints}.");
+    }
+
+    [Fact]
+    public void WhenTheRangeIsFullyCovered_ThenThePointCapDoesNotChangeTheBucket()
+    {
+        // Arrange - the cap floor is range / 999 and the resolution target is range / 200, so the target
+        // always wins when coverage is not clamping. The fix must not coarsen the ordinary case.
+        foreach (var hours in new[] { 1, 4, 24, 168, 720 })
+        {
+            var range = TimeSpan.FromHours(hours);
+
+            // Act
+            var covered = PropertyHistoryChartModel.AutoBucket(range, range);
+            var rangeOnly = PropertyHistoryChartModel.AutoBucket(range);
+
+            // Assert
+            Assert.Equal(rangeOnly, covered);
+        }
     }
 
     [Fact]
@@ -69,9 +117,9 @@ public class PropertyHistoryChartModelTests
         // Act
         var bucket = PropertyHistoryChartModel.ResolveBucket(auto, range, coverage);
 
-        // Assert: driven by the 5 minute coverage rather than the 24 hour range, so 5m / 200 = 1.5s
-        // rounds up to the 2s rung. A golden value for the same reason as above.
-        Assert.Equal(TimeSpan.FromSeconds(2), bucket);
+        // Assert: pulled down by the 5 minute coverage, but held at the point cap's floor of 24h / 999,
+        // which rounds up to the 2m rung. A golden value for the same reason as above.
+        Assert.Equal(TimeSpan.FromMinutes(2), bucket);
     }
 
     [Theory]
