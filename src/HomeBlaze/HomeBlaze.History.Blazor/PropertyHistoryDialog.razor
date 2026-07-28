@@ -8,7 +8,7 @@
 
 <MudDialog Style="height:100%;" ContentClass="overflow-hidden">
     <DialogContent>
-        <div style="display:flex; flex-direction:column; height:100%;">
+        <div data-testid="property-history-dialog" style="display:flex; flex-direction:column; height:100%;">
         <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center; flex:0 0 auto;">
             <MudSelect T="int" Value="_rangeIndex" ValueChanged="OnRangeChanged" Label="Range" Dense="true" Style="min-width:160px;"
                        HelperText="@_rangeHint">
@@ -45,7 +45,7 @@
 
         @if (_truncated && !_loading && _error is null)
         {
-            <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="flex:0 0 auto; margin-top:8px;">
+            <MudText data-testid="history-truncation-notice" Typo="Typo.caption" Class="mud-text-secondary" Style="flex:0 0 auto; margin-top:8px;">
                 @_truncationHint
             </MudText>
         }
