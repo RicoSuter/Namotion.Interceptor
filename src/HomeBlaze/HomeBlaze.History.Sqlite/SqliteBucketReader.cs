@@ -70,7 +70,12 @@ internal static class SqliteBucketReader
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var connection = context.OpenPartition(segment.PartitionKey);
-                foreach (var partial in ReadPartials(connection, segment.Path, aggregation, isUlong,
+                if (SqliteHistoryReader.ResolvePathId(connection, segment.Path) is not { } pathId)
+                {
+                    continue; // this partition never saw the path
+                }
+
+                foreach (var partial in ReadPartials(connection, pathId, aggregation, isUlong,
                              bucketTicks, segment.FromTicks, segment.ToTicks))
                 {
                     partials[partial.BucketStartTicks] = partials.TryGetValue(partial.BucketStartTicks, out var existing)
@@ -146,20 +151,20 @@ internal static class SqliteBucketReader
     // columns the aggregation needs are fetched. The bucket key is (ts/@b)*@b on epoch ticks, which equals
     // BucketAlignment.BucketStart for the same bucket size.
     private static IEnumerable<BucketPartial> ReadPartials(
-        SqliteConnection connection, string propertyPath, string aggregation, bool isUlong,
+        SqliteConnection connection, long pathId, string aggregation, bool isUlong,
         long bucketTicks, long fromTicks, long toTicks)
     {
         if (aggregation is HistoryAggregations.First or HistoryAggregations.Last)
         {
-            return ReadEdgePartials(connection, propertyPath, aggregation, isUlong, bucketTicks, fromTicks, toTicks);
+            return ReadEdgePartials(connection, pathId, aggregation, isUlong, bucketTicks, fromTicks, toTicks);
         }
 
         if (aggregation == HistoryAggregations.Count)
         {
-            return ReadCountPartials(connection, propertyPath, bucketTicks, fromTicks, toTicks);
+            return ReadCountPartials(connection, pathId, bucketTicks, fromTicks, toTicks);
         }
 
-        return ReadNumericPartials(connection, propertyPath, isUlong, bucketTicks, fromTicks, toTicks);
+        return ReadNumericPartials(connection, pathId, isUlong, bucketTicks, fromTicks, toTicks);
     }
 
     // Time-weighted average: per bucket, the IN-BUCKET integral only. Each recorded event's value is held
@@ -199,11 +204,16 @@ internal static class SqliteBucketReader
         {
             cancellationToken.ThrowIfCancellationRequested();
             var connection = context.OpenPartition(segment.PartitionKey);
+            if (SqliteHistoryReader.ResolvePathId(connection, segment.Path) is not { } pathId)
+            {
+                continue; // this partition never saw the path
+            }
+
             using var command = connection.CreateCommand();
             command.CommandText =
                 "SELECT ts, " + numeric + " AS v FROM history " +
-                "WHERE path = @path AND ts >= @from AND ts < @to ORDER BY ts;";
-            command.Parameters.AddWithValue("@path", segment.Path);
+                "WHERE path_id = @path_id AND ts >= @from AND ts < @to ORDER BY ts;";
+            command.Parameters.AddWithValue("@path_id", pathId);
             command.Parameters.AddWithValue("@from", segment.FromTicks);
             command.Parameters.AddWithValue("@to", segment.ToTicks);
 
@@ -270,7 +280,7 @@ internal static class SqliteBucketReader
 
     // First/Last: the earliest (MIN ts) or latest (MAX ts) row per bucket, with its raw value columns.
     private static List<BucketPartial> ReadEdgePartials(
-        SqliteConnection connection, string propertyPath, string aggregation, bool isUlong,
+        SqliteConnection connection, long pathId, string aggregation, bool isUlong,
         long bucketTicks, long fromTicks, long toTicks)
     {
         var isFirst = aggregation == HistoryAggregations.First;
@@ -285,9 +295,9 @@ internal static class SqliteBucketReader
         command.CommandText =
             "SELECT " + FloorBucketExpression("ts") + " AS bucket, " + edge + " AS ts, " +
             "value_long, value_double, value_json FROM history " +
-            "WHERE path = @path AND ts >= @from AND ts < @to " +
+            "WHERE path_id = @path_id AND ts >= @from AND ts < @to " +
             "GROUP BY bucket;";
-        command.Parameters.AddWithValue("@path", propertyPath);
+        command.Parameters.AddWithValue("@path_id", pathId);
         command.Parameters.AddWithValue("@b", bucketTicks);
         command.Parameters.AddWithValue("@from", fromTicks);
         command.Parameters.AddWithValue("@to", toTicks);
@@ -335,13 +345,13 @@ internal static class SqliteBucketReader
     // Count: total number of samples per bucket (COUNT(*)), matching InMemory's samples.Count, which
     // includes non-numeric and explicit-null samples (Count is allowed on any column type).
     private static List<BucketPartial> ReadCountPartials(
-        SqliteConnection connection, string propertyPath, long bucketTicks, long fromTicks, long toTicks)
+        SqliteConnection connection, long pathId, long bucketTicks, long fromTicks, long toTicks)
     {
         using var command = connection.CreateCommand();
         command.CommandText =
             "SELECT " + FloorBucketExpression("ts") + " AS bucket, COUNT(*) AS cnt FROM history " +
-            "WHERE path = @path AND ts >= @from AND ts < @to GROUP BY bucket ORDER BY bucket;";
-        command.Parameters.AddWithValue("@path", propertyPath);
+            "WHERE path_id = @path_id AND ts >= @from AND ts < @to GROUP BY bucket ORDER BY bucket;";
+        command.Parameters.AddWithValue("@path_id", pathId);
         command.Parameters.AddWithValue("@b", bucketTicks);
         command.Parameters.AddWithValue("@from", fromTicks);
         command.Parameters.AddWithValue("@to", toTicks);
@@ -362,7 +372,7 @@ internal static class SqliteBucketReader
     // When the property is ulong, value_json numbers (ulong overflow) also count as numeric values; SQLite's
     // COALESCE includes value_json (numeric text parses to a number) so the reductions fold it in too.
     private static List<BucketPartial> ReadNumericPartials(
-        SqliteConnection connection, string propertyPath, bool isUlong,
+        SqliteConnection connection, long pathId, bool isUlong,
         long bucketTicks, long fromTicks, long toTicks)
     {
         // The numeric expression: for ulong properties also fold value_json (a JSON number stored as text).
@@ -378,9 +388,9 @@ internal static class SqliteBucketReader
             "MIN(" + numeric + ") AS min_num, " +
             "MAX(" + numeric + ") AS max_num, " +
             "SUM(" + numeric + " * " + numeric + ") AS sumsq_num " +
-            "FROM history WHERE path = @path AND ts >= @from AND ts < @to " +
+            "FROM history WHERE path_id = @path_id AND ts >= @from AND ts < @to " +
             "GROUP BY bucket ORDER BY bucket;";
-        command.Parameters.AddWithValue("@path", propertyPath);
+        command.Parameters.AddWithValue("@path_id", pathId);
         command.Parameters.AddWithValue("@b", bucketTicks);
         command.Parameters.AddWithValue("@from", fromTicks);
         command.Parameters.AddWithValue("@to", toTicks);

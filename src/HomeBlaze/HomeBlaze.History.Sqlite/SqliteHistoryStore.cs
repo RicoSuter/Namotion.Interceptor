@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using HomeBlaze.History.Abstractions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
@@ -46,9 +47,19 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // Whether the store has already reported that its coverage retracted to nothing. Under _pendingLock.
     private bool _reportedBlankedCoverage;
 
-    // Keep the existing moves.db filename for compatibility. It is now the metadata database and
-    // contains both move records and coverage ranges. "moves" is never a valid partition key.
-    private const string MetadataKey = "moves";
+    // The store-wide database: move records and durable coverage ranges. Unlike a partition it is
+    // never deleted by retention. "metadata" is never a valid partition key, so partition
+    // enumeration skips it without a special case.
+    private const string MetadataKey = "metadata";
+
+    // The on-disk format version stamped into every database file. Bump it whenever the durable
+    // shape changes, so a build that predates the change refuses the file instead of misreading it.
+    private const long SchemaVersion = 1;
+
+    // 'HBH1' in ASCII, stamped into the SQLite header so file(1) and external tooling recognise these
+    // as HomeBlaze history databases rather than reporting a bare "SQLite 3.x database". This marks
+    // the format family and never changes; SchemaVersion above carries the revision.
+    private const long ApplicationId = 0x48424831;
 
     private readonly object _pendingLock = new();
     private readonly object _flushLock = new();
@@ -682,11 +693,26 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     }
                 }
 
+                // Moves describing samples that no longer exist only slow down chain resolution, which
+                // every query and look-back performs, and they accumulate in the one database retention
+                // never deletes. The newest move at or before the cutoff is kept, because that is the one
+                // bounding the leg covering the cutoff instant. Mirrors InMemoryHistoryStore.Sweep.
+                PruneMoves(EpochTicks.ToEpochTicks(cutoff));
+
                 // Persist the WAL contents back into the surviving main database files so their on-disk
                 // size reflects the data after the sweep.
-                foreach (var connection in _connections.Values)
+                //
+                // Only the files that actually have frames. A sweep runs after every flush, so at the
+                // default year of weekly partitions this loop faced more than fifty cached connections
+                // every ten seconds while a flush usually writes one of them, and checkpointing the rest
+                // rewrote their headers for nothing. Write volume is the limiting cost on the SD cards
+                // and eMMC these installations run on.
+                foreach (var (key, connection) in _connections)
                 {
-                    Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
+                    if (HasWalFrames(_readContext.PartitionFilePath(key)))
+                    {
+                        Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
+                    }
                 }
             }
 
@@ -715,6 +741,28 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         DeleteFileIfExists(path);
         DeleteFileIfExists(path + "-wal");
         DeleteFileIfExists(path + "-shm");
+    }
+
+    // Drops moves that only describe samples already aged out, keeping the newest one at or before the
+    // cutoff. Ties at that instant are all kept: an extra leg boundary older than every retained sample
+    // costs a row and changes no answer, where dropping one too many would rewrite history.
+    private void PruneMoves(long cutoffTicks)
+    {
+        using var command = OpenMetadata().CreateCommand();
+        command.CommandText =
+            "DELETE FROM moves WHERE ts < (SELECT MAX(ts) FROM moves WHERE ts <= @cutoff);";
+        command.Parameters.AddWithValue("@cutoff", cutoffTicks);
+        command.ExecuteNonQuery();
+    }
+
+    // Whether a database has WAL frames waiting to be folded back in. A successful TRUNCATE checkpoint
+    // leaves the -wal file at zero bytes, so any content means the database was written since the last
+    // one, or that its checkpoint could not complete and should be retried. Derived from the file rather
+    // than tracked alongside the writes, so a future write path cannot forget to flag itself.
+    private static bool HasWalFrames(string databaseFilePath)
+    {
+        var writeAheadLog = new FileInfo(databaseFilePath + "-wal");
+        return writeAheadLog.Exists && writeAheadLog.Length > 0;
     }
 
     private static void DeleteFileIfExists(string path)
@@ -746,12 +794,31 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             try
             {
                 connection.Open();
-                Execute(connection, "PRAGMA journal_mode=WAL;");
+                InitializeDatabase(connection, _readContext.PartitionFilePath(key));
+
+                // Paths are interned per partition: the row key carries an integer id instead of the
+                // full path string, which is otherwise more than half of every partition file. Keeping
+                // the mapping inside the partition (rather than in the metadata database) leaves each
+                // file self-describing, so it can be read, copied or deleted on its own, and lets a
+                // path insert and the samples referencing it commit in one transaction.
+                //
+                // This table also carries what path_meta used to: the single lookup a read already
+                // performs now answers the id and the column kind together.
                 Execute(connection,
-                    "CREATE TABLE IF NOT EXISTS history (ts INTEGER NOT NULL, path TEXT NOT NULL, " +
-                    "value_long INTEGER, value_double REAL, value_json TEXT, PRIMARY KEY (path, ts)) WITHOUT ROWID;");
+                    "CREATE TABLE IF NOT EXISTS paths (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, " +
+                    "value_column INTEGER NOT NULL, is_ulong INTEGER NOT NULL);");
                 Execute(connection,
-                    "CREATE TABLE IF NOT EXISTS path_meta (path TEXT PRIMARY KEY, column INTEGER NOT NULL, is_ulong INTEGER NOT NULL);");
+                    "CREATE TABLE IF NOT EXISTS history (path_id INTEGER NOT NULL, ts INTEGER NOT NULL, " +
+                    "value_long INTEGER, value_double REAL, value_json TEXT, " +
+                    "PRIMARY KEY (path_id, ts)) WITHOUT ROWID;");
+
+                // Ids are local to each partition, so a hand-written query spanning several files cannot
+                // union on them. This view costs nothing to store and keeps ad-hoc inspection as simple
+                // as it was when the path was stored inline.
+                Execute(connection,
+                    "CREATE VIEW IF NOT EXISTS history_paths AS " +
+                    "SELECT p.path, h.ts, h.value_long, h.value_double, h.value_json " +
+                    "FROM history h JOIN paths p ON p.id = h.path_id;");
             }
             catch
             {
@@ -783,9 +850,18 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             try
             {
                 connection.Open();
-                Execute(connection, "PRAGMA journal_mode=WAL;");
+                InitializeDatabase(connection, _readContext.PartitionFilePath(MetadataKey));
+
+                // The key makes a re-insert idempotent, which matters because a failed flush re-queues
+                // its moves, and it orders the table for the retention prune.
                 Execute(connection,
-                    "CREATE TABLE IF NOT EXISTS moves (ts INTEGER NOT NULL, from_path TEXT NOT NULL, to_path TEXT NOT NULL);");
+                    "CREATE TABLE IF NOT EXISTS moves (ts INTEGER NOT NULL, from_path TEXT NOT NULL, " +
+                    "to_path TEXT NOT NULL, PRIMARY KEY (ts, from_path, to_path)) WITHOUT ROWID;");
+
+                // HistoryMoveChain walks a chain backwards from the current path, so every step asks
+                // "which move landed on this path". Without the index that is a full scan per step.
+                Execute(connection,
+                    "CREATE INDEX IF NOT EXISTS ix_moves_to_path ON moves (to_path, ts);");
                 Execute(connection,
                     "CREATE TABLE IF NOT EXISTS coverage_ranges (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, from_ts INTEGER NOT NULL, to_ts INTEGER NOT NULL, " +
@@ -802,11 +878,57 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
     }
 
+    // The pragmas and version handling every database file shares, applied before any table is created.
+    //
+    // page_size has to be set before the first table exists and before WAL is entered: from then on it
+    // is fixed for the life of the file and only a full VACUUM can change it. 2048 costs about 1.3%
+    // more file than the 4096 default and writes roughly a third less WAL per flush. Write volume is
+    // what matters here, because PRIMARY KEY (path_id, ts) puts each path in its own region of the
+    // b-tree, so a flush touching N paths dirties N pages however few bytes it actually carries.
+    private static void InitializeDatabase(SqliteConnection connection, string filePath)
+    {
+        Execute(connection, "PRAGMA page_size=2048;");
+        Execute(connection, "PRAGMA journal_mode=WAL;");
+
+        var version = QueryLong(connection, "PRAGMA user_version;");
+        if (version > SchemaVersion)
+        {
+            throw new InvalidOperationException(
+                $"The history database '{filePath}' is at schema version {version}, but this build " +
+                $"understands version {SchemaVersion}. Upgrade HomeBlaze, or move the file aside to " +
+                "start a new one. Refusing it here rather than reading it as far as the columns happen " +
+                "to line up.");
+        }
+
+        // Version 0 on an empty file is simply a new database. Version 0 on a file that already has
+        // tables predates the stamp, so its shape is whatever an older build wrote, and the reader
+        // would fail later with a bare "no such column" from inside a query.
+        if (version == 0 && QueryLong(connection, HasUserTablesSql) != 0)
+        {
+            throw new InvalidOperationException(
+                $"The history database '{filePath}' predates the versioned schema. Delete the history " +
+                "directory to start fresh; these files hold best-effort history and are not migrated.");
+        }
+
+        Execute(connection, $"PRAGMA application_id={ApplicationId};");
+        Execute(connection, $"PRAGMA user_version={SchemaVersion};");
+    }
+
+    private const string HasUserTablesSql =
+        "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%');";
+
     private static void Execute(SqliteConnection connection, string sql)
     {
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         command.ExecuteNonQuery();
+    }
+
+    private static long QueryLong(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return Convert.ToInt64(command.ExecuteScalar() ?? 0L, CultureInfo.InvariantCulture);
     }
 
     public void Dispose()

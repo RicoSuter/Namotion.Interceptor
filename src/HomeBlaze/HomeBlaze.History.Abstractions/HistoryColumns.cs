@@ -3,16 +3,22 @@ namespace HomeBlaze.History.Abstractions;
 /// <summary>
 /// The typed column a value is routed into.
 /// </summary>
+/// <remarks>
+/// These values are persisted: the SQLite store writes the ordinal into <c>paths.value_column</c> and
+/// reads it back to decide which column a property's values live in. Reordering the members or reusing
+/// a number silently reinterprets every database file already on disk, with no error at any layer.
+/// Assign the next free number when adding a member, and never renumber an existing one.
+/// </remarks>
 public enum ValueColumn
 {
     /// <summary>Integer types and bool (bool as 0/1).</summary>
-    Long,
+    Long = 0,
 
     /// <summary>double, float, and decimal (decimal also archives its exact text in the persistent store).</summary>
-    Double,
+    Double = 1,
 
     /// <summary>string, enum, and (v1.1) path references.</summary>
-    Json
+    Json = 2
 }
 
 /// <summary>

@@ -10,7 +10,7 @@ namespace HomeBlaze.History.Sqlite;
 /// </summary>
 internal readonly record struct ChainSegment(string Path, string PartitionKey, long FromTicks, long ToTicks);
 
-/// <summary>The stored column kind and ulong flag for a path, read from <c>path_meta</c>.</summary>
+/// <summary>The stored column kind and ulong flag for a path, read from a partition's <c>paths</c> table.</summary>
 internal readonly record struct ColumnMeta(ValueColumn Column, bool IsUlong);
 
 /// <summary>
@@ -118,11 +118,16 @@ internal static class SqliteHistoryReader
                 }
 
                 var connection = context.OpenPartition(key);
+                if (ResolvePathId(connection, leg.Path) is not { } pathId)
+                {
+                    continue; // this partition never saw the path
+                }
+
                 using var command = connection.CreateCommand();
                 command.CommandText =
                     "SELECT ts, value_long, value_double, value_json FROM history " +
-                    "WHERE path = @path AND ts >= @from AND ts < @to ORDER BY ts DESC LIMIT @limit;";
-                command.Parameters.AddWithValue("@path", leg.Path);
+                    "WHERE path_id = @path_id AND ts >= @from AND ts < @to ORDER BY ts DESC LIMIT @limit;";
+                command.Parameters.AddWithValue("@path_id", pathId);
                 command.Parameters.AddWithValue("@from", fromTicks);
                 command.Parameters.AddWithValue("@to", toTicks);
                 command.Parameters.AddWithValue("@limit", limit);
@@ -231,11 +236,16 @@ internal static class SqliteHistoryReader
             }
 
             var connection = context.OpenPartition(key);
+            if (ResolvePathId(connection, path) is not { } pathId)
+            {
+                continue; // this partition never saw the path
+            }
+
             using var command = connection.CreateCommand();
             command.CommandText =
                 "SELECT ts, value_long, value_double, value_json FROM history " +
-                "WHERE path = @path AND ts <= @asOf ORDER BY ts DESC LIMIT 1;";
-            command.Parameters.AddWithValue("@path", path);
+                "WHERE path_id = @path_id AND ts <= @asOf ORDER BY ts DESC LIMIT 1;";
+            command.Parameters.AddWithValue("@path_id", pathId);
             command.Parameters.AddWithValue("@asOf", asOfTicks);
 
             using var reader = command.ExecuteReader();
@@ -248,8 +258,20 @@ internal static class SqliteHistoryReader
         return null;
     }
 
-    // The stored column kind and ulong flag for a single path, read from path_meta (written at flush time).
-    // Returns null when the path has never been written.
+    // The id a partition interns a path to, or null when that partition never held the path.
+    //
+    // Ids are local to the file that assigned them, which is what keeps a partition self-describing and
+    // independently deletable, so this is resolved per partition rather than once per query.
+    public static long? ResolvePathId(SqliteConnection connection, string propertyPath)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id FROM paths WHERE path = @path;";
+        command.Parameters.AddWithValue("@path", propertyPath);
+        return command.ExecuteScalar() is long id ? id : null;
+    }
+
+    // The stored column kind and ulong flag for a single path, read from the paths table (written at
+    // flush time). Returns null when the path has never been written.
     //
     // Newest partition first, and stops at the first hit. Directory enumeration order is not specified,
     // so scanning in that order let an arbitrary partition answer: after a property's type changed, the
@@ -261,7 +283,7 @@ internal static class SqliteHistoryReader
         {
             var connection = context.OpenPartition(key);
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT column, is_ulong FROM path_meta WHERE path = @path;";
+            command.CommandText = "SELECT value_column, is_ulong FROM paths WHERE path = @path;";
             command.Parameters.AddWithValue("@path", propertyPath);
             using var reader = command.ExecuteReader();
             if (reader.Read())
