@@ -19,9 +19,6 @@ internal readonly record struct PendingSample(
 /// </summary>
 internal static class SqliteHistoryWriter
 {
-    /// <summary>A path resolved within one flush: its id, and the kind currently stored against it.</summary>
-    private readonly record struct InternedPath(long Id, ValueColumn Column, bool IsUlong);
-
     // Writes one partition's batch in a single transaction: each sample's row into history, keyed by
     // the integer id its path interns to in this same file.
     public static void WritePartition(SqliteConnection connection, IReadOnlyList<PendingSample> samples)
@@ -39,25 +36,31 @@ internal static class SqliteHistoryWriter
         var doubleParameter = insert.Parameters.Add("@double", SqliteType.Real);
         var jsonParameter = insert.Parameters.Add("@json", SqliteType.Text);
 
-        // A batch carries far more samples than distinct paths, so resolve each path once per flush.
+        // A batch carries far more samples than distinct paths, so resolve each path once per flush, and
+        // resolve it from that path's NEWEST sample rather than from whichever arrived last.
         //
-        // The cached kind is part of the key, not just the id: a property whose type changes twice within
-        // one flush must still leave the newest kind stored. Caching the id alone made the first sample of
-        // a batch own the kind, while across batches the last one owned it, so the same two samples were
-        // read back differently depending only on whether a flush happened to fall between them.
-        var interned = new Dictionary<string, InternedPath>(StringComparer.Ordinal);
+        // The pending list is in arrival order, so a device reporting late puts an older sample after a
+        // newer one. Taking the kind from the last arrival then stored the superseded one, and a ulong
+        // whose value had overflowed into value_json read back as JSON text instead of a number. Ordering
+        // by timestamp makes the stored kind independent of the order the samples turned up in.
+        var newestByPath = new Dictionary<string, PendingSample>(StringComparer.Ordinal);
+        foreach (var sample in samples)
+        {
+            if (!newestByPath.TryGetValue(sample.Path, out var newest) || sample.Timestamp > newest.Timestamp)
+            {
+                newestByPath[sample.Path] = sample;
+            }
+        }
+
+        var pathIds = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var (path, newest) in newestByPath)
+        {
+            pathIds[path] = InternPath(connection, transaction, newest);
+        }
 
         foreach (var sample in samples)
         {
-            if (!interned.TryGetValue(sample.Path, out var path) ||
-                path.Column != sample.Column || path.IsUlong != sample.IsUlong)
-            {
-                path = new InternedPath(
-                    InternPath(connection, transaction, sample), sample.Column, sample.IsUlong);
-                interned[sample.Path] = path;
-            }
-
-            pathIdParameter.Value = path.Id;
+            pathIdParameter.Value = pathIds[sample.Path];
             tsParameter.Value = EpochTicks.ToEpochTicks(sample.Timestamp);
             longParameter.Value = (object?)sample.Row.Long ?? DBNull.Value;
             doubleParameter.Value = (object?)sample.Row.Double ?? DBNull.Value;

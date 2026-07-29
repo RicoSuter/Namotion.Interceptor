@@ -192,6 +192,53 @@ public sealed class SqliteHistorySchemaTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenSamplesArriveOutOfOrderWithinOneFlush_ThenTheNewestOneOwnsTheStoredKind()
+    {
+        // Arrange - the pending list is in arrival order, so a device reporting late puts an older
+        // sample after a newer one. Interning from whichever arrived last then stored the superseded
+        // kind. Here the newer sample is a ulong large enough to overflow into value_json, which only
+        // reads back as a number when the stored flag says the property is ulong.
+        using var core = NewCore(Base.AddSeconds(60));
+        core.Record("/a/Value", Base.AddSeconds(1), ulong.MaxValue, typeof(ulong)); // newer, arrives first
+        core.Record("/a/Value", Base, 7L, typeof(long));                            // older, arrives second
+
+        // Act
+        await core.FlushAsync(CancellationToken.None);
+
+        // Assert
+        var partition = Directory.EnumerateFiles(_directory, "*.db")
+            .Single(file => Path.GetFileName(file) != "metadata.db");
+        Assert.Equal(1, Scalar(partition, "SELECT is_ulong FROM paths;"));
+
+        var series = core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(10)));
+        Assert.Equal(
+            new double?[] { 7d, ulong.MaxValue },
+            series.Points.Select(point => point.Number).ToArray());
+    }
+
+    [Fact]
+    public void WhenTheFileIsNotAHistoryDatabase_ThenItIsRefusedRatherThanAdopted()
+    {
+        // Arrange - a SQLite file that happens to sit in the history directory under a partition-shaped
+        // name. Checking only the version let anything with tables and an unexpected version through:
+        // it was restamped as a history database and its own tables left in place.
+        Directory.CreateDirectory(_directory);
+        var foreign = Path.Combine(_directory, "2026-06-22.db");
+        using (var connection = OpenDirectly(foreign))
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE something_else (id INTEGER); PRAGMA user_version=7;";
+            command.ExecuteNonQuery();
+        }
+
+        // Act & Assert
+        using var core = NewCore(Base.AddSeconds(60));
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(10))));
+        Assert.Contains("Delete the history directory", exception.Message);
+    }
+
+    [Fact]
     public async Task WhenAPropertyChangesTypeWithinOneFlush_ThenTheStoredColumnKindStillFollowsIt()
     {
         // Arrange - the same type change as the test below, but with no flush between the two samples.

@@ -897,7 +897,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // Both checks run before any pragma: converting a file to WAL and only then declaring it
         // unreadable would modify the very file being refused.
         var version = QueryLong(connection, "PRAGMA user_version;");
-        if (version > SchemaVersion)
+        var applicationId = QueryLong(connection, "PRAGMA application_id;");
+        var hasTables = QueryLong(connection, HasUserTablesSql) != 0;
+
+        if (applicationId == ApplicationId && version > SchemaVersion)
         {
             throw new InvalidOperationException(
                 $"The history database '{filePath}' is at schema version {version}, but this build " +
@@ -906,14 +909,17 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                 "to line up.");
         }
 
-        // Version 0 on an empty file is simply a new database. Version 0 on a file that already has
-        // tables predates the stamp, so its shape is whatever an older build wrote, and the reader
-        // would fail later with a bare "no such column" from inside a query.
-        if (version == 0 && QueryLong(connection, HasUserTablesSql) != 0)
+        // Anything already holding tables must be exactly this build's format. An empty file is simply
+        // new, and gets stamped below. Checking the version alone adopted any other SQLite file that
+        // happened to sit here under a partition-shaped name: it was restamped as a history database
+        // with its own tables left in place, and a read then failed with a bare "no such column" from
+        // inside a query. There is no migration by design, so anything else is refused.
+        if (hasTables && (applicationId != ApplicationId || version != SchemaVersion))
         {
             throw new InvalidOperationException(
-                $"The history database '{filePath}' predates the versioned schema. Delete the history " +
-                "directory to start fresh; these files hold best-effort history and are not migrated.");
+                $"'{filePath}' is not a history database this build wrote (application id " +
+                $"0x{applicationId:X8}, schema version {version}). Delete the history directory to " +
+                "start fresh; these files hold best-effort history and are not migrated.");
         }
 
         Execute(connection, "PRAGMA page_size=2048;");
