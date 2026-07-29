@@ -5,7 +5,7 @@ namespace HomeBlaze.History
 {
     public sealed class HistoryChangeRecorder
     {
-        public HistoryChangeRecorder(HomeBlaze.History.Abstractions.IHistoryRecorder engine, HomeBlaze.Abstractions.ISubjectPathResolver resolver) { }
+        public HistoryChangeRecorder(HomeBlaze.History.Abstractions.IHistoryRecorder engine, HomeBlaze.Abstractions.ISubjectPathResolver resolver, System.Func<System.DateTimeOffset>? getUtcNow = null) { }
         public double IncomingChangesPerSecond { get; }
         public double RecordedChangesPerSecond { get; }
         public void Forget(Namotion.Interceptor.IInterceptorSubject subject) { }
