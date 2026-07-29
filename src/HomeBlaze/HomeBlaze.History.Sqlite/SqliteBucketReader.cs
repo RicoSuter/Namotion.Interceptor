@@ -32,7 +32,7 @@ internal static class SqliteBucketReader
         // samples under its own path. With no moves this is a single unbounded leg under query.PropertyPath.
         var chain = SqliteHistoryReader.ResolveChain(context, query.PropertyPath);
 
-        // Resolve the stored column kind and ulong flag from path_meta along the chain (the SQLite
+        // Resolve the stored column kind and ulong flag from the paths table along the chain (the SQLite
         // equivalent of the InMemory buffer's Column/IsUlong, which uses the first buffer in the chain).
         // A numeric aggregation on a json-stored, non-ulong property (string/enum) is not
         // supported, mirroring InMemoryHistoryStore.QueryBucketed.

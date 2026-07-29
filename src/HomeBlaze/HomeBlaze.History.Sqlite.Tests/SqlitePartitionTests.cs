@@ -97,7 +97,7 @@ public sealed class SqlitePartitionTests
     }
 
     [Theory]
-    [InlineData("moves")]
+    [InlineData("metadata")] // the metadata database shares the directory and must never enumerate as a partition
     [InlineData("2026")]
     [InlineData("2026-13")]
     public void WhenKeyIsNotAPartition_ThenItIsRejected(string key)

@@ -110,6 +110,35 @@ public sealed class SqliteHistorySchemaTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAStoreOnlyReads_ThenItLeavesEveryDatabaseUnwritten()
+    {
+        // Arrange - write some partitions, then let a sweep fold their WAL back so every -wal is empty.
+        using (var writer = NewCore(Base.AddSeconds(60)))
+        {
+            writer.Record("/a/Value", Base, 1.5d, typeof(double));
+            writer.Record("/b/Value", Base.AddSeconds(1), 2.5d, typeof(double));
+            await writer.FlushAsync(CancellationToken.None);
+            writer.Sweep();
+        }
+
+        // Act - a fresh store that only queries. Opening a database used to re-stamp application_id and
+        // user_version unconditionally, and both write page 1, so merely reading dirtied every file the
+        // open path touched and handed the next sweep a checkpoint it should never have needed.
+        using (var reader = NewCore(Base.AddSeconds(120)))
+        {
+            reader.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(60)));
+            reader.Query(new HistoryQuery("/never/Written", Base, Base.AddSeconds(60)));
+
+            // Assert - while the connections are still open, so the sizes reflect the reads themselves.
+            var dirty = Directory.EnumerateFiles(_directory, "*.db-wal")
+                .Where(file => new FileInfo(file).Length > 0)
+                .Select(Path.GetFileName)
+                .ToArray();
+            Assert.Empty(dirty);
+        }
+    }
+
+    [Fact]
     public async Task WhenMovesAgeOut_ThenSweepKeepsOnlyTheNewestOneAtOrBeforeTheCutoff()
     {
         // Arrange - the metadata database is never deleted by retention, so without pruning its move
@@ -160,6 +189,32 @@ public sealed class SqliteHistorySchemaTests : IDisposable
         // The view is the reason ad-hoc SQL stays readable once ids replaced the inline path.
         Assert.Equal(
             25, Scalar(partition, "SELECT COUNT(*) FROM history_paths WHERE path = '/a/Value';"));
+    }
+
+    [Fact]
+    public async Task WhenAPropertyChangesTypeWithinOneFlush_ThenTheStoredColumnKindStillFollowsIt()
+    {
+        // Arrange - the same type change as the test below, but with no flush between the two samples.
+        // Resolving a path once per batch and caching only its id let the first sample own the stored
+        // kind, so whether the newest kind survived depended on where the flush boundary happened to
+        // fall. Here the ulong is stored as an overflow in value_json, which only reads back as a number
+        // when the stored flag says the property is ulong.
+        using var core = NewCore(Base.AddSeconds(60));
+        core.Record("/a/Value", Base, 7L, typeof(long));
+        core.Record("/a/Value", Base.AddSeconds(1), ulong.MaxValue, typeof(ulong));
+
+        // Act
+        await core.FlushAsync(CancellationToken.None);
+
+        // Assert
+        var partition = Directory.EnumerateFiles(_directory, "*.db")
+            .Single(file => Path.GetFileName(file) != "metadata.db");
+        Assert.Equal(1, Scalar(partition, "SELECT is_ulong FROM paths;"));
+
+        var series = core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(10)));
+        Assert.Equal(
+            new double?[] { 7d, ulong.MaxValue },
+            series.Points.Select(point => point.Number).ToArray());
     }
 
     [Fact]

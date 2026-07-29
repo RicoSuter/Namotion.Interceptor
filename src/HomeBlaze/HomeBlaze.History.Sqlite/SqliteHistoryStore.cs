@@ -697,16 +697,27 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                 // every query and look-back performs, and they accumulate in the one database retention
                 // never deletes. The newest move at or before the cutoff is kept, because that is the one
                 // bounding the leg covering the cutoff instant. Mirrors InMemoryHistoryStore.Sweep.
-                PruneMoves(EpochTicks.ToEpochTicks(cutoff));
+                try
+                {
+                    PruneMoves(EpochTicks.ToEpochTicks(cutoff));
+                }
+                catch (SqliteException exception)
+                {
+                    // Same reasoning as the delete loop above: a locked or failing metadata database
+                    // must not abort the sweep before the partitions are checkpointed and before the
+                    // coverage start advances below. The next sweep prunes what this one did not.
+                    _lastError = exception.Message;
+                }
 
                 // Persist the WAL contents back into the surviving main database files so their on-disk
                 // size reflects the data after the sweep.
                 //
                 // Only the files that actually have frames. A sweep runs after every flush, so at the
                 // default year of weekly partitions this loop faced more than fifty cached connections
-                // every ten seconds while a flush usually writes one of them, and checkpointing the rest
-                // rewrote their headers for nothing. Write volume is the limiting cost on the SD cards
-                // and eMMC these installations run on.
+                // every ten seconds while a flush usually writes one of them. An idle TRUNCATE leaves
+                // the database itself untouched, so the cost was not rewriting them: it was ~55
+                // truncate-to-zero calls and inode updates every ten seconds, which still matters on
+                // the SD cards and eMMC these installations run on.
                 foreach (var (key, connection) in _connections)
                 {
                     if (HasWalFrames(_readContext.PartitionFilePath(key)))
@@ -858,10 +869,6 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     "CREATE TABLE IF NOT EXISTS moves (ts INTEGER NOT NULL, from_path TEXT NOT NULL, " +
                     "to_path TEXT NOT NULL, PRIMARY KEY (ts, from_path, to_path)) WITHOUT ROWID;");
 
-                // HistoryMoveChain walks a chain backwards from the current path, so every step asks
-                // "which move landed on this path". Without the index that is a full scan per step.
-                Execute(connection,
-                    "CREATE INDEX IF NOT EXISTS ix_moves_to_path ON moves (to_path, ts);");
                 Execute(connection,
                     "CREATE TABLE IF NOT EXISTS coverage_ranges (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, from_ts INTEGER NOT NULL, to_ts INTEGER NOT NULL, " +
@@ -887,9 +894,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // b-tree, so a flush touching N paths dirties N pages however few bytes it actually carries.
     private static void InitializeDatabase(SqliteConnection connection, string filePath)
     {
-        Execute(connection, "PRAGMA page_size=2048;");
-        Execute(connection, "PRAGMA journal_mode=WAL;");
-
+        // Both checks run before any pragma: converting a file to WAL and only then declaring it
+        // unreadable would modify the very file being refused.
         var version = QueryLong(connection, "PRAGMA user_version;");
         if (version > SchemaVersion)
         {
@@ -910,8 +916,21 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                 "directory to start fresh; these files hold best-effort history and are not migrated.");
         }
 
-        Execute(connection, $"PRAGMA application_id={ApplicationId};");
-        Execute(connection, $"PRAGMA user_version={SchemaVersion};");
+        Execute(connection, "PRAGMA page_size=2048;");
+        Execute(connection, "PRAGMA journal_mode=WAL;");
+
+        // Stamped only when they differ. Both pragmas write page 1 unconditionally, so re-stamping what
+        // is already there dirtied every file a read merely opened, which put back the write volume the
+        // checkpoint gate below exists to remove. Same argument InternPath makes for the paths table.
+        if (QueryLong(connection, "PRAGMA application_id;") != ApplicationId)
+        {
+            Execute(connection, $"PRAGMA application_id={ApplicationId};");
+        }
+
+        if (version != SchemaVersion)
+        {
+            Execute(connection, $"PRAGMA user_version={SchemaVersion};");
+        }
     }
 
     private const string HasUserTablesSql =

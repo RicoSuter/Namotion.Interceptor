@@ -179,7 +179,7 @@ internal static class SqliteHistoryReader
     }
 
     // The stored column kind and ulong flag for a (possibly moved) property: the first path along its chain
-    // that has path_meta. The SQLite equivalent of InMemoryHistoryStore.ResolveBuffer (which returns the
+    // that the paths table knows. The SQLite equivalent of InMemoryHistoryStore.ResolveBuffer (which returns the
     // first buffer in the chain), used for the numeric-on-json-non-ulong guard and ulong-overflow folding.
     public static ColumnMeta? ResolveColumnMeta(SqliteReadContext context, List<HistoryChainLeg> chain)
     {

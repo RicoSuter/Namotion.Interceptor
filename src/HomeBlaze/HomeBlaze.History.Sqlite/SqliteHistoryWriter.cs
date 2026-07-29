@@ -19,6 +19,9 @@ internal readonly record struct PendingSample(
 /// </summary>
 internal static class SqliteHistoryWriter
 {
+    /// <summary>A path resolved within one flush: its id, and the kind currently stored against it.</summary>
+    private readonly record struct InternedPath(long Id, ValueColumn Column, bool IsUlong);
+
     // Writes one partition's batch in a single transaction: each sample's row into history, keyed by
     // the integer id its path interns to in this same file.
     public static void WritePartition(SqliteConnection connection, IReadOnlyList<PendingSample> samples)
@@ -37,17 +40,24 @@ internal static class SqliteHistoryWriter
         var jsonParameter = insert.Parameters.Add("@json", SqliteType.Text);
 
         // A batch carries far more samples than distinct paths, so resolve each path once per flush.
-        var pathIds = new Dictionary<string, long>(StringComparer.Ordinal);
+        //
+        // The cached kind is part of the key, not just the id: a property whose type changes twice within
+        // one flush must still leave the newest kind stored. Caching the id alone made the first sample of
+        // a batch own the kind, while across batches the last one owned it, so the same two samples were
+        // read back differently depending only on whether a flush happened to fall between them.
+        var interned = new Dictionary<string, InternedPath>(StringComparer.Ordinal);
 
         foreach (var sample in samples)
         {
-            if (!pathIds.TryGetValue(sample.Path, out var pathId))
+            if (!interned.TryGetValue(sample.Path, out var path) ||
+                path.Column != sample.Column || path.IsUlong != sample.IsUlong)
             {
-                pathId = InternPath(connection, transaction, sample);
-                pathIds[sample.Path] = pathId;
+                path = new InternedPath(
+                    InternPath(connection, transaction, sample), sample.Column, sample.IsUlong);
+                interned[sample.Path] = path;
             }
 
-            pathIdParameter.Value = pathId;
+            pathIdParameter.Value = path.Id;
             tsParameter.Value = EpochTicks.ToEpochTicks(sample.Timestamp);
             longParameter.Value = (object?)sample.Row.Long ?? DBNull.Value;
             doubleParameter.Value = (object?)sample.Row.Double ?? DBNull.Value;
