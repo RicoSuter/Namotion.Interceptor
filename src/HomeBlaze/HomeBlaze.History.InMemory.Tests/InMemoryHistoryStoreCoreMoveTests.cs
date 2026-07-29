@@ -16,6 +16,26 @@ public class InMemoryHistoryStoreCoreMoveTests
             maxJsonSize: 8192, getUtcNow);
 
     [Fact]
+    public void WhenMovesArriveOutOfOrder_ThenSweepKeepsTheOnesInsideRetention()
+    {
+        // Arrange - move timestamps come from the recorded change, not from arrival, so a device
+        // reporting late appends an older move after a newer one. The retention prune used to walk the
+        // list from the front assuming it was sorted, so it stopped at the first entry above the cutoff
+        // and deleted every newer move sitting before it.
+        var core = NewCore(); // now is Base + 1h against a 1h retention, so the cutoff is Base
+        core.Record("/a/Value", Base.AddMinutes(10), 1d, typeof(double));
+        core.RecordMove(Base.AddMinutes(30), "/a/Value", "/b/Value");  // inside retention, must survive
+        core.RecordMove(Base.AddMinutes(-30), "/x/Value", "/y/Value"); // late arrival from before it
+
+        // Act
+        core.Sweep();
+
+        // Assert - the surviving move still routes /b back to its pre-move samples at /a.
+        var series = core.Query(new HistoryQuery("/b/Value", Base, Base.AddHours(1)));
+        Assert.Equal(new double?[] { 1d }, series.Points.Select(point => point.Number).ToArray());
+    }
+
+    [Fact]
     public void WhenPropertyMovedOnce_ThenRawQueryFollowsChainAcrossPaths()
     {
         // Arrange - recorded at /old until t=10, moved to /new at t=10, recorded at /new after.

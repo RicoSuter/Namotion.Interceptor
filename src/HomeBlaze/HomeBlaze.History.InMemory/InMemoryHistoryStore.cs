@@ -580,15 +580,23 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
         // is the one bounding the leg that covers the cutoff instant.
         lock (_movesLock)
         {
-            var obsolete = 0;
-            while (obsolete + 1 < _moves.Count && _moves[obsolete + 1].Timestamp <= cutoff)
+            // Found rather than walked from the front. Timestamps come from the recorded change, so a
+            // device reporting out of order appends an older move after a newer one, and a prefix walk
+            // then stopped at the first entry above the cutoff and deleted the newer moves before it.
+            // Recording ts=5 and then ts=0 with a cutoff of 0 discarded the ts=5 move outright.
+            DateTimeOffset? newestAtOrBeforeCutoff = null;
+            foreach (var move in _moves)
             {
-                obsolete++;
+                if (move.Timestamp <= cutoff &&
+                    (newestAtOrBeforeCutoff is null || move.Timestamp > newestAtOrBeforeCutoff))
+                {
+                    newestAtOrBeforeCutoff = move.Timestamp;
+                }
             }
 
-            if (obsolete > 0)
+            if (newestAtOrBeforeCutoff is { } keepFrom)
             {
-                _moves.RemoveRange(0, obsolete);
+                _moves.RemoveAll(move => move.Timestamp < keepFrom);
             }
         }
     }
