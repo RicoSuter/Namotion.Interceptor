@@ -24,7 +24,7 @@ public static class PropertyHistoryChartModel
         TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2),
         TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(30),
         TimeSpan.FromHours(1), TimeSpan.FromHours(2), TimeSpan.FromHours(6), TimeSpan.FromHours(12),
-        TimeSpan.FromDays(1)
+        TimeSpan.FromDays(1), TimeSpan.FromDays(7), TimeSpan.FromDays(30)
     };
 
     /// <summary>
@@ -127,9 +127,10 @@ public static class PropertyHistoryChartModel
     /// </summary>
     /// <remarks>
     /// The result is never small enough to divide <paramref name="range"/> into more than <see cref="MaxPoints"/>
-    /// intervals. Sizing from the coverage alone satisfies the clamp above but ignores that the query still spans
-    /// the whole range, so a system recording for five minutes asked for an hour picked a one-second bucket, and
-    /// every such chart reported truncation for having too little data rather than too much.
+    /// intervals, which holds as long as the range fits within the coarsest rung times that cap. Sizing from the
+    /// coverage alone satisfies the clamp above but ignores that the query still spans the whole range, so a system
+    /// recording for five minutes asked for an hour picked a one-second bucket, and every such chart reported
+    /// truncation for having too little data rather than too much.
     /// </remarks>
     public static TimeSpan AutoBucket(TimeSpan range, TimeSpan? availableCoverage = null)
     {
@@ -138,8 +139,11 @@ public static class PropertyHistoryChartModel
             : range;
 
         // Rounded up, and against one fewer than the cap: the first bucket starts at or before the query's
-        // start, so a range can span one interval more than dividing it by the bucket suggests.
-        var capTicks = (range.Ticks + MaxPoints - 2) / (MaxPoints - 1);
+        // start, so a range can span one interval more than dividing it by the bucket suggests. Guarded against
+        // overflow, which would turn the floor negative and silently stop capping anything at all.
+        var capTicks = range.Ticks > long.MaxValue - MaxPoints
+            ? long.MaxValue
+            : (range.Ticks + MaxPoints - 2) / (MaxPoints - 1);
         var targetTicks = TimeSpan.FromTicks(
             Math.Max(Math.Max(target.Ticks / 200, capTicks), TimeSpan.TicksPerSecond));
         foreach (var candidate in Ladder)

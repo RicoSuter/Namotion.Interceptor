@@ -78,6 +78,40 @@ public class PropertyHistoryChartModelTests
             $"which needs {bucketCount} intervals for a cap of {PropertyHistoryChartModel.MaxPoints}.");
     }
 
+    [Theory]
+    [InlineData(1000)]
+    [InlineData(2400)]   // a custom range of 2020-01-01 to today
+    [InlineData(4000)]
+    public void WhenTheRangeSpansYears_ThenAutoStillFitsThePointCap(int days)
+    {
+        // Arrange - the cap floor needs a rung at least range/999, so a ladder topping out at one day
+        // could not satisfy it beyond 999 days. Past that, Auto picked the coarsest bucket in existence
+        // and the chart still reported truncation, with no coarser period available to escape to. The
+        // custom range picker reaches this easily.
+        var range = TimeSpan.FromDays(days);
+
+        // Act
+        var bucket = PropertyHistoryChartModel.AutoBucket(range, TimeSpan.FromMinutes(5));
+
+        // Assert - mirrors BucketAlignment.FirstBucketStart, which aligns the first bucket at or before
+        // the query start, so the range can span one interval more than the division suggests.
+        var bucketCount = 1 + (range.Ticks - 1) / bucket.Ticks + 1;
+        Assert.True(
+            bucketCount <= PropertyHistoryChartModel.MaxPoints,
+            $"{days}d chose a {bucket} bucket, needing {bucketCount} intervals.");
+    }
+
+    [Fact]
+    public void WhenTheRangeIsAbsurd_ThenAutoDoesNotOverflowIntoNoCapAtAll()
+    {
+        // Arrange & Act - the ceiling division overflows above long.MaxValue - MaxPoints, and a negative
+        // floor is silently discarded by Math.Max, which restored exactly the uncapped behaviour.
+        var bucket = PropertyHistoryChartModel.AutoBucket(TimeSpan.MaxValue, TimeSpan.FromMinutes(5));
+
+        // Assert - the coarsest rung, not the two seconds the coverage alone would have asked for.
+        Assert.Equal(TimeSpan.FromDays(30), bucket);
+    }
+
     [Fact]
     public void WhenTheRangeIsFullyCovered_ThenThePointCapDoesNotChangeTheBucket()
     {

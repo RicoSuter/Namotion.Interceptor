@@ -21,8 +21,6 @@ public class PropertyHistoryDialogTests
 {
     private const int PageLoadTimeout = 30000;
     private const int ElementVisibilityTimeout = 15000;
-    private const int BlazorRenderDelay = 500;
-
     private readonly PlaywrightFixture _fixture;
 
     public PropertyHistoryDialogTests(PlaywrightFixture fixture)
@@ -43,10 +41,7 @@ public class PropertyHistoryDialogTests
 
         // Scoped to the child list's typography: an unscoped "Demo" also matches the app bar's page link.
         await page.Locator("span:text-is('Demo')").First.ClickAsync();
-        await page.WaitForTimeoutAsync(BlazorRenderDelay);
-
         await page.Locator("span:text-is('Test Motor')").First.ClickAsync();
-        await page.WaitForTimeoutAsync(BlazorRenderDelay);
 
         // The property renders as a link only when it is recordable AND a history store is registered,
         // so this click is itself the assertion that the store reached the registry.
@@ -56,7 +51,6 @@ public class PropertyHistoryDialogTests
 
         var dialog = page.Locator("[data-testid='property-history-dialog']");
         await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-        await page.WaitForTimeoutAsync(BlazorRenderDelay);
 
         return page;
     }
@@ -67,7 +61,9 @@ public class PropertyHistoryDialogTests
         // Arrange & Act
         var page = await OpenMotorHistoryAsync("Speed");
 
-        // Assert - the range and period controls only render once the dialog got past its query.
+        // Assert - the controls sit outside the loading and error guards, so this does not prove the query
+        // succeeded. What it does prove is the reach of the wiring: the property renders as a link at all
+        // only because a store registered itself and claimed the path, which is the click above.
         var dialog = page.Locator("[data-testid='property-history-dialog']");
         await Assertions.Expect(dialog.Locator("label:text-is('Range')")).ToBeVisibleAsync(
             new() { Timeout = ElementVisibilityTimeout });
