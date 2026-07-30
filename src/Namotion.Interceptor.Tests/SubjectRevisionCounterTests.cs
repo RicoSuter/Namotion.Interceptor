@@ -13,9 +13,9 @@ public class SubjectRevisionCounterTests
         var second = new Car(context);
 
         // Act
-        var firstA = SubjectRevisionCounter.Next(first);
-        var firstB = SubjectRevisionCounter.Next(first);
-        var secondA = SubjectRevisionCounter.Next(second);
+        var firstA = NextUnderSyncRoot(first);
+        var firstB = NextUnderSyncRoot(first);
+        var secondA = NextUnderSyncRoot(second);
 
         // Assert
         Assert.Equal(1, firstA);
@@ -27,15 +27,30 @@ public class SubjectRevisionCounterTests
     public void WhenContextIsNotAnInterceptorExecutor_ThenRevisionStillIncrements()
     {
         // Arrange
-        var subject = new PlainSubject();
+        var first = new PlainSubject();
+        var second = new PlainSubject();
 
         // Act
-        var first = SubjectRevisionCounter.Next(subject);
-        var second = SubjectRevisionCounter.Next(subject);
+        var firstA = NextUnderSyncRoot(first);
+        var firstB = NextUnderSyncRoot(first);
+        var secondA = NextUnderSyncRoot(second);
 
         // Assert
-        Assert.Equal(1, first);
-        Assert.Equal(2, second);
+        Assert.Equal(1, firstA);
+        Assert.Equal(2, firstB);
+        Assert.Equal(1, secondA); // independent per subject
+    }
+
+    /// <summary>
+    /// The counter documents that callers hold the subject's SyncRoot, and the assertion inside
+    /// <see cref="SubjectRevisionCounter.Next"/> enforces it, so the tests take the same lock.
+    /// </summary>
+    private static long NextUnderSyncRoot(IInterceptorSubject subject)
+    {
+        lock (subject.SyncRoot)
+        {
+            return SubjectRevisionCounter.Next(subject);
+        }
     }
 
     /// <summary>

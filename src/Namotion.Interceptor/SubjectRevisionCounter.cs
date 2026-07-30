@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor;
@@ -17,6 +19,9 @@ internal static class SubjectRevisionCounter
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static long Next(IInterceptorSubject subject)
     {
+        Debug.Assert(Monitor.IsEntered(subject.SyncRoot),
+            "The revision counter must be incremented under the subject's SyncRoot: the plain increment on the fast path relies on that exclusion.");
+
         // Generated subjects own their executor, so the counter is a plain field on an object that
         // is already hot in this write: no lookup, no atomic, no shared cache line.
         if (subject.Context is InterceptorExecutor executor)
@@ -36,6 +41,10 @@ internal static class SubjectRevisionCounter
     private static long NextFallback(IInterceptorSubject subject)
     {
         var holder = (long[])subject.Data.GetOrAdd((null, RevisionKey), static _ => new long[1])!;
-        return ++holder[0];
+
+        // Hand-written subjects are the ones least likely to honour the SyncRoot contract, and a
+        // 64-bit increment is not atomic on 32-bit runtimes anyway (netstandard2.0 covers x86
+        // .NET Framework). Interlocked keeps the value dense without allocating.
+        return Interlocked.Increment(ref holder[0]);
     }
 }
