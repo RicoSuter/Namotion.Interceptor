@@ -82,6 +82,84 @@ public class ChangeDeduplicatorTests
     }
 
     [Fact]
+    public void WhenARevisionZeroChangeIsNotTheLastArrival_ThenTheSurvivorKeepsTheLastArrivalNewValue()
+    {
+        // Arrange - a revision 0 change makes the whole property fall back to arrival position, even
+        // though a later arrival carries the highest revision of the batch.
+        using var deduplicator = new ChangeDeduplicator();
+
+        var subject = new Person();
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+
+        SubjectPropertyChange[] changes =
+        [
+            CreateChange(property, "ZeroOld", "ZeroNew", revision: 0),
+            CreateChange(property, "MiddleOld", "MiddleNew", revision: 999),
+            CreateChange(property, "LastOld", "LastNew", revision: 50)
+        ];
+
+        // Act
+        var deduplicated = deduplicator.Deduplicate(changes).ToArray();
+
+        // Assert - the first arrival supplies the old value, the last arrival the new value
+        var change = Assert.Single(deduplicated);
+        Assert.Equal("ZeroOld", change.GetOldValue<string>());
+        Assert.Equal("LastNew", change.GetNewValue<string>());
+    }
+
+    [Fact]
+    public void WhenARevisionZeroChangeSitsBetweenHigherRevisions_ThenTheSurvivorKeepsTheLastArrivalNewValue()
+    {
+        // Arrange - high revisions arrive both before and after the revision 0 change, so neither of
+        // them may be promoted into the survivor once the fallback applies.
+        using var deduplicator = new ChangeDeduplicator();
+
+        var subject = new Person();
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+
+        SubjectPropertyChange[] changes =
+        [
+            CreateChange(property, "EarlyHighOld", "EarlyHighNew", revision: 800),
+            CreateChange(property, "ZeroOld", "ZeroNew", revision: 0),
+            CreateChange(property, "LateHighOld", "LateHighNew", revision: 900),
+            CreateChange(property, "LastOld", "LastNew", revision: 10)
+        ];
+
+        // Act
+        var deduplicated = deduplicator.Deduplicate(changes).ToArray();
+
+        // Assert - the first arrival supplies the old value, the last arrival the new value
+        var change = Assert.Single(deduplicated);
+        Assert.Equal("EarlyHighOld", change.GetOldValue<string>());
+        Assert.Equal("LastNew", change.GetNewValue<string>());
+    }
+
+    [Fact]
+    public void WhenTheRevisionZeroChangeArrivesLast_ThenTheBatchCollapsesByArrivalPosition()
+    {
+        // Arrange - the fallback also holds when the unordered change closes the batch
+        using var deduplicator = new ChangeDeduplicator();
+
+        var subject = new Person();
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+
+        SubjectPropertyChange[] changes =
+        [
+            CreateChange(property, "FirstOld", "FirstNew", revision: 30),
+            CreateChange(property, "MiddleOld", "MiddleNew", revision: 10),
+            CreateChange(property, "ZeroOld", "ZeroNew", revision: 0)
+        ];
+
+        // Act
+        var deduplicated = deduplicator.Deduplicate(changes).ToArray();
+
+        // Assert - the first arrival supplies the old value, the last arrival the new value
+        var change = Assert.Single(deduplicated);
+        Assert.Equal("FirstOld", change.GetOldValue<string>());
+        Assert.Equal("ZeroNew", change.GetNewValue<string>());
+    }
+
+    [Fact]
     public void WhenChangesBelongToDifferentSubjects_ThenEachPropertyIsCollapsedIndependently()
     {
         // Arrange - revisions of different subjects are not comparable, so the two properties must be
