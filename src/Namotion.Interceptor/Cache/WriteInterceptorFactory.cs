@@ -15,6 +15,7 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
+                    context.Revision = SubjectRevisionCounter.Next(context.Property.Subject);
                     context.FinalizeOrigin();
                     var raw = context.WriteTimestampRaw;
                     context.Property.SetWriteTimestamp(raw > 0 ? raw : 0);
@@ -30,6 +31,7 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
+                    context.Revision = SubjectRevisionCounter.Next(context.Property.Subject);
                     context.FinalizeOrigin();
                     var raw = context.WriteTimestampRaw;
                     context.Property.SetWriteTimestamp(raw > 0 ? raw : 0);

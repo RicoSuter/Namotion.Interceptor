@@ -51,6 +51,12 @@ public struct PropertyWriteContext<TProperty>
     internal Action<IInterceptorSubject, TProperty>? Terminal;
 
     /// <summary>
+    /// The subject's commit revision assigned by the terminal write, or 0 when the write did not
+    /// commit. Monotonic per subject, not comparable across subjects.
+    /// </summary>
+    internal long Revision;
+
+    /// <summary>
     /// Gets the property to write a value to.
     /// </summary>
     public PropertyReference Property { get; }
