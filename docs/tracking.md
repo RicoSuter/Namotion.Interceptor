@@ -145,6 +145,25 @@ Dispatch starts on the writing thread, outside the subject lock, and shares one 
 - **Throwing synchronous observers suppress later deliveries**: each interceptor dispatches its queue first, then its Rx observable, then any per-property listeners it resolved. With aggregated contexts, the innermost interceptor resolves the per-property listeners, so they may run before outer contexts' queue and Rx channels. An exception from any synchronous observer propagates out of the write and prevents later deliveries in that order; queue items already enqueued remain available. Keep synchronous observers exception-free. The exception surfaces from the setter after the value was committed and nothing is rolled back; the property keeps the new value. For scheduler-based Rx observers, delivery means the change was accepted by the channel, not that the callback has already run.
 - **Transactions replay on commit**: with `WithTransactions()`, writes captured inside a transaction do not notify during capture. They replay through the interceptor on commit and notifications fire then. If the transaction is rolled back (disposed without commit), the changes are discarded, no notifications fire, and the property keeps its pre-transaction value. If a best-effort commit partially applies and then reverts, listeners observe the apply-and-revert pair, so a consumer such as a watchdog or dirty flag must not treat the revert as a user change.
 
+### Delivery Guarantees
+
+Every committed write carries a `SubjectPropertyChange.Revision`: a counter that is monotonic **per subject** over committed writes, so two changes to the *same* subject are ordered by comparing it, the higher revision committed later. Revisions of *different* subjects are **not** comparable, and a change constructed outside a terminal write carries `0`, which orders against nothing.
+
+The revision exists because arrival order can differ from commit order. Dispatch happens after the commit and outside the subject lock, so under concurrent writers a change that committed later can reach a consumer first. A consumer that has to converge on the current value compares `Revision` and keeps the higher one, or re-reads the property.
+
+| Channel | Exactly-once | Order | Consumer runs on |
+|---|---|---|---|
+| Per-property callback | conditional (a) | arrival | writer thread |
+| Observable | conditional (a) | arrival | writer thread |
+| Pull queue | conditional (a) | arrival | consumer thread |
+| `ChangeQueueProcessor`, buffer > 0 | no, latest-state-wins | arrival of survivors; per-property newest within a flush (b) | processor thread |
+
+(a) A throwing lifecycle handler or a throwing earlier observer suppresses delivery for the rest of that write's consumers, so delivery is exactly-once only while those no-throw contracts hold.
+
+(b) Deduplication is scoped to one flush batch, so an inversion straddling a flush tick can still emit the older value last. Compare `Revision` in the write handler if that matters.
+
+**Flush deduplication semantics**: a `ChangeQueueProcessor` with a buffer time collapses each flush batch to one change per property. Per property, the surviving old value comes from the change with the *lowest* revision in that batch and the new value from the change with the *highest*, so the survivor spans the batch even when the enqueue order was inverted. If any change for that property carries revision `0`, that property falls back entirely to arrival-position behavior (first arrival's old value, last arrival's new value), because the bounds no longer describe the batch. Emit order is unaffected either way: it is the arrival order of each property's last occurrence.
+
 ## Property Value Equality Check
 
 Prevents unnecessary change notifications when a property is set to the same value:
