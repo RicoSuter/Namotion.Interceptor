@@ -1,6 +1,6 @@
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -13,9 +13,6 @@ namespace Namotion.Interceptor.Connectors;
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
 {
-    private const int FlushDedupedBufferMinSize = 256;
-    private const int FlushDedupedBufferMaxSize = 1024;
-
     private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
@@ -35,13 +32,9 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
 
-    // Scratch buffers used only while holding the flush gate (single-threaded access)
+    // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
-    private readonly Dictionary<PropertyReference, int> _flushPropertyIndices = new(PropertyReference.Comparer);
-
-    // Reusable buffer for deduped changes (rented from ArrayPool to avoid allocations on resize)
-    private SubjectPropertyChange[] _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
-    private int _flushDedupedCount;
+    private readonly ChangeDeduplicator _flushDeduplicator = new();
 
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
@@ -89,8 +82,7 @@ public class ChangeQueueProcessor : IDisposable
         }
         catch
         {
-            ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
-            _flushDedupedBuffer = null!;
+            _flushDeduplicator.Dispose();
             throw;
         }
     }
@@ -225,47 +217,13 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            _flushPropertyIndices.Clear();
-            _flushDedupedCount = 0;
+            var dedupedChanges = _flushDeduplicator.Deduplicate(CollectionsMarshal.AsSpan(_flushChanges));
 
-            // Pre-size to avoid resizes under bursts
-            _flushPropertyIndices.EnsureCapacity(_flushChanges.Count);
-
-            // Ensure the buffer is large enough (rent from pool to avoid allocations)
-            if (_flushDedupedBuffer.Length < _flushChanges.Count)
-            {
-                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
-                _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(_flushChanges.Count);
-            }
-
-            // Deduplicate by Property: keep oldest old value, use newest new value.
-            // Backward iteration finds last occurrences first, preserving last-occurrence order.
-            for (var i = _flushChanges.Count - 1; i >= 0; i--)
-            {
-                var change = _flushChanges[i];
-                if (!_flushPropertyIndices.TryGetValue(change.Property, out var existingIndex))
-                {
-                    _flushPropertyIndices[change.Property] = _flushDedupedCount;
-                    _flushDedupedBuffer[_flushDedupedCount++] = change;
-                }
-                else
-                {
-                    // Earlier occurrence: merge its old value into the kept (later) change
-                    _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(_flushDedupedBuffer[existingIndex]);
-                }
-            }
-
-            // Reverse to restore chronological order of last occurrences
-            if (_flushDedupedCount > 1)
-            {
-                Array.Reverse(_flushDedupedBuffer, 0, _flushDedupedCount);
-            }
-
-            if (_flushDedupedCount > 0)
+            if (dedupedChanges.Length > 0)
             {
                 try
                 {
-                    await _writeHandler(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, _flushDedupedCount), cancellationToken).ConfigureAwait(false);
+                    await _writeHandler(dedupedChanges, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -281,24 +239,15 @@ public class ChangeQueueProcessor : IDisposable
         {
             // Clear buffers to allow GC of SubjectPropertyChange objects
             _flushChanges.Clear();
-            _flushPropertyIndices.Clear();
-
-            // Clear entire rented array before potential return to pool.
-            // SubjectPropertyChange contains object references (Source, boxed values) that must be released.
-            Array.Clear(_flushDedupedBuffer, 0, _flushDedupedBuffer.Length);
 
             if (Volatile.Read(ref _disposed) == 1)
             {
                 // Disposed while flushing - return buffer to pool now
-                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
-                _flushDedupedBuffer = null!;
+                _flushDeduplicator.Dispose();
             }
-            else if (_flushDedupedBuffer.Length >= FlushDedupedBufferMaxSize &&
-                     _flushDedupedCount < _flushDedupedBuffer.Length / 4)
+            else
             {
-                // Shrink buffer if it grew too large (return to pool and rent smaller)
-                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
-                _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
+                _flushDeduplicator.Reset();
             }
 
             Volatile.Write(ref _flushGate, 0);
@@ -324,9 +273,7 @@ public class ChangeQueueProcessor : IDisposable
             try
             {
                 // Clear and return the buffer to the pool
-                Array.Clear(_flushDedupedBuffer, 0, _flushDedupedBuffer.Length);
-                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
-                _flushDedupedBuffer = null!;
+                _flushDeduplicator.Dispose();
             }
             finally
             {
