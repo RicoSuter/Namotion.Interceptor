@@ -57,6 +57,14 @@ public struct PropertyWriteContext<TProperty>
     internal long Revision;
 
     /// <summary>
+    /// Set by the derived recalculation entry point, where <see cref="NewValue"/> is already the
+    /// stabilized getter output. Stops <see cref="GetFinalValue"/> from re-invoking the getter,
+    /// which would run user code at publish time and could return a value that never paired
+    /// atomically with this change's old value.
+    /// </summary>
+    internal bool FinalValueIsNewValue;
+
+    /// <summary>
     /// Gets the property to write a value to.
     /// </summary>
     public PropertyReference Property { get; }
@@ -215,6 +223,11 @@ public struct PropertyWriteContext<TProperty>
     /// <returns>The property value.</returns>
     public TProperty GetFinalValue()
     {
+        if (FinalValueIsNewValue)
+        {
+            return NewValue;
+        }
+
         var property = Property;
         var metadata = property.Metadata;
         return metadata.IsDerived

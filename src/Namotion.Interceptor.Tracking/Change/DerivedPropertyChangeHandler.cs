@@ -362,7 +362,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
         // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
         // not need a WithChangedTimestamp scope active to share the time with the dependent).
-        derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
+        // newValue is the value the stabilization loop settled on and the value paired with
+        // oldValue by the guards above, so publishing must reuse it rather than re-invoke the
+        // getter, which could return a later value that never coexisted with oldValue.
+        derivedProperty.SetPropertyValueWithInterception(
+            newValue, oldValue, NoOpWriteDelegate, rawTimestamp, finalValueIsNewValue: true);
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {

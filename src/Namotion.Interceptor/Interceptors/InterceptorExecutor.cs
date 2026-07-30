@@ -42,15 +42,21 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// Cascade re-entry path: skips the lazy-resolve machinery by pre-populating the new write
     /// context's timestamp cache. Lets the cascade share the trigger's captured time without
     /// pushing a <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope.
+    /// Pass <c>finalValueIsNewValue</c> as true when the new value is already the stabilized getter
+    /// output, so publishing reuses it instead of invoking the getter again (see
+    /// <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp)
+    internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp, bool finalValueIsNewValue)
     {
         var context = new PropertyWriteContext<TProperty>(
             new PropertyReference(_subject, propertyName),
             currentValue,
             newValue,
-            rawTimestamp);
+            rawTimestamp)
+        {
+            FinalValueIsNewValue = finalValueIsNewValue
+        };
 
         ExecuteInterceptedWrite(ref context, writeValue);
         return context.IsWritten;
