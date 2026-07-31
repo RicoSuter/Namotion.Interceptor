@@ -44,6 +44,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _delegationCycleVisited;
 
+    [ThreadStatic]
+    private static List<InterceptorSubjectContext>? _delegationCyclePath;
+
     // Written via Interlocked.Exchange and Interlocked.CompareExchange instead of being declared
     // volatile, which would raise CS0420 when passed by ref to Interlocked under
     // warnings-as-errors. Every context constructs its own initial state because caches live on
@@ -327,12 +330,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 // A meeting is proof of a cycle only in a graph that does not change underneath the
                 // walk. Concurrent mutation can move the tortoise onto the hare over an edge the
                 // hare never took, so the suspicion is confirmed exactly before it is reported,
-                // which keeps a rewiring from being reported as a cycle in every case that a
-                // single pass over the current edges can rule out. It is not an absolute
-                // guarantee: the confirming walk reads each edge at its own time, so a mutator
-                // that rewires around it can still make it observe one context twice. Both are
-                // vanishingly unlikely and the outcome is a catchable exception, never a bad
-                // resolution.
+                // and the confirmation re-reads the loop it found before reporting anything, since
+                // a walk that reads each edge at its own time follows a path through time and not
+                // a topology at an instant.
                 return ResolveDelegationChainExactly(delegationTarget, out state);
             }
         }
@@ -340,41 +340,84 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     /// <summary>
     /// Re-walks the chain remembering every context, which either reaches a context that does not
-    /// delegate or observes one twice, in which case the delegation references really do close into
-    /// a cycle. Only reached from a Floyd meeting, so the set never touches a resolving query.
+    /// delegate or observes one twice. Observing one twice is not yet a cycle: the walk reads each
+    /// edge at its own time, so it follows a path through time rather than a topology at an
+    /// instant, and two ordered rewirings that are each acyclic can produce a repeat that never
+    /// existed as a cycle. Cutting an edge upstream of a walker and then linking a node downstream
+    /// of it back to that upstream node is enough. So the candidate loop is re-read afterwards and
+    /// only reported once its edges are all still in place. Only reached from a Floyd meeting, so
+    /// none of this touches a resolving query.
     /// </summary>
     private static InterceptorSubjectContext ResolveDelegationChainExactly(InterceptorSubjectContext delegationTarget, out ContextState state)
     {
         var visited = _delegationCycleVisited ??= [];
+        var path = _delegationCyclePath ??= [];
         try
         {
-            var current = delegationTarget;
-            var currentState = Volatile.Read(ref current._state);
-
-            while (visited.Add(current))
+            while (true)
             {
-                var next = currentState.DelegationTarget;
-                if (next is null)
+                visited.Clear();
+                path.Clear();
+
+                var current = delegationTarget;
+                var currentState = Volatile.Read(ref current._state);
+
+                while (visited.Add(current))
                 {
-                    state = currentState;
-                    return current;
+                    path.Add(current);
+
+                    var next = currentState.DelegationTarget;
+                    if (next is null)
+                    {
+                        state = currentState;
+                        return current;
+                    }
+
+                    current = next;
+                    currentState = Volatile.Read(ref current._state);
                 }
 
-                current = next;
-                currentState = Volatile.Read(ref current._state);
-            }
+                if (DelegationLoopStillClosed(path, current))
+                {
+                    throw new InvalidOperationException(
+                        "The fallback contexts form a delegation cycle, so no service can be resolved. A context " +
+                        "without own services and with exactly one fallback context resolves everything through " +
+                        "that fallback context, and following those references leads back to a context already " +
+                        "visited. Break the cycle by removing one of the fallback context registrations or by " +
+                        "registering a service on one of the contexts on it.");
+                }
 
-            throw new InvalidOperationException(
-                "The fallback contexts form a delegation cycle, so no service can be resolved. A context " +
-                "without own services and with exactly one fallback context resolves everything through " +
-                "that fallback context, and following those references leads back to a context already " +
-                "visited. Break the cycle by removing one of the fallback context registrations or by " +
-                "registering a service on one of the contexts on it.");
+                // The loop came apart under the walk, so it was a rewiring and not a cycle. A real
+                // cycle has no edge to lose and confirms on the next pass.
+            }
         }
         finally
         {
             visited.Clear();
+            path.Clear();
         }
+    }
+
+    /// <summary>
+    /// Re-reads every edge of the candidate loop that the walk recorded, after that walk finished.
+    /// Because this pass starts once the whole loop has been observed, edges that all still point
+    /// where they did held together across the two passes, which no single rewiring survives and
+    /// which a genuine cycle always satisfies. It compares delegation targets rather than state
+    /// objects, since invalidating a cache publishes a new state that leaves the topology alone.
+    /// </summary>
+    private static bool DelegationLoopStillClosed(List<InterceptorSubjectContext> path, InterceptorSubjectContext repeated)
+    {
+        for (var index = path.IndexOf(repeated); index < path.Count; index++)
+        {
+            var node = path[index];
+            var expectedNext = index + 1 < path.Count ? path[index + 1] : repeated;
+            if (!ReferenceEquals(Volatile.Read(ref node._state).DelegationTarget, expectedNext))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
