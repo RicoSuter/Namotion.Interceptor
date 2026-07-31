@@ -11,9 +11,12 @@ internal static class WriteInterceptorFactory<TProperty>
         {
             return static (ref context, innerWriteValue) =>
             {
-                lock (context.Property.Subject.SyncRoot)
+                // Hoisted: innerWriteValue is opaque to the JIT, so a second read of the property
+                // reference could not be folded into the first (PropertyReference advises this).
+                var subject = context.Property.Subject;
+                lock (subject.SyncRoot)
                 {
-                    innerWriteValue(context.Property.Subject, context.NewValue);
+                    innerWriteValue(subject, context.NewValue);
                     context.IsWritten = true;
                     // Plain increment, no Interlocked: the enclosing lock is the subject's SyncRoot and the
                     // executor belongs to that subject, so the increment is exclusive. The contract used to
@@ -31,12 +34,13 @@ internal static class WriteInterceptorFactory<TProperty>
             interceptors,
             static (ref context, innerWriteValue) =>
             {
-                lock (context.Property.Subject.SyncRoot)
+                var subject = context.Property.Subject;
+                lock (subject.SyncRoot)
                 {
-                    innerWriteValue(context.Property.Subject, context.NewValue);
+                    innerWriteValue(subject, context.NewValue);
                     context.IsWritten = true;
-                    // See the zero-interceptor terminal above for why the increment needs no Interlocked
-                    // and no lock assert.
+                    // See the zero-interceptor terminal above for why the subject is hoisted and why the
+                    // increment needs no Interlocked and no lock assert.
                     context.Revision = ++context.Executor.Revision;
                     context.FinalizeOrigin();
                     var raw = context.WriteTimestampRaw;
