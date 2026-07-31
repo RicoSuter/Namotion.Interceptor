@@ -435,6 +435,278 @@ public class OpcUaSessionExtensionsTests
         Assert.True(result.ContainsKey(secondNodeId));
     }
 
+    [Fact]
+    public async Task WhenServerLimitsBrowseContinuationPoints_ThenBrowseBatchesToThatQuota()
+    {
+        // Arrange: the continuation-point quota (2) is far below the operation limit (100).
+        // Batching by the operation limit would open more continuation points than the server
+        // allows, which fails permanently and identically on every reconnect retry.
+        var nodeIds = Enumerable.Range(1, 5).Select(index => new NodeId((uint)(1000 + index), 2)).ToArray();
+        var mockSession = CreateMockSession();
+        mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits { MaxNodesPerBrowse = 100 });
+        mockSession.SetupGet(s => s.ServerCapabilities).Returns(new ServerCapabilities { MaxBrowseContinuationPoints = 2 });
+
+        var batchSizes = new List<int>();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection descriptions, CancellationToken _) =>
+            {
+                batchSizes.Add(descriptions.Count);
+                var results = new BrowseResultCollection();
+                foreach (var _ in descriptions)
+                {
+                    results.Add(new BrowseResult { References = [] });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        // Act
+        var result = await mockSession.Object.BrowseNodesAsync(
+            nodeIds,
+            maxReferencesPerNode: 1000,
+            maxContinuationRounds: 100,
+            NullLogger<OpcUaSessionExtensionsTests>.Instance,
+            CancellationToken.None);
+
+        // Assert
+        Assert.Equal([2, 2, 1], batchSizes);
+        Assert.Equal(5, result.Count);
+    }
+
+    [Fact]
+    public async Task WhenBrowseRejectsBatchAsTooLarge_ThenSplitsAndRetriesUntilAccepted()
+    {
+        // Arrange: the server rejects any batch above one node with BadRequestTooLarge. Halving
+        // must recurse until every node is browsed rather than failing the whole load.
+        var nodeIds = Enumerable.Range(1, 4).Select(index => new NodeId((uint)(1000 + index), 2)).ToArray();
+        var mockSession = CreateMockSession();
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection descriptions, CancellationToken _) =>
+            {
+                if (descriptions.Count > 1)
+                {
+                    throw new ServiceResultException(StatusCodes.BadRequestTooLarge);
+                }
+                return new BrowseResponse
+                {
+                    Results = [new BrowseResult { References = [] }],
+                    DiagnosticInfos = []
+                };
+            });
+
+        // Act
+        var result = await mockSession.Object.BrowseNodesAsync(
+            nodeIds,
+            maxReferencesPerNode: 1000,
+            maxContinuationRounds: 100,
+            NullLogger<OpcUaSessionExtensionsTests>.Instance,
+            CancellationToken.None);
+
+        // Assert
+        Assert.Equal(4, result.Count);
+        Assert.All(nodeIds, nodeId => Assert.True(result.ContainsKey(nodeId)));
+    }
+
+    [Fact]
+    public async Task WhenBrowseAbortsAfterCollectingContinuationPoints_ThenReleasesThem()
+    {
+        // Arrange: the first node pages (continuation point handed out), the second returns a
+        // transient bad status that aborts the load. The first node's continuation point must be
+        // released, otherwise every aborted load burns one of the server's scarce slots.
+        var pagingNodeId = new NodeId(1001, 2);
+        var failingNodeId = new NodeId(1002, 2);
+        var continuationToken = new byte[] { 0xAA };
+        var mockSession = CreateMockSession();
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseResponse
+            {
+                Results =
+                [
+                    new BrowseResult { References = [], ContinuationPoint = continuationToken },
+                    new BrowseResult { StatusCode = StatusCodes.BadCommunicationError, References = [] }
+                ],
+                DiagnosticInfos = []
+            });
+
+        var releasedTokens = new List<byte[]>();
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                true,
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, bool _, ByteStringCollection points, CancellationToken _) =>
+            {
+                releasedTokens.AddRange(points);
+                return new BrowseNextResponse { Results = [], DiagnosticInfos = [] };
+            });
+
+        // Act & Assert
+        await Assert.ThrowsAsync<OpcUaTransientServiceException>(() =>
+            mockSession.Object.BrowseNodesAsync(
+                [pagingNodeId, failingNodeId],
+                maxReferencesPerNode: 1000,
+                maxContinuationRounds: 100,
+                NullLogger<OpcUaSessionExtensionsTests>.Instance,
+                CancellationToken.None));
+
+        Assert.Equal([continuationToken], releasedTokens);
+    }
+
+    [Fact]
+    public async Task WhenContinuationRoundCapIsReached_ThenPartiallyPagedNodeIsOmitted()
+    {
+        // Arrange: the server never stops handing out continuation points. Hitting the round cap
+        // leaves the node's child list truncated, so it must be reported as failed this round
+        // rather than as a successfully browsed node with fewer children than it really has.
+        var nodeId = new NodeId(1001, 2);
+        var mockSession = CreateMockSession();
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseResponse
+            {
+                Results =
+                [
+                    new BrowseResult
+                    {
+                        References =
+                        [
+                            new ReferenceDescription { BrowseName = new QualifiedName("First"), NodeId = new ExpandedNodeId(new NodeId(3001, 2)) }
+                        ],
+                        ContinuationPoint = [0xAA]
+                    }
+                ],
+                DiagnosticInfos = []
+            });
+
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                false,
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseNextResponse
+            {
+                Results =
+                [
+                    new BrowseResult
+                    {
+                        References =
+                        [
+                            new ReferenceDescription { BrowseName = new QualifiedName("Next"), NodeId = new ExpandedNodeId(new NodeId(3002, 2)) }
+                        ],
+                        ContinuationPoint = [0xBB]
+                    }
+                ],
+                DiagnosticInfos = []
+            });
+
+        var releasedTokens = new List<byte[]>();
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                true,
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, bool _, ByteStringCollection points, CancellationToken _) =>
+            {
+                releasedTokens.AddRange(points);
+                return new BrowseNextResponse { Results = [], DiagnosticInfos = [] };
+            });
+
+        // Act
+        var result = await mockSession.Object.BrowseNodesAsync(
+            [nodeId],
+            maxReferencesPerNode: 1000,
+            maxContinuationRounds: 2,
+            NullLogger<OpcUaSessionExtensionsTests>.Instance,
+            CancellationToken.None);
+
+        // Assert
+        Assert.Empty(result);
+        Assert.Single(releasedTokens);
+    }
+
+    [Fact]
+    public async Task WhenBrowseNextReturnsPermanentBadStatus_ThenPartiallyPagedNodeIsOmitted()
+    {
+        // Arrange: the first page arrives, the second fails permanently. The node has a truncated
+        // child list either way, so it is omitted rather than reported as fully browsed.
+        var nodeId = new NodeId(1001, 2);
+        var mockSession = CreateMockSession();
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseResponse
+            {
+                Results =
+                [
+                    new BrowseResult
+                    {
+                        References =
+                        [
+                            new ReferenceDescription { BrowseName = new QualifiedName("First"), NodeId = new ExpandedNodeId(new NodeId(3001, 2)) }
+                        ],
+                        ContinuationPoint = [0xAA]
+                    }
+                ],
+                DiagnosticInfos = []
+            });
+
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                false,
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseNextResponse
+            {
+                Results = [new BrowseResult { StatusCode = StatusCodes.BadNodeIdUnknown, References = [] }],
+                DiagnosticInfos = []
+            });
+
+        // Act
+        var result = await mockSession.Object.BrowseNodesAsync(
+            [nodeId],
+            maxReferencesPerNode: 1000,
+            maxContinuationRounds: 100,
+            NullLogger<OpcUaSessionExtensionsTests>.Instance,
+            CancellationToken.None);
+
+        // Assert
+        Assert.Empty(result);
+    }
+
     private static Mock<ISession> CreateMockSession()
     {
         var mockSession = new Mock<ISession>();
