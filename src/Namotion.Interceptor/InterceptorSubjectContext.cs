@@ -11,10 +11,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     // All topology (services, fallback contexts) and everything derived from it (delegation
     // target, caches, compiled interceptor chains) lives in one immutable snapshot per context,
-    // published atomically. Queries take no locks (R1): a query pins one snapshot with a single
-    // volatile read and walks other contexts' snapshots the same way, so the downward service
-    // walk and the upward invalidation walk cannot form a lock cycle, including in cyclic
-    // fallback graphs.
+    // published atomically. Queries take no context lock (R1): a query pins one snapshot with a
+    // single volatile read and walks other contexts' snapshots the same way, so the downward
+    // service walk and the upward invalidation walk cannot form a lock cycle, including in cyclic
+    // fallback graphs. Filling a cache still takes the internal bucket lock of a
+    // ConcurrentDictionary, which is a leaf and never spans two contexts.
     //
     // Lock order: _mutationLock -> a _usedByContexts set lock, never reverse. A set lock is a
     // leaf: its critical sections only touch that one set and never take another lock or call
@@ -29,12 +30,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // (see IInterceptorSubjectContext.TryAddService).
 
     [ThreadStatic]
-    private static HashSet<InterceptorSubjectContext>? _contextChangeVisited;
+    private static HashSet<InterceptorSubjectContext>? _invalidationVisited;
 
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _serviceQueryVisited;
 
-    // Written via Volatile.Write and Interlocked.CompareExchange instead of being declared
+    // Written via Interlocked.Exchange and Interlocked.CompareExchange instead of being declared
     // volatile, which would raise CS0420 when passed by ref to Interlocked under
     // warnings-as-errors. Every context constructs its own initial state because caches live on
     // the state: one shared empty instance would let unrelated contexts contaminate each other's
@@ -404,7 +405,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private void InvalidateUsingContexts()
     {
-        var visited = _contextChangeVisited ??= [];
+        var visited = _invalidationVisited ??= [];
         try
         {
             // Self needs no invalidation here: the publish preceding this call already swapped
@@ -420,11 +421,19 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private void InvalidateUsingContexts(HashSet<InterceptorSubjectContext> visited)
     {
-        // Contexts that are never used as a fallback take no lock at all. A registration racing
-        // this check has not published its own state yet, so it cannot have cached anything that
-        // predates the publish this walk follows, and its own walk covers everything above it.
+        // Contexts that are never used as a fallback take no lock at all. The field is written
+        // once by a CAS that is ordered before the registrant's own publish, so a registration
+        // racing this read either is visible here or belongs to a context that has not published
+        // yet, and that context's own walk then covers everything above it. This depends on the
+        // publish being a full fence, see PublishState: with a release-only store the read could
+        // be satisfied from before it and the registration would be missed in both directions.
+        //
+        // The emptiness of the set is deliberately NOT checked here. HashSet.Count is a composite
+        // of two independently mutated fields, so an unlocked read can compute a count that was
+        // never true, and a using context that never left the set could be skipped for good. The
+        // locked block below handles an empty set without allocating anyway.
         var usedByContexts = Volatile.Read(ref _usedByContexts);
-        if (usedByContexts is null || usedByContexts.Count == 0)
+        if (usedByContexts is null)
         {
             return;
         }
