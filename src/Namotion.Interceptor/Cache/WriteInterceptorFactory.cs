@@ -15,7 +15,11 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
-                    context.Revision = SubjectRevisionCounter.Next(context.Property.Subject);
+                    // Plain increment, no Interlocked: the enclosing lock is the subject's SyncRoot and the
+                    // executor belongs to that subject, so the increment is exclusive. The contract used to
+                    // be asserted in a helper that any caller could reach; inlined here the lock is lexically
+                    // enclosing, which the compiler guarantees, so an assert would restate the line above it.
+                    context.Revision = ++context.Executor.Revision;
                     context.FinalizeOrigin();
                     var raw = context.WriteTimestampRaw;
                     context.Property.SetWriteTimestamp(raw > 0 ? raw : 0);
@@ -31,7 +35,9 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
-                    context.Revision = SubjectRevisionCounter.Next(context.Property.Subject);
+                    // See the zero-interceptor terminal above for why the increment needs no Interlocked
+                    // and no lock assert.
+                    context.Revision = ++context.Executor.Revision;
                     context.FinalizeOrigin();
                     var raw = context.WriteTimestampRaw;
                     context.Property.SetWriteTimestamp(raw > 0 ? raw : 0);

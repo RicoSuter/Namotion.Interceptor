@@ -50,6 +50,12 @@ public struct PropertyWriteContext<TProperty>
     // per-call state belongs on the per-call context, which is also robust against reentrant writes.
     internal Action<IInterceptorSubject, TProperty>? Terminal;
 
+    // The executor that started this write. Always the executor of Property.Subject: both construction
+    // sites pass their own 'this' alongside a PropertyReference over their own subject. Threaded through
+    // the context so the terminal can stamp the commit revision with a plain field increment, instead of
+    // resolving the subject's context (an interface dispatch plus a type test) on every committed write.
+    internal readonly InterceptorExecutor Executor;
+
     /// <summary>
     /// The subject's commit revision assigned by the terminal write, or 0 when the write did not
     /// commit. Monotonic per subject, not comparable across subjects.
@@ -109,8 +115,9 @@ public struct PropertyWriteContext<TProperty>
     /// Internal so every meaningfully constructed context comes from the library's execution
     /// entry points, which always thread the per-call chain state (such as the terminal) through it.
     /// </summary>
-    internal PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
+    internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue)
     {
+        Executor = executor;
         Property = property;
         CurrentValue = currentValue;
         NewValue = newValue;
@@ -127,8 +134,9 @@ public struct PropertyWriteContext<TProperty>
     /// Like the public constructor, this consumes the thread-static pending origin stamp for
     /// this property (see <see cref="PendingOrigin"/>) as a side effect of construction.
     /// </summary>
-    internal PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp)
+    internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp)
     {
+        Executor = executor;
         Property = property;
         CurrentValue = currentValue;
         NewValue = newValue;

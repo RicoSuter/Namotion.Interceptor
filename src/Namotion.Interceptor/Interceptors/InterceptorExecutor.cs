@@ -30,6 +30,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
         var context = new PropertyWriteContext<TProperty>(
+            this,
             new PropertyReference(_subject, propertyName),
             currentValue,
             newValue);
@@ -50,6 +51,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp, bool finalValueIsNewValue)
     {
         var context = new PropertyWriteContext<TProperty>(
+            this,
             new PropertyReference(_subject, propertyName),
             currentValue,
             newValue,
