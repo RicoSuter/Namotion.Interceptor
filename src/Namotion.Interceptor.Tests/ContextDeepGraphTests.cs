@@ -51,6 +51,59 @@ public class ContextDeepGraphTests
         Assert.Single(deepestContext.GetServices<OtherMarkerService>());
     }
 
+    /// <summary>
+    /// Exercises the service walk over the same depth: a context with two fallback contexts is not
+    /// a delegation target, so the walk cannot collapse the chain into a single hop and descends
+    /// every one of the 100,000 levels. The mutation at the end then also has to reach the cache
+    /// that the resolution filled at the far side of it.
+    /// </summary>
+    [Fact]
+    public void WhenVeryDeepChainHasMultiFallbackNodes_ThenServicesResolveThroughAllOfThem()
+    {
+        // Arrange: the same chain, but every 10,000th level carries a second fallback context with
+        // an own service, the last level included.
+        const int BranchInterval = 10_000;
+        const int BranchCount = ChainLength / BranchInterval;
+
+        var rootContext = InterceptorSubjectContext.Create();
+        var rootService = new MarkerService();
+        rootContext.AddService(rootService);
+
+        var branchServices = new List<MarkerService>();
+        var deepestContext = rootContext;
+        for (var index = 0; index < ChainLength; index++)
+        {
+            var context = InterceptorSubjectContext.Create();
+            context.AddFallbackContext(deepestContext);
+
+            if ((index + 1) % BranchInterval == 0)
+            {
+                var branchContext = InterceptorSubjectContext.Create();
+                var branchService = new MarkerService();
+                branchContext.AddService(branchService);
+                branchServices.Add(branchService);
+                context.AddFallbackContext(branchContext);
+            }
+
+            deepestContext = context;
+        }
+
+        // Act
+        var services = deepestContext.GetServices<MarkerService>();
+
+        // Assert
+        Assert.Equal(BranchCount + 1, services.Length);
+        Assert.Contains(rootService, services);
+        Assert.All(branchServices, branchService => Assert.Contains(branchService, services));
+
+        // Act: the deepest context has two fallback contexts and therefore keeps the cache that the
+        // resolution above just filled, 100,000 levels away from the context being mutated.
+        rootContext.AddService(new MarkerService());
+
+        // Assert: a cache that the invalidation did not reach would still answer with the old count.
+        Assert.Equal(BranchCount + 2, deepestContext.GetServices<MarkerService>().Length);
+    }
+
     private sealed class MarkerService;
 
     private sealed class OtherMarkerService;

@@ -515,7 +515,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var visited = _serviceQueryVisited ??= [];
         try
         {
-            return CollectServices(typeof(TInterface), state, visited)
+            return CollectServices(typeof(TInterface), this, state, visited)
                 .OfType<TInterface>()
                 .ToImmutableArray();
         }
@@ -525,27 +525,191 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
-    private IEnumerable<object> CollectServices(Type type, ContextState state, HashSet<InterceptorSubjectContext> visited)
+    /// <summary>
+    /// Collects the services of the given type from the pinned snapshot and from every context it
+    /// reaches, walked with an explicit worklist rather than by recursion. The fallback graph is as
+    /// deep as the subject graph that produced it, see <see cref="ResolveDelegationTarget"/>, so a
+    /// recursive walk died on an uncatchable <see cref="StackOverflowException"/> on a graph that is
+    /// otherwise legitimate.
+    ///
+    /// The shape of the recursive walk is preserved exactly, because the order of the result is
+    /// observable: <see cref="ServiceOrderResolver.OrderByDependencies"/> keeps the input order
+    /// among services that no ordering attribute separates. So the walk stays depth first and left
+    /// to right, every context contributes its own services before those of its fallback contexts,
+    /// and the collected services are made distinct and reordered once per context rather than once
+    /// at the end.
+    ///
+    /// It terminates because a context is entered only when <c>visited</c> did not already hold it,
+    /// so every context is pushed at most once and every iteration either pushes one or pops one.
+    /// That bound is also what makes the walk safe on a cyclic fallback graph.
+    /// </summary>
+    private static List<object> CollectServices(
+        Type type,
+        InterceptorSubjectContext context,
+        ContextState state,
+        HashSet<InterceptorSubjectContext> visited)
     {
-        if (!visited.Add(this))
+        // One buffer for the whole walk instead of one result per context: a context owns the tail
+        // of the buffer from its own start index onwards, and reducing that tail in place leaves
+        // everything the contexts below it already contributed untouched.
+        var collected = new List<object>();
+        if (!TryEnterContext(context, state, visited, out var enteredState))
         {
-            return [];
+            return collected;
         }
 
-        var delegationTarget = state.DelegationTarget;
-        if (delegationTarget is not null)
+        var frames = new List<ServiceWalkFrame>();
+        var distinctServices = new HashSet<object>();
+        PushFrame(frames, collected, type, enteredState);
+
+        while (frames.Count != 0)
         {
-            return delegationTarget.CollectServices(type, Volatile.Read(ref delegationTarget._state), visited);
+            var frameIndex = frames.Count - 1;
+            var frame = frames[frameIndex];
+            var fallbackContexts = frame.State.FallbackContexts;
+
+            var entered = false;
+            while (frame.NextFallbackIndex < fallbackContexts.Length)
+            {
+                var fallbackContext = fallbackContexts[frame.NextFallbackIndex++];
+                if (!TryEnterContext(fallbackContext, Volatile.Read(ref fallbackContext._state), visited, out var fallbackState))
+                {
+                    continue;
+                }
+
+                // The advanced cursor has to survive the push, the frame is a struct.
+                frames[frameIndex] = frame;
+                PushFrame(frames, collected, type, fallbackState);
+                entered = true;
+                break;
+            }
+
+            if (entered)
+            {
+                continue;
+            }
+
+            frames.RemoveAt(frameIndex);
+            ReduceFrame(collected, frame.ResultStart, distinctServices);
         }
 
-        var services = state.Services
-            .Where(type.IsInstanceOfType)
-            .Concat(state.FallbackContexts.SelectMany(
-                fallbackContext => fallbackContext.CollectServices(type, Volatile.Read(ref fallbackContext._state), visited)))
-            .Distinct()
-            .ToArray();
+        return collected;
+    }
 
-        return ServiceOrderResolver.OrderByDependencies(services);
+    /// <summary>
+    /// Marks the given context visited and follows its delegation chain, which is the one shape the
+    /// walk collapses instead of giving it a frame: a context without own services and with exactly
+    /// one fallback context contributes nothing of its own and resolves to exactly what its target
+    /// resolves, so a whole chain shares the frame of the context it ends on. Returns <c>false</c>
+    /// when the chain runs into a context that was already visited, which contributes nothing.
+    ///
+    /// It terminates because every hop adds a context to <c>visited</c> and it stops as soon as one
+    /// is already in it, so it takes at most one hop per context in the graph.
+    /// </summary>
+    private static bool TryEnterContext(
+        InterceptorSubjectContext context,
+        ContextState state,
+        HashSet<InterceptorSubjectContext> visited,
+        out ContextState enteredState)
+    {
+        enteredState = state;
+
+        while (visited.Add(context))
+        {
+            var delegationTarget = enteredState.DelegationTarget;
+            if (delegationTarget is null)
+            {
+                return true;
+            }
+
+            context = delegationTarget;
+            enteredState = Volatile.Read(ref delegationTarget._state);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Opens the buffer region of a context and appends its own matching services to it, which the
+    /// recursive walk placed ahead of everything its fallback contexts contribute.
+    /// </summary>
+    private static void PushFrame(List<ServiceWalkFrame> frames, List<object> collected, Type type, ContextState state)
+    {
+        var resultStart = collected.Count;
+
+        var services = state.Services;
+        for (var index = 0; index < services.Length; index++)
+        {
+            var service = services[index];
+            if (type.IsInstanceOfType(service))
+            {
+                collected.Add(service);
+            }
+        }
+
+        frames.Add(new ServiceWalkFrame(state, resultStart));
+    }
+
+    /// <summary>
+    /// Turns the buffer region that a context and its fallback contexts filled into the result of
+    /// that context: duplicates dropped keeping the first occurrence, then reordered by the ordering
+    /// attributes. That is what the recursive walk did per context with Distinct() and
+    /// OrderByDependencies, and doing it per context rather than once at the end is what the order
+    /// of the result depends on.
+    /// </summary>
+    private static void ReduceFrame(List<object> collected, int resultStart, HashSet<object> distinctServices)
+    {
+        // Compacted in place so that the duplicate removal needs no second buffer. The set uses the
+        // same default comparer that Distinct() used, so it keeps the same occurrence of a service.
+        distinctServices.Clear();
+        var writeIndex = resultStart;
+        for (var readIndex = resultStart; readIndex < collected.Count; readIndex++)
+        {
+            var service = collected[readIndex];
+            if (distinctServices.Add(service))
+            {
+                collected[writeIndex++] = service;
+            }
+        }
+
+        collected.RemoveRange(writeIndex, collected.Count - writeIndex);
+
+        var count = collected.Count - resultStart;
+        if (count == 0)
+        {
+            // OrderByDependencies returns an empty result for an empty input and does nothing else,
+            // so what is skipped here is the copy out of and back into the buffer, not the call.
+            return;
+        }
+
+        var services = new object[count];
+        collected.CopyTo(resultStart, services, 0, count);
+
+        // OrderByDependencies permutes its input, so the result goes straight back over the region
+        // it was taken from.
+        var ordered = ServiceOrderResolver.OrderByDependencies(services);
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            collected[resultStart + index] = ordered[index];
+        }
+    }
+
+    /// <summary>
+    /// One context on the walk stack: the snapshot it was pinned on, the index at which its region
+    /// of the shared buffer begins, and the cursor over its fallback contexts.
+    /// </summary>
+    private struct ServiceWalkFrame
+    {
+        internal readonly ContextState State;
+        internal readonly int ResultStart;
+        internal int NextFallbackIndex;
+
+        internal ServiceWalkFrame(ContextState state, int resultStart)
+        {
+            State = state;
+            ResultStart = resultStart;
+            NextFallbackIndex = 0;
+        }
     }
 
     /// <summary>
