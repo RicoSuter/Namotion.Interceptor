@@ -52,9 +52,19 @@ internal sealed class ChangeDeduplicator : IDisposable
     /// <param name="changes">The batch to collapse, in arrival order.</param>
     /// <returns>The deduplicated changes. The memory points into the pooled buffer and stays valid until
     /// the next <see cref="Deduplicate"/>, <see cref="Reset"/> or <see cref="Dispose"/> call, so the caller
-    /// can await a write handler on it before resetting.</returns>
+    /// can await a write handler on it before resetting. Empty once <see cref="Dispose"/> has run.</returns>
     public ReadOnlyMemory<SubjectPropertyChange> Deduplicate(ReadOnlySpan<SubjectPropertyChange> changes)
     {
+        if (_buffer is null)
+        {
+            // Reachable after disposal: ChangeQueueProcessor.Dispose releases the buffer once it wins the
+            // flush gate, and the periodic flush task can outlive that and tick again on whatever was
+            // enqueued in between. Returning empty skips the write handler, which is what a disposed
+            // processor owes its caller anyway. Without the guard the buffer read below throws and the
+            // flush task reports it as a write failure, which is a misleading log for an orderly shutdown.
+            return ReadOnlyMemory<SubjectPropertyChange>.Empty;
+        }
+
         _propertyIndices.Clear();
         _count = 0;
 
@@ -152,10 +162,10 @@ internal sealed class ChangeDeduplicator : IDisposable
     /// </summary>
     public void Reset()
     {
-        // Idempotent like Dispose. Both are called from the same finally block in ChangeQueueProcessor,
-        // picked by a disposal flag read outside the buffer's own lifetime, so a released buffer must not
-        // turn into an ArgumentNullException raised from a finally block, which would replace whatever the
-        // flush was propagating.
+        // Idempotent like Dispose and Deduplicate. Unlike those two this call cannot actually observe a
+        // released buffer: ChangeQueueProcessor only releases it while holding the flush gate, and the
+        // flush that reaches this line holds that same gate. The guard is here so the whole class is
+        // uniformly a no-op after disposal, not because a reaching interleaving is known.
         if (_buffer is null)
         {
             return;
