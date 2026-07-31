@@ -29,28 +29,24 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // predicate that mutates a different context, which the public contract forbids for that reason
     // (see IInterceptorSubjectContext.TryAddService).
 
-    // Stored in a state's resolved terminal slot when its chain was proven to be a cycle, so that
-    // the verdict is reached once per state instead of once per query. It is a context rather than
-    // a plain marker object so that the slot can be typed, which keeps reading it on the hot path a
-    // null check: this class is not sealed, so testing the type of an object slot there compiles to
-    // a runtime helper call on every intercepted access. Its own state delegates to itself, so the
-    // check that a cached context does not itself delegate rejects it without comparing anything.
+    // Recorded on a state whose chain was proven cyclic, so the verdict costs one walk per state
+    // rather than one per query. A context rather than a marker object so that the slot can be
+    // typed: this class is not sealed, so a type test on an object slot compiles to a runtime
+    // helper call on every intercepted access. It delegates to itself, so the check that a recorded
+    // context does not itself delegate rejects it without comparing anything.
     private static readonly InterceptorSubjectContext CyclicDelegationChain = CreateCyclicDelegationChain();
 
-    // Past this many hops the walk buffers are dropped instead of cleared. They are ThreadStatic
-    // and Clear() keeps the capacity, so walking one deep chain would otherwise retain an entry per
-    // hop on that thread for the rest of the process.
     private const int MaximumRetainedDelegationBufferCapacity = 1024;
 
     private static int _lastPropertyTypeIndex = -1;
 
     /// <summary>
-    /// A dense index per intercepted property type, so that the compiled chain of a property access
-    /// is found by indexing an array instead of hashing a <see cref="Type"/>. The index is a static
-    /// of a generic type, so it is resolved once per property type and folds into the call site.
-    /// Handing them out process wide rather than per context is what keeps it a plain array read;
-    /// the cost is that an array is as long as the largest index its context has seen, which is
-    /// bounded by the number of distinct property types in the process.
+    /// A dense index per intercepted property type, so that a compiled chain is found by indexing
+    /// an array instead of hashing a <see cref="Type"/>. Being a static of a generic type, it is
+    /// computed once per property type in the process rather than once per access. Handing the
+    /// indices out process wide is what keeps the lookup a plain array read; the cost is that an
+    /// array is as long as the largest index its context has seen rather than as long as the number
+    /// of types that context uses.
     /// </summary>
     private static class PropertyTypeIndex<TProperty>
     {
@@ -270,18 +266,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Resolves the context that answers for <paramref name="entry"/> down the delegation chain
-    /// that its pinned state starts, and replaces <paramref name="state"/> with the state that
-    /// context was pinned on. A context with no own service and exactly one fallback context
-    /// resolves everything through that fallback, so the chain is as deep as the subject tree that
-    /// produced it: every child attached to a parent inherits the parent context as its fallback,
-    /// which makes a graph of depth N a chain of length N.
+    /// Resolves the context that answers for <paramref name="entry"/> and replaces
+    /// <paramref name="state"/> with the state that context was pinned on. A context with no own
+    /// service and exactly one fallback context resolves everything through it, so the chain is as
+    /// deep as the subject graph: every attached child inherits the context of its parent.
     ///
-    /// The chain is walked once per state, not once per query: the state caches the context the
-    /// walk ended on, so every later query on the same state reaches it in one hop no matter how
-    /// deep the graph is. The cache holds the terminal CONTEXT and never its state, because the
-    /// state of a context is replaced whenever anything below it changes; re-reading it here on
-    /// every query is what keeps the answer fresh.
+    /// The chain is walked once per state rather than once per query, which is what makes depth
+    /// free here. The record holds the terminal CONTEXT and never its state: a context's state is
+    /// replaced whenever anything below it changes, so re-reading it on every query is what keeps
+    /// the answer fresh, and that read cannot be removed.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static InterceptorSubjectContext ResolveDelegationTarget(InterceptorSubjectContext entry, ref ContextState state)
@@ -304,14 +297,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Walks the delegation chain hop by hop and caches what it finds on every state it passed, so
-    /// that a chain is walked once rather than once per query and building a graph of depth N costs
-    /// one walk instead of one per level. Iterative because the chain is as deep as the subject
-    /// graph, which ruled out recursion, and because no fixed hop limit can be correct for a chain
-    /// whose legitimate length is that depth.
-    ///
-    /// A chain that runs in a circle resolves nothing and raises, and that verdict is cached the
-    /// same way, so the second query on such a state raises without walking again.
+    /// Walks the chain and records where it ends on every state it passed, which is what makes
+    /// building a graph of depth N cost one walk instead of one per level. Iterative because the
+    /// chain is as deep as the subject graph, so recursion overflows the stack and no fixed hop
+    /// limit is correct.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static InterceptorSubjectContext ResolveDelegationChain(InterceptorSubjectContext entry, ref ContextState state)
@@ -325,11 +314,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 visited.Clear();
                 path.Clear();
 
-                // Re-pinned on every pass rather than reusing the state the caller pinned. Reusing
-                // it livelocks: if the entry's own fallback context changed after the caller pinned
-                // it, every pass replays that same stale first hop, reaches the same repeat, fails
-                // the same confirmation and starts over, forever, with nothing mutating any more.
-                // One mutation before the graph goes quiet would be enough to spin here for good.
+                // Re-pinned every pass, never reused from the caller: a stale first hop would make
+                // every pass reach the same repeat and fail the same confirmation, spinning here
+                // for good after one mutation.
                 var current = entry;
                 var currentState = Volatile.Read(ref current._state);
 
@@ -348,15 +335,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                         var cachedState = Volatile.Read(ref resolvedTerminal._state);
                         if (cachedState.DelegationTarget is null)
                         {
-                            // The suffix from here on is already compressed, which is what keeps
-                            // the total work of resolving a deep chain linear in its length.
+                            // Reusing an already recorded suffix is what keeps the total work of
+                            // resolving a deep chain linear in its length. A recorded context that
+                            // has started delegating is stale, and walking on corrects it.
                             CacheResolvedTerminal(path, resolvedTerminal);
                             state = cachedState;
                             return resolvedTerminal;
                         }
-
-                        // A cached context that has started delegating is a stale hint, not an
-                        // answer. Walking on costs a hop and corrects it.
                     }
 
                     var next = currentState.DelegationTarget;
@@ -389,11 +374,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
         finally
         {
-            // Dropped rather than cleared once they grew past the threshold: these are ThreadStatic
-            // and Clear() keeps the capacity, so one walk down a chain as deep as a large subject
-            // graph would hold an entry per hop on this thread for the rest of the process. The
-            // walk runs on every cold resolution now, not only on a suspected cycle, so that would
-            // be paid by every thread that ever touches a deep graph.
+            // Dropped rather than cleared past the threshold: Clear() keeps the capacity, so one
+            // walk down a deep chain would hold an entry per level on this thread for the rest of
+            // the process, on every thread that ever touches such a graph.
             if (path.Capacity > MaximumRetainedDelegationBufferCapacity)
             {
                 _delegationCycleVisited = null;
@@ -408,12 +391,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Records what the walk found on every state it passed on the way, which is what turns the
-    /// next query on any of them into a single hop. Only ever written to the exact state objects
-    /// the walk pinned, never to a re-read of a context's current state: a pinned state that is
-    /// still installed has not been invalidated since it was pinned, and one that was replaced is
-    /// abandoned, so a late write to it can never be read again. Filled once, because a state that
-    /// already carries an answer was either given it by an equally valid walk or is abandoned.
+    /// Records where the chain ends on every state the walk pinned, which turns the next query on
+    /// any of them into a single hop. Written only to those pinned objects and never to a re-read
+    /// of a context's current state: a pinned state that is still installed cannot have been
+    /// invalidated since, and one that was replaced is abandoned, so a late write to it is never
+    /// read again.
     /// </summary>
     private static void CacheResolvedTerminal(List<DelegationHop> path, InterceptorSubjectContext resolvedTerminal)
     {
@@ -424,13 +406,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Re-reads the state of every context on the candidate loop and reports whether each is still
-    /// the one the walk pinned. States are never installed twice, so a state that is still in place
-    /// has been in place since it was pinned, which means every edge of the loop existed together
-    /// at the moment the last of them was read. That is a cycle. It compares state objects and not
-    /// the fallback contexts they point at, because a walk reading each edge at its own time
-    /// follows a path through time rather than a topology at an instant, and a sequence of
-    /// rewirings that is acyclic throughout can produce a repeat that never existed as a cycle.
+    /// Reports whether every context on the candidate loop still holds the state the walk pinned.
+    /// A state is never installed twice, so one still in place has been in place since it was
+    /// pinned, and every edge of the loop therefore existed at the same moment. That is a cycle.
+    /// Comparing states rather than the fallback contexts they point at is what makes this exact:
+    /// a walk reads each edge at its own time, so a sequence of rewirings that is acyclic
+    /// throughout can otherwise produce a repeat that never was a cycle.
     /// </summary>
     private static bool DelegationLoopStillClosed(List<DelegationHop> path, InterceptorSubjectContext repeated)
     {
@@ -952,9 +933,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
         private Delegate? _methodInvocationFunction;
 
-        // Indexed by PropertyTypeIndex, grown by replacing the array. Only the context a chain ends
-        // on ever fills these, because everything above it resolves to that context, so they exist
-        // on a handful of contexts rather than on every subject.
+        // Indexed by PropertyTypeIndex, grown by replacing the array. Only a context a chain ends
+        // on ever fills these, because everything above it resolves to that context, so a graph of
+        // delegating subjects has as many arrays as it has contexts that answer.
         private Delegate?[]? _readFunctions;
         private Delegate?[]? _writeFunctions;
 
@@ -1033,11 +1014,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Delegate? TryGetFunction(ref Delegate?[]? functions, int propertyTypeIndex)
         {
-            // The element is read plainly rather than through Volatile.Read, which would take a
-            // reference into the array and make the JIT emit the array element address helper on
-            // the hot path. The acquire read of the array itself already orders this load after it,
-            // and a store into the array is an interlocked one, so the only thing this can miss is
-            // an entry stored just now, which costs the caller one rebuild.
+            // Read plainly rather than through Volatile.Read, which takes a reference into the
+            // array and emits the element address helper on the hot path. The acquire read of the
+            // array orders this load after it, so the only thing this can miss is an entry stored
+            // just now, which costs the caller one rebuild.
             var current = Volatile.Read(ref functions);
             return current is not null && propertyTypeIndex < current.Length
                 ? current[propertyTypeIndex]
@@ -1045,10 +1025,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         /// <summary>
-        /// Stores a compiled chain, growing the array when the index is beyond it. A store that is
-        /// lost to a concurrent growth only costs the next caller one recompilation, which is what
-        /// a caller that loses the race already does: it invokes the chain it built itself rather
-        /// than the one that won.
+        /// Stores a compiled chain, growing the array when the index is beyond it. A store lost to
+        /// a concurrent growth costs the next caller one recompilation, which is what a caller that
+        /// loses the race already does: it invokes the chain it built rather than the one that won.
         /// </summary>
         private static void SetFunction(ref Delegate?[]? functions, int propertyTypeIndex, Delegate function)
         {
