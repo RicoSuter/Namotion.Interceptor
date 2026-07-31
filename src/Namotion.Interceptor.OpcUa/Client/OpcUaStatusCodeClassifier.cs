@@ -90,11 +90,8 @@ internal static class OpcUaStatusCodeClassifier
     /// True iff the <see cref="ServiceResultException"/> indicates the server rejected
     /// the batch size rather than the operation itself.
     /// </summary>
-    public static bool IsBatchTooLarge(ServiceResultException exception) => exception.StatusCode switch
-    {
-        StatusCodes.BadTooManyOperations => true,
-        StatusCodes.BadEncodingLimitsExceeded => true,
-        StatusCodes.BadResponseTooLarge => true,
-        _ => false,
-    };
+    public static bool IsBatchTooLarge(ServiceResultException exception) =>
+        exception.StatusCode is StatusCodes.BadTooManyOperations
+            or StatusCodes.BadEncodingLimitsExceeded
+            or StatusCodes.BadResponseTooLarge;
 }

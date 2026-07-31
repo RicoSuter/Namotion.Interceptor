@@ -234,36 +234,45 @@ internal class SubscriptionManager : IAsyncDisposable
             throw;
         }
 
-        if (changes.Count > 0)
-        {
-            _source.IncomingThroughput.Add(changes.Count);
+        ApplyChanges(changes, receivedTimestamp);
+    }
 
-            // Pool item returned inside callback. Safe because ApplyUpdate never throws:
-            // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
-            var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);
-            _propertyWriter.Write(state, static s =>
-            {
-                for (var i = 0; i < s.changes.Count; i++)
-                {
-                    var change = s.changes[i];
-                    try
-                    {
-                        change.Property.SetValueFromSource(s.source, change.Timestamp, s.receivedTimestamp, change.Value);
-                    }
-                    catch (Exception e)
-                    {
-                        s.logger.LogError(e, "Failed to apply change for property {PropertyName}.", change.Property.Name);
-                    }
-                }
-
-                s.changes.Clear();
-                ChangesPool.Return(s.changes);
-            });
-        }
-        else
+    /// <summary>
+    /// Writes a batch of property updates through the property writer and returns the pooled
+    /// list, whether or not the batch was empty. A single property write that throws is logged
+    /// and the remaining changes in the batch still apply.
+    /// </summary>
+    private void ApplyChanges(List<PropertyUpdate> changes, DateTimeOffset receivedTimestamp)
+    {
+        if (changes.Count == 0)
         {
             ChangesPool.Return(changes);
+            return;
         }
+
+        _source.IncomingThroughput.Add(changes.Count);
+
+        // Pool item returned inside callback. Safe because ApplyUpdate never throws:
+        // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
+        var state = (source: _source, receivedTimestamp, changes, logger: _logger);
+        _propertyWriter.Write(state, static s =>
+        {
+            for (var i = 0; i < s.changes.Count; i++)
+            {
+                var change = s.changes[i];
+                try
+                {
+                    change.Property.SetValueFromSource(s.source, change.Timestamp, s.receivedTimestamp, change.Value);
+                }
+                catch (Exception e)
+                {
+                    s.logger.LogError(e, "Failed to apply change for property {PropertyName}.", change.Property.Name);
+                }
+            }
+
+            s.changes.Clear();
+            ChangesPool.Return(s.changes);
+        });
     }
 
     /// <summary>
@@ -566,11 +575,10 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Applies a single data change for the given client handle through the property writer,
-    /// mirroring the per-item logic of OnFastDataChange. No-ops when gated or shutting down,
-    /// and when the handle is not in the monitored items dictionary.
-    /// Intended as a unit-testable seam: it exercises the same gate flag as OnFastDataChange
-    /// without requiring a live OPC UA SDK Subscription.
+    /// Applies a single data change for the given client handle. No-ops when gated or shutting
+    /// down, and when the handle is not in the monitored items dictionary. Intended as a
+    /// unit-testable seam: it runs the same gate check and the same <see cref="ApplyChanges"/>
+    /// write path as the live callback, without requiring an OPC UA SDK Subscription.
     /// </summary>
     internal void ApplyDataChange(uint clientHandle, DateTimeOffset timestamp, object? value)
     {
@@ -584,20 +592,15 @@ internal class SubscriptionManager : IAsyncDisposable
             return;
         }
 
-        var receivedTimestamp = DateTimeOffset.UtcNow;
-        var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, property);
-        var state = (source: _source, property, timestamp, receivedTimestamp, convertedValue, logger: _logger);
-        _propertyWriter.Write(state, static s =>
+        var changes = ChangesPool.Rent();
+        changes.Add(new PropertyUpdate
         {
-            try
-            {
-                s.property.SetValueFromSource(s.source, s.timestamp, s.receivedTimestamp, s.convertedValue);
-            }
-            catch (Exception e)
-            {
-                s.logger.LogError(e, "Failed to apply change for property {PropertyName}.", s.property.Name);
-            }
+            Property = property,
+            Value = _configuration.ValueConverter.ConvertToPropertyValue(value, property),
+            Timestamp = timestamp
         });
+
+        ApplyChanges(changes, DateTimeOffset.UtcNow);
     }
 
     internal bool AreCallbacksEnabledForTesting => _callbacksEnabled;
