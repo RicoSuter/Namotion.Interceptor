@@ -913,13 +913,13 @@ Following Task 2's findings, extend chain construction so the compiled terminal 
 In each of the two lock bodies in `WriteInterceptorFactory.cs`, **before** `innerWriteValue(...)`:
 
 ```csharp
-                    var revision = SubjectRevisionCounter.Next(context.Property.Subject);
+                    var revision = ++context.Executor.Revision;
                     context.Revision = revision;
 
-                    // Ordered delivery requires an executor (the gate's home); other subjects still
-                    // get the revision label above.
+                    // The executor is on the write context, so there is no lookup and no subject that
+                    // can miss out: every committed write gets the revision label above, and the marker
+                    // below only decides whether slots are also reserved.
                     if (context.PublisherPresent &&
-                        context.Property.Subject.Context is InterceptorExecutor executor &&
                         context.ReservationRecord is { } record)
                     {
                         for (var r = 0; r < registries.Length; r++)
@@ -931,8 +931,8 @@ In each of the two lock bodies in `WriteInterceptorFactory.cs`, **before** `inne
                             }
                         }
 
-                        if (Volatile.Read(ref executor.OrderedPropertyListenerCount) != 0 &&
-                            OrderedPropertyIndex.TryGet(context.Property, out var listeners))
+                        if (Volatile.Read(ref context.Executor.OrderedPropertyListenerCount) != 0 &&
+                            OrderedPropertyIndex.TryGet(property, out var listeners))
                         {
                             for (var l = 0; l < listeners!.Length; l++)
                             {
@@ -941,11 +941,13 @@ In each of the two lock bodies in `WriteInterceptorFactory.cs`, **before** `inne
                         }
                     }
 
-                    innerWriteValue(context.Property.Subject, context.NewValue);
+                    innerWriteValue(subject, context.NewValue);
                     context.IsWritten = true;
 ```
 
-Remove the Phase 1 `context.Revision = ...` line that sat after `IsWritten`, since the revision is now assigned above.
+Both terminals already hoist `var property = context.Property;` and `var subject = property.Subject;` above the lock, so use those locals rather than re-reading `context.Property`, which is a struct copy the JIT cannot fold across the opaque `innerWriteValue` call.
+
+Remove the Phase 1 `context.Revision = ...` line and its `Debug.Assert` that sat after `IsWritten`, since the revision is now assigned above. Keep the assert, moved up next to the new increment: it is what pins the executor-owns-subject pairing the plain increment depends on.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -955,7 +957,7 @@ Expected: PASS.
 - [ ] **Step 7: Run the Phase 1 revision tests to confirm no regression**
 
 Run: `dotnet test src/Namotion.Interceptor.Tests src/Namotion.Interceptor.Tracking.Tests`
-Expected: PASS, including `SubjectRevisionCounterTests` and `PropertyChangeRevisionTests` from Phase 1.
+Expected: PASS, including `CommitRevisionTests` and `PropertyChangeRevisionTests` from Phase 1.
 
 - [ ] **Step 8: Commit**
 
