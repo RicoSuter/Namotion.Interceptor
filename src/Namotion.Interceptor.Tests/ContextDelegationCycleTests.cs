@@ -488,6 +488,72 @@ public class ContextDelegationCycleTests
             "delegation cycle on a graph that is acyclic at every instant.");
     }
 
+    /// <summary>
+    /// A context reached over the short branch of a diamond gets its final state while the long
+    /// branch is still waiting to be invalidated. Anything the collecting walk believes about the
+    /// long branch during that window is cached on a state that nothing invalidates again, so it
+    /// has to be true of the final graph. This fails against a walk that trusts the end of a chain
+    /// recorded on a state it did not re-read: the record still names a context that is a perfectly
+    /// valid place to stop, it is just no longer the one that chain leads to.
+    /// </summary>
+    [Fact]
+    public async Task WhenChainIsRewiredBelowADiamond_ThenTheCollectedServicesMatchTheFinalGraph()
+    {
+        // The long branch decides how many invalidations happen between the collecting context
+        // getting its final state and the branch head losing what it recorded, so it is what makes
+        // the window wide enough to hit.
+        const int BranchLength = 50;
+        const int Iterations = 400;
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            // Arrange
+            var terminal = InterceptorSubjectContext.Create();
+            terminal.AddService(new MarkerService());
+
+            var middle = InterceptorSubjectContext.Create();
+            middle.AddFallbackContext(terminal);
+
+            var longBranch = middle;
+            for (var index = 0; index < BranchLength; index++)
+            {
+                var context = InterceptorSubjectContext.Create();
+                context.AddFallbackContext(longBranch);
+                longBranch = context;
+            }
+
+            var shortBranch = InterceptorSubjectContext.Create();
+            shortBranch.AddFallbackContext(middle);
+
+            var collecting = InterceptorSubjectContext.Create();
+            collecting.AddFallbackContext(longBranch);
+            collecting.AddFallbackContext(shortBranch);
+
+            // Resolving the branch head is what records where its chain ends, on every context of
+            // the branch. Without that there is nothing stale to trust later.
+            Assert.Single(longBranch.GetServices<MarkerService>());
+
+            var stop = false;
+            var reader = Task.Factory.StartNew(() =>
+            {
+                while (!Volatile.Read(ref stop))
+                {
+                    collecting.GetServices<MarkerService>();
+                }
+            }, TaskCreationOptions.LongRunning);
+
+            // Act: the terminal leaves the graph, so nothing resolves a service any more.
+            middle.RemoveFallbackContext(terminal);
+            Volatile.Write(ref stop, true);
+            await reader;
+
+            // Assert
+            Assert.True(collecting.GetServices<MarkerService>().IsEmpty,
+                $"The collecting context still resolves a service of a context the graph no longer reaches, " +
+                $"cached on a state that nothing invalidates again (iteration {iteration}).");
+        }
+    }
+
     private sealed class MarkerService;
 
     private sealed class CountingWriteInterceptor : IWriteInterceptor
