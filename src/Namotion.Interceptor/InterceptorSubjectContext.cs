@@ -344,7 +344,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// loop. Mutators serialize on the lock, so none can lose another mutator's topology. The
     /// only lock-free writer is the invalidation CAS, which never changes topology; the state
     /// published here carries fresh caches, so overwriting a concurrent invalidation preserves
-    /// its intent.
+    /// its intent. When such an overwrite defeats an invalidation CAS, the freshness of later
+    /// cache fills rests on the full fences of Monitor.Exit and Interlocked rather than on a
+    /// formal happens-before edge, which holds on every platform .NET runs on.
     /// </summary>
     private void PublishState(ContextState state)
     {
