@@ -1,3 +1,4 @@
+using System.Reflection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
@@ -60,6 +61,7 @@ public class ContextConcurrencyFuzzTests
         var deepChains = 0;
         var rejectedQueries = 0;
         var maximumDepth = 0;
+        var checkedCaches = 0;
 
         for (var round = 0; round < Rounds; round++)
         {
@@ -88,6 +90,7 @@ public class ContextConcurrencyFuzzTests
             // Assert
             AssertResolutionMatchesTopology(topology, roundSeed);
             AssertInterceptionMatchesTopology(topology, roundSeed);
+            checkedCaches += AssertResolvedTerminalsMatchTopology(topology, roundSeed);
 
             foreach (var node in topology.Nodes)
             {
@@ -116,6 +119,70 @@ public class ContextConcurrencyFuzzTests
         Assert.True(rejectedQueries > 0,
             "No final topology contained a context whose delegation chain is a cycle, so the corpus does not " +
             "cover the resolution that raises instead of returning services.");
+
+        // The cache oracle skips a context whose chain was never walked, so without this it would
+        // pass a run in which it never compared anything at all.
+        Assert.True(checkedCaches > 0,
+            "No context ended a round with a resolved delegation chain in its cache, so the oracle for that " +
+            "cache compared nothing.");
+    }
+
+    private static readonly FieldInfo StateField = typeof(InterceptorSubjectContext)
+        .GetField("_state", BindingFlags.NonPublic | BindingFlags.Instance)
+        ?? throw new InvalidOperationException("InterceptorSubjectContext._state was renamed, this oracle needs updating.");
+
+    private static readonly FieldInfo ResolvedTerminalField = typeof(InterceptorSubjectContext)
+        .GetNestedType("ContextState", BindingFlags.NonPublic)
+        ?.GetField("_resolvedTerminal", BindingFlags.NonPublic | BindingFlags.Instance)
+        ?? throw new InvalidOperationException("ContextState._resolvedTerminal was renamed, this oracle needs updating.");
+
+    private static readonly object CyclicDelegationChain = typeof(InterceptorSubjectContext)
+        .GetField("CyclicDelegationChain", BindingFlags.NonPublic | BindingFlags.Static)
+        ?.GetValue(null)
+        ?? throw new InvalidOperationException("InterceptorSubjectContext.CyclicDelegationChain was renamed, this oracle needs updating.");
+
+    /// <summary>
+    /// The oracle for the resolved chain cache itself, rather than for what it produces. The two
+    /// oracles above only see a wrong cached context when it happens to resolve different services,
+    /// so a chain cached against a context that carries the same services would pass them while
+    /// being stale. This compares the cache of every context against the final topology directly.
+    ///
+    /// A cache that is still empty is always legal, since nothing forces a chain to be walked. A
+    /// cache that holds something has to agree exactly: the context the chain ends on, or the mark
+    /// that it runs in a circle. It may hold something only if the state carrying it was installed
+    /// after the last change below it, because a change replaces the state of every context above
+    /// it, so the walk that filled it saw the final topology.
+    /// </summary>
+    private static int AssertResolvedTerminalsMatchTopology(Topology topology, int roundSeed)
+    {
+        var checkedCaches = 0;
+        foreach (var node in topology.Nodes)
+        {
+            var cached = ResolvedTerminalField.GetValue(StateField.GetValue(node.Context));
+            if (cached is null)
+            {
+                continue;
+            }
+
+            checkedCaches++;
+
+            var depth = topology.DelegationDepth(node);
+            if (depth < 0)
+            {
+                Assert.True(ReferenceEquals(cached, CyclicDelegationChain),
+                    $"Context {node.Name} resolves through a delegation cycle in the final topology but its cache " +
+                    $"holds a context to resolve through. {topology.Describe(roundSeed)}");
+                continue;
+            }
+
+            Assert.False(ReferenceEquals(cached, CyclicDelegationChain),
+                $"Context {node.Name} is marked as running in a circle but its chain ends after {depth} hops in " +
+                $"the final topology. {topology.Describe(roundSeed)}");
+
+            Assert.Same(topology.ResolveTerminal(node).Context, cached);
+        }
+
+        return checkedCaches;
     }
 
     private static void AssertResolutionMatchesTopology(Topology topology, int roundSeed)
@@ -648,6 +715,21 @@ public class ContextConcurrencyFuzzTests
         internal bool RejectsQuery(ContextNode node)
         {
             return DelegationDepth(node) < 0;
+        }
+
+        /// <summary>
+        /// The context that answers for the given one, which is the end of its delegation chain.
+        /// Only defined for a chain that does not run in a circle.
+        /// </summary>
+        internal ContextNode ResolveTerminal(ContextNode node)
+        {
+            var current = node;
+            while (DelegationTarget(current) is { } target)
+            {
+                current = target;
+            }
+
+            return current;
         }
 
         internal string Describe(int roundSeed)

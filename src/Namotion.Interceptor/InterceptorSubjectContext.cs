@@ -33,6 +33,21 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // the verdict is reached once per state instead of once per query.
     private static readonly object CyclicDelegationChain = new();
 
+    private static int _lastPropertyTypeIndex = -1;
+
+    /// <summary>
+    /// A dense index per intercepted property type, so that the compiled chain of a property access
+    /// is found by indexing an array instead of hashing a <see cref="Type"/>. The index is a static
+    /// of a generic type, so it is resolved once per property type and folds into the call site.
+    /// Handing them out process wide rather than per context is what keeps it a plain array read;
+    /// the cost is that an array is as long as the largest index its context has seen, which is
+    /// bounded by the number of distinct property types in the process.
+    /// </summary>
+    private static class PropertyTypeIndex<TProperty>
+    {
+        internal static readonly int Value = Interlocked.Increment(ref _lastPropertyTypeIndex);
+    }
+
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _invalidationVisited;
 
@@ -428,7 +443,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadFunc<TProperty> GetReadInterceptorFunction<TProperty>(ContextState state)
     {
-        if (state.GetReadFunctions().TryGetValue(typeof(TProperty), out var cached))
+        var cached = state.TryGetReadFunction(PropertyTypeIndex<TProperty>.Value);
+        if (cached is not null)
         {
             return (ReadFunc<TProperty>)cached;
         }
@@ -443,14 +459,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // that misses an interceptor.
         var readInterceptors = GetServicesFromState<IReadInterceptor>(state);
         var function = ReadInterceptorFactory<TProperty>.Create(readInterceptors);
-        state.GetReadFunctions().TryAdd(typeof(TProperty), function);
+        state.SetReadFunction(PropertyTypeIndex<TProperty>.Value, function);
         return function;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private WriteAction<TProperty> GetWriteInterceptorFunction<TProperty>(ContextState state)
     {
-        if (state.GetWriteFunctions().TryGetValue(typeof(TProperty), out var cached))
+        var cached = state.TryGetWriteFunction(PropertyTypeIndex<TProperty>.Value);
+        if (cached is not null)
         {
             return (WriteAction<TProperty>)cached;
         }
@@ -462,7 +479,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         var writeInterceptors = GetServicesFromState<IWriteInterceptor>(state);
         var action = WriteInterceptorFactory<TProperty>.Create(writeInterceptors);
-        state.GetWriteFunctions().TryAdd(typeof(TProperty), action);
+        state.SetWriteFunction(PropertyTypeIndex<TProperty>.Value, action);
         return action;
     }
 
@@ -921,9 +938,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // use. A topology change publishes a new state, so a late insert from a concurrent
         // computation lands in the abandoned state and is never read again.
         private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
-        private ConcurrentDictionary<Type, Delegate>? _readFunctions;
-        private ConcurrentDictionary<Type, Delegate>? _writeFunctions;
         private Delegate? _methodInvocationFunction;
+
+        // Indexed by PropertyTypeIndex, grown by replacing the array. Only the context a chain ends
+        // on ever fills these, because everything above it resolves to that context, so they exist
+        // on a handful of contexts rather than on every subject.
+        private Delegate?[]? _readFunctions;
+        private Delegate?[]? _writeFunctions;
 
         // The context this state's delegation chain ends on, or CyclicDelegationChain when that
         // chain runs in a circle and nothing resolves. Null until the chain is first walked. A
@@ -976,27 +997,62 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal ConcurrentDictionary<Type, Delegate> GetReadFunctions()
+        internal Delegate? TryGetReadFunction(int propertyTypeIndex)
         {
-            return Volatile.Read(ref _readFunctions) ?? InitializeReadFunctions();
+            return TryGetFunction(ref _readFunctions, propertyTypeIndex);
         }
 
-        private ConcurrentDictionary<Type, Delegate> InitializeReadFunctions()
+        internal void SetReadFunction(int propertyTypeIndex, Delegate function)
         {
-            var created = new ConcurrentDictionary<Type, Delegate>();
-            return Interlocked.CompareExchange(ref _readFunctions, created, null) ?? created;
+            SetFunction(ref _readFunctions, propertyTypeIndex, function);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal ConcurrentDictionary<Type, Delegate> GetWriteFunctions()
+        internal Delegate? TryGetWriteFunction(int propertyTypeIndex)
         {
-            return Volatile.Read(ref _writeFunctions) ?? InitializeWriteFunctions();
+            return TryGetFunction(ref _writeFunctions, propertyTypeIndex);
         }
 
-        private ConcurrentDictionary<Type, Delegate> InitializeWriteFunctions()
+        internal void SetWriteFunction(int propertyTypeIndex, Delegate function)
         {
-            var created = new ConcurrentDictionary<Type, Delegate>();
-            return Interlocked.CompareExchange(ref _writeFunctions, created, null) ?? created;
+            SetFunction(ref _writeFunctions, propertyTypeIndex, function);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Delegate? TryGetFunction(ref Delegate?[]? functions, int propertyTypeIndex)
+        {
+            var current = Volatile.Read(ref functions);
+            return current is not null && propertyTypeIndex < current.Length
+                ? Volatile.Read(ref current[propertyTypeIndex])
+                : null;
+        }
+
+        /// <summary>
+        /// Stores a compiled chain, growing the array when the index is beyond it. A store that is
+        /// lost to a concurrent growth only costs the next caller one recompilation, which is what
+        /// a caller that loses the race already does: it invokes the chain it built itself rather
+        /// than the one that won.
+        /// </summary>
+        private static void SetFunction(ref Delegate?[]? functions, int propertyTypeIndex, Delegate function)
+        {
+            while (true)
+            {
+                var current = Volatile.Read(ref functions);
+                if (current is not null && propertyTypeIndex < current.Length)
+                {
+                    Interlocked.CompareExchange(ref current[propertyTypeIndex], function, null);
+                    return;
+                }
+
+                var grown = new Delegate?[propertyTypeIndex + 1];
+                current?.CopyTo(grown, 0);
+                grown[propertyTypeIndex] = function;
+
+                if (ReferenceEquals(Interlocked.CompareExchange(ref functions, grown, current), current))
+                {
+                    return;
+                }
+            }
         }
 
         internal Delegate SetMethodInvocationFunction(Delegate function)
