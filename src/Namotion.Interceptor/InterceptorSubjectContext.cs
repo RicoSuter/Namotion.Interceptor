@@ -346,17 +346,24 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// R2: mutators publish with one volatile write under <see cref="_mutationLock"/>, no CAS
-    /// loop. Mutators serialize on the lock, so none can lose another mutator's topology. The
-    /// only lock-free writer is the invalidation CAS, which never changes topology; the state
-    /// published here carries fresh caches, so overwriting a concurrent invalidation preserves
-    /// its intent. When such an overwrite defeats an invalidation CAS, the freshness of later
-    /// cache fills rests on the full fences of Monitor.Exit and Interlocked rather than on a
-    /// formal happens-before edge, which holds on every platform .NET runs on.
+    /// R2: mutators publish under <see cref="_mutationLock"/>, no CAS loop. Mutators serialize on
+    /// the lock, so none can lose another mutator's topology. The only lock-free writer is the
+    /// invalidation CAS, which never changes topology; the state published here carries fresh
+    /// caches, so overwriting a concurrent invalidation preserves its intent.
+    ///
+    /// The publish is an interlocked exchange rather than a volatile write because the publisher
+    /// then reads the using sets and other contexts' states to drive the invalidation walk, and
+    /// those reads must not be reordered before it. A release store plus Monitor.Exit does not
+    /// order a later load: the memory model defines both as release-only, and CoreCLR implements
+    /// Monitor.Exit release-only on Windows ARM64 before .NET 10, where an acquire load may then
+    /// be satisfied from before the store. The consequence would be an invalidation skipped
+    /// against a stale using set while the current state keeps accumulating cache fills computed
+    /// from pre-mutation topology, leaving a compiled chain permanently missing an interceptor.
+    /// The full fence closes that without touching the query path.
     /// </summary>
     private void PublishState(ContextState state)
     {
-        Volatile.Write(ref _state, state);
+        Interlocked.Exchange(ref _state, state);
     }
 
     /// <summary>
