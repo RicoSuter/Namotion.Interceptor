@@ -30,8 +30,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // (see IInterceptorSubjectContext.TryAddService).
 
     // Stored in a state's resolved terminal slot when its chain was proven to be a cycle, so that
-    // the verdict is reached once per state instead of once per query.
-    private static readonly object CyclicDelegationChain = new();
+    // the verdict is reached once per state instead of once per query. It is a context rather than
+    // a plain marker object so that the slot can be typed, which keeps reading it on the hot path a
+    // null check: this class is not sealed, so testing the type of an object slot there compiles to
+    // a runtime helper call on every intercepted access. Its own state delegates to itself, so the
+    // check that a cached context does not itself delegate rejects it without comparing anything.
+    private static readonly InterceptorSubjectContext CyclicDelegationChain = CreateCyclicDelegationChain();
+
+    // Past this many hops the walk buffers are dropped instead of cleared. They are ThreadStatic
+    // and Clear() keeps the capacity, so walking one deep chain would otherwise retain an entry per
+    // hop on that thread for the rest of the process.
+    private const int MaximumRetainedDelegationBufferCapacity = 1024;
 
     private static int _lastPropertyTypeIndex = -1;
 
@@ -81,6 +90,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     public static InterceptorSubjectContext Create()
     {
         return new InterceptorSubjectContext();
+    }
+
+    private static InterceptorSubjectContext CreateCyclicDelegationChain()
+    {
+        var marker = new InterceptorSubjectContext();
+        marker.AddFallbackContext(marker);
+        return marker;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -270,12 +286,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static InterceptorSubjectContext ResolveDelegationTarget(InterceptorSubjectContext entry, ref ContextState state)
     {
-        if (state.ResolvedTerminal is InterceptorSubjectContext terminal)
+        var terminal = state.ResolvedTerminal;
+        if (terminal is not null)
         {
             var terminalState = Volatile.Read(ref terminal._state);
 
-            // The cached context can have started delegating since it was cached, which the walk
-            // below then sorts out. Everything else stays out of line.
+            // Fails for a context that started delegating since it was cached, and for the marker
+            // of a cyclic chain, which delegates to itself. The walk below sorts both out.
             if (terminalState.DelegationTarget is null)
             {
                 state = terminalState;
@@ -326,16 +343,16 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                         throw CreateDelegationCycleException();
                     }
 
-                    if (resolvedTerminal is InterceptorSubjectContext cachedTerminal)
+                    if (resolvedTerminal is not null)
                     {
-                        var cachedState = Volatile.Read(ref cachedTerminal._state);
+                        var cachedState = Volatile.Read(ref resolvedTerminal._state);
                         if (cachedState.DelegationTarget is null)
                         {
                             // The suffix from here on is already compressed, which is what keeps
                             // the total work of resolving a deep chain linear in its length.
-                            CacheResolvedTerminal(path, cachedTerminal);
+                            CacheResolvedTerminal(path, resolvedTerminal);
                             state = cachedState;
-                            return cachedTerminal;
+                            return resolvedTerminal;
                         }
 
                         // A cached context that has started delegating is a stale hint, not an
@@ -356,7 +373,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                     }
 
                     path.Add(new DelegationHop(current, currentState));
-                    current = currentState.DelegationTarget!;
+                    current = next;
                     currentState = Volatile.Read(ref current._state);
                 }
 
@@ -372,8 +389,21 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
         finally
         {
-            visited.Clear();
-            path.Clear();
+            // Dropped rather than cleared once they grew past the threshold: these are ThreadStatic
+            // and Clear() keeps the capacity, so one walk down a chain as deep as a large subject
+            // graph would hold an entry per hop on this thread for the rest of the process. The
+            // walk runs on every cold resolution now, not only on a suspected cycle, so that would
+            // be paid by every thread that ever touches a deep graph.
+            if (path.Capacity > MaximumRetainedDelegationBufferCapacity)
+            {
+                _delegationCycleVisited = null;
+                _delegationCyclePath = null;
+            }
+            else
+            {
+                visited.Clear();
+                path.Clear();
+            }
         }
     }
 
@@ -385,7 +415,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// abandoned, so a late write to it can never be read again. Filled once, because a state that
     /// already carries an answer was either given it by an equally valid walk or is abandoned.
     /// </summary>
-    private static void CacheResolvedTerminal(List<DelegationHop> path, object resolvedTerminal)
+    private static void CacheResolvedTerminal(List<DelegationHop> path, InterceptorSubjectContext resolvedTerminal)
     {
         for (var index = 0; index < path.Count; index++)
         {
@@ -625,21 +655,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// It terminates because every hop adds a context to <c>visited</c> and it stops as soon as one
     /// is already in it, so it takes at most one hop per context in the graph.
     ///
-    /// A chain that already knows where it ends is taken in one step instead of hop by hop, which
-    /// is what makes attaching to a deep graph cost one walk rather than one per level. Two things
-    /// that differ from the resolving walk in <see cref="ResolveDelegationTarget"/>:
-    ///
-    /// A chain that is known to be a cycle contributes nothing here and does NOT raise. Raising is
-    /// for a context asked to resolve its own services; a cycle merely reachable as one of several
-    /// fallback contexts is cut like any other repeat, which is what the hop by hop walk does and
-    /// what keeps a graph that mixes a cycle with a context that answers working.
-    ///
-    /// The context the chain ends on is still entered through <c>visited</c>. Skipping that check
-    /// would give it a second frame where two branches of a graph meet on the same chain, and the
-    /// duplicates of that frame are only removed against its own region. The contexts passed over
-    /// on the way are deliberately not marked: they contribute nothing, they never got a frame in
-    /// the hop by hop walk either, and anything reaching one of them later resolves to the same
-    /// end, which is then already visited.
+    /// Every hop re-reads the state of the context it moves to, and that is load bearing rather
+    /// than incidental: it must NOT take the shortcut that <see cref="ResolveDelegationTarget"/>
+    /// takes and trust the end of a chain recorded on a state. A state that is still installed
+    /// always describes the topology of its own context correctly, but the recorded end of its
+    /// chain is a statement about contexts further down that can be stale while the state carrying
+    /// it is current. The resolving walk may trust it because a delegating context has exactly one
+    /// fallback context and therefore sits in exactly one using set, so a change below it reaches
+    /// the contexts above it in order. This walk has no such order: a context with several fallback
+    /// contexts can be reached over a shorter branch and be given its final state while a longer
+    /// branch is still waiting to be invalidated, and a resolution that trusted a stale record
+    /// there would be cached on that final state and never corrected.
     /// </summary>
     private static bool TryEnterContext(
         InterceptorSubjectContext context,
@@ -657,20 +683,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 return true;
             }
 
-            var resolvedTerminal = enteredState.ResolvedTerminal;
-            if (resolvedTerminal is InterceptorSubjectContext terminal)
-            {
-                var terminalState = Volatile.Read(ref terminal._state);
-                if (terminalState.DelegationTarget is null)
-                {
-                    enteredState = terminalState;
-                    return visited.Add(terminal);
-                }
-            }
-            else if (resolvedTerminal is not null)
-            {
-                return false;
-            }
 
             context = delegationTarget;
             enteredState = Volatile.Read(ref delegationTarget._state);
@@ -950,7 +962,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // chain runs in a circle and nothing resolves. Null until the chain is first walked. A
         // context and never a state, because the state of a context is replaced whenever anything
         // below it changes, so a cached state would keep serving the caches of an abandoned one.
-        private object? _resolvedTerminal;
+        private InterceptorSubjectContext? _resolvedTerminal;
 
         internal ContextState(ImmutableArray<object> services, ImmutableArray<InterceptorSubjectContext> fallbackContexts)
         {
@@ -961,13 +973,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         internal bool IsEmpty => Services.IsEmpty && FallbackContexts.IsEmpty;
 
-        internal object? ResolvedTerminal
+        internal InterceptorSubjectContext? ResolvedTerminal
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => Volatile.Read(ref _resolvedTerminal);
         }
 
-        internal void TrySetResolvedTerminal(object resolvedTerminal)
+        internal void TrySetResolvedTerminal(InterceptorSubjectContext resolvedTerminal)
         {
             Interlocked.CompareExchange(ref _resolvedTerminal, resolvedTerminal, null);
         }
@@ -1021,9 +1033,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Delegate? TryGetFunction(ref Delegate?[]? functions, int propertyTypeIndex)
         {
+            // The element is read plainly rather than through Volatile.Read, which would take a
+            // reference into the array and make the JIT emit the array element address helper on
+            // the hot path. The acquire read of the array itself already orders this load after it,
+            // and a store into the array is an interlocked one, so the only thing this can miss is
+            // an entry stored just now, which costs the caller one rebuild.
             var current = Volatile.Read(ref functions);
             return current is not null && propertyTypeIndex < current.Length
-                ? Volatile.Read(ref current[propertyTypeIndex])
+                ? current[propertyTypeIndex]
                 : null;
         }
 
@@ -1044,7 +1061,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                     return;
                 }
 
-                var grown = new Delegate?[propertyTypeIndex + 1];
+                // Doubled rather than sized to the index: filling the indices of a process with
+                // many property types one at a time would otherwise reallocate once per type.
+                var grown = new Delegate?[Math.Max(propertyTypeIndex + 1, (current?.Length ?? 0) * 2)];
                 current?.CopyTo(grown, 0);
                 grown[propertyTypeIndex] = function;
 

@@ -104,6 +104,45 @@ public class ContextDeepGraphTests
         Assert.Equal(BranchCount + 2, deepestContext.GetServices<MarkerService>().Length);
     }
 
+    /// <summary>
+    /// The walk down a delegation chain records every context it passes so that it can note the end
+    /// of the chain on each of them. Those buffers are thread statics, and clearing a collection
+    /// keeps its capacity, so a thread that once walked a chain this deep would hold an entry per
+    /// level for the rest of the process. It costs nothing to notice while a chain of 100,000 is a
+    /// test fixture, and megabytes per thread in a host whose graph is that deep.
+    /// </summary>
+    [Fact]
+    public void WhenVeryDeepChainWasWalked_ThenTheWalkBuffersAreNotRetained()
+    {
+        // Arrange
+        var rootContext = InterceptorSubjectContext.Create();
+        rootContext.AddService(new MarkerService());
+
+        var deepestContext = rootContext;
+        for (var index = 0; index < ChainLength; index++)
+        {
+            var context = InterceptorSubjectContext.Create();
+            context.AddFallbackContext(deepestContext);
+            deepestContext = context;
+        }
+
+        // Act: one cold resolution, which walks all 100,000 levels.
+        Assert.Single(deepestContext.GetServices<MarkerService>());
+
+        // Assert: the buffers belong to this thread, so they are read from it.
+        Assert.Null(GetThreadStaticBuffer("_delegationCyclePath"));
+        Assert.Null(GetThreadStaticBuffer("_delegationCycleVisited"));
+    }
+
+    private static object? GetThreadStaticBuffer(string fieldName)
+    {
+        var field = typeof(InterceptorSubjectContext)
+            .GetField(fieldName, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        Assert.True(field is not null, $"{fieldName} was renamed, this test needs updating.");
+        return field!.GetValue(null);
+    }
+
     private sealed class MarkerService;
 
     private sealed class OtherMarkerService;

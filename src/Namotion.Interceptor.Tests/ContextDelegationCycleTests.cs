@@ -404,6 +404,90 @@ public class ContextDelegationCycleTests
         Assert.Same(marker, Assert.Single(services));
     }
 
+    /// <summary>
+    /// A graph that is acyclic at every single instant must never be reported as a cycle. The walk
+    /// reads one edge at a time, so it follows a path through time rather than a topology at an
+    /// instant, and a sequence of rewirings that is acyclic throughout can still make it arrive at
+    /// a context it already passed. That is why a repeat is confirmed before it is reported, and
+    /// this is the test that a confirmation which stops being strict enough would fail.
+    ///
+    /// The fuzzer cannot cover this: its workers tolerate the cycle exception, because which of its
+    /// contexts sit on a cycle changes with every edge they toggle. Here nothing is ever cyclic, so
+    /// any exception at all is a defect.
+    /// </summary>
+    [Fact]
+    public async Task WhenChainIsRewiredButNeverCyclic_ThenResolvingNeverReportsACycle()
+    {
+        // Arrange: a chain of delegating contexts ending on one that answers. The mutator moves the
+        // last hop between two contexts that both lead to the answering one, so every intermediate
+        // state of the graph is acyclic, while the walk keeps seeing edges change underneath it.
+        const int ChainLength = 400;
+
+        var answering = InterceptorSubjectContext.Create();
+        answering.AddService(new MarkerService());
+
+        var firstBridge = InterceptorSubjectContext.Create();
+        var secondBridge = InterceptorSubjectContext.Create();
+        firstBridge.AddFallbackContext(answering);
+        secondBridge.AddFallbackContext(answering);
+
+        var chain = new InterceptorSubjectContext[ChainLength];
+        var deepest = firstBridge;
+        for (var index = 0; index < ChainLength; index++)
+        {
+            chain[index] = InterceptorSubjectContext.Create();
+            chain[index].AddFallbackContext(deepest);
+            deepest = chain[index];
+        }
+
+        var entry = deepest;
+        var swing = chain[ChainLength / 2];
+        var stop = false;
+        var completedQueries = 0;
+        var falsePositives = 0;
+
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Factory.StartNew(() =>
+        {
+            while (!Volatile.Read(ref stop))
+            {
+                try
+                {
+                    entry.GetServices<MarkerService>();
+                }
+                catch (InvalidOperationException)
+                {
+                    Interlocked.Increment(ref falsePositives);
+                }
+
+                Interlocked.Increment(ref completedQueries);
+            }
+        }, TaskCreationOptions.LongRunning)).ToArray();
+
+        var mutator = Task.Factory.StartNew(() =>
+        {
+            while (!Volatile.Read(ref stop))
+            {
+                // Two fallback contexts for a moment, never zero, so the chain below always
+                // resolves and the graph is acyclic throughout.
+                swing.AddFallbackContext(secondBridge);
+                swing.RemoveFallbackContext(chain[(ChainLength / 2) - 1]);
+                swing.AddFallbackContext(chain[(ChainLength / 2) - 1]);
+                swing.RemoveFallbackContext(secondBridge);
+            }
+        }, TaskCreationOptions.LongRunning);
+
+        // Act
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        Volatile.Write(ref stop, true);
+        await Task.WhenAll([.. readers, mutator]);
+
+        // Assert
+        Assert.True(Volatile.Read(ref completedQueries) > 0, "No query completed at all.");
+        Assert.True(Volatile.Read(ref falsePositives) == 0,
+            $"{Volatile.Read(ref falsePositives)} of {Volatile.Read(ref completedQueries)} queries reported a " +
+            "delegation cycle on a graph that is acyclic at every instant.");
+    }
+
     private sealed class MarkerService;
 
     private sealed class CountingWriteInterceptor : IWriteInterceptor
