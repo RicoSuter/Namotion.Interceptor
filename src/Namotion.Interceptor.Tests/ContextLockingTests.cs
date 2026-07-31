@@ -49,5 +49,51 @@ public class ContextLockingTests
         }
     }
 
+    [Fact]
+    public async Task WhenTwoThreadsTryAddTheSameServiceOnDelegatingContext_ThenOnlyOneSucceeds()
+    {
+        // Arrange: a context that delegates all service lookups to a single fallback context,
+        // which is the state in which the delegation fast-path field is set.
+        const int ConcurrentAttempts = 3_000;
+        var violations = 0;
+
+        for (var attempt = 1; attempt <= ConcurrentAttempts; attempt++)
+        {
+            var fallbackContext = InterceptorSubjectContext.Create();
+            var context = InterceptorSubjectContext.Create();
+            context.AddFallbackContext(fallbackContext);
+
+            using var start = new Barrier(2);
+            var results = new bool[2];
+
+            var adders = new[]
+            {
+                Task.Factory.StartNew(() =>
+                {
+                    start.SignalAndWait();
+                    results[0] = context.TryAddService(() => new MarkerService(), _ => true);
+                }, TaskCreationOptions.LongRunning),
+                Task.Factory.StartNew(() =>
+                {
+                    start.SignalAndWait();
+                    results[1] = context.TryAddService(() => new MarkerService(), _ => true);
+                }, TaskCreationOptions.LongRunning)
+            };
+
+            // Act
+            await Task.WhenAll(adders);
+
+            // Assert
+            if (results[0] == results[1])
+            {
+                violations++;
+            }
+        }
+
+        Assert.True(violations == 0,
+            $"TryAddService was not atomic in {violations} of {ConcurrentAttempts} attempts: two concurrent " +
+            "calls for the same service type must have exactly one winner.");
+    }
+
     private sealed class MarkerService;
 }

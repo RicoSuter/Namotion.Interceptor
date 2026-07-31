@@ -111,20 +111,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             // Fast path: first fallback on a fresh context (no services, no caches) that no other
-            // context resolves through. There is nothing to invalidate, so only the delegation
-            // field has to be set. The used-by check is required because OnContextChanged is also
-            // the only thing that invalidates the contexts above, which would otherwise keep a
-            // compiled chain that never sees the newly attached fallback.
+            // context resolves through. There is nothing to invalidate, so updating the delegation
+            // field below is all that is needed. The used-by check is required because
+            // OnContextChanged is also the only thing that invalidates the contexts above, which
+            // would otherwise keep a compiled chain that never sees the newly attached fallback.
             requiresInvalidation =
                 isUsedByOtherContexts ||
                 _serviceCache is not null ||
                 _services.Count != 0 ||
                 _fallbackContexts.Count != 1;
 
-            if (!requiresInvalidation)
-            {
-                _noServicesSingleFallbackContext = contextImpl;
-            }
+            UpdateDelegationTarget();
         }
 
         if (requiresInvalidation)
@@ -152,6 +149,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             lock (UsedByContextsLock) { contextImpl._usedByContexts.Remove(this); }
+
+            UpdateDelegationTarget();
         }
 
         OnContextChanged();
@@ -170,6 +169,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             _services.Add(factory()!);
+
+            UpdateDelegationTarget();
         }
 
         OnContextChanged();
@@ -181,6 +182,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (_lock)
         {
             _services.Add(service!);
+
+            UpdateDelegationTarget();
         }
 
         OnContextChanged();
@@ -359,6 +362,20 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
+    /// Recomputes the delegation fast path from the current services and fallback contexts.
+    /// Must be called while holding <see cref="_lock"/>, as the last statement of every mutation of
+    /// <see cref="_services"/> or <see cref="_fallbackContexts"/>. The field is a cached derivation
+    /// of those two sets, so a lock holder that reads it (see <see cref="TryAddService{TService}"/>,
+    /// which relies on check and add being atomic) must never observe it disagreeing with them.
+    /// </summary>
+    private void UpdateDelegationTarget()
+    {
+        _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1
+            ? _fallbackContexts.First()
+            : null;
+    }
+
+    /// <summary>
     /// Invalidates the compiled chains of this context and of every context that resolves through
     /// it. Must be called without <see cref="_lock"/> held, see the lock ordering note at the top
     /// of the class: this walks upwards into the using contexts, while a service query walks
@@ -395,8 +412,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         InterceptorSubjectContext[]? parents = null;
         lock (_lock)
         {
-            _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1
-                ? _fallbackContexts.First() : null;
+            // The delegation fast path is not recomputed here: every mutation of _services and
+            // _fallbackContexts already updates it under this lock, and the upward walk below
+            // reaches contexts whose own services and fallback contexts did not change.
 
             // Avoid array allocation for common cases (0 or 1 parent)
             lock (UsedByContextsLock)
