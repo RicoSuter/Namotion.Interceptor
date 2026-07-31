@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
 using Namotion.Interceptor.Interceptors;
@@ -10,40 +9,38 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
-    // Lock ordering: _lock → UsedByContextsLock (never reverse).
+    // All topology (services, fallback contexts) and everything derived from it (delegation
+    // target, caches, compiled interceptor chains) lives in one immutable snapshot per context,
+    // published atomically. Queries take no locks (R1): a query pins one snapshot with a single
+    // volatile read and walks other contexts' snapshots the same way, so the downward service
+    // walk and the upward invalidation walk cannot form a lock cycle, including in cyclic
+    // fallback graphs.
     //
-    // Across contexts, _lock may only be nested downwards, meaning a context may hold its own
-    // _lock while taking the _lock of one of its fallback contexts (that is what a service query
-    // does while walking the fallback chain). It must never be nested upwards into a using
-    // context, because the two directions would then form a cycle. Practically that means
-    // OnContextChanged, which walks _usedByContexts, is always invoked after _lock is released.
-    // The remaining theoretical exposure is a fallback graph that contains a cycle, where the
-    // downward direction is no longer a partial order.
+    // Lock order: _mutationLock -> UsedByContextsLock, never reverse. UsedByContextsLock
+    // critical sections only touch a _usedByContexts set and never call into another context.
     //
     // TODO(perf): Static lock simplifies cross-instance ordering but may contend under many independent trees.
     private static readonly object UsedByContextsLock = new();
-
-    private const string OnContextChangedLockMessage =
-        "OnContextChanged walks upwards into the using contexts and must not be called while _lock is held.";
 
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _contextChangeVisited;
 
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _serviceQueryVisited;
-    
-    private readonly object _lock = new();
 
-    private ConcurrentDictionary<Type, Delegate>? _readInterceptorFunction;
-    private ConcurrentDictionary<Type, Delegate>? _writeInterceptorFunction;
-    private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
-    private Delegate? _methodInvocationFunction;
+    // Written via Volatile.Write and Interlocked.CompareExchange instead of being declared
+    // volatile, which would raise CS0420 when passed by ref to Interlocked under
+    // warnings-as-errors. Every context constructs its own initial state because caches live on
+    // the state: one shared empty instance would let unrelated contexts contaminate each other's
+    // caches.
+    private ContextState _state = new(ImmutableArray<object>.Empty, ImmutableArray<InterceptorSubjectContext>.Empty);
 
-    private readonly HashSet<object> _services = []; // TODO(perf): Keep null initially?
-    private readonly HashSet<InterceptorSubjectContext> _usedByContexts = [];
-    private readonly HashSet<InterceptorSubjectContext> _fallbackContexts = [];
+    // Serializes mutators; never held on a query path.
+    private readonly object _mutationLock = new();
 
-    private InterceptorSubjectContext? _noServicesSingleFallbackContext;
+    // Contexts that resolve through this context, lazily allocated because most contexts are
+    // never used as a fallback.
+    private HashSet<InterceptorSubjectContext>? _usedByContexts;
 
     public static InterceptorSubjectContext Create()
     {
@@ -53,144 +50,114 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ImmutableArray<TInterface> GetServices<TInterface>()
     {
-        // When there is only a fallback context and no services then we do not
-        // need to create an own cache and waste time creating and maintaining it.
-        // We can just redirect the call to the fallback context.
-        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
-        if (noServicesSingleFallbackContext is not null)
+        var state = Volatile.Read(ref _state);
+        var delegationTarget = state.DelegationTarget;
+        if (delegationTarget is not null)
         {
-            return noServicesSingleFallbackContext.GetServices<TInterface>();
+            // Delegation chains are one or two hops in practice. A pure delegation cycle (every
+            // context empty) would recurse forever, which matches the pre-redesign behavior.
+            return delegationTarget.GetServices<TInterface>();
         }
 
-        EnsureInitialized();
-        if (!_serviceCache!.TryGetValue(typeof(TInterface), out var services))
-        {
-            services = _serviceCache!.GetOrAdd(typeof(TInterface), _ =>
-            {
-                lock (_lock)
-                {
-                    return GetServicesWithoutCache<TInterface>().ToImmutableArray();
-                }
-            });
-        }
-
-        return (ImmutableArray<TInterface>)services;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void EnsureInitialized()
-    {
-        if (_serviceCache is null)
-        {
-            lock (_lock)
-            {
-                if (_serviceCache is null)
-                {
-                    _readInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
-                    _writeInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
-
-                    Volatile.Write(ref _serviceCache, new ConcurrentDictionary<Type, object>());
-                }
-            }
-        }
+        return GetServicesFromState<TInterface>(state);
     }
 
     public virtual bool AddFallbackContext(IInterceptorSubjectContext context)
     {
         var contextImpl = (InterceptorSubjectContext)context;
-        bool requiresInvalidation;
 
-        lock (_lock)
+        lock (_mutationLock)
         {
-            if (!_fallbackContexts.Add(contextImpl))
+            var state = Volatile.Read(ref _state);
+            if (state.FallbackContexts.Contains(contextImpl))
             {
                 return false;
             }
 
-            bool isUsedByOtherContexts;
+            // R4: register into the fallback BEFORE publishing so that its _usedByContexts is
+            // always a superset of the true using set. An extra entry only costs a spurious
+            // invalidation; a missing entry would leave a compiled chain above permanently stale.
             lock (UsedByContextsLock)
             {
-                contextImpl._usedByContexts.Add(this);
-                isUsedByOtherContexts = _usedByContexts.Count != 0;
+                (contextImpl._usedByContexts ??= []).Add(this);
             }
 
-            // Fast path: first fallback on a fresh context (no services, no caches) that no other
-            // context resolves through. There is nothing to invalidate, so updating the delegation
-            // field below is all that is needed. The used-by check is required because
-            // OnContextChanged is also the only thing that invalidates the contexts above, which
-            // would otherwise keep a compiled chain that never sees the newly attached fallback.
-            requiresInvalidation =
-                isUsedByOtherContexts ||
-                _serviceCache is not null ||
-                _services.Count != 0 ||
-                _fallbackContexts.Count != 1;
-
-            UpdateDelegationTarget();
+            PublishState(new ContextState(state.Services, state.FallbackContexts.Add(contextImpl)));
         }
 
-        if (requiresInvalidation)
-        {
-            OnContextChanged();
-        }
-
+        InvalidateUsingContexts();
         return true;
     }
 
     protected bool HasFallbackContext(IInterceptorSubjectContext context)
     {
-        lock (_lock)
-            return _fallbackContexts.Contains(context);
+        return context is InterceptorSubjectContext contextImpl &&
+               Volatile.Read(ref _state).FallbackContexts.Contains(contextImpl);
     }
 
     public virtual bool RemoveFallbackContext(IInterceptorSubjectContext context)
     {
         var contextImpl = (InterceptorSubjectContext)context;
-        lock (_lock)
+
+        lock (_mutationLock)
         {
-            if (!_fallbackContexts.Remove(contextImpl))
+            var state = Volatile.Read(ref _state);
+            var index = state.FallbackContexts.IndexOf(contextImpl);
+            if (index < 0)
             {
                 return false;
             }
 
-            lock (UsedByContextsLock) { contextImpl._usedByContexts.Remove(this); }
+            PublishState(new ContextState(state.Services, state.FallbackContexts.RemoveAt(index)));
 
-            UpdateDelegationTarget();
+            // R4: unregister from the fallback only AFTER publishing so that its _usedByContexts
+            // stays a superset of the true using set for the whole transition (see
+            // AddFallbackContext).
+            lock (UsedByContextsLock)
+            {
+                contextImpl._usedByContexts?.Remove(this);
+            }
         }
 
-        OnContextChanged();
+        InvalidateUsingContexts();
         return true;
     }
 
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
     {
-        lock (_lock)
+        lock (_mutationLock)
         {
-            // The lookup walks downwards into the fallback contexts and keeps the check and the
-            // add atomic against concurrent mutations of this context, as before.
-            if (GetServicesWithoutCache<TService>().Any(exists))
+            var state = Volatile.Read(ref _state);
+
+            // The lock-free walk keeps the check atomic against concurrent mutators of this
+            // context because they all serialize on _mutationLock.
+            if (ComputeServices<TService>(state).Any(exists))
             {
                 return false;
             }
 
-            _services.Add(factory()!);
+            var service = factory();
 
-            UpdateDelegationTarget();
+            // The factory may reenter this context (Monitor is reentrant) and publish a mutation,
+            // so re-read the state to not lose it. A factory registering the same service type
+            // into the same context is its own responsibility.
+            state = Volatile.Read(ref _state);
+            PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts));
         }
 
-        OnContextChanged();
+        InvalidateUsingContexts();
         return true;
     }
 
     public void AddService<TService>(TService service)
     {
-        lock (_lock)
+        lock (_mutationLock)
         {
-            _services.Add(service!);
-
-            UpdateDelegationTarget();
+            var state = Volatile.Read(ref _state);
+            PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts));
         }
 
-        OnContextChanged();
+        InvalidateUsingContexts();
     }
 
     public TInterface? TryGetService<TInterface>()
@@ -207,118 +174,141 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> readValue)
     {
-        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
-        if (noServicesSingleFallbackContext is not null)
+        var state = Volatile.Read(ref _state);
+        var delegationTarget = state.DelegationTarget;
+        if (delegationTarget is not null)
         {
-            return noServicesSingleFallbackContext.ExecuteInterceptedRead(ref context, readValue);
+            return delegationTarget.ExecuteInterceptedRead(ref context, readValue);
         }
 
-        EnsureInitialized();
-        var func = GetReadInterceptorFunction<TProperty>();
-        return func(ref context, readValue);
+        var function = GetReadInterceptorFunction<TProperty>(state);
+        return function(ref context, readValue);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
-        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
-        if (noServicesSingleFallbackContext is not null)
+        var state = Volatile.Read(ref _state);
+        var delegationTarget = state.DelegationTarget;
+        if (delegationTarget is not null)
         {
-            noServicesSingleFallbackContext.ExecuteInterceptedWrite(ref context, writeValue);
+            delegationTarget.ExecuteInterceptedWrite(ref context, writeValue);
             return;
         }
 
-        EnsureInitialized();
-        var action = GetWriteInterceptorFunction<TProperty>();
+        var action = GetWriteInterceptorFunction<TProperty>(state);
         action(ref context, writeValue);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal object? ExecuteInterceptedInvoke(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
-        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
-        if (noServicesSingleFallbackContext is not null)
+        var state = Volatile.Read(ref _state);
+        var delegationTarget = state.DelegationTarget;
+        if (delegationTarget is not null)
         {
-            return noServicesSingleFallbackContext.ExecuteInterceptedInvoke(ref context, invokeMethod);
+            return delegationTarget.ExecuteInterceptedInvoke(ref context, invokeMethod);
         }
 
-        EnsureInitialized();
-        var func = GetMethodInvocationFunction();
-        return func(ref context, invokeMethod);
+        var function = GetMethodInvocationFunction(state);
+        return function(ref context, invokeMethod);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ReadFunc<TProperty> GetReadInterceptorFunction<TProperty>()
+    private ReadFunc<TProperty> GetReadInterceptorFunction<TProperty>(ContextState state)
     {
-        if (_readInterceptorFunction!.TryGetValue(typeof(TProperty), out var cached))
+        if (state.GetReadFunctions().TryGetValue(typeof(TProperty), out var cached))
         {
             return (ReadFunc<TProperty>)cached;
         }
 
-        var readInterceptors = GetServices<IReadInterceptor>();
-        var func = ReadInterceptorFactory<TProperty>.Create(readInterceptors);
-        _readInterceptorFunction.TryAdd(typeof(TProperty), func);
-        return func;
+        return CreateReadInterceptorFunction<TProperty>(state);
+    }
+
+    private ReadFunc<TProperty> CreateReadInterceptorFunction<TProperty>(ContextState state)
+    {
+        // Services are resolved from the same snapshot that caches the compiled chain, so a
+        // topology change (which publishes a new state with fresh caches) can never keep a chain
+        // that misses an interceptor.
+        var readInterceptors = GetServicesFromState<IReadInterceptor>(state);
+        var function = ReadInterceptorFactory<TProperty>.Create(readInterceptors);
+        state.GetReadFunctions().TryAdd(typeof(TProperty), function);
+        return function;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private WriteAction<TProperty> GetWriteInterceptorFunction<TProperty>()
+    private WriteAction<TProperty> GetWriteInterceptorFunction<TProperty>(ContextState state)
     {
-        if (_writeInterceptorFunction!.TryGetValue(typeof(TProperty), out var cached))
+        if (state.GetWriteFunctions().TryGetValue(typeof(TProperty), out var cached))
         {
             return (WriteAction<TProperty>)cached;
         }
 
-        var writeInterceptors = GetServices<IWriteInterceptor>();
+        return CreateWriteInterceptorFunction<TProperty>(state);
+    }
+
+    private WriteAction<TProperty> CreateWriteInterceptorFunction<TProperty>(ContextState state)
+    {
+        var writeInterceptors = GetServicesFromState<IWriteInterceptor>(state);
         var action = WriteInterceptorFactory<TProperty>.Create(writeInterceptors);
-        _writeInterceptorFunction.TryAdd(typeof(TProperty), action);
+        state.GetWriteFunctions().TryAdd(typeof(TProperty), action);
         return action;
     }
 
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private InvokeFunc GetMethodInvocationFunction()
+    private InvokeFunc GetMethodInvocationFunction(ContextState state)
     {
-        if (_methodInvocationFunction is not null)
+        var cached = state.MethodInvocationFunction;
+        if (cached is not null)
         {
-            return (InvokeFunc)_methodInvocationFunction;
+            return (InvokeFunc)cached;
         }
 
-        lock (_lock)
-        {
-            if (_methodInvocationFunction is not null)
-            {
-                return (InvokeFunc)_methodInvocationFunction;
-            }
-
-            var methodInterceptors = GetServices<IMethodInterceptor>();
-            var func = MethodInvocationFactory.Create(methodInterceptors);
-            _methodInvocationFunction = func;
-            return func;
-        }
+        return CreateMethodInvocationFunction(state);
     }
 
-    private TInterface[] GetServicesWithoutCache<TInterface>()
+    private InvokeFunc CreateMethodInvocationFunction(ContextState state)
     {
-        // Fast path: single fallback, no local services - delegate to cached GetServices
-        var singleFallback = _noServicesSingleFallbackContext;
-        if (singleFallback is not null)
+        var methodInterceptors = GetServicesFromState<IMethodInterceptor>(state);
+        var function = MethodInvocationFactory.Create(methodInterceptors);
+
+        // The CAS winner is returned so that every caller invokes the same canonical chain.
+        return (InvokeFunc)state.SetMethodInvocationFunction(function);
+    }
+
+    /// <summary>
+    /// Resolves services from the given pinned snapshot, whose delegation target the caller has
+    /// already ruled out. The cache entry is computed from the same snapshot that owns the cache,
+    /// so a topology change (which publishes a new state) can never receive a stale entry.
+    /// </summary>
+    private ImmutableArray<TInterface> GetServicesFromState<TInterface>(ContextState state)
+    {
+        // Empty contexts skip cache creation entirely so that fresh contexts stay allocation-free.
+        if (state.IsEmpty)
         {
-            return [.. singleFallback.GetServices<TInterface>()];
+            return ImmutableArray<TInterface>.Empty;
         }
 
-        // Fast path: no services and no fallbacks - return empty (common for fresh contexts)
-        if (_services.Count == 0 && _fallbackContexts.Count == 0)
+        var serviceCache = state.GetServiceCache();
+        if (serviceCache.TryGetValue(typeof(TInterface), out var cachedServices))
         {
-            return [];
+            return (ImmutableArray<TInterface>)cachedServices;
         }
 
+        var services = ComputeServices<TInterface>(state);
+
+        // The two-argument GetOrAdd canonicalizes racing computations without a closure allocation.
+        return (ImmutableArray<TInterface>)serviceCache.GetOrAdd(typeof(TInterface), services);
+    }
+
+    private ImmutableArray<TInterface> ComputeServices<TInterface>(ContextState state)
+    {
         var visited = _serviceQueryVisited ??= [];
         try
         {
-            return GetServicesWithoutCache(typeof(TInterface), visited)
+            return CollectServices(typeof(TInterface), state, visited)
                 .OfType<TInterface>()
-                .ToArray();
+                .ToImmutableArray();
         }
         finally
         {
@@ -326,39 +316,23 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
-    private IEnumerable<object> GetServicesWithoutCache(Type type, HashSet<InterceptorSubjectContext> visited)
+    private IEnumerable<object> CollectServices(Type type, ContextState state, HashSet<InterceptorSubjectContext> visited)
     {
         if (!visited.Add(this))
         {
             return [];
         }
 
-        InterceptorSubjectContext? delegateTo = null;
-        InterceptorSubjectContext[] fallbacks = [];
-        object[] localServices = [];
-
-        lock (_lock)
+        var delegationTarget = state.DelegationTarget;
+        if (delegationTarget is not null)
         {
-            // Fast path: no local services, single fallback - just delegate
-            if (_services.Count == 0 && _fallbackContexts.Count == 1)
-            {
-                delegateTo = _fallbackContexts.First();
-            }
-            else
-            {
-                fallbacks = [.. _fallbackContexts];
-                localServices = _services.Where(type.IsInstanceOfType).ToArray();
-            }
+            return delegationTarget.CollectServices(type, Volatile.Read(ref delegationTarget._state), visited);
         }
 
-        // Recursive calls OUTSIDE the lock to prevent deadlock
-        if (delegateTo is not null)
-        {
-            return delegateTo.GetServicesWithoutCache(type, visited);
-        }
-
-        var services = localServices
-            .Concat(fallbacks.SelectMany(c => c.GetServicesWithoutCache(type, visited)))
+        var services = state.Services
+            .Where(type.IsInstanceOfType)
+            .Concat(state.FallbackContexts.SelectMany(
+                fallbackContext => fallbackContext.CollectServices(type, Volatile.Read(ref fallbackContext._state), visited)))
             .Distinct()
             .ToArray();
 
@@ -366,44 +340,38 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Recomputes the delegation fast path from the current services and fallback contexts.
-    /// Must be called while holding <see cref="_lock"/>, as the last statement of every mutation of
-    /// <see cref="_services"/> or <see cref="_fallbackContexts"/>. The field is a cached derivation
-    /// of those two sets, so a lock holder that reads it (see <see cref="TryAddService{TService}"/>,
-    /// which relies on check and add being atomic) must never observe it disagreeing with them.
+    /// R2: mutators publish with one volatile write under <see cref="_mutationLock"/>, no CAS
+    /// loop. Mutators serialize on the lock, so none can lose another mutator's topology. The
+    /// only lock-free writer is the invalidation CAS, which never changes topology; the state
+    /// published here carries fresh caches, so overwriting a concurrent invalidation preserves
+    /// its intent.
     /// </summary>
-    private void UpdateDelegationTarget()
+    private void PublishState(ContextState state)
     {
-        InterceptorSubjectContext? target = null;
-        if (_services.Count == 0 && _fallbackContexts.Count == 1)
-        {
-            // foreach binds the HashSet struct enumerator, First() would box it on every attach.
-            foreach (var fallbackContext in _fallbackContexts)
-            {
-                target = fallbackContext;
-                break;
-            }
-        }
-
-        _noServicesSingleFallbackContext = target;
+        Volatile.Write(ref _state, state);
     }
 
     /// <summary>
-    /// Invalidates the compiled chains of this context and of every context that resolves through
-    /// it. Must be called without <see cref="_lock"/> held, see the lock ordering note at the top
-    /// of the class: this walks upwards into the using contexts, while a service query walks
-    /// downwards into the fallback contexts, and holding _lock across the upward walk lets the two
-    /// directions deadlock.
+    /// R3: one unconditional CAS attempt. No early-out when caches look absent, because a reader
+    /// may be lazily creating a cache concurrently and skipping would let its insert survive the
+    /// change. No retry on failure, because every competing write also publishes cache-free
+    /// state, so the intent is satisfied either way.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void OnContextChanged()
+    private void InvalidateState()
     {
-        Debug.Assert(!Monitor.IsEntered(_lock), OnContextChangedLockMessage);
+        var current = Volatile.Read(ref _state);
+        Interlocked.CompareExchange(ref _state, current.WithoutCaches(), current);
+    }
 
-        var visited = _contextChangeVisited ??= new HashSet<InterceptorSubjectContext>();
+    private void InvalidateUsingContexts()
+    {
+        var visited = _contextChangeVisited ??= [];
         try
         {
-            OnContextChanged(visited);
+            // Self needs no invalidation here: the publish preceding this call already swapped
+            // in a cache-free state.
+            visited.Add(this);
+            InvalidateUsingContexts(visited);
         }
         finally
         {
@@ -411,56 +379,138 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
-    private void OnContextChanged(HashSet<InterceptorSubjectContext> visited)
+    private void InvalidateUsingContexts(HashSet<InterceptorSubjectContext> visited)
     {
-        Debug.Assert(!Monitor.IsEntered(_lock), OnContextChangedLockMessage);
+        // Snapshot under the lock, invalidate after release: calling into another context while
+        // holding UsedByContextsLock is forbidden by the lock order. The 0/1/many shapes avoid
+        // an array allocation in the common cases.
+        InterceptorSubjectContext? singleUsingContext = null;
+        InterceptorSubjectContext[]? usingContexts = null;
 
-        if (!visited.Add(this))
+        lock (UsedByContextsLock)
+        {
+            var usedByContexts = _usedByContexts;
+            if (usedByContexts is not null && usedByContexts.Count != 0)
+            {
+                if (usedByContexts.Count == 1)
+                {
+                    // foreach binds the HashSet struct enumerator, First() would box it.
+                    foreach (var usingContext in usedByContexts)
+                    {
+                        singleUsingContext = usingContext;
+                        break;
+                    }
+                }
+                else
+                {
+                    usingContexts = [.. usedByContexts];
+                }
+            }
+        }
+
+        if (singleUsingContext is not null)
+        {
+            InvalidateUsingContext(singleUsingContext, visited);
+        }
+        else if (usingContexts is not null)
+        {
+            foreach (var usingContext in usingContexts)
+            {
+                InvalidateUsingContext(usingContext, visited);
+            }
+        }
+    }
+
+    private static void InvalidateUsingContext(InterceptorSubjectContext usingContext, HashSet<InterceptorSubjectContext> visited)
+    {
+        if (!visited.Add(usingContext))
         {
             return;
         }
 
-        _serviceCache?.Clear();
-        _readInterceptorFunction?.Clear();
-        _writeInterceptorFunction?.Clear();
+        usingContext.InvalidateState();
+        usingContext.InvalidateUsingContexts(visited);
+    }
 
-        InterceptorSubjectContext? singleParent = null;
-        InterceptorSubjectContext[]? parents = null;
-        lock (_lock)
+    private sealed class ContextState
+    {
+        // Insertion order is kept and duplicate references are tolerated here; the Distinct()
+        // in the service walk preserves the previous HashSet storage semantics.
+        internal readonly ImmutableArray<object> Services;
+        internal readonly ImmutableArray<InterceptorSubjectContext> FallbackContexts;
+
+        // Derived in the constructor from the two fields above, so no reader can ever observe
+        // it disagreeing with them.
+        internal readonly InterceptorSubjectContext? DelegationTarget;
+
+        // Caches belong to the state that produced them and are created lazily via CAS on first
+        // use. A topology change publishes a new state, so a late insert from a concurrent
+        // computation lands in the abandoned state and is never read again.
+        private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
+        private ConcurrentDictionary<Type, Delegate>? _readFunctions;
+        private ConcurrentDictionary<Type, Delegate>? _writeFunctions;
+        private Delegate? _methodInvocationFunction;
+
+        internal ContextState(ImmutableArray<object> services, ImmutableArray<InterceptorSubjectContext> fallbackContexts)
         {
-            // Under the lock so that it cannot land after a concurrent GetMethodInvocationFunction
-            // has computed a chain from the pre-change services and is about to assign it.
-            _methodInvocationFunction = null;
-
-            // The delegation fast path is not recomputed here: every mutation of _services and
-            // _fallbackContexts already updates it under this lock, and the upward walk below
-            // reaches contexts whose own services and fallback contexts did not change.
-
-            // Avoid array allocation for common cases (0 or 1 parent)
-            lock (UsedByContextsLock)
-            {
-                var usedByCount = _usedByContexts.Count;
-                if (usedByCount == 1)
-                {
-                    singleParent = _usedByContexts.First();
-                }
-                else if (usedByCount > 1)
-                {
-                    parents = [.. _usedByContexts];
-                }
-            }
+            Services = services;
+            FallbackContexts = fallbackContexts;
+            DelegationTarget = services.IsEmpty && fallbackContexts.Length == 1 ? fallbackContexts[0] : null;
         }
 
-        if (singleParent is not null)
+        internal bool IsEmpty => Services.IsEmpty && FallbackContexts.IsEmpty;
+
+        internal Delegate? MethodInvocationFunction
         {
-            singleParent.OnContextChanged(visited);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Volatile.Read(ref _methodInvocationFunction);
         }
-        else if (parents is not null)
+
+        internal ContextState WithoutCaches()
         {
-            foreach (var parent in parents)
-            {
-                parent.OnContextChanged(visited);
-            }
+            return new ContextState(Services, FallbackContexts);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal ConcurrentDictionary<Type, object> GetServiceCache()
+        {
+            return Volatile.Read(ref _serviceCache) ?? InitializeServiceCache();
+        }
+
+        private ConcurrentDictionary<Type, object> InitializeServiceCache()
+        {
+            // The CAS keeps one canonical dictionary when two readers race the first use.
+            var created = new ConcurrentDictionary<Type, object>();
+            return Interlocked.CompareExchange(ref _serviceCache, created, null) ?? created;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal ConcurrentDictionary<Type, Delegate> GetReadFunctions()
+        {
+            return Volatile.Read(ref _readFunctions) ?? InitializeReadFunctions();
+        }
+
+        private ConcurrentDictionary<Type, Delegate> InitializeReadFunctions()
+        {
+            var created = new ConcurrentDictionary<Type, Delegate>();
+            return Interlocked.CompareExchange(ref _readFunctions, created, null) ?? created;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal ConcurrentDictionary<Type, Delegate> GetWriteFunctions()
+        {
+            return Volatile.Read(ref _writeFunctions) ?? InitializeWriteFunctions();
+        }
+
+        private ConcurrentDictionary<Type, Delegate> InitializeWriteFunctions()
+        {
+            var created = new ConcurrentDictionary<Type, Delegate>();
+            return Interlocked.CompareExchange(ref _writeFunctions, created, null) ?? created;
+        }
+
+        internal Delegate SetMethodInvocationFunction(Delegate function)
+        {
+            return Interlocked.CompareExchange(ref _methodInvocationFunction, function, null) ?? function;
         }
     }
 }

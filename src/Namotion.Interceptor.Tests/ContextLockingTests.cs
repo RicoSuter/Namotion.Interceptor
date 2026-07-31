@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Testing;
+
 namespace Namotion.Interceptor.Tests;
 
 public class ContextLockingTests
@@ -137,5 +139,153 @@ public class ContextLockingTests
             "calls for the same service type must have exactly one winner.");
     }
 
+    [Fact]
+    public async Task WhenServiceFactoryRegistersIntoSameContext_ThenNoDeadlockOccurs()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var added = false;
+
+        // Act: the factory reenters the mutation lock of the context it is registered into.
+        var work = Task.Run(() =>
+        {
+            added = context.TryAddService(
+                () =>
+                {
+                    context.AddService(new OtherMarkerService());
+                    return new MarkerService();
+                },
+                _ => true);
+        });
+
+        await AsyncTestHelpers.WaitUntilAsync(() => work.IsCompleted,
+            message: "TryAddService deadlocked while its factory mutated the same context");
+        await work;
+
+        // Assert
+        Assert.True(added);
+        Assert.Single(context.GetServices<MarkerService>());
+        Assert.Single(context.GetServices<OtherMarkerService>());
+    }
+
+    [Fact]
+    public async Task WhenFallbackGraphContainsCycle_ThenQueriesAndMutationsDoNotDeadlock()
+    {
+        // Arrange: both contexts keep an own service so that neither one purely delegates to
+        // the other, then the fallback graph is closed into a cycle.
+        const int AddedServicesPerContext = 100;
+
+        var contextA = InterceptorSubjectContext.Create();
+        var contextB = InterceptorSubjectContext.Create();
+        contextA.AddService(new MarkerService());
+        contextB.AddService(new MarkerService());
+        contextA.AddFallbackContext(contextB);
+        contextB.AddFallbackContext(contextA);
+
+        using var start = new ManualResetEventSlim(false);
+
+        Task StartWorker(Action work) => Task.Factory.StartNew(() =>
+        {
+            start.Wait();
+            work();
+        }, TaskCreationOptions.LongRunning);
+
+        var workers = new[]
+        {
+            StartWorker(() =>
+            {
+                for (var index = 0; index < 1_000; index++)
+                {
+                    _ = contextA.GetServices<MarkerService>();
+                }
+            }),
+            StartWorker(() =>
+            {
+                for (var index = 0; index < 1_000; index++)
+                {
+                    _ = contextB.GetServices<MarkerService>();
+                }
+            }),
+            StartWorker(() =>
+            {
+                for (var index = 0; index < AddedServicesPerContext; index++)
+                {
+                    contextA.AddService(new MarkerService());
+                }
+            }),
+            StartWorker(() =>
+            {
+                for (var index = 0; index < AddedServicesPerContext; index++)
+                {
+                    contextB.AddService(new MarkerService());
+                }
+            })
+        };
+
+        // Act
+        start.Set();
+        await AsyncTestHelpers.WaitUntilAsync(() => workers.All(worker => worker.IsCompleted),
+            message: "Queries or mutations on a cyclic fallback graph deadlocked");
+        await Task.WhenAll(workers);
+
+        // Assert: both contexts aggregate every service of the whole cycle once writes settled.
+        const int TotalServices = 2 + 2 * AddedServicesPerContext;
+        Assert.Equal(TotalServices, contextA.GetServices<MarkerService>().Length);
+        Assert.Equal(TotalServices, contextB.GetServices<MarkerService>().Length);
+    }
+
+    [Fact]
+    public async Task WhenServicesAreAddedConcurrentlyWithQueries_ThenQuiescentStateSeesAllServices()
+    {
+        // Arrange
+        const int WriterCount = 4;
+        const int ReaderCount = 4;
+        const int ServicesPerWriter = 50;
+
+        var context = InterceptorSubjectContext.Create();
+        using var start = new ManualResetEventSlim(false);
+        var activeWriters = WriterCount;
+
+        var writers = Enumerable.Range(0, WriterCount)
+            .Select(_ => Task.Factory.StartNew(() =>
+            {
+                start.Wait();
+                for (var index = 0; index < ServicesPerWriter; index++)
+                {
+                    context.AddService(new MarkerService());
+                }
+
+                Interlocked.Decrement(ref activeWriters);
+            }, TaskCreationOptions.LongRunning))
+            .ToArray();
+
+        var readers = Enumerable.Range(0, ReaderCount)
+            .Select(_ => Task.Factory.StartNew(() =>
+            {
+                start.Wait();
+
+                // Keeps refilling the service cache while writers invalidate it, so that a cache
+                // entry surviving a mutation would poison the final query below.
+                while (Volatile.Read(ref activeWriters) != 0)
+                {
+                    context.GetServices<MarkerService>();
+                }
+            }, TaskCreationOptions.LongRunning))
+            .ToArray();
+
+        var workers = writers.Concat(readers).ToArray();
+
+        // Act
+        start.Set();
+        await AsyncTestHelpers.WaitUntilAsync(() => workers.All(worker => worker.IsCompleted),
+            message: "Concurrent service additions and queries did not finish");
+        await Task.WhenAll(workers);
+
+        // Assert
+        Assert.Equal(WriterCount * ServicesPerWriter, context.GetServices<MarkerService>().Length);
+    }
+
     private sealed class MarkerService;
+
+    private sealed class OtherMarkerService;
 }
