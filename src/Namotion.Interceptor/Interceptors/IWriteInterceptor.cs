@@ -67,6 +67,10 @@ public struct PropertyWriteContext<TProperty>
     /// stabilized getter output. Stops <see cref="GetFinalValue"/> from re-invoking the getter,
     /// which would run user code at publish time and could return a value that never paired
     /// atomically with this change's old value.
+    ///
+    /// The published value is therefore <see cref="NewValue"/> as of publish time, not as of entry.
+    /// <see cref="NewValue"/> is publicly settable, so an interceptor that rewrites it on a derived
+    /// recalculation now changes what is published; the getter re-read used to mask such a rewrite.
     /// </summary>
     internal bool FinalValueIsNewValue;
 

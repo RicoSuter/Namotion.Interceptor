@@ -9,8 +9,12 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// <summary>
     /// Monotonic per-subject commit counter. Incremented by the terminal write while the subject's
     /// SyncRoot is held, so a plain increment is exclusive: no Interlocked needed. Dense over
-    /// committed writes (vetoed and no-op writes never reach the terminal) and never reset, so it
-    /// stays comparable across detach and reattach. A label only: ordering does not depend on it.
+    /// committed writes and never reset, so it stays comparable across detach and reattach. A label
+    /// only: ordering does not depend on it.
+    ///
+    /// Consumes a revision exactly when the terminal write runs. A vetoed write and a write stopped
+    /// by the equality check never reach the terminal and consume nothing, but a derived property's
+    /// recalculation does reach it (with a no-op write delegate) and takes a revision of its own.
     /// </summary>
     internal long Revision;
 
