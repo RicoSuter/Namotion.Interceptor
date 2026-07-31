@@ -41,10 +41,15 @@ public class ChangeDeduplicatorTests
         var subject = new Person();
         var property = new PropertyReference(subject, nameof(Person.FirstName));
 
+        var newerSource = new object();
+        var newerOrigin = ChangeOrigin.FromSource(newerSource);
+        var newerTimestamp = DateTimeOffset.UtcNow;
+        var olderTimestamp = newerTimestamp.AddSeconds(-1);
+
         SubjectPropertyChange[] changes =
         [
-            CreateChange(property, "NewerOld", "NewerNew", revision: 20),
-            CreateChange(property, "OlderOld", "OlderNew", revision: 10)
+            CreateChange(property, "NewerOld", "NewerNew", revision: 20, newerOrigin, newerTimestamp),
+            CreateChange(property, "OlderOld", "OlderNew", revision: 10, ChangeOrigin.Local, olderTimestamp)
         ];
 
         // Act
@@ -55,6 +60,12 @@ public class ChangeDeduplicatorTests
         Assert.Equal("OlderOld", change.GetOldValue<string>());
         Assert.Equal("NewerNew", change.GetNewValue<string>());
         Assert.Equal(20, change.Revision);
+
+        // The survivor's metadata follows the highest revision, not the last arrival, which matters for a
+        // consumer that keys off Origin.Source (echo suppression) or off the timestamp.
+        Assert.Equal(ChangeOriginKind.FromSource, change.Origin.Kind);
+        Assert.Same(newerSource, change.Origin.Source);
+        Assert.Equal(newerTimestamp, change.ChangedTimestamp);
     }
 
     [Fact]
@@ -204,12 +215,12 @@ public class ChangeDeduplicatorTests
     private const int SmallBatchSize = 2;
 
     [Fact]
-    public void WhenALargeBatchIsFollowedByASmallOne_ThenNothingBeyondTheSmallPrefixStaysReferenced()
+    public void WhenBatchesHaveBeenReleased_ThenNeitherThePooledNorTheDeduplicatedChangesStayReferenced()
     {
-        // Arrange - two sets of stale changes have to be gone once the small batch is released: the ones
-        // the array pool handed over with the buffer, and the ones the deduplicator's own large batch
-        // wrote past the small batch's prefix. Both sit outside the prefix a flush clears, so they only
-        // go away if the buffer is cleared in full when it is rented.
+        // Arrange - two sets of stale changes have to be gone: the ones the array pool handed over with
+        // the buffer, which only the clear on rent removes because no flush ever writes those slots, and
+        // the ones a released batch wrote, which Reset has to clear over the batch's full length rather
+        // than over the length of whatever batch comes after it.
         var (deduplicator, pooledSubjects, largeBatchSubjects) = RunLargeBatchThenSmallBatch();
 
         // Act
@@ -221,7 +232,7 @@ public class ChangeDeduplicatorTests
         Assert.All(pooledSubjects, subject => Assert.False(subject.IsAlive,
             "The deduplicator must release what the array pool left in the buffer it rented."));
         Assert.All(largeBatchSubjects, subject => Assert.False(subject.IsAlive,
-            "The deduplicator must release a batch even when the next batch fills a shorter prefix."));
+            "Resetting a batch must clear every slot that batch filled."));
 
         deduplicator.Dispose();
     }
@@ -293,12 +304,14 @@ public class ChangeDeduplicatorTests
         PropertyReference property,
         string? oldValue,
         string? newValue,
-        long revision)
+        long revision,
+        ChangeOrigin? origin = null,
+        DateTimeOffset? changedTimestamp = null)
     {
         return SubjectPropertyChange.Create(
             property,
-            ChangeOrigin.Local,
-            DateTimeOffset.UtcNow,
+            origin ?? ChangeOrigin.Local,
+            changedTimestamp ?? DateTimeOffset.UtcNow,
             null,
             oldValue,
             newValue,

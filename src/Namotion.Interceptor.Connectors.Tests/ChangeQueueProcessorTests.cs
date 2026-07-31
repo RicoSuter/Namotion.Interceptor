@@ -329,11 +329,55 @@ public class ChangeQueueProcessorTests
         await processing;
     }
 
+    [Fact]
+    public async Task WhenTheNewerCommitIsEnqueuedFirst_ThenTheFlushedSurvivorTakesItsNewValue()
+    {
+        // Arrange - a change is enqueued after its commit and outside the subject lock, so two writers to
+        // one property can enqueue in the opposite order they committed. The flush must resolve that by
+        // revision, not by queue position.
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writtenChanges = new List<SubjectPropertyChange>();
+
+        var processor = new ChangeQueueProcessor(
+            source: null,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                writtenChanges.AddRange(changes.ToArray());
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMilliseconds(50),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        // Act
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        EnqueueChange(processor, property, "Committed1", "Committed2", revision: 2);
+        EnqueueChange(processor, property, "Committed0", "Committed1", revision: 1);
+
+        await TriggerFlushAsync(processor);
+
+        processor.Dispose();
+
+        // Assert - the survivor spans the batch: the lowest revision's old value and the highest
+        // revision's new value, even though the highest arrived first
+        var change = Assert.Single(writtenChanges);
+        Assert.Equal("Committed0", change.GetOldValue<string>());
+        Assert.Equal("Committed2", change.GetNewValue<string>());
+        Assert.Equal(2, change.Revision);
+    }
+
     private static void EnqueueChange(
         ChangeQueueProcessor processor,
         PropertyReference property,
         string? oldValue,
-        string? newValue)
+        string? newValue,
+        long revision = 0)
     {
         // Use reflection to access the private _changes queue
         var changesField = typeof(ChangeQueueProcessor)
@@ -347,7 +391,8 @@ public class ChangeQueueProcessorTests
             DateTimeOffset.UtcNow,
             null,
             oldValue,
-            newValue);
+            newValue,
+            revision);
 
         queue.Enqueue(change);
     }
