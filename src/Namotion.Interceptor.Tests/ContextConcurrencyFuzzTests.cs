@@ -18,11 +18,12 @@ namespace Namotion.Interceptor.Tests;
 /// The subject executors take part in the graph as ordinary nodes, so the caches of
 /// <see cref="InterceptorExecutor"/> are fuzzed the same way as the caches of a plain context.
 ///
-/// One shape is deliberately excluded: a delegation cycle in which every context is empty cannot
-/// resolve anything and raises instead of returning a service set, so a context without services
-/// never gets a fallback edge to another context without services. The oracle here models what a
-/// topology resolves, not which topology is rejected, and that rejection is covered by
-/// <see cref="ContextDelegationCycleTests"/>.
+/// Chains of contexts without services take part as well, both the acyclic ones that a deep
+/// subject graph produces and the pure delegation cycles that resolve to an exception rather than
+/// to a service set. The oracle models both outcomes, so a round asserts not only what a topology
+/// resolves but also which topology is rejected. Whether a given context sits on such a cycle
+/// changes constantly while the workers run, which is why the workers tolerate that one exception
+/// and only the final topology decides.
 /// </summary>
 public class ContextConcurrencyFuzzTests
 {
@@ -56,6 +57,10 @@ public class ContextConcurrencyFuzzTests
     [InlineData(7654321)]
     public async Task WhenTopologyAndServicesAreMutatedConcurrently_ThenQuiescentResolutionMatchesFinalTopology(int seed)
     {
+        var deepChains = 0;
+        var rejectedQueries = 0;
+        var maximumDepth = 0;
+
         for (var round = 0; round < Rounds; round++)
         {
             // Arrange: the round seed fully determines the topology and every worker operation, so
@@ -83,13 +88,52 @@ public class ContextConcurrencyFuzzTests
             // Assert
             AssertResolutionMatchesTopology(topology, roundSeed);
             AssertInterceptionMatchesTopology(topology, roundSeed);
+
+            foreach (var node in topology.Nodes)
+            {
+                var depth = topology.DelegationDepth(node);
+                if (depth < 0)
+                {
+                    rejectedQueries++;
+                }
+                else if (depth >= 3)
+                {
+                    deepChains++;
+                }
+
+                maximumDepth = Math.Max(maximumDepth, depth);
+            }
         }
+
+        // The corpus has to contain the shapes this test claims to cover, otherwise it passes by
+        // never building them. Both of these were absent before delegation chains between contexts
+        // without services were allowed: the deepest chain the generator could produce was two
+        // hops and a chain that resolves nothing could not occur at all.
+        Assert.True(deepChains > 0,
+            $"No final topology contained a delegation chain of three or more hops, so the corpus does not " +
+            $"cover the shape a deep subject graph produces. Deepest chain seen: {maximumDepth}.");
+
+        Assert.True(rejectedQueries > 0,
+            "No final topology contained a context whose delegation chain is a cycle, so the corpus does not " +
+            "cover the resolution that raises instead of returning services.");
     }
 
     private static void AssertResolutionMatchesTopology(Topology topology, int roundSeed)
     {
         foreach (var node in topology.Nodes)
         {
+            if (topology.RejectsQuery(node))
+            {
+                var exception = Assert.Throws<InvalidOperationException>(() => node.Context.GetServices<MarkerService>());
+                Assert.True(IsDelegationCycle(exception),
+                    $"Context {node.Name} resolves through a delegation cycle in the final topology but raised " +
+                    $"'{exception.Message}'. {topology.Describe(roundSeed)}");
+
+                Assert.Throws<InvalidOperationException>(() => node.Context.GetServices<IWriteInterceptor>());
+                Assert.Throws<InvalidOperationException>(() => node.Context.TryGetService<SingletonProbeService>());
+                continue;
+            }
+
             var reachableNodes = topology.ComputeReachableNodes(node);
 
             // Every service instance is unique and services are never removed, so the expected
@@ -123,6 +167,20 @@ public class ContextConcurrencyFuzzTests
         foreach (var node in topology.SubjectNodes)
         {
             var subject = node.Subject!;
+            if (topology.RejectsQuery(node))
+            {
+                // Nothing resolves for this executor, so no compiled chain exists to run and every
+                // intercepted operation on its subject raises instead.
+                var exception = Assert.Throws<InvalidOperationException>(() => subject.Value = ++writtenValue);
+                Assert.True(IsDelegationCycle(exception),
+                    $"An intercepted write on the subject of {node.Name} raised '{exception.Message}' but its " +
+                    $"delegation chain is a cycle in the final topology. {topology.Describe(roundSeed)}");
+
+                Assert.Throws<InvalidOperationException>(() => _ = subject.Value);
+                Assert.Throws<InvalidOperationException>(() => subject.Echo(1));
+                continue;
+            }
+
             var expectedInterceptors = ExpectedInterceptors(topology.ComputeReachableNodes(node));
 
             AssertInterceptorsAreCalledOnce(topology, node, expectedInterceptors, roundSeed, "int write",
@@ -211,8 +269,7 @@ public class ContextConcurrencyFuzzTests
         }
 
         // The executor of a subject is a context too, so it joins the graph as a node whose
-        // fallbacks are fuzzed like any other. Nothing ever points at an executor, so an executor
-        // can never sit on a cycle and may therefore delegate into a context without services.
+        // fallbacks are fuzzed like any other.
         var contextNodes = nodes.ToArray();
         var subjectCount = random.Next(1, contextCount + 1);
         for (var index = 0; index < subjectCount; index++)
@@ -222,19 +279,27 @@ public class ContextConcurrencyFuzzTests
             nodes.Add(new ContextNode($"s{index}", executor, null, false, subject));
         }
 
+        // Contexts that never receive a service, so they keep delegating for the whole round. They
+        // are chained head to tail below, which is what puts a delegation chain of more than one
+        // hop in the corpus: one proxy per level is exactly what an attached subject graph builds.
+        var proxyNodes = new List<ContextNode>();
+        var proxyCount = random.Next(0, 7);
+        for (var index = 0; index < proxyCount; index++)
+        {
+            var proxy = new ContextNode($"p{index}", InterceptorSubjectContext.Create(), null, false, null, isProxy: true);
+            nodes.Add(proxy);
+            proxyNodes.Add(proxy);
+        }
+
+        // Candidate and binding edges may point at a proxy too, which is what lets a chain close
+        // into the pure delegation cycle that resolves nothing at all.
+        var targetNodes = contextNodes.Concat(proxyNodes).ToArray();
+
         var edges = new List<Edge>();
         var declaredEdges = new HashSet<(ContextNode Source, ContextNode Target)>();
 
         void DeclareEdge(ContextNode source, ContextNode target, bool isPresent)
         {
-            // Never let a plain context without services delegate into another one without
-            // services: that is the pure delegation cycle, which resolves to an exception rather
-            // than to a service set and therefore has no place in this oracle.
-            if (source.Subject is null && !source.HasOwnService && !target.HasOwnService)
-            {
-                return;
-            }
-
             if (declaredEdges.Add((source, target)))
             {
                 edges.Add(new Edge(source, target, isPresent));
@@ -255,17 +320,58 @@ public class ContextConcurrencyFuzzTests
             }
         }
 
+        // The proxy chain, head to tail. The tail is left open on purpose: whether it reaches a
+        // context with services, runs back into the chain as a pure cycle, or gains a second
+        // fallback and stops delegating is left to the candidate edges and to the workers.
+        for (var index = 0; index + 1 < proxyNodes.Count; index++)
+        {
+            DeclareEdge(proxyNodes[index], proxyNodes[index + 1], true);
+        }
+
+        if (proxyNodes.Count != 0)
+        {
+            // In some rounds the tail points back into the chain, which closes it into the pure
+            // delegation cycle that resolves nothing; in the rest it ends on a context that can
+            // answer. Whether the edge starts out present is left to chance, and a worker owning
+            // it then breaks and reforms the cycle underneath the queries of the other workers.
+            var target = random.Next(3) == 0
+                ? proxyNodes[random.Next(proxyNodes.Count)]
+                : contextNodes[random.Next(contextNodes.Length)];
+
+            DeclareEdge(proxyNodes[^1], target, random.Next(5) != 0);
+        }
+
         // Every subject starts out bound to one context, like a subject constructed with a context.
+        // Binding to the head of the proxy chain is what makes an intercepted read, write or method
+        // call resolve through the whole chain, which is the hot path a deep subject graph takes.
         for (var index = contextNodes.Length; index < nodes.Count; index++)
         {
-            DeclareEdge(nodes[index], contextNodes[random.Next(contextNodes.Length)], true);
+            if (nodes[index].Subject is null)
+            {
+                continue;
+            }
+
+            var target = proxyNodes.Count != 0 && random.Next(2) == 0
+                ? proxyNodes[0]
+                : contextNodes[random.Next(contextNodes.Length)];
+
+            DeclareEdge(nodes[index], target, true);
         }
 
         var candidateCount = random.Next(nodes.Count, nodes.Count * 2 + 1);
         for (var candidate = 0; candidate < candidateCount; candidate++)
         {
             var source = nodes[random.Next(nodes.Count)];
-            var target = contextNodes[random.Next(contextNodes.Length)];
+            var target = targetNodes[random.Next(targetNodes.Length)];
+
+            // A proxy keeps exactly the one fallback context declared above, because a second one
+            // stops it from delegating and would cut every chain back to a single hop. Pointing at
+            // a proxy stays allowed, so chains still gain branches from above.
+            if (source.IsProxy)
+            {
+                continue;
+            }
+
             if (source == target && random.Next(10) != 0)
             {
                 continue;
@@ -279,9 +385,20 @@ public class ContextConcurrencyFuzzTests
         foreach (var edge in edges)
         {
             edge.Owner = random.Next(10) < 7 ? random.Next(WorkerCount) : -1;
-            if (edge.IsPresent)
+            if (!edge.IsPresent)
+            {
+                continue;
+            }
+
+            try
             {
                 edge.Source.Context.AddFallbackContext(edge.Target.Context);
+            }
+            catch (InvalidOperationException exception) when (IsDelegationCycle(exception))
+            {
+                // Closing a circle underneath a subject executor makes its attach callbacks fail
+                // to resolve, after the fallback context is registered. The edge is in place, so
+                // the topology stays exactly as declared.
             }
         }
 
@@ -302,60 +419,112 @@ public class ContextConcurrencyFuzzTests
             var subject = subjectNodes[random.Next(subjectNodes.Length)].Subject!;
             var choice = random.Next(100);
 
-            if (choice < 18 && ownedEdges.Length != 0)
+            try
             {
-                var edge = ownedEdges[random.Next(ownedEdges.Length)];
-                if (random.Next(2) == 0)
-                {
-                    edge.Source.Context.AddFallbackContext(edge.Target.Context);
-                    edge.IsPresent = true;
-                }
-                else
-                {
-                    edge.Source.Context.RemoveFallbackContext(edge.Target.Context);
-                    edge.IsPresent = false;
-                }
+                RunOperation(ownedEdges, node, subject, choice, operation, random);
             }
-            else if (choice < 30)
+            catch (InvalidOperationException exception) when (IsDelegationCycle(exception))
+            {
+                // The one outcome a legal topology produces that is not a value: a context whose
+                // delegation chain is a circle at this instant resolves nothing. Which contexts
+                // those are changes with every edge the workers toggle, so it cannot be predicted
+                // here; the oracles decide it against the final topology once everyone joined.
+                // Every other InvalidOperationException still fails the round, in particular the
+                // arity check of TryGetService that detects a service admitted twice.
+            }
+        }
+    }
+
+    private static bool IsDelegationCycle(InvalidOperationException exception)
+    {
+        return exception.Message.Contains("delegation cycle", StringComparison.Ordinal);
+    }
+
+    private static void RunOperation(
+        Edge[] ownedEdges,
+        ContextNode node,
+        FuzzSubject subject,
+        int choice,
+        int operation,
+        Random random)
+    {
+        if (choice < 18 && ownedEdges.Length != 0)
+        {
+            var edge = ownedEdges[random.Next(ownedEdges.Length)];
+            if (random.Next(2) == 0)
+            {
+                // Recorded before the call, not after: the executor override registers the
+                // fallback context first and only then resolves the lifecycle interceptors to run
+                // the attach callbacks, and that resolution raises when the chain is a circle at
+                // that instant. The edge exists either way, so recording it after the call would
+                // lose it. Removal is the other way round, it resolves first and unregisters
+                // afterwards, so a raise there means the edge is still in place.
+                edge.IsPresent = true;
+                edge.Source.Context.AddFallbackContext(edge.Target.Context);
+            }
+            else
+            {
+                edge.Source.Context.RemoveFallbackContext(edge.Target.Context);
+                edge.IsPresent = false;
+            }
+        }
+        else if (choice < 30)
+        {
+            // A proxy keeps delegating for the whole round, so it is queried instead. Handing it a
+            // service would end its chain, and with nearly every context receiving one over a few
+            // hundred operations no chain would survive to the final topology at all.
+            if (node.IsProxy)
+            {
+                _ = node.Context.GetServices<MarkerService>();
+            }
+            else
             {
                 node.Context.AddService(new MarkerService());
                 Interlocked.Increment(ref node.MarkerCount);
             }
-            else if (choice < 38)
-            {
-                // The outcome depends on the concurrent topology and is therefore not modeled; the
-                // service type is one the oracles ignore, and an extra service can only remove a
-                // delegation shortcut, never add one.
-                node.Context.TryAddService(() => new TransientProbeService(), _ => true);
-            }
-            else if (choice < 55)
-            {
-                _ = node.Context.GetServices<MarkerService>();
-            }
-            else if (choice < 68)
-            {
-                _ = node.Context.GetServices<IWriteInterceptor>();
-            }
-            else if (choice < 74)
+        }
+        else if (choice < 38)
+        {
+            // Whether this adds anything depends on the topology at that instant, so the return
+            // value is what the model records. The service type is one the oracles ignore, but
+            // adding one stops a context from delegating, which decides whether it resolves or
+            // raises.
+            if (node.IsProxy)
             {
                 _ = node.Context.TryGetService<SingletonProbeService>();
             }
-            else if (choice < 84)
+            else if (node.Context.TryAddService(() => new TransientProbeService(), _ => true))
             {
-                subject.Value = operation;
+                Interlocked.Increment(ref node.TransientServiceCount);
             }
-            else if (choice < 90)
-            {
-                subject.Text = null;
-            }
-            else if (choice < 96)
-            {
-                _ = subject.Value;
-            }
-            else
-            {
-                _ = subject.Echo(operation);
-            }
+        }
+        else if (choice < 55)
+        {
+            _ = node.Context.GetServices<MarkerService>();
+        }
+        else if (choice < 68)
+        {
+            _ = node.Context.GetServices<IWriteInterceptor>();
+        }
+        else if (choice < 74)
+        {
+            _ = node.Context.TryGetService<SingletonProbeService>();
+        }
+        else if (choice < 84)
+        {
+            subject.Value = operation;
+        }
+        else if (choice < 90)
+        {
+            subject.Text = null;
+        }
+        else if (choice < 96)
+        {
+            _ = subject.Value;
+        }
+        else
+        {
+            _ = subject.Echo(operation);
         }
     }
 
@@ -407,14 +576,90 @@ public class ContextConcurrencyFuzzTests
             return reachableNodes;
         }
 
+        /// <summary>
+        /// Models <c>ContextState.DelegationTarget</c>: a context without own services and with
+        /// exactly one fallback context contributes nothing itself and resolves everything through
+        /// that one context.
+        /// </summary>
+        private ContextNode? DelegationTarget(ContextNode node)
+        {
+            if (node.HasAnyService)
+            {
+                return null;
+            }
+
+            ContextNode? target = null;
+            foreach (var edge in Edges)
+            {
+                if (!edge.IsPresent || edge.Source != node)
+                {
+                    continue;
+                }
+
+                if (target is not null)
+                {
+                    return null;
+                }
+
+                target = edge.Target;
+            }
+
+            return target;
+        }
+
+        /// <summary>
+        /// The number of delegation hops from the given context to the one that resolves for it,
+        /// or -1 when following them runs in a circle, in which case nothing resolves at all.
+        /// </summary>
+        internal int DelegationDepth(ContextNode node)
+        {
+            var visited = new HashSet<ContextNode>();
+            var current = node;
+            var depth = 0;
+
+            while (true)
+            {
+                var target = DelegationTarget(current);
+                if (target is null)
+                {
+                    return depth;
+                }
+
+                if (!visited.Add(current))
+                {
+                    return -1;
+                }
+
+                current = target;
+                depth++;
+            }
+        }
+
+        /// <summary>
+        /// Whether querying this context raises instead of resolving, which happens exactly when
+        /// its own delegation chain closes into a circle: every context on it resolves through the
+        /// next one and none of them ever answers.
+        ///
+        /// A circle that is merely reachable as one of several fallback contexts does not count.
+        /// The collecting walk cuts it at the first context it has already visited and it
+        /// contributes nothing, which is the same result it would contribute anyway: every context
+        /// on such a circle is without services by construction.
+        /// </summary>
+        internal bool RejectsQuery(ContextNode node)
+        {
+            return DelegationDepth(node) < 0;
+        }
+
         internal string Describe(int roundSeed)
         {
             var shape = string.Join("; ", Nodes.Select(node =>
-                $"{node.Name}{(node.HasOwnService ? "" : "*")}+{node.MarkerCount}->" +
+                $"{node.Name}{(node.HasOwnService ? "" : "*")}+{node.MarkerCount}" +
+                $"{(DelegationDepth(node) is var depth && depth < 0 ? "!" : depth == 0 ? "" : $"~{depth}")}->" +
                 $"[{string.Join(",", Edges.Where(edge => edge.IsPresent && edge.Source == node).Select(edge => edge.Target.Name))}]"));
 
-            return $"Seed {roundSeed}, final topology ('c' is a context, 's' a subject executor, " +
-                   $"'*' a node seeded without services, '+n' its added marker services): {shape}";
+            return $"Seed {roundSeed}, final topology ('c' is a context, 's' a subject executor, 'p' a proxy that " +
+                   $"never receives services, '*' a node seeded without services, '+n' its added marker services, " +
+                   $"'~n' the length of its delegation chain, '!' a chain that is a cycle): {shape}";
         }
     }
 
@@ -423,9 +668,29 @@ public class ContextConcurrencyFuzzTests
         InterceptorSubjectContext context,
         RecordingInterceptor? interceptor,
         bool hasOwnService,
-        FuzzSubject? subject)
+        FuzzSubject? subject,
+        bool isProxy = false)
     {
+        /// <summary>
+        /// Set for a context that never receives a service, so it keeps delegating for the whole
+        /// round. Without those the workers hand a service to nearly every context long before
+        /// they finish, and the final topology of a round contains no delegation at all, which is
+        /// the shape a graph of attached subjects consists almost entirely of.
+        /// </summary>
+        internal bool IsProxy { get; } = isProxy;
+
+
         internal int MarkerCount;
+
+        /// <summary>
+        /// Set once <see cref="IInterceptorSubjectContext.TryAddService{TService}"/> reported that
+        /// it added the transient probe service to this context. Its presence is not part of any
+        /// service oracle, but it decides whether this context still delegates, so an unrecorded
+        /// one would make the model disagree about which contexts resolve.
+        /// </summary>
+        internal int TransientServiceCount;
+
+        internal bool HasAnyService => HasOwnService || MarkerCount != 0 || TransientServiceCount != 0;
 
         internal string Name { get; } = name;
 
