@@ -18,9 +18,11 @@ namespace Namotion.Interceptor.Tests;
 /// The subject executors take part in the graph as ordinary nodes, so the caches of
 /// <see cref="InterceptorExecutor"/> are fuzzed the same way as the caches of a plain context.
 ///
-/// One shape is deliberately excluded: a delegation cycle in which every context is empty
-/// recurses forever by design (see issue #401), so a context without services never gets a
-/// fallback edge to another context without services.
+/// One shape is deliberately excluded: a delegation cycle in which every context is empty cannot
+/// resolve anything and raises instead of returning a service set, so a context without services
+/// never gets a fallback edge to another context without services. The oracle here models what a
+/// topology resolves, not which topology is rejected, and that rejection is covered by
+/// <see cref="ContextDelegationCycleTests"/>.
 /// </summary>
 public class ContextConcurrencyFuzzTests
 {
@@ -226,7 +228,8 @@ public class ContextConcurrencyFuzzTests
         void DeclareEdge(ContextNode source, ContextNode target, bool isPresent)
         {
             // Never let a plain context without services delegate into another one without
-            // services: that is the pure delegation cycle that recurses forever by design.
+            // services: that is the pure delegation cycle, which resolves to an exception rather
+            // than to a service set and therefore has no place in this oracle.
             if (source.Subject is null && !source.HasOwnService && !target.HasOwnService)
             {
                 return;
