@@ -90,7 +90,7 @@ public class SubjectSourceBenchmark
     {
         _source.Reset();
 
-        var queue = _context.GetService<PropertyChangeQueue>();
+        var queue = _context.GetService<PropertyChangeInterceptor>();
         for (var i = 0; i < _propertyNames.Length; i++)
         {
             var context = new PropertyWriteContext<int>(
@@ -98,7 +98,8 @@ public class SubjectSourceBenchmark
                 0,
                 i);
 
-            queue.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
+            // The stub next models the terminal, which sets IsWritten when the value is stored.
+            queue.WriteProperty(ref context, (ref PropertyWriteContext<int> c) => c.IsWritten = true);
         }
 
         _source.Wait();

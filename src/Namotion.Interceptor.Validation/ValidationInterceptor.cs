@@ -17,11 +17,13 @@ public class ValidationInterceptor : IWriteInterceptor
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         var validators = context.Property.Subject.Context.GetServices<IPropertyValidator>();
-        
+
+        var validationContext = new PropertyValidationContext<TProperty>(context.Property, context.NewValue, context.Origin);
+
         List<ValidationResult>? additionalErrors = null;
         foreach (var validator in validators)
         {
-            foreach (var error in validator.Validate(context.Property, context.NewValue))
+            foreach (var error in validator.Validate(in validationContext))
             {
                 additionalErrors ??= [];
                 additionalErrors.Add(error);

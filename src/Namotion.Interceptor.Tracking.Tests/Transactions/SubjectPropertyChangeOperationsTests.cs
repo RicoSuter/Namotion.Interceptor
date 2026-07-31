@@ -18,7 +18,7 @@ public class SubjectPropertyChangeOperationsTests
         var oldValue = property.Metadata.GetValue?.Invoke(subject) as string;
         return SubjectPropertyChange.Create(
             property,
-            source: null,
+            origin: ChangeOrigin.Local,
             changedTimestamp: DateTimeOffset.UtcNow,
             receivedTimestamp: null,
             oldValue: oldValue,

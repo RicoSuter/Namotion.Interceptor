@@ -59,7 +59,7 @@ public class SubjectUpdateCycleTests
         var changes = new[]
         {
             SubjectPropertyChange.Create(
-                new PropertyReference(person, "Father"), null, DateTimeOffset.UtcNow, null, null, father),
+                new PropertyReference(person, "Father"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, father),
         };
 
         // Act
@@ -94,9 +94,9 @@ public class SubjectUpdateCycleTests
         var changes = new[]
         {
             SubjectPropertyChange.Create(
-                new PropertyReference(father, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewFather"),
+                new PropertyReference(father, "FirstName"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "Old", "NewFather"),
             SubjectPropertyChange.Create(
-                new PropertyReference(mother, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewMother"),
+                new PropertyReference(mother, "FirstName"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "Old", "NewMother"),
         };
 
         // Act
@@ -125,7 +125,7 @@ public class SubjectUpdateCycleTests
         var changes = new[]
         {
             SubjectPropertyChange.Create(
-                new PropertyReference(child1, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewChild1"),
+                new PropertyReference(child1, "FirstName"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "Old", "NewChild1"),
         };
 
         // Act
@@ -156,7 +156,7 @@ public class SubjectUpdateCycleTests
         {
             SubjectPropertyChange.Create(
                 new PropertyReference(person, "Children"),
-                null,
+                ChangeOrigin.Local,
                 DateTimeOffset.UtcNow,
                 null,
                 new List<Person>(),
@@ -191,9 +191,9 @@ public class SubjectUpdateCycleTests
         var changes = new[]
         {
             SubjectPropertyChange.Create(
-                new PropertyReference(person, "Father"), null, DateTimeOffset.UtcNow, null, null, sibling1),
+                new PropertyReference(person, "Father"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, sibling1),
             SubjectPropertyChange.Create(
-                new PropertyReference(person, "Mother"), null, DateTimeOffset.UtcNow, null, null, sibling2),
+                new PropertyReference(person, "Mother"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, sibling2),
         };
 
         // Act
@@ -228,11 +228,11 @@ public class SubjectUpdateCycleTests
         var changes = new[]
         {
             SubjectPropertyChange.Create(
-                new PropertyReference(level1, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewLevel1"),
+                new PropertyReference(level1, "FirstName"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "Old", "NewLevel1"),
             SubjectPropertyChange.Create(
-                new PropertyReference(level2, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewLevel2"),
+                new PropertyReference(level2, "FirstName"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "Old", "NewLevel2"),
             SubjectPropertyChange.Create(
-                new PropertyReference(level3, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewLevel3"),
+                new PropertyReference(level3, "FirstName"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "Old", "NewLevel3"),
         };
 
         // Act
@@ -259,7 +259,7 @@ public class SubjectUpdateCycleTests
         var changes = new[]
         {
             SubjectPropertyChange.Create(
-                new PropertyReference(child, "Father"), null, DateTimeOffset.UtcNow, null, null, root),
+                new PropertyReference(child, "Father"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, root),
         };
 
         // Act
@@ -288,9 +288,9 @@ public class SubjectUpdateCycleTests
         var changes = new[]
         {
             SubjectPropertyChange.Create(
-                new PropertyReference(baz, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewFirst"),
+                new PropertyReference(baz, "FirstName"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "Old", "NewFirst"),
             SubjectPropertyChange.Create(
-                new PropertyReference(baz, "LastName"), null, DateTimeOffset.UtcNow, null, "Old", "NewLast"),
+                new PropertyReference(baz, "LastName"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "Old", "NewLast"),
         };
 
         // Act
@@ -358,7 +358,7 @@ public class SubjectUpdateCycleTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangeObservable()
+            .WithPropertyChangeSubscriptions()
             .WithRegistry();
 
         var root = new CycleTestNode(context) { Name = "Root" };
@@ -438,7 +438,7 @@ public class SubjectUpdateCycleTests
         {
             SubjectPropertyChange.Create(
                 new PropertyReference(root, "Items"),
-                null,
+                ChangeOrigin.Local,
                 DateTimeOffset.UtcNow,
                 null,
                 oldItems,
@@ -478,7 +478,7 @@ public class SubjectUpdateCycleTests
         {
             SubjectPropertyChange.Create(
                 new PropertyReference(root, "Items"),
-                null,
+                ChangeOrigin.Local,
                 DateTimeOffset.UtcNow,
                 null,
                 oldItems,
@@ -552,14 +552,14 @@ public class SubjectUpdateCycleTests
         {
             SubjectPropertyChange.Create(
                 new PropertyReference(level2, "Items"),
-                null,
+                ChangeOrigin.Local,
                 DateTimeOffset.UtcNow,
                 null,
                 oldLevel2Items,
                 newLevel2Items),
             SubjectPropertyChange.Create(
                 new PropertyReference(level1, "Items"),
-                null,
+                ChangeOrigin.Local,
                 DateTimeOffset.UtcNow,
                 null,
                 oldLevel1Items,
@@ -594,7 +594,7 @@ public class SubjectUpdateCycleTests
         var changes = new[]
         {
             SubjectPropertyChange.Create(
-                new PropertyReference(nodeB, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewB"),
+                new PropertyReference(nodeB, "FirstName"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "Old", "NewB"),
         };
 
         // Act -- should terminate, not infinite loop

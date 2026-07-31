@@ -54,7 +54,7 @@ public class SubjectUpdateFlowTests
         var deserializedWelcome = serializer.Deserialize<WelcomePayload>(bytes.AsSpan(payloadStart, payloadLength));
 
         // This should not throw an InvalidCastException for JsonElement -> int conversion
-        clientRoot.ApplySubjectUpdate(deserializedWelcome.State!, DefaultSubjectFactory.Instance);
+        clientRoot.ApplySubjectUpdate(deserializedWelcome.State!, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("RootWithItems", clientRoot.Name);
@@ -106,7 +106,7 @@ public class SubjectUpdateFlowTests
         var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserializedWelcome = serializer.Deserialize<WelcomePayload>(bytes.AsSpan(payloadStart, payloadLength));
 
-        clientRoot.ApplySubjectUpdate(deserializedWelcome.State!, DefaultSubjectFactory.Instance);
+        clientRoot.ApplySubjectUpdate(deserializedWelcome.State!, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert - Collection should be replaced with new one containing 3 items
         Assert.Equal("ServerWithMoreItems", clientRoot.Name);
@@ -177,7 +177,7 @@ public class SubjectUpdateFlowTests
         Assert.Equal(SubjectPropertyUpdateKind.Value, nameUpdate.Kind);
         Assert.NotNull(nameUpdate.Value);
 
-        clientRoot.ApplySubjectUpdate(deserializedWelcome.State!, DefaultSubjectFactory.Instance);
+        clientRoot.ApplySubjectUpdate(deserializedWelcome.State!, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("Initial", clientRoot.Name);
@@ -210,7 +210,7 @@ public class SubjectUpdateFlowTests
         var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
-        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(2, clientRoot.Items.Length);
@@ -250,7 +250,7 @@ public class SubjectUpdateFlowTests
         var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
-        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Single(clientRoot.Items);
@@ -294,7 +294,7 @@ public class SubjectUpdateFlowTests
         var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
-        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal(3, clientRoot.Items.Length);
@@ -332,7 +332,7 @@ public class SubjectUpdateFlowTests
         var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
-        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("Updated", clientRoot.Name);
@@ -379,7 +379,7 @@ public class SubjectUpdateFlowTests
         var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
-        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Single(clientRoot.Lookup);
@@ -413,7 +413,7 @@ public class SubjectUpdateFlowTests
         var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
-        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Null(clientRoot.Child);

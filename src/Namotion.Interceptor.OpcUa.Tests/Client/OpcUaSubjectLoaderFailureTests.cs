@@ -494,7 +494,7 @@ public class OpcUaSubjectLoaderFailureTests
         var subjectContext = InterceptorSubjectContext.Create()
             .WithRegistry()
             .WithLifecycle()
-            .WithPropertyChangeObservable();
+            .WithPropertyChangeSubscriptions();
         var subject = new DynamicSubject(subjectContext);
 
         var loader = new OpcUaSubjectLoader(

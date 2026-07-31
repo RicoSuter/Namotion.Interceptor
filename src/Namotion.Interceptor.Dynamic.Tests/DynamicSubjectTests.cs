@@ -129,7 +129,7 @@ public class DynamicSubjectTests
             _logs = logs;
         }
 
-        public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
         {
             _logs.Add($"{_name}: Before read {context.Property.Name}");
             var result = next(ref context);

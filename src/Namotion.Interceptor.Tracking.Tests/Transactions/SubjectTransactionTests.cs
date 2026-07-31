@@ -36,7 +36,7 @@ public class SubjectTransactionTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
-            .WithPropertyChangeObservable();
+            .WithPropertyChangeSubscriptions();
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -590,7 +590,7 @@ public class SubjectTransactionTests
             var span = changes.Span;
             for (var i = 0; i < span.Length; i++)
             {
-                span[i] = span[i].WithSource(source);
+                span[i] = span[i].WithOrigin(ChangeOrigin.Confirmed(source));
             }
             return new ValueTask<SourceWriteResult>(new SourceWriteResult([], [], [], RevertState: null));
         }
@@ -624,7 +624,7 @@ public class SubjectTransactionTests
 
         // Assert: the local apply published the FirstName change carrying the writer's source.
         var firstNameChange = Assert.Single(changes, c => c.Property.Name == nameof(Person.FirstName));
-        Assert.Same(source, firstNameChange.Source);
+        Assert.Same(source, firstNameChange.Origin.Source);
         Assert.Equal("John", firstNameChange.GetNewValue<string?>());
     }
 
@@ -670,7 +670,7 @@ public class SubjectTransactionTests
         // connector queue would not recognize the notification as an echo and would push the value
         // to the source a second time (the documented graceful degradation for non-marking writers).
         var firstNameChange = Assert.Single(changes, c => c.Property.Name == nameof(Person.FirstName));
-        Assert.Null(firstNameChange.Source);
+        Assert.Null(firstNameChange.Origin.Source);
         Assert.Equal("John", firstNameChange.GetNewValue<string?>());
         Assert.Equal("John", person.FirstName);
     }

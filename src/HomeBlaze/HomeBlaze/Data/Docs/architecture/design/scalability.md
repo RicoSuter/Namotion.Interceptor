@@ -147,7 +147,7 @@ Indexes would be context services, updated via lifecycle events. Only indexes th
 
 ### Problem
 
-The `PropertyChangeQueue` distributes changes to all subscriber queues synchronously during property write interception. At very high change rates, this distribution becomes a bottleneck.
+The queue channel of `PropertyChangeInterceptor` distributes changes to all subscriber queues synchronously during property write interception. At very high change rates, this distribution becomes a bottleneck.
 
 ### Possible Approaches
 
