@@ -3,9 +3,18 @@ namespace Namotion.Interceptor.Tests;
 public class ContextLockingTests
 {
     private const int Attempts = 200;
+    private const int Mutations = 50;
 
-    [Fact]
-    public async Task WhenServicesAreAddedToFallbackWhileSubjectIsWritten_ThenNoDeadlockOccurs()
+    /// <summary>
+    /// Every mutator has to release the context lock before invalidating the contexts above it,
+    /// so all four are covered: a regression in any single one reintroduces the deadlock.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(IInterceptorSubjectContext.AddService))]
+    [InlineData(nameof(IInterceptorSubjectContext.TryAddService))]
+    [InlineData(nameof(IInterceptorSubjectContext.AddFallbackContext))]
+    [InlineData(nameof(IInterceptorSubjectContext.RemoveFallbackContext))]
+    public async Task WhenFallbackContextIsMutatedWhileSubjectIsWritten_ThenNoDeadlockOccurs(string mutation)
     {
         // Arrange: the subject context keeps an own service so that it maintains an own service
         // cache and walks into the fallback context instead of delegating to it.
@@ -15,6 +24,19 @@ public class ContextLockingTests
             var subjectContext = InterceptorSubjectContext.Create();
             subjectContext.AddService(new MarkerService());
             subjectContext.AddFallbackContext(fallbackContext);
+
+            var attachedContexts = Enumerable
+                .Range(0, Mutations)
+                .Select(_ => InterceptorSubjectContext.Create())
+                .ToArray();
+
+            if (mutation == nameof(IInterceptorSubjectContext.RemoveFallbackContext))
+            {
+                foreach (var attachedContext in attachedContexts)
+                {
+                    fallbackContext.AddFallbackContext(attachedContext);
+                }
+            }
 
             var car = new Car(subjectContext);
             using var start = new ManualResetEventSlim(false);
@@ -31,9 +53,29 @@ public class ContextLockingTests
             var mutator = Task.Factory.StartNew(() =>
             {
                 start.Wait();
-                for (var index = 0; index < 200; index++)
+                for (var index = 0; index < Mutations; index++)
                 {
-                    fallbackContext.AddService(new MarkerService());
+                    switch (mutation)
+                    {
+                        case nameof(IInterceptorSubjectContext.AddService):
+                            fallbackContext.AddService(new MarkerService());
+                            break;
+
+                        case nameof(IInterceptorSubjectContext.TryAddService):
+                            fallbackContext.TryAddService(() => new MarkerService(), _ => false);
+                            break;
+
+                        case nameof(IInterceptorSubjectContext.AddFallbackContext):
+                            fallbackContext.AddFallbackContext(attachedContexts[index]);
+                            break;
+
+                        case nameof(IInterceptorSubjectContext.RemoveFallbackContext):
+                            fallbackContext.RemoveFallbackContext(attachedContexts[index]);
+                            break;
+
+                        default:
+                            throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown mutation.");
+                    }
                 }
             }, TaskCreationOptions.LongRunning);
 
@@ -44,8 +86,8 @@ public class ContextLockingTests
 
             // Assert
             Assert.True(ReferenceEquals(finished, both),
-                $"Deadlock on attempt {attempt} of {Attempts}: writing a property and adding a service " +
-                "to a fallback context acquired the two context locks in opposite orders.");
+                $"Deadlock on attempt {attempt} of {Attempts}: writing a property and calling {mutation} " +
+                "on a fallback context acquired the two context locks in opposite orders.");
         }
     }
 

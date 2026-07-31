@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
 using Namotion.Interceptor.Interceptors;
@@ -21,6 +22,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     //
     // TODO(perf): Static lock simplifies cross-instance ordering but may contend under many independent trees.
     private static readonly object UsedByContextsLock = new();
+
+    private const string OnContextChangedLockMessage =
+        "OnContextChanged walks upwards into the using contexts and must not be called while _lock is held.";
 
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _contextChangeVisited;
@@ -385,6 +389,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void OnContextChanged()
     {
+        Debug.Assert(!Monitor.IsEntered(_lock), OnContextChangedLockMessage);
+
         var visited = _contextChangeVisited ??= new HashSet<InterceptorSubjectContext>();
         try
         {
@@ -398,6 +404,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private void OnContextChanged(HashSet<InterceptorSubjectContext> visited)
     {
+        Debug.Assert(!Monitor.IsEntered(_lock), OnContextChangedLockMessage);
+
         if (!visited.Add(this))
         {
             return;
@@ -406,12 +414,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         _serviceCache?.Clear();
         _readInterceptorFunction?.Clear();
         _writeInterceptorFunction?.Clear();
-        _methodInvocationFunction = null;
 
         InterceptorSubjectContext? singleParent = null;
         InterceptorSubjectContext[]? parents = null;
         lock (_lock)
         {
+            // Under the lock so that it cannot land after a concurrent GetMethodInvocationFunction
+            // has computed a chain from the pre-change services and is about to assign it.
+            _methodInvocationFunction = null;
+
             // The delegation fast path is not recomputed here: every mutation of _services and
             // _fallbackContexts already updates it under this lock, and the upward walk below
             // reaches contexts whose own services and fallback contexts did not change.
