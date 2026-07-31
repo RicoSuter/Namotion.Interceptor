@@ -39,6 +39,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private static HashSet<InterceptorSubjectContext>? _invalidationVisited;
 
     [ThreadStatic]
+    private static List<InterceptorSubjectContext>? _invalidationPending;
+
+    [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _serviceQueryVisited;
 
     [ThreadStatic]
@@ -595,23 +598,57 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return Interlocked.CompareExchange(ref _usedByContexts, created, null) ?? created;
     }
 
+    /// <summary>
+    /// Invalidates every context that resolves through this one, walked with an explicit worklist
+    /// rather than by recursion. The using graph is the fallback graph reversed, so it is as deep as
+    /// the subject graph: every attached child inherits the context of its parent as a fallback
+    /// context, which makes a graph of depth N a using chain of length N. Recursing over it died on
+    /// an uncatchable <see cref="StackOverflowException"/> that no mutator could survive, while the
+    /// worklist grows on the heap alongside the graph it walks.
+    ///
+    /// It terminates because a context is queued only when <c>visited</c> did not already hold it,
+    /// so every context enters the worklist at most once and the loop removes one per iteration.
+    /// That bound is what also makes the walk safe on a cyclic graph.
+    /// </summary>
     private void InvalidateUsingContexts()
     {
         var visited = _invalidationVisited ??= [];
+        var pending = _invalidationPending ??= [];
         try
         {
             // Self needs no invalidation here: the publish preceding this call already swapped
             // in a cache-free state.
             visited.Add(this);
-            InvalidateUsingContexts(visited);
+            QueueUsingContexts(this, visited, pending);
+
+            while (pending.Count != 0)
+            {
+                // Removing from the end keeps the worklist a stack, which costs no shifting. The
+                // order between two contexts is not observable: invalidating one is an independent
+                // CAS on its own state and never reads another context.
+                var lastIndex = pending.Count - 1;
+                var usingContext = pending[lastIndex];
+                pending.RemoveAt(lastIndex);
+
+                usingContext.InvalidateState();
+                QueueUsingContexts(usingContext, visited, pending);
+            }
         }
         finally
         {
             visited.Clear();
+            pending.Clear();
         }
     }
 
-    private void InvalidateUsingContexts(HashSet<InterceptorSubjectContext> visited)
+    /// <summary>
+    /// Queues the contexts that resolve through <paramref name="context"/> and have not been
+    /// invalidated yet.
+    /// </summary>
+    private static void QueueUsingContexts(
+        InterceptorSubjectContext context,
+        HashSet<InterceptorSubjectContext> visited,
+        List<InterceptorSubjectContext> pending)
     {
         // Contexts that are never used as a fallback take no lock at all. The field is written
         // once by a CAS that is ordered before the registrant's own publish, so a registration
@@ -624,15 +661,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // of two independently mutated fields, so an unlocked read can compute a count that was
         // never true, and a using context that never left the set could be skipped for good. The
         // locked block below handles an empty set without allocating anyway.
-        var usedByContexts = Volatile.Read(ref _usedByContexts);
+        var usedByContexts = Volatile.Read(ref context._usedByContexts);
         if (usedByContexts is null)
         {
             return;
         }
 
-        // Snapshot under the set lock, invalidate after release: calling into another context
-        // while holding a set lock is forbidden by the lock order. The 0/1/many shapes avoid an
-        // array allocation in the common cases.
+        // Snapshot under the set lock, queue after release: calling into another context while
+        // holding a set lock is forbidden by the lock order. The 0/1/many shapes avoid an array
+        // allocation in the common cases.
         InterceptorSubjectContext? singleUsingContext = null;
         InterceptorSubjectContext[]? usingContexts = null;
 
@@ -655,26 +692,21 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         if (singleUsingContext is not null)
         {
-            InvalidateUsingContext(singleUsingContext, visited);
+            if (visited.Add(singleUsingContext))
+            {
+                pending.Add(singleUsingContext);
+            }
         }
         else if (usingContexts is not null)
         {
             foreach (var usingContext in usingContexts)
             {
-                InvalidateUsingContext(usingContext, visited);
+                if (visited.Add(usingContext))
+                {
+                    pending.Add(usingContext);
+                }
             }
         }
-    }
-
-    private static void InvalidateUsingContext(InterceptorSubjectContext usingContext, HashSet<InterceptorSubjectContext> visited)
-    {
-        if (!visited.Add(usingContext))
-        {
-            return;
-        }
-
-        usingContext.InvalidateState();
-        usingContext.InvalidateUsingContexts(visited);
     }
 
     private sealed class ContextState
