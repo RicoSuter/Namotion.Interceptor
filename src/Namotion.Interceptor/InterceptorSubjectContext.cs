@@ -16,11 +16,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // walk and the upward invalidation walk cannot form a lock cycle, including in cyclic
     // fallback graphs.
     //
-    // Lock order: _mutationLock -> UsedByContextsLock, never reverse. UsedByContextsLock
-    // critical sections only touch a _usedByContexts set and never call into another context.
-    //
-    // TODO(perf): Static lock simplifies cross-instance ordering but may contend under many independent trees.
-    private static readonly object UsedByContextsLock = new();
+    // Lock order: _mutationLock -> a _usedByContexts set lock, never reverse. A set lock is a
+    // leaf: its critical sections only touch that one set and never take another lock or call
+    // into another context. That leaf property is what makes per-context set locks safe where a
+    // single global one was: the wait graph has no edge out of a set lock, so two contexts
+    // registering into each other concurrently cannot form a cycle.
 
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _contextChangeVisited;
@@ -39,7 +39,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private readonly object _mutationLock = new();
 
     // Contexts that resolve through this context, lazily allocated because most contexts are
-    // never used as a fallback.
+    // never used as a fallback. The set instance is its own lock: it is created once via CAS and
+    // never replaced, so every thread locks the same canonical object without a second allocation.
     private HashSet<InterceptorSubjectContext>? _usedByContexts;
 
     public static InterceptorSubjectContext Create()
@@ -77,9 +78,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // R4: register into the fallback BEFORE publishing so that its _usedByContexts is
             // always a superset of the true using set. An extra entry only costs a spurious
             // invalidation; a missing entry would leave a compiled chain above permanently stale.
-            lock (UsedByContextsLock)
+            var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
+            lock (usedByContexts)
             {
-                (contextImpl._usedByContexts ??= []).Add(this);
+                usedByContexts.Add(this);
             }
 
             PublishState(new ContextState(state.Services, state.FallbackContexts.Add(contextImpl)));
@@ -113,9 +115,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // R4: unregister from the fallback only AFTER publishing so that its _usedByContexts
             // stays a superset of the true using set for the whole transition (see
             // AddFallbackContext).
-            lock (UsedByContextsLock)
+            var usedByContexts = Volatile.Read(ref contextImpl._usedByContexts);
+            if (usedByContexts is not null)
             {
-                contextImpl._usedByContexts?.Remove(this);
+                lock (usedByContexts)
+                {
+                    usedByContexts.Remove(this);
+                }
             }
         }
 
@@ -365,6 +371,23 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         Interlocked.CompareExchange(ref _state, current.WithoutCaches(), current);
     }
 
+    /// <summary>
+    /// Returns the canonical using set of this context, creating it on first use. The CAS keeps
+    /// one instance when two contexts register concurrently, which is what lets callers use the
+    /// set itself as the lock.
+    /// </summary>
+    private HashSet<InterceptorSubjectContext> GetOrCreateUsedByContexts()
+    {
+        var usedByContexts = Volatile.Read(ref _usedByContexts);
+        if (usedByContexts is not null)
+        {
+            return usedByContexts;
+        }
+
+        var created = new HashSet<InterceptorSubjectContext>();
+        return Interlocked.CompareExchange(ref _usedByContexts, created, null) ?? created;
+    }
+
     private void InvalidateUsingContexts()
     {
         var visited = _contextChangeVisited ??= [];
@@ -383,30 +406,35 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private void InvalidateUsingContexts(HashSet<InterceptorSubjectContext> visited)
     {
-        // Snapshot under the lock, invalidate after release: calling into another context while
-        // holding UsedByContextsLock is forbidden by the lock order. The 0/1/many shapes avoid
-        // an array allocation in the common cases.
+        // Contexts that are never used as a fallback take no lock at all. A registration racing
+        // this check has not published its own state yet, so it cannot have cached anything that
+        // predates the publish this walk follows, and its own walk covers everything above it.
+        var usedByContexts = Volatile.Read(ref _usedByContexts);
+        if (usedByContexts is null || usedByContexts.Count == 0)
+        {
+            return;
+        }
+
+        // Snapshot under the set lock, invalidate after release: calling into another context
+        // while holding a set lock is forbidden by the lock order. The 0/1/many shapes avoid an
+        // array allocation in the common cases.
         InterceptorSubjectContext? singleUsingContext = null;
         InterceptorSubjectContext[]? usingContexts = null;
 
-        lock (UsedByContextsLock)
+        lock (usedByContexts)
         {
-            var usedByContexts = _usedByContexts;
-            if (usedByContexts is not null && usedByContexts.Count != 0)
+            if (usedByContexts.Count == 1)
             {
-                if (usedByContexts.Count == 1)
+                // foreach binds the HashSet struct enumerator, First() would box it.
+                foreach (var usingContext in usedByContexts)
                 {
-                    // foreach binds the HashSet struct enumerator, First() would box it.
-                    foreach (var usingContext in usedByContexts)
-                    {
-                        singleUsingContext = usingContext;
-                        break;
-                    }
+                    singleUsingContext = usingContext;
+                    break;
                 }
-                else
-                {
-                    usingContexts = [.. usedByContexts];
-                }
+            }
+            else if (usedByContexts.Count != 0)
+            {
+                usingContexts = [.. usedByContexts];
             }
         }
 
