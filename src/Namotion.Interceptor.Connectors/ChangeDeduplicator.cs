@@ -148,10 +148,19 @@ internal sealed class ChangeDeduplicator : IDisposable
     /// <summary>
     /// Releases the batch state after the write handler has consumed the result, invalidating the memory
     /// returned by <see cref="Deduplicate"/>. Must be called after every batch, because it is what keeps
-    /// the pooled buffer free of stale references.
+    /// the pooled buffer free of stale references. A no-op once <see cref="Dispose"/> has run.
     /// </summary>
     public void Reset()
     {
+        // Idempotent like Dispose. Both are called from the same finally block in ChangeQueueProcessor,
+        // picked by a disposal flag read outside the buffer's own lifetime, so a released buffer must not
+        // turn into an ArgumentNullException raised from a finally block, which would replace whatever the
+        // flush was propagating.
+        if (_buffer is null)
+        {
+            return;
+        }
+
         _propertyIndices.Clear();
 
         // Only the prefix Deduplicate filled can hold object references (subjects, boxed values): every
