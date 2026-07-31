@@ -21,10 +21,11 @@ internal sealed class ChangeDeduplicator : IDisposable
     // Slot of a property whose surviving change has not been placed into the buffer yet.
     private const int UnplacedIndex = -1;
 
-    // Per property: the slot of its surviving change, the revision bounds of the whole batch for that
-    // property, and whether any of its changes is unordered (revision 0). Revisions are only comparable
-    // within one subject, which holds here because the key pins the collapse to a single property.
-    private readonly Dictionary<PropertyReference, (int Index, long LowestRevision, long HighestRevision, bool HasUnorderedChange)> _propertyIndices
+    // Per property: the slot of its surviving change and the revision bounds of the whole batch for that
+    // property. Revisions are only comparable within one subject, which holds here because the key pins
+    // the collapse to a single property. A committed write never takes revision 0, so a zero lower bound
+    // doubles as the "this property has an unordered change" flag the merge falls back on.
+    private readonly Dictionary<PropertyReference, (int Index, long LowestRevision, long HighestRevision)> _propertyIndices
         = new(PropertyReference.Comparer);
 
     // Reusable buffer for deduplicated changes (rented from ArrayPool to avoid allocations on resize)
@@ -74,9 +75,9 @@ internal sealed class ChangeDeduplicator : IDisposable
             _buffer = RentClearedBuffer(changes.Length);
         }
 
-        // First pass: collect the revision bounds per property, and whether the property has to fall back
-        // to arrival position. Merging only starts once these are known for the whole batch, because a
-        // merge decided against partial bounds can promote a value that a later change invalidates.
+        // First pass: collect the revision bounds per property, a lower bound of 0 meaning the property has
+        // to fall back to arrival position. Merging only starts once these are known for the whole batch,
+        // because a merge decided against partial bounds can promote a value that a later change invalidates.
         for (var i = 0; i < changes.Length; i++)
         {
             var change = changes[i];
@@ -85,17 +86,13 @@ internal sealed class ChangeDeduplicator : IDisposable
             ref var bounds = ref CollectionsMarshal.GetValueRefOrAddDefault(_propertyIndices, change.Property, out var propertyAlreadySeen);
             if (!propertyAlreadySeen)
             {
-                bounds = (UnplacedIndex, change.Revision, change.Revision, change.Revision == 0);
-            }
-            else if (change.Revision == 0)
-            {
-                // A change constructed outside a terminal write carries revision 0, which orders against
-                // nothing, so the bounds stop describing the batch and the property falls back entirely
-                // to arrival position.
-                bounds.HasUnorderedChange = true;
+                bounds = (UnplacedIndex, change.Revision, change.Revision);
             }
             else if (change.Revision < bounds.LowestRevision)
             {
+                // A change constructed outside a terminal write carries revision 0, which orders against
+                // nothing. Revisions start at 1, so such a change drives the lower bound to 0 through this
+                // plain minimum, and the merge reads that as the signal to fall back to arrival position.
                 bounds.LowestRevision = change.Revision;
             }
             else if (change.Revision > bounds.HighestRevision)
@@ -121,7 +118,7 @@ internal sealed class ChangeDeduplicator : IDisposable
             }
 
             var survivingChange = _buffer[entry.Index];
-            if (entry.HasUnorderedChange || change.Revision == entry.LowestRevision)
+            if (entry.LowestRevision == 0 || change.Revision == entry.LowestRevision)
             {
                 // The earlier arrival, respectively the batch's baseline commit, supplies the old value.
                 // Under the fallback every earlier arrival overwrites it, so the first one wins.
