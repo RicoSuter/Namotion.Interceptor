@@ -10,6 +10,15 @@ namespace Namotion.Interceptor;
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     // Lock ordering: _lock → UsedByContextsLock (never reverse).
+    //
+    // Across contexts, _lock may only be nested downwards, meaning a context may hold its own
+    // _lock while taking the _lock of one of its fallback contexts (that is what a service query
+    // does while walking the fallback chain). It must never be nested upwards into a using
+    // context, because the two directions would then form a cycle. Practically that means
+    // OnContextChanged, which walks _usedByContexts, is always invoked after _lock is released.
+    // The remaining theoretical exposure is a fallback graph that contains a cycle, where the
+    // downward direction is no longer a partial order.
+    //
     // TODO(perf): Static lock simplifies cross-instance ordering but may contend under many independent trees.
     private static readonly object UsedByContextsLock = new();
 
@@ -85,27 +94,45 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     public virtual bool AddFallbackContext(IInterceptorSubjectContext context)
     {
         var contextImpl = (InterceptorSubjectContext)context;
+        bool requiresInvalidation;
+
         lock (_lock)
         {
-            if (_fallbackContexts.Add(contextImpl))
+            if (!_fallbackContexts.Add(contextImpl))
             {
-                lock (UsedByContextsLock) { contextImpl._usedByContexts.Add(this); }
-
-                // Fast path: first fallback on fresh context (no services, no caches)
-                // Skip full OnContextChanged - just set the optimization field
-                if (_serviceCache is null && _services.Count == 0 && _fallbackContexts.Count == 1)
-                {
-                    _noServicesSingleFallbackContext = contextImpl;
-                }
-                else
-                {
-                    OnContextChanged();
-                }
-                return true;
+                return false;
             }
 
-            return false;
+            bool isUsedByOtherContexts;
+            lock (UsedByContextsLock)
+            {
+                contextImpl._usedByContexts.Add(this);
+                isUsedByOtherContexts = _usedByContexts.Count != 0;
+            }
+
+            // Fast path: first fallback on a fresh context (no services, no caches) that no other
+            // context resolves through. There is nothing to invalidate, so only the delegation
+            // field has to be set. The used-by check is required because OnContextChanged is also
+            // the only thing that invalidates the contexts above, which would otherwise keep a
+            // compiled chain that never sees the newly attached fallback.
+            requiresInvalidation =
+                isUsedByOtherContexts ||
+                _serviceCache is not null ||
+                _services.Count != 0 ||
+                _fallbackContexts.Count != 1;
+
+            if (!requiresInvalidation)
+            {
+                _noServicesSingleFallbackContext = contextImpl;
+            }
         }
+
+        if (requiresInvalidation)
+        {
+            OnContextChanged();
+        }
+
+        return true;
     }
 
     protected bool HasFallbackContext(IInterceptorSubjectContext context)
@@ -119,29 +146,33 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var contextImpl = (InterceptorSubjectContext)context;
         lock (_lock)
         {
-            if (_fallbackContexts.Remove(contextImpl))
+            if (!_fallbackContexts.Remove(contextImpl))
             {
-                lock (UsedByContextsLock) { contextImpl._usedByContexts.Remove(this); }
-                OnContextChanged();
-                return true;
+                return false;
             }
 
-            return false;
+            lock (UsedByContextsLock) { contextImpl._usedByContexts.Remove(this); }
         }
+
+        OnContextChanged();
+        return true;
     }
 
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
     {
         lock (_lock)
         {
+            // The lookup walks downwards into the fallback contexts and keeps the check and the
+            // add atomic against concurrent mutations of this context, as before.
             if (GetServicesWithoutCache<TService>().Any(exists))
             {
                 return false;
             }
 
-            AddService(factory());
+            _services.Add(factory()!);
         }
 
+        OnContextChanged();
         return true;
     }
 
@@ -150,8 +181,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (_lock)
         {
             _services.Add(service!);
-            OnContextChanged();
         }
+
+        OnContextChanged();
     }
 
     public TInterface? TryGetService<TInterface>()
@@ -326,6 +358,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return ServiceOrderResolver.OrderByDependencies(services);
     }
 
+    /// <summary>
+    /// Invalidates the compiled chains of this context and of every context that resolves through
+    /// it. Must be called without <see cref="_lock"/> held, see the lock ordering note at the top
+    /// of the class: this walks upwards into the using contexts, while a service query walks
+    /// downwards into the fallback contexts, and holding _lock across the upward walk lets the two
+    /// directions deadlock.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void OnContextChanged()
     {
