@@ -809,14 +809,13 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void WhenMeasuringSubjectPropertyChange_ThenSizeStaysWithinOneAlignmentSlotOfMaster()
+    public void WhenMeasuringSubjectPropertyChange_ThenSizeStaysWithinTheAcceptedBudget()
     {
-        // The plain ChangeOrigin field may cost one alignment slot (8 bytes) versus master's
-        // object? Source. That growth is accepted. If the benchmark gate later shows it matters
-        // on the hot path, flatten the origin into a padding-folded kind byte plus the existing
-        // source reference slot; that is the known optimization, not applied preemptively.
-        // Master measured at 192 bytes; the accepted bound is master + one alignment slot.
+        // The struct is copied on every publish, so growth is a hot-path cost that has to be a decision
+        // rather than a side effect. The commit revision took it up by one alignment slot, to the 144
+        // bytes measured here, and that growth is accepted. The bound is the exact measurement: slack
+        // would let the next field through unnoticed.
         var size = System.Runtime.CompilerServices.Unsafe.SizeOf<SubjectPropertyChange>();
-        Assert.True(size <= 200, $"SubjectPropertyChange grew to {size} bytes");
+        Assert.True(size <= 144, $"SubjectPropertyChange grew to {size} bytes");
     }
 }
