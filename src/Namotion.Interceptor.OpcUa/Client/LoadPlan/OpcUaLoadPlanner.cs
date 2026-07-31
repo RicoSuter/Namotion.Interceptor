@@ -15,13 +15,14 @@ namespace Namotion.Interceptor.OpcUa.Client.LoadPlan;
 /// staged-subject links needed for the load. Ownership claims, root assignments, values,
 /// subscriptions, and read-after-write registration are all deferred to
 /// <see cref="OpcUaLoadPlan.Commit"/>, which applies the plan after discovery succeeds.
-/// Two live side effects do occur during discovery, because nested dynamic discovery needs
-/// them: dynamic properties are added eagerly to their subjects, and newly created child
-/// subjects are linked into the parent context so their own children are discoverable.
-/// On any planning failure the planner rolls back all staged-subject links it established
-/// (deepest-first, mirroring the order they were added), so no subjects leak into the
-/// registry on error; a leftover eager dynamic property is transient and is re-matched by
-/// the next load through its attached node-id attribute.
+/// Subjects created during discovery stay off-tree: they are never linked into the parent
+/// context until commit, so a planning failure leaks nothing into the registry and needs no
+/// rollback. Discovery still needs a <see cref="RegisteredSubject"/> to descend through, so
+/// off-tree subjects get a detached one (see <see cref="GetRegisteredView"/>).
+/// One live side effect remains, because nested dynamic discovery needs it: dynamic
+/// properties are added eagerly to their subjects. On a reused (already registered) subject
+/// that is visible immediately, but it is transient and re-matched by the next load through
+/// the attached node-id attribute.
 /// </summary>
 internal sealed class OpcUaLoadPlanner
 {
@@ -33,9 +34,9 @@ internal sealed class OpcUaLoadPlanner
     // Browse cache shared across all phases including attribute traversal.
     private readonly Dictionary<NodeId, IReadOnlyList<ReferenceDescription>> _browseCache = new();
 
-    // Discovery-time staged-subject links, maintained for rollback on planning failure.
-    // The order matches AddFallbackContext call order so rollback runs deepest-first.
-    private readonly List<(IInterceptorSubject Subject, IInterceptorSubjectContext ParentContext)> _discoveryLinks = new();
+    // Registry views of off-tree subjects, keyed by subject so descent through the same
+    // subject twice sees the same instance (BatchLoadVariableNodesAsync dedups on it).
+    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _detachedViews = new();
 
     // Discovery-only reuse maps (pure data; never mutate the live graph).
     private readonly Dictionary<NodeId, IInterceptorSubject> _subjectsByNodeId = new();
@@ -54,8 +55,9 @@ internal sealed class OpcUaLoadPlanner
     }
 
     /// <summary>
-    /// Runs the full multi-phase discovery and returns a populated plan. Rolls back all
-    /// staged-subject links and rethrows on any exception.
+    /// Runs the full multi-phase discovery and returns a populated plan. Discovery touches
+    /// only off-tree subjects, so an exception needs no rollback: the caller drops the plan
+    /// and the subjects it staged become unreachable.
     /// </summary>
     public async Task<OpcUaLoadPlan> CreatePlanAsync(
         IInterceptorSubject subject,
@@ -64,31 +66,18 @@ internal sealed class OpcUaLoadPlanner
         CancellationToken cancellationToken)
     {
         var plan = new OpcUaLoadPlan(_rootSubject, _logger);
-        try
+        if (subject.TryGetRegisteredSubject() is null)
         {
-            await LoadSubjectsAsync([(rootNode, subject)], plan, session, cancellationToken).ConfigureAwait(false);
+            // Everything below the root resolves through the registry, so without one there is
+            // nothing to plan. Checked once here rather than per subject: subjects created during
+            // discovery are legitimately unregistered until commit.
+            _logger.LogWarning(
+                "Skipping OPC UA load for '{Subject}': the subject is not in a registry. Add WithRegistry() to the subject context.",
+                subject.GetType().Name);
+            return plan;
         }
-        catch
-        {
-            // Rollback discovery-time AddFallbackContext calls deepest-first. One failed
-            // detach must not strand the rest or mask the original exception.
-            for (var i = _discoveryLinks.Count - 1; i >= 0; i--)
-            {
-                var (staged, parentContext) = _discoveryLinks[i];
-                try
-                {
-                    staged.Context.RemoveFallbackContext(parentContext);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex,
-                        "Failed to detach staged subject {Subject} from parent context during discovery rollback.",
-                        staged.GetType().Name);
-                }
-            }
-            _discoveryLinks.Clear();
-            throw;
-        }
+
+        await LoadSubjectsAsync([(rootNode, subject)], plan, session, cancellationToken).ConfigureAwait(false);
         return plan;
     }
 
@@ -163,12 +152,7 @@ internal sealed class OpcUaLoadPlanner
                 continue;
             }
 
-            var registeredSubject = subject.TryGetRegisteredSubject();
-            if (registeredSubject is null)
-            {
-                continue;
-            }
-
+            var registeredSubject = GetRegisteredView(subject);
             var resolved = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
             if (resolved is null)
             {
@@ -447,7 +431,7 @@ internal sealed class OpcUaLoadPlanner
 
         if (existingSubject is null)
         {
-            RegisterStagedSubject(subjectToLoad, parentSubject.Context, plan);
+            StageSubject(subjectToLoad, parentSubject.Context, plan);
         }
 
         _subjectsByNodeId.TryAdd(resolvedNodeId, subjectToLoad);
@@ -476,14 +460,15 @@ internal sealed class OpcUaLoadPlanner
         foreach (var (property, nodeId) in variableNodes)
         {
             var children = property.Children;
-            var childSubject = (children.IsEmpty ? null : (IInterceptorSubject?)children[0].Subject)?.TryGetRegisteredSubject();
-            if (childSubject is null)
+            if (children.IsEmpty)
             {
                 _logger.LogWarning(
                     "Skipping OPC UA Variable-typed subject reference '{Subject}.{Property}' (NodeId: {NodeId}): no child subject was pre-constructed. The parent type must instantiate this property in its constructor.",
                     property.Subject.GetType().Name, property.Name, nodeId);
                 continue;
             }
+
+            var childSubject = GetRegisteredView(children[0].Subject);
 
             if (!nodeByChildSubject.TryGetValue(childSubject, out var existing) || nodeId.CompareTo(existing) < 0)
             {
@@ -691,7 +676,7 @@ internal sealed class OpcUaLoadPlanner
 
             if (isFreshlyCreated)
             {
-                RegisterStagedSubject(childSubject, property.Subject.Context, plan);
+                StageSubject(childSubject, property.Subject.Context, plan);
             }
 
             _subjectsByNodeId.TryAdd(nodeId, childSubject);
@@ -964,30 +949,40 @@ internal sealed class OpcUaLoadPlanner
     }
 
     /// <summary>
-    /// Links a newly-created staged subject into the parent context during discovery
-    /// (so its children are discoverable via TryGetRegisteredSubject) and records the
-    /// link in the planner's rollback list and the plan's staged-subject list.
+    /// Records a newly-created subject for linking into the parent context at commit. The
+    /// subject stays off-tree for the rest of discovery, so this cannot fail and needs no
+    /// rollback.
     /// </summary>
-    private void RegisterStagedSubject(
+    private void StageSubject(
         IInterceptorSubject subject,
         IInterceptorSubjectContext parentContext,
         OpcUaLoadPlan plan)
     {
-        // Record the rollback entry BEFORE the side effect so an exception in
-        // AddFallbackContext doesn't leave a link that cannot be rolled back.
-        _discoveryLinks.Add((subject, parentContext));
-        try
+        GetRegisteredView(subject);
+        plan.AddStagedSubject(subject, parentContext);
+    }
+
+    /// <summary>
+    /// Returns the registry's view of the subject, creating and caching a detached one when
+    /// the subject is off-tree. Mutations through a detached view (AddProperty, AddAttribute)
+    /// still land on the subject itself, so the registry picks them up when it adopts the
+    /// subject at commit. Subjects the planner created and everything pre-constructed
+    /// underneath them are off-tree, which is why this never gives up and returns null.
+    /// </summary>
+    private RegisteredSubject GetRegisteredView(IInterceptorSubject subject)
+    {
+        if (subject.TryGetRegisteredSubject() is { } registeredSubject)
         {
-            subject.Context.AddFallbackContext(parentContext);
-        }
-        catch
-        {
-            _discoveryLinks.RemoveAt(_discoveryLinks.Count - 1);
-            throw;
+            return registeredSubject;
         }
 
-        // Also tell the plan, so Commit's step 1 re-linking is a harmless dedup.
-        plan.AddStagedSubject(subject, parentContext);
+        if (!_detachedViews.TryGetValue(subject, out var view))
+        {
+            view = new RegisteredSubject(subject);
+            _detachedViews[subject] = view;
+        }
+
+        return view;
     }
 
     /// <summary>
