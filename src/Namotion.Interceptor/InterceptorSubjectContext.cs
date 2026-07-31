@@ -374,9 +374,18 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// </summary>
     private void UpdateDelegationTarget()
     {
-        _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1
-            ? _fallbackContexts.First()
-            : null;
+        InterceptorSubjectContext? target = null;
+        if (_services.Count == 0 && _fallbackContexts.Count == 1)
+        {
+            // foreach binds the HashSet struct enumerator, First() would box it on every attach.
+            foreach (var fallbackContext in _fallbackContexts)
+            {
+                target = fallbackContext;
+                break;
+            }
+        }
+
+        _noServicesSingleFallbackContext = target;
     }
 
     /// <summary>
