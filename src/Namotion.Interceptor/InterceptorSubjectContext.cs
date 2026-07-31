@@ -29,10 +29,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // predicate that mutates a different context, which the public contract forbids for that reason
     // (see IInterceptorSubjectContext.TryAddService).
 
-    // Delegation hops walked without any cycle bookkeeping. Chains of two or three are the shape
-    // real graphs produce, so the bookkeeping below is kept off them entirely; the value only has
-    // to be small enough that a cyclic chain reaches the detection quickly and large enough that
-    // realistic chains never do.
+    // Delegation hops walked without any cycle bookkeeping. Chains can be as long as the subject
+    // graph is deep, so this is not a bound on anything: past it the walk keeps going under Floyd
+    // detection, which costs a second pointer and no memory. The value only trades how quickly a
+    // cyclic chain reaches detection against how many hops stay free of it.
     private const int UncheckedDelegationHops = 8;
 
     [ThreadStatic]
@@ -251,8 +251,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static InterceptorSubjectContext ResolveDelegationTarget(InterceptorSubjectContext delegationTarget, out ContextState state)
     {
-        // The single hop stays inline and costs exactly what the recursive call site cost before:
-        // one pinned state and one branch. Everything deeper is out of line.
+        // The single hop stays inline: one pinned state and one branch, and one call frame less
+        // than the recursive call site it replaces, which the JIT could not inline. Everything
+        // deeper is out of line.
         state = Volatile.Read(ref delegationTarget._state);
         var next = state.DelegationTarget;
         return next is null ? delegationTarget : FollowDelegationChain(next, out state);
@@ -285,8 +286,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             hareState = Volatile.Read(ref hare._state);
         }
 
-        // Both start where the plain prefix ended: Floyd only needs the two to start on the same
-        // node, and the part of the chain already walked cannot contain the cycle entrance twice.
+        // Both start where the plain prefix ended rather than at the head. Every context has
+        // exactly one delegation edge, so the walk is deterministic: a cycle reachable from the
+        // head is still reachable from here, and if the prefix already entered one then this node
+        // is on it. Floyd only needs the two pointers to start together.
         var tortoise = hare;
         var tortoiseState = hareState;
 
@@ -323,8 +326,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             {
                 // A meeting is proof of a cycle only in a graph that does not change underneath the
                 // walk. Concurrent mutation can move the tortoise onto the hare over an edge the
-                // hare never took, so the suspicion is confirmed exactly before it is reported: a
-                // legal topology must never be rejected because a fallback was rewired mid walk.
+                // hare never took, so the suspicion is confirmed exactly before it is reported,
+                // which keeps a rewiring from being reported as a cycle in every case that a
+                // single pass over the current edges can rule out. It is not an absolute
+                // guarantee: the confirming walk reads each edge at its own time, so a mutator
+                // that rewires around it can still make it observe one context twice. Both are
+                // vanishingly unlikely and the outcome is a catchable exception, never a bad
+                // resolution.
                 return ResolveDelegationChainExactly(delegationTarget, out state);
             }
         }

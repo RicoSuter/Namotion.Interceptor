@@ -38,7 +38,9 @@ public class ContextDelegationCycleTests
     /// regression in either the plain prefix or the detection beyond it fails this.
     /// </summary>
     [Theory]
+    [InlineData(1)] // a context that is its own fallback, the shortest cycle there is
     [InlineData(3)]
+    [InlineData(8)] // exactly the unchecked prefix, so detection starts on the first checked hop
     [InlineData(9)]
     [InlineData(10)]
     [InlineData(64)]
@@ -72,8 +74,10 @@ public class ContextDelegationCycleTests
     [Fact]
     public void WhenDelegationChainIsVeryDeepWithoutCycle_ThenEveryResolvingOperationSucceeds()
     {
-        // Arrange
-        const int ChainLength = 500;
+        // Arrange: deep enough that the recursion this replaced would die on it. That version
+        // overflowed at roughly 75,000 frames on an 8 MB stack and far earlier on the 1 MB stacks
+        // some hosts use, so a few hundred levels would pass either way and prove nothing.
+        const int ChainLength = 100_000;
 
         var interceptor = new CountingWriteInterceptor();
         var rootContext = InterceptorSubjectContext.Create();
@@ -177,6 +181,38 @@ public class ContextDelegationCycleTests
         Assert.Single(servicesOfB);
         Assert.Equal(3, subject.Value);
         Assert.Equal(1, interceptor.WriteCount);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(3, 3)]
+    [InlineData(7, 2)] // the cycle opens on the last unchecked hop
+    [InlineData(9, 2)] // the walk is already under cycle detection when it enters the cycle
+    [InlineData(20, 3)]
+    public void WhenAcyclicPrefixLeadsIntoDelegationCycle_ThenResolvingThrows(int prefixLength, int cycleLength)
+    {
+        // Arrange: a tail that is not part of the cycle it runs into, which is the shape Floyd has
+        // to handle with the two pointers starting past the tail rather than at the head.
+        var cycle = Enumerable
+            .Range(0, cycleLength)
+            .Select(_ => InterceptorSubjectContext.Create())
+            .ToArray();
+
+        for (var index = 0; index < cycleLength; index++)
+        {
+            cycle[index].AddFallbackContext(cycle[(index + 1) % cycleLength]);
+        }
+
+        var entry = cycle[0];
+        for (var index = 0; index < prefixLength; index++)
+        {
+            var context = InterceptorSubjectContext.Create();
+            context.AddFallbackContext(entry);
+            entry = context;
+        }
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => entry.GetServices<MarkerService>());
     }
 
     private sealed class MarkerService;
