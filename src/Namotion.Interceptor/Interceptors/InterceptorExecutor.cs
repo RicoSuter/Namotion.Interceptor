@@ -7,6 +7,12 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     private readonly IInterceptorSubject _subject;
 
     /// <summary>
+    /// The subject this executor was constructed for. Exposed so the terminal write can assert that the
+    /// context's executor and the locked subject are the same pairing its plain increment relies on.
+    /// </summary>
+    internal IInterceptorSubject Subject => _subject;
+
+    /// <summary>
     /// Monotonic per-subject commit counter. Incremented by the terminal write while the subject's
     /// SyncRoot is held, so a plain increment is exclusive: no Interlocked needed. Dense over
     /// committed writes and never reset, so it stays comparable across detach and reattach. A label
