@@ -93,5 +93,6 @@ internal static class OpcUaStatusCodeClassifier
     public static bool IsBatchTooLarge(ServiceResultException exception) =>
         exception.StatusCode is StatusCodes.BadTooManyOperations
             or StatusCodes.BadEncodingLimitsExceeded
+            or StatusCodes.BadRequestTooLarge
             or StatusCodes.BadResponseTooLarge;
 }
