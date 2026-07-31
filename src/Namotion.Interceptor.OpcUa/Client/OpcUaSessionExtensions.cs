@@ -20,10 +20,32 @@ internal static class OpcUaSessionExtensions
     private static int GetMaxNodesPerRead(ISession session) => ToBatchLimit(session.OperationLimits?.MaxNodesPerRead);
 
     /// <summary>
+    /// Batch size for calls that can leave continuation points open. The continuation-point quota
+    /// is a separate and much smaller limit than the per-call operation limit (SDK servers default
+    /// to 10 against a MaxNodesPerBrowse of 2500), and a batch larger than the quota either fails
+    /// with <c>BadNoContinuationPoints</c> or has its oldest points evicted and then fails
+    /// BrowseNext with <c>BadContinuationPointInvalid</c>. Both are permanent for the load, so
+    /// retrying with the same batch size would fail identically: capping is what makes it converge.
+    /// Mirrors what <c>Opc.Ua.Client.Browser</c> does for the same reason.
+    /// </summary>
+    private static int GetBrowseBatchSize(ISession session)
+    {
+        var operationLimit = GetMaxNodesPerBrowse(session);
+
+        // Declared non-nullable by ISession, but a partially initialized or mocked session can
+        // still hand back null, and a server that does not expose the node reports 0.
+        int continuationPointLimit = session.ServerCapabilities?.MaxBrowseContinuationPoints ?? 0;
+        return continuationPointLimit > 0 && continuationPointLimit < operationLimit
+            ? continuationPointLimit
+            : operationLimit;
+    }
+
+    /// <summary>
     /// Browses multiple nodes in batched calls, collecting all references including
-    /// continuation-point pages. Deduplicates input NodeIds; NodeIds whose browse
-    /// returns a permanent bad status are omitted from the result so callers can
-    /// distinguish "browsed successfully (possibly empty)" from "failed this round".
+    /// continuation-point pages. Deduplicates input NodeIds. A NodeId present in the result was
+    /// browsed to completion (possibly to an empty reference list); one that failed this round,
+    /// whether the first page returned a permanent bad status or pagination stopped part-way, is
+    /// omitted rather than reported with a truncated child list.
     /// </summary>
     public static async Task<Dictionary<NodeId, ReferenceDescriptionCollection>> BrowseNodesAsync(
         this ISession session,
@@ -49,7 +71,7 @@ internal static class OpcUaSessionExtensions
             }
         }
 
-        var batchSize = GetMaxNodesPerBrowse(session);
+        var batchSize = GetBrowseBatchSize(session);
 
         for (var offset = 0; offset < uniqueNodeIds.Count; offset += batchSize)
         {
@@ -125,7 +147,9 @@ internal static class OpcUaSessionExtensions
             }
             if (!seen.Add(nodeId))
             {
-                logger.LogWarning(
+                // Debug, not Warning: a node reachable through more than one hierarchical
+                // reference is normal in OPC UA address spaces, so this is expected traffic.
+                logger.LogDebug(
                     "Skipping duplicate browse reference '{BrowseName}' resolving to already-seen NodeId '{NodeId}'.",
                     reference.BrowseName.Name, nodeId);
                 continue;
@@ -185,8 +209,10 @@ internal static class OpcUaSessionExtensions
         var actual = response.Results.Count;
         if (actual != count)
         {
+            // Extras are ignored (their continuation points are still released below); a short
+            // response aborts the load once the processing loop reaches the first missing slot.
             logger.LogWarning(
-                "BrowseAsync returned {Actual} results but {Expected} were requested. Clamping to preserve positional alignment.",
+                "BrowseAsync returned {Actual} results but {Expected} were requested.",
                 actual, count);
         }
         // Collect continuation points from good in-range results upfront so they can be
@@ -253,14 +279,14 @@ internal static class OpcUaSessionExtensions
         var current = initialPoints;
         var next = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
         var round = 0;
-        var batchSize = GetMaxNodesPerBrowse(session);
+        var batchSize = GetBrowseBatchSize(session);
         try
         {
             while (current.Count > 0)
             {
                 // One round drains every currently-pending continuation point, possibly
                 // in multiple BrowseNextAsync calls (the inner loop batches by
-                // GetMaxNodesPerBrowse). The cap therefore bounds pagination *depth*,
+                // GetBrowseBatchSize). The cap therefore bounds pagination *depth*,
                 // i.e. how many times the server can keep handing out fresh continuation
                 // points before we give up. It does not bound BrowseNext call count,
                 // which legitimately scales with the number of in-flight continuation
@@ -270,6 +296,15 @@ internal static class OpcUaSessionExtensions
                     logger.LogWarning(
                         "Aborting BrowseNext after {MaxRounds} rounds with {Remaining} continuation points still pending. Possible server bug.",
                         maxContinuationRounds, current.Count);
+
+                    // Those nodes are still mid-pagination, so what was collected is a prefix of
+                    // their children. Drop it: the contract is that a NodeId present in the result
+                    // was browsed completely, and a truncated child list would make positional
+                    // consumers replace a collection with a shortened one.
+                    foreach (var (nodeId, _) in current)
+                    {
+                        result.Remove(nodeId);
+                    }
                     break;
                 }
 
@@ -304,12 +339,16 @@ internal static class OpcUaSessionExtensions
             return;
         }
 
-        using var releaseTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        // Releasing frees continuation points rather than consuming them, so the quota does not
+        // apply and the plain operation limit is the right batch size here.
         var batchSize = GetMaxNodesPerBrowse(session);
         for (var offset = 0; offset < continuationPoints.Count; offset += batchSize)
         {
             try
             {
+                // Per batch, not shared: one shared budget would let a slow first batch consume
+                // the whole timeout and cancel every remaining release without ever calling.
+                using var releaseTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 var end = Math.Min(offset + batchSize, continuationPoints.Count);
                 var collection = new ByteStringCollection(end - offset);
                 for (var i = offset; i < end; i++)
@@ -399,8 +438,9 @@ internal static class OpcUaSessionExtensions
         var actual = nextResponse.Results.Count;
         if (actual != count)
         {
+            // Same handling as Browse: extras are released as orphans, a short response aborts.
             logger.LogWarning(
-                "BrowseNextAsync returned {Actual} results but {Expected} were requested. Clamping to preserve positional alignment.",
+                "BrowseNextAsync returned {Actual} results but {Expected} were requested.",
                 actual, count);
         }
 
@@ -425,8 +465,9 @@ internal static class OpcUaSessionExtensions
             {
                 OpcUaStatusCodeClassifier.ThrowIfTransientError(browseResult.StatusCode, "BrowseNext", nodeId);
                 logger.LogWarning(
-                    "BrowseNextAsync returned permanent bad status for {NodeId} ({StatusCode}); the partial result so far is retained.",
+                    "BrowseNextAsync returned permanent bad status for {NodeId} ({StatusCode}); dropping the pages collected so far because the child list would be truncated.",
                     nodeId, browseResult.StatusCode);
+                result.Remove(nodeId);
                 continue;
             }
             if (browseResult.References is { Count: > 0 })
@@ -447,10 +488,21 @@ internal static class OpcUaSessionExtensions
         CancellationToken cancellationToken)
     {
         var count = batchEnd - batchStart;
-        var chunk = new ReadValueIdCollection(count);
-        for (var i = batchStart; i < batchEnd; i++)
+
+        ReadValueIdCollection chunk;
+        if (count == nodesToRead.Count)
         {
-            chunk.Add(nodesToRead[i]);
+            // Everything fits in one call, which is the common case: send the caller's collection
+            // as-is rather than copying it. ReadAsync does not mutate the request.
+            chunk = nodesToRead;
+        }
+        else
+        {
+            chunk = new ReadValueIdCollection(count);
+            for (var i = batchStart; i < batchEnd; i++)
+            {
+                chunk.Add(nodesToRead[i]);
+            }
         }
 
         ReadResponse response;

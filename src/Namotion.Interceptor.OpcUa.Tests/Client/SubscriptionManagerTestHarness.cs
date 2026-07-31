@@ -26,8 +26,6 @@ internal sealed class SubscriptionManagerTestHarness
     private readonly IInterceptorSubject _subject;
 
     public SubscriptionManager Manager { get; }
-    public OpcUaSubjectClientSource Source { get; }
-    public SubjectPropertyWriter PropertyWriter { get; }
 
     /// <summary>
     /// Read-after-write spy injected by <see cref="CreateWithReadAfterWriteSpy"/>.
@@ -37,20 +35,16 @@ internal sealed class SubscriptionManagerTestHarness
 
     private SubscriptionManagerTestHarness(
         IInterceptorSubject subject,
-        OpcUaSubjectClientSource source,
-        SubjectPropertyWriter propertyWriter,
         SubscriptionManager manager,
-        ReadAfterWriteRegistrarSpy? readAfterWriteSpy = null)
+        ReadAfterWriteRegistrarSpy? readAfterWriteSpy)
     {
         _subject = subject;
-        Source = source;
-        PropertyWriter = propertyWriter;
         Manager = manager;
         ReadAfterWriteSpy = readAfterWriteSpy;
     }
 
     public static SubscriptionManagerTestHarness Create()
-        => Build(readAfterWriteRegistrar: null);
+        => Build(readAfterWriteSpy: null);
 
     /// <summary>
     /// Builds the harness with a recording <see cref="ReadAfterWriteRegistrarSpy"/> injected
@@ -58,14 +52,9 @@ internal sealed class SubscriptionManagerTestHarness
     /// The spy records every <c>RegisterProperty</c> call unconditionally (no filter).
     /// </summary>
     public static SubscriptionManagerTestHarness CreateWithReadAfterWriteSpy()
-    {
-        var spy = new ReadAfterWriteRegistrarSpy();
-        return Build(spy, spy);
-    }
+        => Build(new ReadAfterWriteRegistrarSpy());
 
-    private static SubscriptionManagerTestHarness Build(
-        IReadAfterWriteRegistrar? readAfterWriteRegistrar,
-        ReadAfterWriteRegistrarSpy? spy = null)
+    private static SubscriptionManagerTestHarness Build(ReadAfterWriteRegistrarSpy? readAfterWriteSpy)
     {
         var context = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
         var subject = new DynamicSubject(context);
@@ -83,9 +72,9 @@ internal sealed class SubscriptionManagerTestHarness
 
         // The SubjectPropertyWriter buffers updates until LoadInitialStateAndResumeAsync is called
         // (its _updates field starts as a non-null list at construction). We need it in the
-        // applying state (i.e., _updates == null) so that ApplyDataChange actually updates subjects
-        // in tests. We back the writer with a mock ISubjectSource that returns null initial state
-        // so that LoadInitialStateAndResumeAsync succeeds without a live session.
+        // applying state (i.e., _updates == null) so that a delivered notification actually
+        // updates subjects in tests. We back the writer with a mock ISubjectSource that returns
+        // null initial state so LoadInitialStateAndResumeAsync succeeds without a live session.
         var mockSource = new Mock<ISubjectSource>();
         mockSource
             .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
@@ -99,11 +88,11 @@ internal sealed class SubscriptionManagerTestHarness
             source,
             propertyWriter,
             pollingManager: null,
-            readAfterWriteManager: readAfterWriteRegistrar,
+            readAfterWriteManager: readAfterWriteSpy,
             configuration,
             NullLogger<OpcUaSubjectClientSource>.Instance);
 
-        return new SubscriptionManagerTestHarness(subject, source, propertyWriter, manager, spy);
+        return new SubscriptionManagerTestHarness(subject, manager, readAfterWriteSpy);
     }
 
     /// <summary>
@@ -151,26 +140,6 @@ internal sealed class SubscriptionManagerTestHarness
         context.TryGetLifecycleInterceptor()!.DetachSubjectFromContext(childSubject);
 
         return property;
-    }
-
-    /// <summary>
-    /// Returns the current SDK MonitoredItem collection to pass to
-    /// <c>RegisterSurvivorsForReadAfterWriteForTesting</c>. Items are created via
-    /// <see cref="CreatedMonitoredItem"/> so that <c>Status.Created</c> is true.
-    /// Call this after registering all items with <see cref="RegisterMonitoredItem"/>
-    /// and <see cref="RegisterMonitoredItemThenDetachSubject"/>.
-    /// </summary>
-    public IReadOnlyCollection<MonitoredItem> MonitoredItemSnapshot()
-    {
-        // Build a fake created MonitoredItem for every entry in the manager's dictionary.
-        // The snapshot is called AFTER Sweep, so detached handles may already be absent,
-        // but we build it from all registered handles for test flexibility.
-        var items = new List<MonitoredItem>();
-        foreach (var (clientHandle, property) in Manager.MonitoredItemsForTesting)
-        {
-            items.Add(CreatedMonitoredItem.Create(clientHandle, new NodeId(clientHandle, 2), 0, property));
-        }
-        return items;
     }
 
     /// <summary>
