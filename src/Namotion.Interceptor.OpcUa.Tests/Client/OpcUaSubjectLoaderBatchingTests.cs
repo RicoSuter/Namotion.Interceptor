@@ -718,11 +718,11 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
             NullLogger<OpcUaSubjectClientSource>.Instance,
             CancellationToken.None);
 
-        // Assert: 1 initial reference + 100 page references collected before the safety
-        // bound aborts the loop. The trailing release call uses a separate mock branch
-        // (releaseContinuationPoints == true) that returns no references and is excluded
-        // from browseNextCallCount.
-        Assert.Equal(101, result[rootId].Count);
+        // Assert: the safety bound stopped the loop after 100 rounds, and the node is omitted
+        // rather than reported with the 101 references gathered so far. A truncated child list
+        // would read as "this node really has 101 children". The trailing release call uses a
+        // separate mock branch (releaseContinuationPoints == true) excluded from the count.
+        Assert.Empty(result);
         Assert.Equal(100, browseNextCallCount);
     }
 
@@ -792,9 +792,9 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
             NullLogger<OpcUaSubjectClientSource>.Instance,
             CancellationToken.None);
 
-        // Assert: 1 initial reference + customLimit page references collected before abort.
+        // Assert: the custom limit stopped the loop, and the partially paged node is omitted.
         // browseNextCallCount excludes the release call (see mock branch above).
-        Assert.Equal(1 + customLimit, result[rootId].Count);
+        Assert.Empty(result);
         Assert.Equal(customLimit, browseNextCallCount);
     }
 
