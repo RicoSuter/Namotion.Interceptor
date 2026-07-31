@@ -21,6 +21,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // into another context. That leaf property is what makes per-context set locks safe where a
     // single global one was: the wait graph has no edge out of a set lock, so two contexts
     // registering into each other concurrently cannot form a cycle.
+    //
+    // Two _mutationLock objects are never ordered against each other because no path in this class
+    // acquires a second one: mutators only touch another context's using set (a leaf lock) and the
+    // service walk is lock-free. The single way to nest them is a TryAddService factory or exists
+    // predicate that mutates a different context, which the public contract forbids for that reason
+    // (see IInterceptorSubjectContext.TryAddService).
 
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _contextChangeVisited;
@@ -146,7 +152,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
             // The factory may reenter this context (Monitor is reentrant) and publish a mutation,
             // so re-read the state to not lose it. A factory registering the same service type
-            // into the same context is its own responsibility.
+            // into the same context is its own responsibility; mutating a different context from
+            // here is forbidden, see the lock order note at the top of the class.
             state = Volatile.Read(ref _state);
             PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts));
         }

@@ -19,6 +19,13 @@ public interface IInterceptorSubjectContext
     /// Conditionally registers a service using a factory function.
     /// The factory is only invoked if the <paramref name="exists"/> predicate returns false for all existing services of this type.
     /// </summary>
+    /// <remarks>
+    /// Both delegates run while this context is locked for mutation. They may read any context and
+    /// may mutate this one, but they must not mutate a different context: the calling thread then
+    /// holds the mutation locks of two contexts, and two threads that each register into one context
+    /// from a factory mutating the other acquire those locks in opposite orders and deadlock. Create
+    /// the instance in the factory and register it into any other context after this call returns.
+    /// </remarks>
     /// <typeparam name="TService">The type of service to register.</typeparam>
     /// <param name="factory">Factory function to create the service instance.</param>
     /// <param name="exists">Predicate to check against existing services. If any existing service matches (returns true), the factory is not invoked.</param>
