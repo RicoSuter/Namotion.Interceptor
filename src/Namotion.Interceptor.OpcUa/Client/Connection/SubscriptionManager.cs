@@ -178,20 +178,32 @@ internal class SubscriptionManager : IAsyncDisposable
             _subscriptions.TryAdd(subscription, 0);
         }
 
-        // Sweep before read-after-write registration so a subject that detached during setup
-        // is never registered. Callbacks stay gated until after both the sweep and survivor
-        // registration complete, so no notification can reach a subject during setup.
+        CompleteSetup(_subscriptions.Keys.SelectMany(subscription => subscription.MonitoredItems));
+    }
+
+    /// <summary>
+    /// Finishes subscription setup: drops monitored items whose subject detached while the
+    /// subscriptions were being created, registers what survived for read-after-write tracking,
+    /// then opens the callback gate.
+    /// </summary>
+    /// <remarks>
+    /// The order is the point of this method, which is why it is one unit rather than three
+    /// statements at the call site. Sweeping first is what keeps a detached subject out of the
+    /// read-after-write index, and the gate stays closed across both steps so no notification can
+    /// reach a subject mid-setup. Notifications arriving after the gate opens but before the
+    /// initial state load are not lost: the caller starts the property writer's buffering before
+    /// setup and replays it afterwards.
+    /// </remarks>
+    private void CompleteSetup(IEnumerable<MonitoredItem> monitoredItems)
+    {
         SweepDetachedSubjects();
+        RegisterSurvivors(monitoredItems);
 
-        RegisterSurvivors(_subscriptions.Keys.SelectMany(s => s.MonitoredItems));
-
-        // Open the gate only after the sweep and survivor registration are complete.
-        _callbacksEnabled = true;
+        // Never re-open a gate that DisposeAsync closed: it may have run concurrently with setup.
+        _callbacksEnabled = !_shuttingDown;
     }
 
     // Inbound notifications are dropped while shutting down or before the setup gate opens.
-    // OnFastDataChange and the ApplyDataChange test seam share this predicate so the gating
-    // test exercises the same flag the live callback checks.
     private bool AreCallbacksSuppressed => _shuttingDown || !_callbacksEnabled;
 
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
@@ -315,7 +327,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 continue;
             }
 
-            var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
+            var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
 
             switch (ClassifyFailedItem(statusCode, pollingEnabled))
             {
@@ -453,6 +465,13 @@ internal class SubscriptionManager : IAsyncDisposable
 
             foreach (var monitoredItem in subscription.MonitoredItems)
             {
+                if (!_monitoredItems.ContainsKey(monitoredItem.ClientHandle))
+                {
+                    // Swept because its subject detached, but the SDK subscription still holds it.
+                    // Escalating would resurrect it into polling under a subject nobody tracks.
+                    continue;
+                }
+
                 if (!SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
                 {
                     if (!_healAttempts.IsEmpty)
@@ -522,11 +541,19 @@ internal class SubscriptionManager : IAsyncDisposable
     /// </summary>
     private void SweepDetachedSubjects()
     {
-        var swept = new HashSet<IInterceptorSubject>();
-        foreach (var property in _monitoredItems.Values)
+        if (_monitoredItems.IsEmpty)
         {
-            var subject = property.Reference.Subject;
-            if (subject.TryGetRegisteredSubject() is null && swept.Add(subject))
+            return;
+        }
+
+        // Enumerate the dictionary rather than its Values property, which takes every bucket lock
+        // and copies. Testing the seen-set first also keeps the registry lookup to one per distinct
+        // subject instead of one per monitored item.
+        var seen = new HashSet<IInterceptorSubject>();
+        foreach (var entry in _monitoredItems)
+        {
+            var subject = entry.Value.Reference.Subject;
+            if (seen.Add(subject) && subject.TryGetRegisteredSubject() is null)
             {
                 RemoveItemsForSubject(subject);
                 _pollingManager?.RemoveItemsForSubject(subject);
@@ -574,41 +601,16 @@ internal class SubscriptionManager : IAsyncDisposable
         return _configuration.DefaultSamplingInterval;
     }
 
-    /// <summary>
-    /// Applies a single data change for the given client handle. No-ops when gated or shutting
-    /// down, and when the handle is not in the monitored items dictionary. Intended as a
-    /// unit-testable seam: it runs the same gate check and the same <see cref="ApplyChanges"/>
-    /// write path as the live callback, without requiring an OPC UA SDK Subscription.
-    /// </summary>
-    internal void ApplyDataChange(uint clientHandle, DateTimeOffset timestamp, object? value)
-    {
-        if (AreCallbacksSuppressed)
-        {
-            return;
-        }
-
-        if (!_monitoredItems.TryGetValue(clientHandle, out var property))
-        {
-            return;
-        }
-
-        var changes = ChangesPool.Rent();
-        changes.Add(new PropertyUpdate
-        {
-            Property = property,
-            Value = _configuration.ValueConverter.ConvertToPropertyValue(value, property),
-            Timestamp = timestamp
-        });
-
-        ApplyChanges(changes, DateTimeOffset.UtcNow);
-    }
-
-    internal bool AreCallbacksEnabledForTesting => _callbacksEnabled;
-    internal void EnableCallbacksForTesting() => _callbacksEnabled = true;
     internal IDictionary<uint, RegisteredSubjectProperty> MonitoredItemsForTesting => _monitoredItems;
 
-    internal void SweepDetachedSubjectsForTesting() => SweepDetachedSubjects();
-    internal void RegisterSurvivorsForReadAfterWriteForTesting(IEnumerable<MonitoredItem> monitoredItems) => RegisterSurvivors(monitoredItems);
+    internal void CompleteSetupForTesting(IEnumerable<MonitoredItem> monitoredItems) => CompleteSetup(monitoredItems);
+
+    /// <summary>
+    /// Drives the live data-change callback without an SDK <see cref="Subscription"/>. The callback
+    /// reads neither the subscription nor the string table, so this exercises the production path
+    /// including its gate check rather than a parallel copy of it.
+    /// </summary>
+    internal void OnFastDataChangeForTesting(DataChangeNotification notification) => OnFastDataChange(null!, notification, []);
 
     public async ValueTask DisposeAsync()
     {
@@ -635,7 +637,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 var disposalTimeout = _configuration.SessionDisposalTimeout;
                 try
                 {
-                    await session.RemoveSubscriptionsAsync(subscriptions, CancellationToken.None)
+                    await session.RemoveSubscriptionsAsync(subscriptions, default)
                         .WaitAsync(disposalTimeout).ConfigureAwait(false);
                 }
                 catch (Exception ex)
