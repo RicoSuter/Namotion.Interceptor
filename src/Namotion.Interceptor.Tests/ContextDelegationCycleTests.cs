@@ -370,6 +370,40 @@ public class ContextDelegationCycleTests
         Assert.True(Volatile.Read(ref completedQueries) > 0, "No query completed at all.");
     }
 
+    /// <summary>
+    /// A cycle raises for the context whose own chain it is, and contributes nothing for a context
+    /// that merely reaches it as one of several fallback contexts. That difference is what lets a
+    /// graph keep working when part of it is a cycle, and it has to survive the chain being
+    /// resolved and cached first, which is when the cached verdict is what the walk finds.
+    /// </summary>
+    [Fact]
+    public void WhenCollectingContextReachesDelegationCycle_ThenItResolvesItsOtherFallbackContexts()
+    {
+        // Arrange
+        var cyclicHead = InterceptorSubjectContext.Create();
+        var cyclicTail = InterceptorSubjectContext.Create();
+        cyclicHead.AddFallbackContext(cyclicTail);
+        cyclicTail.AddFallbackContext(cyclicHead);
+
+        var answering = InterceptorSubjectContext.Create();
+        var marker = new MarkerService();
+        answering.AddService(marker);
+
+        var collecting = InterceptorSubjectContext.Create();
+        collecting.AddFallbackContext(cyclicHead);
+        collecting.AddFallbackContext(answering);
+
+        // The cycle is reported and cached first, so the collecting walk meets the cached verdict
+        // rather than discovering the cycle itself.
+        Assert.Throws<InvalidOperationException>(() => cyclicHead.GetServices<MarkerService>());
+
+        // Act
+        var services = collecting.GetServices<MarkerService>();
+
+        // Assert
+        Assert.Same(marker, Assert.Single(services));
+    }
+
     private sealed class MarkerService;
 
     private sealed class CountingWriteInterceptor : IWriteInterceptor

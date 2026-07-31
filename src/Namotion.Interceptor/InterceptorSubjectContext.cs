@@ -607,6 +607,22 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     ///
     /// It terminates because every hop adds a context to <c>visited</c> and it stops as soon as one
     /// is already in it, so it takes at most one hop per context in the graph.
+    ///
+    /// A chain that already knows where it ends is taken in one step instead of hop by hop, which
+    /// is what makes attaching to a deep graph cost one walk rather than one per level. Two things
+    /// that differ from the resolving walk in <see cref="ResolveDelegationTarget"/>:
+    ///
+    /// A chain that is known to be a cycle contributes nothing here and does NOT raise. Raising is
+    /// for a context asked to resolve its own services; a cycle merely reachable as one of several
+    /// fallback contexts is cut like any other repeat, which is what the hop by hop walk does and
+    /// what keeps a graph that mixes a cycle with a context that answers working.
+    ///
+    /// The context the chain ends on is still entered through <c>visited</c>. Skipping that check
+    /// would give it a second frame where two branches of a graph meet on the same chain, and the
+    /// duplicates of that frame are only removed against its own region. The contexts passed over
+    /// on the way are deliberately not marked: they contribute nothing, they never got a frame in
+    /// the hop by hop walk either, and anything reaching one of them later resolves to the same
+    /// end, which is then already visited.
     /// </summary>
     private static bool TryEnterContext(
         InterceptorSubjectContext context,
@@ -622,6 +638,21 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             if (delegationTarget is null)
             {
                 return true;
+            }
+
+            var resolvedTerminal = enteredState.ResolvedTerminal;
+            if (resolvedTerminal is InterceptorSubjectContext terminal)
+            {
+                var terminalState = Volatile.Read(ref terminal._state);
+                if (terminalState.DelegationTarget is null)
+                {
+                    enteredState = terminalState;
+                    return visited.Add(terminal);
+                }
+            }
+            else if (resolvedTerminal is not null)
+            {
+                return false;
             }
 
             context = delegationTarget;
