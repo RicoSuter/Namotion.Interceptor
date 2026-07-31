@@ -28,8 +28,21 @@ internal sealed class ChangeDeduplicator : IDisposable
         = new(PropertyReference.Comparer);
 
     // Reusable buffer for deduplicated changes (rented from ArrayPool to avoid allocations on resize)
-    private SubjectPropertyChange[] _buffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(BufferMinimumSize);
+    private SubjectPropertyChange[] _buffer = RentClearedBuffer(BufferMinimumSize);
     private int _count;
+
+    /// <summary>
+    /// Rents a buffer and clears it once. <see cref="ArrayPool{T}"/> hands out whatever the previous
+    /// renter left behind and a <see cref="SubjectPropertyChange"/> carries object references, so this is
+    /// what establishes the invariant the flush path relies on: nothing outside <c>[0, _count)</c> holds a
+    /// reference, which is why releasing a batch only has to clear that prefix.
+    /// </summary>
+    private static SubjectPropertyChange[] RentClearedBuffer(int minimumLength)
+    {
+        var buffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(minimumLength);
+        Array.Clear(buffer, 0, buffer.Length);
+        return buffer;
+    }
 
     /// <summary>
     /// Collapses the batch to one change per property. The result is ordered by the arrival position of
@@ -53,11 +66,12 @@ internal sealed class ChangeDeduplicator : IDisposable
         _propertyIndices.EnsureCapacity(changes.Length);
 
         // Ensure the buffer is large enough (rent from pool to avoid allocations).
-        // Returning without clearing is safe because Reset() clears the buffer after every batch.
+        // Returning without clearing is safe because Reset() released the previous batch, which leaves
+        // the whole array clear.
         if (_buffer.Length < changes.Length)
         {
             ArrayPool<SubjectPropertyChange>.Shared.Return(_buffer);
-            _buffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(changes.Length);
+            _buffer = RentClearedBuffer(changes.Length);
         }
 
         // First pass: collect the revision bounds per property, and whether the property has to fall back
@@ -143,16 +157,21 @@ internal sealed class ChangeDeduplicator : IDisposable
     {
         _propertyIndices.Clear();
 
-        // Clear the entire rented array. SubjectPropertyChange holds object references
-        // (Source, boxed values) that must be released so they can be collected.
-        Array.Clear(_buffer, 0, _buffer.Length);
+        // Only the prefix Deduplicate filled can hold object references (subjects, boxed values): every
+        // buffer is cleared once when it is rented and every batch is released here, so the rest of the
+        // array is already clear. Clearing the whole rental instead would make a small batch pay for the
+        // 256 slot minimum.
+        Array.Clear(_buffer, 0, _count);
 
         if (_buffer.Length >= BufferMaximumSize && _count < _buffer.Length / 4)
         {
             // Shrink buffer if it grew too large (return to pool and rent smaller)
             ArrayPool<SubjectPropertyChange>.Shared.Return(_buffer);
-            _buffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(BufferMinimumSize);
+            _buffer = RentClearedBuffer(BufferMinimumSize);
         }
+
+        // No batch is held any more, and a shrink can leave a buffer shorter than the old count.
+        _count = 0;
     }
 
     /// <summary>
@@ -168,8 +187,12 @@ internal sealed class ChangeDeduplicator : IDisposable
 
         _propertyIndices.Clear();
 
-        Array.Clear(_buffer, 0, _buffer.Length);
+        // The same prefix as Reset: this runs either after a Reset, where the count is zero, or instead
+        // of it when the processor was disposed mid flush, where the count still bounds what that flush
+        // wrote. Everything past it was cleared when the buffer was rented.
+        Array.Clear(_buffer, 0, _count);
         ArrayPool<SubjectPropertyChange>.Shared.Return(_buffer);
         _buffer = null!;
+        _count = 0;
     }
 }

@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -193,6 +195,98 @@ public class ChangeDeduplicatorTests
         Assert.Equal(secondProperty, deduplicated[1].Property);
         Assert.Equal("SecondOld3", deduplicated[1].GetOldValue<string>());
         Assert.Equal("SecondNew8", deduplicated[1].GetNewValue<string>());
+    }
+
+    // Matches the deduplicator's minimum rental, so the array left in the pool lands in the bucket the
+    // deduplicator rents its first buffer from.
+    private const int PooledBatchSize = 256;
+    private const int LargeBatchSize = 64;
+    private const int SmallBatchSize = 2;
+
+    [Fact]
+    public void WhenALargeBatchIsFollowedByASmallOne_ThenNothingBeyondTheSmallPrefixStaysReferenced()
+    {
+        // Arrange - two sets of stale changes have to be gone once the small batch is released: the ones
+        // the array pool handed over with the buffer, and the ones the deduplicator's own large batch
+        // wrote past the small batch's prefix. Both sit outside the prefix a flush clears, so they only
+        // go away if the buffer is cleared in full when it is rented.
+        var (deduplicator, pooledSubjects, largeBatchSubjects) = RunLargeBatchThenSmallBatch();
+
+        // Act
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+        // Assert
+        Assert.All(pooledSubjects, subject => Assert.False(subject.IsAlive,
+            "The deduplicator must release what the array pool left in the buffer it rented."));
+        Assert.All(largeBatchSubjects, subject => Assert.False(subject.IsAlive,
+            "The deduplicator must release a batch even when the next batch fills a shorter prefix."));
+
+        deduplicator.Dispose();
+    }
+
+    // Not inlined, so the batches this builds are dead once it returns and the deduplicator's buffer is
+    // the only thing that could still root their subjects.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (ChangeDeduplicator Deduplicator, WeakReference[] PooledSubjects, WeakReference[] LargeBatchSubjects)
+        RunLargeBatchThenSmallBatch()
+    {
+        var pooledSubjects = LeaveChangesInThePool();
+
+        var deduplicator = new ChangeDeduplicator();
+
+        var largeBatch = CreateBatch(LargeBatchSize);
+        var largeBatchSubjects = ToWeakReferences(largeBatch);
+        deduplicator.Deduplicate(largeBatch);
+        deduplicator.Reset();
+
+        deduplicator.Deduplicate(CreateBatch(SmallBatchSize));
+        deduplicator.Reset();
+
+        return (deduplicator, pooledSubjects, largeBatchSubjects);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference[] LeaveChangesInThePool()
+    {
+        // ArrayPool does not clear what it takes back, so the next renter sees these changes.
+        var buffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(PooledBatchSize);
+        var subjects = new WeakReference[buffer.Length];
+        for (var index = 0; index < buffer.Length; index++)
+        {
+            var subject = new Person();
+            buffer[index] = CreateChange(
+                new PropertyReference(subject, nameof(Person.FirstName)), "Old", "New", revision: index + 1);
+            subjects[index] = new WeakReference(subject);
+        }
+
+        ArrayPool<SubjectPropertyChange>.Shared.Return(buffer);
+        return subjects;
+    }
+
+    private static SubjectPropertyChange[] CreateBatch(int size)
+    {
+        // One subject per change, so every change is the only root of a subject of its own.
+        var changes = new SubjectPropertyChange[size];
+        for (var index = 0; index < size; index++)
+        {
+            changes[index] = CreateChange(
+                new PropertyReference(new Person(), nameof(Person.FirstName)), "Old", "New", revision: index + 1);
+        }
+
+        return changes;
+    }
+
+    private static WeakReference[] ToWeakReferences(SubjectPropertyChange[] changes)
+    {
+        var subjects = new WeakReference[changes.Length];
+        for (var index = 0; index < changes.Length; index++)
+        {
+            subjects[index] = new WeakReference(changes[index].Property.Subject);
+        }
+
+        return subjects;
     }
 
     private static SubjectPropertyChange CreateChange(
