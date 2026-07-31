@@ -34,13 +34,13 @@ public class ContextDelegationCycleTests
     }
 
     /// <summary>
-    /// The cycle lengths straddle the number of hops that are walked without cycle detection, so a
-    /// regression in either the plain prefix or the detection beyond it fails this.
+    /// The chain is walked and reported the same way at every length, so these only guard that the
+    /// walk terminates and reports on a cycle of any size rather than any particular hop count.
     /// </summary>
     [Theory]
     [InlineData(1)] // a context that is its own fallback, the shortest cycle there is
     [InlineData(3)]
-    [InlineData(8)] // exactly the unchecked prefix, so detection starts on the first checked hop
+    [InlineData(8)]
     [InlineData(9)]
     [InlineData(10)]
     [InlineData(64)]
@@ -191,8 +191,8 @@ public class ContextDelegationCycleTests
     [InlineData(20, 3)]
     public void WhenAcyclicPrefixLeadsIntoDelegationCycle_ThenResolvingThrows(int prefixLength, int cycleLength)
     {
-        // Arrange: a tail that is not part of the cycle it runs into, which is the shape Floyd has
-        // to handle with the two pointers starting past the tail rather than at the head.
+        // Arrange: a tail that is not part of the cycle it runs into, so the repeat the walk finds
+        // is not the context it started from and the reported loop is only the suffix.
         var cycle = Enumerable
             .Range(0, cycleLength)
             .Select(_ => InterceptorSubjectContext.Create())
@@ -213,6 +213,161 @@ public class ContextDelegationCycleTests
 
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() => entry.GetServices<MarkerService>());
+    }
+
+    /// <summary>
+    /// The verdict is cached on the state that was queried, so the second query has to reach it
+    /// without walking again and report exactly the same thing.
+    /// </summary>
+    [Fact]
+    public void WhenDelegationCycleIsQueriedRepeatedly_ThenEveryQueryThrows()
+    {
+        // Arrange
+        var contextA = InterceptorSubjectContext.Create();
+        var contextB = InterceptorSubjectContext.Create();
+        var contextC = InterceptorSubjectContext.Create();
+        contextA.AddFallbackContext(contextB);
+        contextB.AddFallbackContext(contextC);
+        contextC.AddFallbackContext(contextA);
+
+        // Act & Assert
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() => contextA.GetServices<MarkerService>());
+            Assert.Contains("delegation cycle", exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// The resolved context is cached per state, so a change that happens after a chain resolved
+    /// has to invalidate that cache rather than keep answering from it. Closing the chain into a
+    /// cycle is the change that turns a resolving context into a raising one.
+    /// </summary>
+    [Fact]
+    public void WhenChainIsClosedIntoCycleAfterItResolved_ThenResolvingThrows()
+    {
+        // Arrange: a chain that ends on a context without services and without fallback contexts,
+        // so it resolves to nothing and the resolved context gets cached on every state above it.
+        var head = InterceptorSubjectContext.Create();
+        var middle = InterceptorSubjectContext.Create();
+        var tail = InterceptorSubjectContext.Create();
+        middle.AddFallbackContext(tail);
+        head.AddFallbackContext(middle);
+
+        Assert.Empty(head.GetServices<MarkerService>());
+
+        // Act: the tail starts delegating back to the head, which closes the chain into a cycle
+        // and has to discard the resolved context cached above it.
+        tail.AddFallbackContext(head);
+
+        // Assert
+        Assert.Throws<InvalidOperationException>(() => head.GetServices<MarkerService>());
+        Assert.Throws<InvalidOperationException>(() => middle.GetServices<MarkerService>());
+        Assert.Throws<InvalidOperationException>(() => tail.GetServices<MarkerService>());
+    }
+
+    /// <summary>
+    /// The other direction: a cached cycle verdict has to be discarded when the cycle is broken.
+    /// </summary>
+    [Fact]
+    public void WhenCycleIsBrokenAfterItWasReported_ThenResolvingSucceeds()
+    {
+        // Arrange
+        var head = InterceptorSubjectContext.Create();
+        var middle = InterceptorSubjectContext.Create();
+        var answering = InterceptorSubjectContext.Create();
+        answering.AddService(new MarkerService());
+
+        head.AddFallbackContext(middle);
+        middle.AddFallbackContext(head);
+
+        Assert.Throws<InvalidOperationException>(() => head.GetServices<MarkerService>());
+
+        // Act: a second fallback context stops the middle from delegating, so the chain ends there.
+        middle.AddFallbackContext(answering);
+
+        // Assert
+        Assert.Single(head.GetServices<MarkerService>());
+        Assert.Single(middle.GetServices<MarkerService>());
+    }
+
+    /// <summary>
+    /// A cycle that is broken while queries are running must not leave a walker spinning. The walk
+    /// starts over when the loop it found came apart underneath it, and if it started over from the
+    /// state the caller pinned rather than re-reading it, a single rewiring of the queried context
+    /// would make every pass replay the same stale first hop and never terminate, long after the
+    /// graph stopped changing.
+    /// </summary>
+    [Fact]
+    public async Task WhenCycleIsBrokenAndReformedWhileQueried_ThenNoQueryHangs()
+    {
+        // Arrange: a long cycle, so that one walk over it takes long enough for a mutation to land
+        // inside it. The mutation is at the far end and only ever restores the same shape, which
+        // replaces the state of every context above it, including the entry, WITHOUT changing what
+        // the entry delegates to. That is the case that spins: a walk holding the entry's older
+        // state keeps finding the same loop and keeps failing the same confirmation.
+        const int CycleLength = 2_000;
+
+        var cycle = Enumerable
+            .Range(0, CycleLength)
+            .Select(_ => InterceptorSubjectContext.Create())
+            .ToArray();
+
+        for (var index = 0; index < CycleLength; index++)
+        {
+            cycle[index].AddFallbackContext(cycle[(index + 1) % CycleLength]);
+        }
+
+        var entry = cycle[0];
+        var last = cycle[^1];
+        var stopReaders = false;
+        var stopMutator = false;
+        var completedQueries = 0;
+
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Factory.StartNew(() =>
+        {
+            while (!Volatile.Read(ref stopReaders))
+            {
+                try
+                {
+                    entry.GetServices<MarkerService>();
+                }
+                catch (InvalidOperationException)
+                {
+                    // The chain is a cycle almost all of the time, so raising is the expected
+                    // outcome. Only a walk that never returns at all fails this test.
+                }
+
+                Interlocked.Increment(ref completedQueries);
+            }
+        }, TaskCreationOptions.LongRunning)).ToArray();
+
+        var mutator = Task.Factory.StartNew(() =>
+        {
+            while (!Volatile.Read(ref stopMutator))
+            {
+                last.RemoveFallbackContext(entry);
+                last.AddFallbackContext(entry);
+            }
+        }, TaskCreationOptions.LongRunning);
+
+        // Act: the mutations stop first, so the readers are then asked to finish against a graph
+        // that no longer changes. A walk that reuses the state its caller pinned does not finish
+        // even then, which is what separates a livelock from ordinary contention.
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        Volatile.Write(ref stopMutator, true);
+        await mutator;
+
+        Volatile.Write(ref stopReaders, true);
+        var allReaders = Task.WhenAll(readers);
+        var finished = await Task.WhenAny(allReaders, Task.Delay(TimeSpan.FromSeconds(20))) == allReaders;
+
+        // Assert
+        Assert.True(finished,
+            "A delegation walk did not return after the graph stopped changing, so it restarted forever on a " +
+            $"state that no longer exists. {Volatile.Read(ref completedQueries)} queries completed.");
+
+        Assert.True(Volatile.Read(ref completedQueries) > 0, "No query completed at all.");
     }
 
     private sealed class MarkerService;

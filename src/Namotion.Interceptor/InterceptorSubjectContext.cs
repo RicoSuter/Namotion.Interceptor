@@ -29,11 +29,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // predicate that mutates a different context, which the public contract forbids for that reason
     // (see IInterceptorSubjectContext.TryAddService).
 
-    // Delegation hops walked without any cycle bookkeeping. Chains can be as long as the subject
-    // graph is deep, so this is not a bound on anything: past it the walk keeps going under Floyd
-    // detection, which costs a second pointer and no memory. The value only trades how quickly a
-    // cyclic chain reaches detection against how many hops stay free of it.
-    private const int UncheckedDelegationHops = 8;
+    // Stored in a state's resolved terminal slot when its chain was proven to be a cycle, so that
+    // the verdict is reached once per state instead of once per query.
+    private static readonly object CyclicDelegationChain = new();
 
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _invalidationVisited;
@@ -48,7 +46,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private static HashSet<InterceptorSubjectContext>? _delegationCycleVisited;
 
     [ThreadStatic]
-    private static List<InterceptorSubjectContext>? _delegationCyclePath;
+    private static List<DelegationHop>? _delegationCyclePath;
 
     // Written via Interlocked.Exchange and Interlocked.CompareExchange instead of being declared
     // volatile, which would raise CS0420 when passed by ref to Interlocked under
@@ -74,11 +72,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     public ImmutableArray<TInterface> GetServices<TInterface>()
     {
         var state = Volatile.Read(ref _state);
-        var delegationTarget = state.DelegationTarget;
         var resolved = this;
-        if (delegationTarget is not null)
+        if (state.DelegationTarget is not null)
         {
-            resolved = ResolveDelegationTarget(delegationTarget, out state);
+            resolved = ResolveDelegationTarget(this, ref state);
         }
 
         return resolved.GetServicesFromState<TInterface>(state);
@@ -203,11 +200,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     internal TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> readValue)
     {
         var state = Volatile.Read(ref _state);
-        var delegationTarget = state.DelegationTarget;
         var resolved = this;
-        if (delegationTarget is not null)
+        if (state.DelegationTarget is not null)
         {
-            resolved = ResolveDelegationTarget(delegationTarget, out state);
+            resolved = ResolveDelegationTarget(this, ref state);
         }
 
         var function = resolved.GetReadInterceptorFunction<TProperty>(state);
@@ -218,11 +214,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     internal void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
         var state = Volatile.Read(ref _state);
-        var delegationTarget = state.DelegationTarget;
         var resolved = this;
-        if (delegationTarget is not null)
+        if (state.DelegationTarget is not null)
         {
-            resolved = ResolveDelegationTarget(delegationTarget, out state);
+            resolved = ResolveDelegationTarget(this, ref state);
         }
 
         var action = resolved.GetWriteInterceptorFunction<TProperty>(state);
@@ -233,11 +228,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     internal object? ExecuteInterceptedInvoke(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
         var state = Volatile.Read(ref _state);
-        var delegationTarget = state.DelegationTarget;
         var resolved = this;
-        if (delegationTarget is not null)
+        if (state.DelegationTarget is not null)
         {
-            resolved = ResolveDelegationTarget(delegationTarget, out state);
+            resolved = ResolveDelegationTarget(this, ref state);
         }
 
         var function = resolved.GetMethodInvocationFunction(state);
@@ -245,113 +239,50 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Walks the delegation chain that starts at <paramref name="delegationTarget"/> down to the
-    /// first context that does not delegate, and returns it together with the state it was pinned
-    /// on. A context with no own service and exactly one fallback context resolves everything
-    /// through that fallback, so the chain is as deep as the subject tree that produced it: every
-    /// child attached to a parent inherits the parent context as its fallback, which makes a graph
-    /// of depth N a chain of length N. That rules out both recursion, which would put an unbounded
-    /// stack depth on the hottest path in the library, and any fixed hop limit, which would reject
-    /// a legitimate deep graph.
+    /// Resolves the context that answers for <paramref name="entry"/> down the delegation chain
+    /// that its pinned state starts, and replaces <paramref name="state"/> with the state that
+    /// context was pinned on. A context with no own service and exactly one fallback context
+    /// resolves everything through that fallback, so the chain is as deep as the subject tree that
+    /// produced it: every child attached to a parent inherits the parent context as its fallback,
+    /// which makes a graph of depth N a chain of length N.
+    ///
+    /// The chain is walked once per state, not once per query: the state caches the context the
+    /// walk ended on, so every later query on the same state reaches it in one hop no matter how
+    /// deep the graph is. The cache holds the terminal CONTEXT and never its state, because the
+    /// state of a context is replaced whenever anything below it changes; re-reading it here on
+    /// every query is what keeps the answer fresh.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static InterceptorSubjectContext ResolveDelegationTarget(InterceptorSubjectContext delegationTarget, out ContextState state)
+    private static InterceptorSubjectContext ResolveDelegationTarget(InterceptorSubjectContext entry, ref ContextState state)
     {
-        // The single hop stays inline: one pinned state and one branch, and one call frame less
-        // than the recursive call site it replaces, which the JIT could not inline. Everything
-        // deeper is out of line.
-        state = Volatile.Read(ref delegationTarget._state);
-        var next = state.DelegationTarget;
-        return next is null ? delegationTarget : FollowDelegationChain(next, out state);
+        if (state.ResolvedTerminal is InterceptorSubjectContext terminal)
+        {
+            var terminalState = Volatile.Read(ref terminal._state);
+
+            // The cached context can have started delegating since it was cached, which the walk
+            // below then sorts out. Everything else stays out of line.
+            if (terminalState.DelegationTarget is null)
+            {
+                state = terminalState;
+                return terminal;
+            }
+        }
+
+        return ResolveDelegationChain(entry, ref state);
     }
 
     /// <summary>
-    /// Iterative continuation of <see cref="ResolveDelegationTarget"/> for chains of more than one
-    /// hop, with Floyd cycle detection beyond <see cref="UncheckedDelegationHops"/>: the hare takes
-    /// two hops per tortoise hop, so a chain that closes into a cycle makes them meet after O(cycle
-    /// length) hops using no memory, while a chain that merely is long never triggers it. Counting
-    /// hops instead would need a ceiling, and no ceiling is correct for a chain whose legitimate
-    /// length is the depth of the subject graph.
+    /// Walks the delegation chain hop by hop and caches what it finds on every state it passed, so
+    /// that a chain is walked once rather than once per query and building a graph of depth N costs
+    /// one walk instead of one per level. Iterative because the chain is as deep as the subject
+    /// graph, which ruled out recursion, and because no fixed hop limit can be correct for a chain
+    /// whose legitimate length is that depth.
+    ///
+    /// A chain that runs in a circle resolves nothing and raises, and that verdict is cached the
+    /// same way, so the second query on such a state raises without walking again.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static InterceptorSubjectContext FollowDelegationChain(InterceptorSubjectContext delegationTarget, out ContextState state)
-    {
-        var hare = delegationTarget;
-        var hareState = Volatile.Read(ref hare._state);
-
-        for (var hop = 0; hop < UncheckedDelegationHops; hop++)
-        {
-            var next = hareState.DelegationTarget;
-            if (next is null)
-            {
-                state = hareState;
-                return hare;
-            }
-
-            hare = next;
-            hareState = Volatile.Read(ref hare._state);
-        }
-
-        // Both start where the plain prefix ended rather than at the head. Every context has
-        // exactly one delegation edge, so the walk is deterministic: a cycle reachable from the
-        // head is still reachable from here, and if the prefix already entered one then this node
-        // is on it. Floyd only needs the two pointers to start together.
-        var tortoise = hare;
-        var tortoiseState = hareState;
-
-        while (true)
-        {
-            for (var step = 0; step < 2; step++)
-            {
-                var next = hareState.DelegationTarget;
-                if (next is null)
-                {
-                    state = hareState;
-                    return hare;
-                }
-
-                hare = next;
-                hareState = Volatile.Read(ref hare._state);
-            }
-
-            var tortoiseNext = tortoiseState.DelegationTarget;
-            if (tortoiseNext is null)
-            {
-                // The hare already crossed this edge, so it can only have disappeared through a
-                // concurrent mutation. Putting the tortoise back on the hare keeps it behind the
-                // hare on a chain that currently exists, which is all Floyd needs.
-                tortoise = hare;
-                tortoiseState = hareState;
-                continue;
-            }
-
-            tortoise = tortoiseNext;
-            tortoiseState = Volatile.Read(ref tortoise._state);
-
-            if (ReferenceEquals(hare, tortoise))
-            {
-                // A meeting is proof of a cycle only in a graph that does not change underneath the
-                // walk. Concurrent mutation can move the tortoise onto the hare over an edge the
-                // hare never took, so the suspicion is confirmed exactly before it is reported,
-                // and the confirmation re-reads the loop it found before reporting anything, since
-                // a walk that reads each edge at its own time follows a path through time and not
-                // a topology at an instant.
-                return ResolveDelegationChainExactly(delegationTarget, out state);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Re-walks the chain remembering every context, which either reaches a context that does not
-    /// delegate or observes one twice. Observing one twice is not yet a cycle: the walk reads each
-    /// edge at its own time, so it follows a path through time rather than a topology at an
-    /// instant, and two ordered rewirings that are each acyclic can produce a repeat that never
-    /// existed as a cycle. Cutting an edge upstream of a walker and then linking a node downstream
-    /// of it back to that upstream node is enough. So the candidate loop is re-read afterwards and
-    /// only reported once its edges are all still in place. Only reached from a Floyd meeting, so
-    /// none of this touches a resolving query.
-    /// </summary>
-    private static InterceptorSubjectContext ResolveDelegationChainExactly(InterceptorSubjectContext delegationTarget, out ContextState state)
+    private static InterceptorSubjectContext ResolveDelegationChain(InterceptorSubjectContext entry, ref ContextState state)
     {
         var visited = _delegationCycleVisited ??= [];
         var path = _delegationCyclePath ??= [];
@@ -362,36 +293,66 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 visited.Clear();
                 path.Clear();
 
-                var current = delegationTarget;
+                // Re-pinned on every pass rather than reusing the state the caller pinned. Reusing
+                // it livelocks: if the entry's own fallback context changed after the caller pinned
+                // it, every pass replays that same stale first hop, reaches the same repeat, fails
+                // the same confirmation and starts over, forever, with nothing mutating any more.
+                // One mutation before the graph goes quiet would be enough to spin here for good.
+                var current = entry;
                 var currentState = Volatile.Read(ref current._state);
 
-                while (visited.Add(current))
+                while (true)
                 {
-                    path.Add(current);
+                    var resolvedTerminal = currentState.ResolvedTerminal;
+                    if (ReferenceEquals(resolvedTerminal, CyclicDelegationChain))
+                    {
+                        // Already proven cyclic, so everything walked to get here is cyclic too.
+                        CacheResolvedTerminal(path, CyclicDelegationChain);
+                        throw CreateDelegationCycleException();
+                    }
+
+                    if (resolvedTerminal is InterceptorSubjectContext cachedTerminal)
+                    {
+                        var cachedState = Volatile.Read(ref cachedTerminal._state);
+                        if (cachedState.DelegationTarget is null)
+                        {
+                            // The suffix from here on is already compressed, which is what keeps
+                            // the total work of resolving a deep chain linear in its length.
+                            CacheResolvedTerminal(path, cachedTerminal);
+                            state = cachedState;
+                            return cachedTerminal;
+                        }
+
+                        // A cached context that has started delegating is a stale hint, not an
+                        // answer. Walking on costs a hop and corrects it.
+                    }
 
                     var next = currentState.DelegationTarget;
                     if (next is null)
                     {
+                        CacheResolvedTerminal(path, current);
                         state = currentState;
                         return current;
                     }
 
-                    current = next;
+                    if (!visited.Add(current))
+                    {
+                        break;
+                    }
+
+                    path.Add(new DelegationHop(current, currentState));
+                    current = currentState.DelegationTarget!;
                     currentState = Volatile.Read(ref current._state);
                 }
 
                 if (DelegationLoopStillClosed(path, current))
                 {
-                    throw new InvalidOperationException(
-                        "The fallback contexts form a delegation cycle, so no service can be resolved. A context " +
-                        "without own services and with exactly one fallback context resolves everything through " +
-                        "that fallback context, and following those references leads back to a context already " +
-                        "visited. Break the cycle by removing one of the fallback context registrations or by " +
-                        "registering a service on one of the contexts on it.");
+                    CacheResolvedTerminal(path, CyclicDelegationChain);
+                    throw CreateDelegationCycleException();
                 }
 
                 // The loop came apart under the walk, so it was a rewiring and not a cycle. A real
-                // cycle has no edge to lose and confirms on the next pass.
+                // cycle has no state to lose and confirms on the next pass.
             }
         }
         finally
@@ -402,25 +363,66 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Re-reads every edge of the candidate loop that the walk recorded, after that walk finished.
-    /// Because this pass starts once the whole loop has been observed, edges that all still point
-    /// where they did held together across the two passes, which no single rewiring survives and
-    /// which a genuine cycle always satisfies. It compares delegation targets rather than state
-    /// objects, since invalidating a cache publishes a new state that leaves the topology alone.
+    /// Records what the walk found on every state it passed on the way, which is what turns the
+    /// next query on any of them into a single hop. Only ever written to the exact state objects
+    /// the walk pinned, never to a re-read of a context's current state: a pinned state that is
+    /// still installed has not been invalidated since it was pinned, and one that was replaced is
+    /// abandoned, so a late write to it can never be read again. Filled once, because a state that
+    /// already carries an answer was either given it by an equally valid walk or is abandoned.
     /// </summary>
-    private static bool DelegationLoopStillClosed(List<InterceptorSubjectContext> path, InterceptorSubjectContext repeated)
+    private static void CacheResolvedTerminal(List<DelegationHop> path, object resolvedTerminal)
     {
-        for (var index = path.IndexOf(repeated); index < path.Count; index++)
+        for (var index = 0; index < path.Count; index++)
         {
-            var node = path[index];
-            var expectedNext = index + 1 < path.Count ? path[index + 1] : repeated;
-            if (!ReferenceEquals(Volatile.Read(ref node._state).DelegationTarget, expectedNext))
+            path[index].State.TrySetResolvedTerminal(resolvedTerminal);
+        }
+    }
+
+    /// <summary>
+    /// Re-reads the state of every context on the candidate loop and reports whether each is still
+    /// the one the walk pinned. States are never installed twice, so a state that is still in place
+    /// has been in place since it was pinned, which means every edge of the loop existed together
+    /// at the moment the last of them was read. That is a cycle. It compares state objects and not
+    /// the fallback contexts they point at, because a walk reading each edge at its own time
+    /// follows a path through time rather than a topology at an instant, and a sequence of
+    /// rewirings that is acyclic throughout can produce a repeat that never existed as a cycle.
+    /// </summary>
+    private static bool DelegationLoopStillClosed(List<DelegationHop> path, InterceptorSubjectContext repeated)
+    {
+        var index = 0;
+        while (index < path.Count && !ReferenceEquals(path[index].Context, repeated))
+        {
+            index++;
+        }
+
+        for (; index < path.Count; index++)
+        {
+            var context = path[index].Context;
+            if (!ReferenceEquals(Volatile.Read(ref context._state), path[index].State))
             {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private static InvalidOperationException CreateDelegationCycleException()
+    {
+        return new InvalidOperationException(
+            "The fallback contexts form a delegation cycle, so no service can be resolved. A context " +
+            "without own services and with exactly one fallback context resolves everything through " +
+            "that fallback context, and following those references leads back to a context already " +
+            "visited. Break the cycle by removing one of the fallback context registrations or by " +
+            "registering a service on one of the contexts on it.");
+    }
+
+    /// <summary>One context on the delegation walk and the state it was pinned on.</summary>
+    private readonly struct DelegationHop(InterceptorSubjectContext context, ContextState state)
+    {
+        internal InterceptorSubjectContext Context { get; } = context;
+
+        internal ContextState State { get; } = state;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -892,6 +894,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         private ConcurrentDictionary<Type, Delegate>? _writeFunctions;
         private Delegate? _methodInvocationFunction;
 
+        // The context this state's delegation chain ends on, or CyclicDelegationChain when that
+        // chain runs in a circle and nothing resolves. Null until the chain is first walked. A
+        // context and never a state, because the state of a context is replaced whenever anything
+        // below it changes, so a cached state would keep serving the caches of an abandoned one.
+        private object? _resolvedTerminal;
+
         internal ContextState(ImmutableArray<object> services, ImmutableArray<InterceptorSubjectContext> fallbackContexts)
         {
             Services = services;
@@ -900,6 +908,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         internal bool IsEmpty => Services.IsEmpty && FallbackContexts.IsEmpty;
+
+        internal object? ResolvedTerminal
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Volatile.Read(ref _resolvedTerminal);
+        }
+
+        internal void TrySetResolvedTerminal(object resolvedTerminal)
+        {
+            Interlocked.CompareExchange(ref _resolvedTerminal, resolvedTerminal, null);
+        }
 
         internal Delegate? MethodInvocationFunction
         {
