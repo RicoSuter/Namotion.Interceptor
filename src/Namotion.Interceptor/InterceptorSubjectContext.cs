@@ -29,16 +29,16 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // predicate that mutates a different context, which the public contract forbids for that reason
     // (see IInterceptorSubjectContext.TryAddService).
 
+    private const int MaximumRetainedDelegationBufferCapacity = 1024;
+
+    // Declared before the marker below, which constructs a context and must not read it at zero.
+    private static int _lastPropertyTypeIndex = -1;
+
     // Recorded on a state whose chain was proven cyclic, so the verdict costs one walk per state
     // rather than one per query. A context rather than a marker object so that the slot can be
     // typed: this class is not sealed, so a type test on an object slot compiles to a runtime
-    // helper call on every intercepted access. It delegates to itself, so the check that a recorded
-    // context does not itself delegate rejects it without comparing anything.
+    // helper call on every intercepted access.
     private static readonly InterceptorSubjectContext CyclicDelegationChain = CreateCyclicDelegationChain();
-
-    private const int MaximumRetainedDelegationBufferCapacity = 1024;
-
-    private static int _lastPropertyTypeIndex = -1;
 
     /// <summary>
     /// A dense index per intercepted property type, so that a compiled chain is found by indexing
@@ -121,8 +121,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             // R4: register into the fallback BEFORE publishing so that its _usedByContexts is
-            // always a superset of the true using set. An extra entry only costs a spurious
-            // invalidation; a missing entry would leave a compiled chain above permanently stale.
+            // always a superset of the true using set. A missing entry would leave a compiled chain
+            // above permanently stale. An extra entry costs a spurious invalidation, and lets the
+            // invalidation walk reach a context out of chain order, which is why no walk may trust
+            // what a context further down recorded about its chain (see ResolveDelegationChain).
             var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
             lock (usedByContexts)
             {
@@ -280,12 +282,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private static InterceptorSubjectContext ResolveDelegationTarget(InterceptorSubjectContext entry, ref ContextState state)
     {
         var terminal = state.ResolvedTerminal;
-        if (terminal is not null)
+        if (terminal is not null && !ReferenceEquals(terminal, CyclicDelegationChain))
         {
             var terminalState = Volatile.Read(ref terminal._state);
 
-            // Fails for a context that started delegating since it was cached, and for the marker
-            // of a cyclic chain, which delegates to itself. The walk below sorts both out.
+            // Fails for a context that started delegating since it was recorded, which the walk
+            // below then corrects.
             if (terminalState.DelegationTarget is null)
             {
                 state = terminalState;
@@ -320,30 +322,22 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 var current = entry;
                 var currentState = Volatile.Read(ref current._state);
 
+                // Only the entry's own record may be trusted, and only for the chain that entry
+                // still has. Everything below is read for topology alone, which is the one thing an
+                // installed state always describes correctly. A record is a claim about contexts
+                // beyond the one carrying it, and an invalidation walk can reach a context out of
+                // chain order, because R4 keeps a using set a superset: RemoveFallbackContext
+                // publishes before it unregisters, so a context that now delegates can still sit in
+                // the using set it is leaving. Trusting a record from further down would then cache
+                // a resolution of a context the graph no longer reaches, on a state that nothing
+                // invalidates again.
+                if (ReferenceEquals(currentState.ResolvedTerminal, CyclicDelegationChain))
+                {
+                    throw CreateDelegationCycleException();
+                }
+
                 while (true)
                 {
-                    var resolvedTerminal = currentState.ResolvedTerminal;
-                    if (ReferenceEquals(resolvedTerminal, CyclicDelegationChain))
-                    {
-                        // Already proven cyclic, so everything walked to get here is cyclic too.
-                        CacheResolvedTerminal(path, CyclicDelegationChain);
-                        throw CreateDelegationCycleException();
-                    }
-
-                    if (resolvedTerminal is not null)
-                    {
-                        var cachedState = Volatile.Read(ref resolvedTerminal._state);
-                        if (cachedState.DelegationTarget is null)
-                        {
-                            // Reusing an already recorded suffix is what keeps the total work of
-                            // resolving a deep chain linear in its length. A recorded context that
-                            // has started delegating is stale, and walking on corrects it.
-                            CacheResolvedTerminal(path, resolvedTerminal);
-                            state = cachedState;
-                            return resolvedTerminal;
-                        }
-                    }
-
                     var next = currentState.DelegationTarget;
                     if (next is null)
                     {
@@ -551,7 +545,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
         finally
         {
-            visited.Clear();
+            if (visited.Count > MaximumRetainedDelegationBufferCapacity)
+            {
+                _serviceQueryVisited = null;
+            }
+            else
+            {
+                visited.Clear();
+            }
         }
     }
 
@@ -636,17 +637,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// It terminates because every hop adds a context to <c>visited</c> and it stops as soon as one
     /// is already in it, so it takes at most one hop per context in the graph.
     ///
-    /// Every hop re-reads the state of the context it moves to, and that is load bearing rather
-    /// than incidental: it must NOT take the shortcut that <see cref="ResolveDelegationTarget"/>
-    /// takes and trust the end of a chain recorded on a state. A state that is still installed
-    /// always describes the topology of its own context correctly, but the recorded end of its
-    /// chain is a statement about contexts further down that can be stale while the state carrying
-    /// it is current. The resolving walk may trust it because a delegating context has exactly one
-    /// fallback context and therefore sits in exactly one using set, so a change below it reaches
-    /// the contexts above it in order. This walk has no such order: a context with several fallback
-    /// contexts can be reached over a shorter branch and be given its final state while a longer
-    /// branch is still waiting to be invalidated, and a resolution that trusted a stale record
-    /// there would be cached on that final state and never corrected.
+    /// Every hop re-reads the state of the context it moves to and uses it for topology only, which
+    /// is load bearing rather than incidental. See <see cref="ResolveDelegationChain"/> for why no
+    /// walk may trust what a context further down recorded about the end of its chain.
     /// </summary>
     private static bool TryEnterContext(
         InterceptorSubjectContext context,
@@ -843,8 +836,16 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
         finally
         {
-            visited.Clear();
-            pending.Clear();
+            if (pending.Capacity > MaximumRetainedDelegationBufferCapacity)
+            {
+                _invalidationVisited = null;
+                _invalidationPending = null;
+            }
+            else
+            {
+                visited.Clear();
+                pending.Clear();
+            }
         }
     }
 

@@ -406,6 +406,15 @@ public class ContextConcurrencyFuzzTests
                 : contextNodes[random.Next(contextNodes.Length)];
 
             DeclareEdge(proxyNodes[^1], target, random.Next(5) != 0);
+
+            // One proxy gains and loses a second fallback context while the workers run, so it
+            // swings between delegating and not. That is what opens the window in which a context
+            // is invalidated out of the order of its own chain: removing a fallback context
+            // publishes before it unregisters, so for a moment the context both delegates and still
+            // sits in the using set it is leaving, and an invalidation can arrive over that entry
+            // before it reaches the contexts further down.
+            var swinging = proxyNodes[random.Next(proxyNodes.Count)];
+            DeclareEdge(swinging, targetNodes[random.Next(targetNodes.Length)], false);
         }
 
         // Every subject starts out bound to one context, like a subject constructed with a context.
