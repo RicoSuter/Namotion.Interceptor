@@ -836,7 +836,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
         finally
         {
-            if (pending.Capacity > MaximumRetainedDelegationBufferCapacity)
+            // Keyed on what the visited set grew to, not on the worklist: the using graph of a deep
+            // chain queues one context per pop, so the worklist never grows while the visited set
+            // takes an entry per level.
+            if (visited.Count > MaximumRetainedDelegationBufferCapacity)
             {
                 _invalidationVisited = null;
                 _invalidationPending = null;
@@ -972,6 +975,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             get => Volatile.Read(ref _methodInvocationFunction);
         }
 
+        /// <summary>
+        /// Always allocates, and must keep doing so. Returning this instance when it happens to
+        /// carry no caches would make the invalidation CAS a no-op, so a recorded chain end would
+        /// survive the change that invalidated it. It would also break the cycle confirmation,
+        /// which proves a loop existed at one instant from a state object still being installed,
+        /// and can only do that because a state is installed exactly once.
+        /// </summary>
         internal ContextState WithoutCaches()
         {
             return new ContextState(Services, FallbackContexts);

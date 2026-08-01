@@ -134,6 +134,68 @@ public class ContextDeepGraphTests
         Assert.Null(GetThreadStaticBuffer("_delegationCycleVisited"));
     }
 
+    /// <summary>
+    /// The same for the buffers of the invalidation walk, which are separate thread statics and
+    /// were missed when the walk down the chain got this treatment: the using graph of a chain
+    /// queues one context per step, so its worklist never grows while its visited set takes an
+    /// entry per level, and keying the check on the worklist never dropped anything.
+    /// </summary>
+    [Fact]
+    public void WhenVeryDeepChainWasInvalidated_ThenTheInvalidationBuffersAreNotRetained()
+    {
+        // Arrange
+        var rootContext = InterceptorSubjectContext.Create();
+
+        var deepestContext = rootContext;
+        for (var index = 0; index < ChainLength; index++)
+        {
+            var context = InterceptorSubjectContext.Create();
+            context.AddFallbackContext(deepestContext);
+            deepestContext = context;
+        }
+
+        // Act: one mutation at the root, whose walk climbs all 100,000 levels.
+        rootContext.AddService(new MarkerService());
+
+        // Assert
+        Assert.Null(GetThreadStaticBuffer("_invalidationVisited"));
+        Assert.Null(GetThreadStaticBuffer("_invalidationPending"));
+    }
+
+    /// <summary>
+    /// Pins the invariant everything else is derived from: a state is installed exactly once, so a
+    /// state object still in place has been in place since it was pinned. The cycle confirmation
+    /// proves a loop existed at one instant from exactly that, and a recorded chain end is only
+    /// discarded by a change because invalidation installs a different object. An invalidation that
+    /// kept the same object when it carried no caches would pass every other test here.
+    /// </summary>
+    [Fact]
+    public void WhenContextIsInvalidated_ThenItsStateObjectIsReplaced()
+    {
+        // Arrange: no query, so the state carries no caches and is the one an invalidation could be
+        // tempted to keep.
+        var rootContext = InterceptorSubjectContext.Create();
+        var usingContext = InterceptorSubjectContext.Create();
+        usingContext.AddFallbackContext(rootContext);
+
+        var stateBefore = GetState(usingContext);
+
+        // Act
+        rootContext.AddService(new MarkerService());
+
+        // Assert
+        Assert.NotSame(stateBefore, GetState(usingContext));
+    }
+
+    private static object GetState(InterceptorSubjectContext context)
+    {
+        var field = typeof(InterceptorSubjectContext)
+            .GetField("_state", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        Assert.True(field is not null, "_state was renamed, this test needs updating.");
+        return field!.GetValue(context)!;
+    }
+
     private static object? GetThreadStaticBuffer(string fieldName)
     {
         var field = typeof(InterceptorSubjectContext)
