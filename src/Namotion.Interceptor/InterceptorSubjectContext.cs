@@ -102,7 +102,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var resolved = this;
         if (state.DelegationTarget is not null)
         {
-            resolved = ResolveDelegationTarget(this, ref state);
+            resolved = ResolveDelegationTarget(ref state);
         }
 
         return resolved.GetServicesFromState<TInterface>(state);
@@ -232,7 +232,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var resolved = this;
         if (state.DelegationTarget is not null)
         {
-            resolved = ResolveDelegationTarget(this, ref state);
+            resolved = ResolveDelegationTarget(ref state);
         }
 
         var function = resolved.GetReadInterceptorFunction<TProperty>(state);
@@ -246,7 +246,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var resolved = this;
         if (state.DelegationTarget is not null)
         {
-            resolved = ResolveDelegationTarget(this, ref state);
+            resolved = ResolveDelegationTarget(ref state);
         }
 
         var action = resolved.GetWriteInterceptorFunction<TProperty>(state);
@@ -260,7 +260,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var resolved = this;
         if (state.DelegationTarget is not null)
         {
-            resolved = ResolveDelegationTarget(this, ref state);
+            resolved = ResolveDelegationTarget(ref state);
         }
 
         var function = resolved.GetMethodInvocationFunction(state);
@@ -268,8 +268,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Resolves the context that answers for <paramref name="entry"/> and replaces
-    /// <paramref name="state"/> with the state that context was pinned on. A context with no own
+    /// Resolves the context that answers for this one and replaces <paramref name="state"/> with
+    /// the state that context was pinned on. A context with no own
     /// service and exactly one fallback context resolves everything through it, so the chain is as
     /// deep as the subject graph: every attached child inherits the context of its parent.
     ///
@@ -279,7 +279,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// the answer fresh, and that read cannot be removed.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static InterceptorSubjectContext ResolveDelegationTarget(InterceptorSubjectContext entry, ref ContextState state)
+    private InterceptorSubjectContext ResolveDelegationTarget(ref ContextState state)
     {
         var terminal = state.ResolvedTerminal;
         if (terminal is not null && !ReferenceEquals(terminal, CyclicDelegationChain))
@@ -295,7 +295,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
         }
 
-        return ResolveDelegationChain(entry, ref state);
+        return ResolveDelegationChain(ref state);
     }
 
     /// <summary>
@@ -305,7 +305,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// limit is correct.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static InterceptorSubjectContext ResolveDelegationChain(InterceptorSubjectContext entry, ref ContextState state)
+    private InterceptorSubjectContext ResolveDelegationChain(ref ContextState state)
     {
         var visited = _delegationCycleVisited ??= [];
         var path = _delegationCyclePath ??= [];
@@ -319,7 +319,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 // Re-pinned every pass, never reused from the caller: a stale first hop would make
                 // every pass reach the same repeat and fail the same confirmation, spinning here
                 // for good after one mutation.
-                var current = entry;
+                var current = this;
                 var currentState = Volatile.Read(ref current._state);
 
                 // Only the entry's own record may be trusted, and only for the chain that entry
@@ -440,9 +440,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// <summary>One context on the delegation walk and the state it was pinned on.</summary>
     private readonly struct DelegationHop(InterceptorSubjectContext context, ContextState state)
     {
-        internal InterceptorSubjectContext Context { get; } = context;
+        internal readonly InterceptorSubjectContext Context = context;
 
-        internal ContextState State { get; } = state;
+        internal readonly ContextState State = state;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
