@@ -388,9 +388,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// Records where the chain ends on every state the walk pinned, which turns the next query on
     /// any of them into a single hop. Written only to those pinned objects and never to a re-read
     /// of a context's current state: a pinned state that is still installed cannot have been
-    /// invalidated since, and one that was replaced is never pinned again, so a late write to it
-    /// cannot reach a query that starts after the replacement. A thread that pinned it earlier does
-    /// still read it, which is why what is written has to have been true when it was pinned.
+    /// invalidated since, so what is recorded on it holds. One that was replaced is never pinned by
+    /// a later query, and a thread still holding it pinned it before the change that replaced it,
+    /// so its query overlaps that change and answering with either side of it is legal.
     /// </summary>
     private static void CacheResolvedTerminal(List<DelegationHop> path, InterceptorSubjectContext resolvedTerminal)
     {

@@ -19,10 +19,11 @@ public class ContextDeepGraphTests
     /// here is the one from the root up through 100,000 using sets.
     ///
     /// What this guards is therefore that the walk finishes rather than that it invalidates
-    /// anything: the assertions below would pass even if it did nothing at all, because a context
-    /// that delegates holds no cache and re-reads the state of the root on every query. Staleness at
-    /// this depth is covered by the test after it, whose middle context has two fallback contexts
-    /// and so keeps a cache the walk has to reach.
+    /// anything: the assertions below would pass even if it did nothing at all. A context that
+    /// delegates records where its chain ends, but that record names the terminal context and not
+    /// its state, so every query re-reads the state of the root and sees the new service either
+    /// way. Staleness across this depth is covered by the test after it, which asserts it on the
+    /// cache of the context at the far end of the chain.
     /// </summary>
     [Fact]
     public void WhenServiceIsAddedAtRootOfVeryDeepChain_ThenTheMutationCompletes()

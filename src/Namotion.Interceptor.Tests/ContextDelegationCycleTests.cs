@@ -528,13 +528,23 @@ public class ContextDelegationCycleTests
             Assert.Single(longBranch.GetServices<MarkerService>());
 
             var stop = false;
+            using var readerStarted = new ManualResetEventSlim(false);
             var reader = Task.Factory.StartNew(() =>
             {
+                // The window this races is the handful of invalidations between the collecting
+                // context getting its final state and the branch head losing what it recorded, so
+                // the reader has to be resolving already when the mutation lands. Without this the
+                // detection rate is whatever the thread start happens to cost on the machine.
+                collecting.GetServices<MarkerService>();
+                readerStarted.Set();
+
                 while (!Volatile.Read(ref stop))
                 {
                     collecting.GetServices<MarkerService>();
                 }
             }, TaskCreationOptions.LongRunning);
+
+            readerStarted.Wait();
 
             // Act: the terminal leaves the graph, so nothing resolves a service any more.
             middle.RemoveFallbackContext(terminal);
