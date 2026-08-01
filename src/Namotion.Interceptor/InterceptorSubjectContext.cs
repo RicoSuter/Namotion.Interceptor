@@ -388,8 +388,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// Records where the chain ends on every state the walk pinned, which turns the next query on
     /// any of them into a single hop. Written only to those pinned objects and never to a re-read
     /// of a context's current state: a pinned state that is still installed cannot have been
-    /// invalidated since, and one that was replaced is abandoned, so a late write to it is never
-    /// read again.
+    /// invalidated since, and one that was replaced is never pinned again, so a late write to it
+    /// cannot reach a query that starts after the replacement. A thread that pinned it earlier does
+    /// still read it, which is why what is written has to have been true when it was pinned.
     /// </summary>
     private static void CacheResolvedTerminal(List<DelegationHop> path, InterceptorSubjectContext resolvedTerminal)
     {
@@ -721,8 +722,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var services = new object[count];
         collected.CopyTo(resultStart, services, 0, count);
 
-        // OrderByDependencies permutes its input, so the result goes straight back over the region
-        // it was taken from.
+        // OrderByDependencies returns a permutation of what it was given, same length, so the
+        // result goes straight back over the region it was taken from.
         var ordered = ServiceOrderResolver.OrderByDependencies(services);
         for (var index = 0; index < ordered.Length; index++)
         {
@@ -772,8 +773,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// <summary>
     /// R3: one unconditional CAS attempt. No early-out when caches look absent, because a reader
     /// may be lazily creating a cache concurrently and skipping would let its insert survive the
-    /// change. No retry on failure, because every competing write also publishes cache-free
-    /// state, so the intent is satisfied either way.
+    /// change. No retry on failure either, and that needs more than the competing write also being
+    /// cache-free at publication, since it starts accepting fills immediately afterwards: a
+    /// competing state can only win this CAS by being installed after the read above, which is
+    /// fenced after the mutation was published, so every fill into it is computed from reads that
+    /// see the mutation. That argument is what rests on the publish being interlocked rather than a
+    /// release store, see PublishState.
     /// </summary>
     private void InvalidateState()
     {
@@ -933,7 +938,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         // Caches belong to the state that produced them and are created lazily via CAS on first
         // use. A topology change publishes a new state, so a late insert from a concurrent
-        // computation lands in the abandoned state and is never read again.
+        // computation lands in a state that no later query pins.
         private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
         private Delegate? _methodInvocationFunction;
 
@@ -1025,10 +1030,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Delegate? TryGetFunction(ref Delegate?[]? functions, int propertyTypeIndex)
         {
-            // Read plainly rather than through Volatile.Read, which takes a reference into the
-            // array and emits the element address helper on the hot path. The acquire read of the
-            // array orders this load after it, so the only thing this can miss is an entry stored
-            // just now, which costs the caller one rebuild.
+            // The element is read plainly. Reading it through Volatile.Read takes a reference into
+            // the array and emits the element address helper on the hot path, while the acquire
+            // read of the array itself already orders this load after it, so the only thing a plain
+            // element read can miss is an entry stored just now, costing the caller one rebuild.
             var current = Volatile.Read(ref functions);
             return current is not null && propertyTypeIndex < current.Length
                 ? current[propertyTypeIndex]

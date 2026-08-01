@@ -17,6 +17,12 @@ public class ContextDeepGraphTests
     /// Isolates the invalidation walk: every context on the chain delegates, so none of them holds
     /// a cache of its own and the service walk never leaves the root. The only walk that goes deep
     /// here is the one from the root up through 100,000 using sets.
+    ///
+    /// What this guards is therefore that the walk finishes rather than that it invalidates
+    /// anything: the assertions below would pass even if it did nothing at all, because a context
+    /// that delegates holds no cache and re-reads the state of the root on every query. Staleness at
+    /// this depth is covered by the test after it, whose middle context has two fallback contexts
+    /// and so keeps a cache the walk has to reach.
     /// </summary>
     [Fact]
     public void WhenServiceIsAddedAtRootOfVeryDeepChain_ThenTheMutationCompletes()
