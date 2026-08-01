@@ -18,6 +18,7 @@ namespace Namotion.Interceptor.Benchmark;
 public class DelegationDepthBenchmark
 {
     private Tire _tire;
+    private Tire _ownedTire;
     private int _writeCounter;
 
     [Params(1, 8, 64)]
@@ -38,6 +39,11 @@ public class DelegationDepthBenchmark
         }
 
         _tire = new Tire(context);
+
+        // The same services, registered on the subject's own context instead of inherited, so it
+        // has services of its own and therefore never delegates.
+        _ownedTire = new Tire();
+        ((IInterceptorSubject)_ownedTire).Context.WithFullPropertyTracking();
     }
 
     [Benchmark]
@@ -53,5 +59,31 @@ public class DelegationDepthBenchmark
     public decimal Read()
     {
         return _tire.Pressure + _tire.Pressure_Minimum + _tire.Pressure_Maximum;
+    }
+
+    /// <summary>
+    /// The cost of delegating at all, measured against a subject that carries the same services on
+    /// its own context and therefore does not delegate: its state answers directly, which is the
+    /// path a design without inherited contexts would take. The difference between these two and
+    /// the pair above is what the ability to scope services to a subtree costs per access, once the
+    /// chain itself is free. Measured at roughly one nanosecond per operation on reads.
+    ///
+    /// These two do not depend on <see cref="Depth"/> and therefore repeat identical work for every
+    /// value of it, which makes the spread between those repetitions the noise reference to read
+    /// the difference against.
+    /// </summary>
+    [Benchmark]
+    public void WriteWithoutDelegation()
+    {
+        var value = (decimal)Interlocked.Increment(ref _writeCounter);
+        _ownedTire.Pressure = value;
+        _ownedTire.Pressure_Minimum = value + 1;
+        _ownedTire.Pressure_Maximum = value + 2;
+    }
+
+    [Benchmark]
+    public decimal ReadWithoutDelegation()
+    {
+        return _ownedTire.Pressure + _ownedTire.Pressure_Minimum + _ownedTire.Pressure_Maximum;
     }
 }
