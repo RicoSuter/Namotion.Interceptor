@@ -8,7 +8,7 @@ public class InterceptorSubjectContextTests
     public void WhenAddingSingleService_ThenItCanBeRetrieved()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
 
         // Act
         context.AddService(1);
@@ -21,7 +21,7 @@ public class InterceptorSubjectContextTests
     public void WhenAddingTwoServices_ThenListCanBeRetrieved()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
 
         // Act
         context.AddService(1);
@@ -43,8 +43,8 @@ public class InterceptorSubjectContextTests
     public void WhenCollectionHasSubCollection_ThenServicesAreInherited()
     {
         // Arrange
-        var context1 = new InterceptorSubjectContext();
-        var context2 = new InterceptorSubjectContext();
+        var context1 = InterceptorSubjectContext.Create();
+        var context2 = InterceptorSubjectContext.Create();
         
         context2.AddFallbackContext(context1);
 
@@ -64,9 +64,9 @@ public class InterceptorSubjectContextTests
         // Arrange: the duplicate in the first fallback enumerates before the constrainer
         // in the second, so last-index binding leaves it unordered (issue #380); relies on
         // fallback enumeration following HashSet insertion order (true in practice, not contractual)
-        var parent = new InterceptorSubjectContext();
-        var fallback1 = new InterceptorSubjectContext();
-        var fallback2 = new InterceptorSubjectContext();
+        var parent = InterceptorSubjectContext.Create();
+        var fallback1 = InterceptorSubjectContext.Create();
+        var fallback2 = InterceptorSubjectContext.Create();
 
         var duplicate0 = new DuplicateOrderedService();
         var constrainer = new ConstrainerOrderedService();

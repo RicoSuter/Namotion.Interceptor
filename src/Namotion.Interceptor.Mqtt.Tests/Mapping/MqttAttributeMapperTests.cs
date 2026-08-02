@@ -15,7 +15,7 @@ public class MqttAttributeMapperTests
     {
         // Arrange
         var mapper = new MqttAttributeMapper();
-        var subject = new MqttAttributeTestSensor(new InterceptorSubjectContext());
+        var subject = new MqttAttributeTestSensor(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Temperature")!;
 
@@ -33,7 +33,7 @@ public class MqttAttributeMapperTests
     {
         // Arrange
         var mapper = new MqttAttributeMapper();
-        var subject = new MqttAttributeTestSensor(new InterceptorSubjectContext());
+        var subject = new MqttAttributeTestSensor(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Unmapped")!;
 
@@ -49,7 +49,7 @@ public class MqttAttributeMapperTests
     {
         // Arrange
         var mapper = new MqttAttributeMapper();
-        var subject = new MqttAttributeTestSensor(new InterceptorSubjectContext());
+        var subject = new MqttAttributeTestSensor(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Humidity")!;
 
@@ -68,7 +68,7 @@ public class MqttAttributeMapperTests
     {
         // Arrange
         var mapper = new MqttAttributeMapper();
-        var subject = new MqttAttributeTestSensor(new InterceptorSubjectContext());
+        var subject = new MqttAttributeTestSensor(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Temperature")!;
 
@@ -85,7 +85,7 @@ public class MqttAttributeMapperTests
     {
         // Arrange
         var mapper = new MqttAttributeMapper("other-connector");
-        var subject = new MqttAttributeTestSensor(new InterceptorSubjectContext());
+        var subject = new MqttAttributeTestSensor(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Temperature")!;
 
