@@ -180,6 +180,23 @@ public class ContextDelegationCycleTests
         Assert.Equal(1, interceptor.WriteCount);
     }
 
+    [Fact]
+    public void WhenServiceIsAddedToDelegationCycle_ThenResolvingSucceeds()
+    {
+        // Arrange
+        var contextA = InterceptorSubjectContext.Create();
+        var contextB = InterceptorSubjectContext.Create();
+        contextA.AddFallbackContext(contextB);
+        contextB.AddFallbackContext(contextA);
+
+        // Act
+        contextA.AddService("test");
+        var services = contextA.GetServices<string>();
+
+        // Assert
+        Assert.Contains("test", services);
+    }
+
     [Theory]
     [InlineData(1, 1)]
     [InlineData(20, 3)]

@@ -2,7 +2,7 @@ using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Tests;
 
-public class InterceptorSubjectContextTests
+public class ContextServiceResolutionTests
 {
     [Fact]
     public void WhenAddingSingleService_ThenItCanBeRetrieved()
