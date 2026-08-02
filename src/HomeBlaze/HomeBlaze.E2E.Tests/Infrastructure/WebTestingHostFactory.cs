@@ -1,4 +1,5 @@
 using HomeBlaze.Components;
+using HomeBlaze.History.InMemory;
 using HomeBlaze.Plugins;
 using HomeBlaze.Samples;
 using HomeBlaze.OpcUa;
@@ -78,6 +79,7 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         typeProvider
             .AddAssembly(typeof(FluentStorageContainer).Assembly)      // HomeBlaze.Storage
             .AddAssembly(typeof(Motor).Assembly)                       // HomeBlaze.Samples (for test subjects)
+            .AddAssembly(typeof(InMemoryHistoryStoreSubject).Assembly) // HomeBlaze.History.InMemory
             .AddAssembly(typeof(PluginManager).Assembly);              // HomeBlaze.Plugins
 
         // Load runtime plugins and register their assemblies.
