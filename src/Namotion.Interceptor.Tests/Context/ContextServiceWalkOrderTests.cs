@@ -2,7 +2,7 @@ using System.Text;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Ordering;
 
-namespace Namotion.Interceptor.Tests;
+namespace Namotion.Interceptor.Tests.Context;
 
 /// <summary>
 /// The differential oracle for the service walk. The order of the resolved services is observable:

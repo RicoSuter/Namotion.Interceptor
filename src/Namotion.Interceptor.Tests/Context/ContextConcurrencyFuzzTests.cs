@@ -3,7 +3,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 
-namespace Namotion.Interceptor.Tests;
+namespace Namotion.Interceptor.Tests.Context;
 
 /// <summary>
 /// Randomized, model based concurrency fuzzing for <see cref="InterceptorSubjectContext"/>.

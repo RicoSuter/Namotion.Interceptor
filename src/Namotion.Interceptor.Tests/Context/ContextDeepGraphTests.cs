@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Tests;
+namespace Namotion.Interceptor.Tests.Context;
 
 /// <summary>
 /// A subject graph of depth N produces a context graph of depth N, because every attached child
@@ -109,6 +109,38 @@ public class ContextDeepGraphTests
 
         // Assert: a cache that the invalidation did not reach would still answer with the old count.
         Assert.Equal(BranchCount + 2, deepestContext.GetServices<MarkerService>().Length);
+    }
+
+    /// <summary>
+    /// The same for the visited set of the service walk, which is a third thread static and the one
+    /// the two tests below do not grow. A pure chain is collapsed onto a single frame, so only a
+    /// context that is not a delegation target makes the walk descend and mark every level.
+    /// </summary>
+    [Fact]
+    public void WhenVeryDeepChainWasCollected_ThenTheServiceWalkBufferIsNotRetained()
+    {
+        // Arrange: a pure chain whose head carries a second fallback context, which is what stops
+        // the head from delegating and makes the collecting walk descend all 100,000 levels.
+        var rootContext = InterceptorSubjectContext.Create();
+        rootContext.AddService(new MarkerService());
+
+        var deepestContext = rootContext;
+        for (var index = 0; index < ChainLength; index++)
+        {
+            var context = InterceptorSubjectContext.Create();
+            context.AddFallbackContext(deepestContext);
+            deepestContext = context;
+        }
+
+        var branchContext = InterceptorSubjectContext.Create();
+        branchContext.AddService(new OtherMarkerService());
+        deepestContext.AddFallbackContext(branchContext);
+
+        // Act: one cold resolution, which marks every level visited.
+        Assert.Single(deepestContext.GetServices<MarkerService>());
+
+        // Assert
+        Assert.Null(GetThreadStaticBuffer("_serviceQueryVisited"));
     }
 
     /// <summary>

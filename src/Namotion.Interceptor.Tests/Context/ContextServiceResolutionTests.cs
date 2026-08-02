@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Attributes;
 
-namespace Namotion.Interceptor.Tests;
+namespace Namotion.Interceptor.Tests.Context;
 
 public class ContextServiceResolutionTests
 {

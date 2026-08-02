@@ -353,7 +353,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                     var next = currentState.DelegationTarget;
                     if (next is null)
                     {
-                        CacheResolvedTerminal(path, current);
+                        CacheResolvedTerminal(path, current, 0);
                         state = currentState;
                         return current;
                     }
@@ -368,9 +368,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                     currentState = Volatile.Read(ref current._state);
                 }
 
-                if (DelegationLoopStillClosed(path, current))
+                if (DelegationLoopStillClosed(path, current, out var loopStart))
                 {
-                    CacheResolvedTerminal(path, CyclicDelegationMarker);
+                    // Only from the loop, never from the acyclic run that led into it: the
+                    // confirmation re-reads the states of the loop and of nothing else, so a
+                    // context ahead of it reaches the loop only according to an edge read earlier
+                    // and possibly rewired since. Marking one of those would make every query on it
+                    // raise until a pending invalidation replaces its state, and a caller cannot
+                    // tell that from a cycle it really is on.
+                    CacheResolvedTerminal(path, CyclicDelegationMarker, loopStart);
                     throw CreateDelegationCycleException();
                 }
 
@@ -397,16 +403,24 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Records where the chain ends on every state the walk pinned, which turns the next query on
-    /// any of them into a single hop. Written only to those pinned objects and never to a re-read
-    /// of a context's current state: a pinned state that is still installed cannot have been
-    /// invalidated since, so what is recorded on it holds. One that was replaced is never pinned by
-    /// a later query, and a thread still holding it pinned it before the change that replaced it,
-    /// so its query overlaps that change and answering with either side of it is legal.
+    /// Records where the chain ends from <paramref name="startIndex"/> onwards, which turns the
+    /// next query on any of those contexts into a single hop. Written only to the objects the walk
+    /// pinned and never to a re-read of a context's current state.
+    ///
+    /// What this guarantees is quiescent, not instantaneous. The walk reads each edge at its own
+    /// time, so the chain it records may never have existed all at once, and a query overlapping
+    /// two mutations can be answered from it. It converges because any change below a context
+    /// replaces that context's state, so a record that disagrees with the topology sits on a state
+    /// that the mutator's invalidation walk is on its way to replacing, and a replaced state is
+    /// never pinned by a later query.
+    ///
+    /// That is why the cyclic marker is recorded from the confirmed loop only. A stale terminal
+    /// resolves the wrong services for a moment and then converges; a stale marker raises, which
+    /// is not a value the caller can tell apart from a real cycle.
     /// </summary>
-    private static void CacheResolvedTerminal(List<DelegationHop> path, InterceptorSubjectContext resolvedTerminal)
+    private static void CacheResolvedTerminal(List<DelegationHop> path, InterceptorSubjectContext resolvedTerminal, int startIndex)
     {
-        for (var index = 0; index < path.Count; index++)
+        for (var index = startIndex; index < path.Count; index++)
         {
             path[index].State.SetResolvedTerminalIfAbsent(resolvedTerminal);
         }
@@ -419,14 +433,20 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// Comparing states rather than the fallback contexts they point at is what makes this exact:
     /// a walk reads each edge at its own time, so a sequence of rewirings that is acyclic
     /// throughout can otherwise produce a repeat that never was a cycle.
+    ///
+    /// <paramref name="loopStart"/> reports where the loop begins, because the run of contexts
+    /// ahead of it is deliberately not re-read and therefore proves nothing, see
+    /// <see cref="CacheResolvedTerminal"/>.
     /// </summary>
-    private static bool DelegationLoopStillClosed(List<DelegationHop> path, InterceptorSubjectContext repeated)
+    private static bool DelegationLoopStillClosed(List<DelegationHop> path, InterceptorSubjectContext repeated, out int loopStart)
     {
         var index = 0;
         while (index < path.Count && !ReferenceEquals(path[index].Context, repeated))
         {
             index++;
         }
+
+        loopStart = index;
 
         for (; index < path.Count; index++)
         {
@@ -769,13 +789,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     ///
     /// The publish is an interlocked exchange rather than a volatile write because the publisher
     /// then reads the using sets and other contexts' states to drive the invalidation walk, and
-    /// those reads must not be reordered before it. A release store plus Monitor.Exit does not
-    /// order a later load: the memory model defines both as release-only, and CoreCLR implements
-    /// Monitor.Exit release-only on Windows ARM64 before .NET 10, where an acquire load may then
-    /// be satisfied from before the store. The consequence would be an invalidation skipped
-    /// against a stale using set while the current state keeps accumulating cache fills computed
-    /// from pre-mutation topology, leaving a compiled chain permanently missing an interceptor.
-    /// The full fence closes that without touching the query path.
+    /// those reads must not be reordered before it. Release semantics constrains only the accesses
+    /// ahead of the store, so it does not order this store against the later load, and store
+    /// followed by load is reordered under every mainstream memory model, x86-64 TSO included,
+    /// where the store sits in the store buffer while the load is already satisfied. A volatile
+    /// write plus Monitor.Exit is therefore not guaranteed to help on any architecture, whatever
+    /// fence a given runtime happens to emit for either. The consequence would be an invalidation
+    /// skipped against a stale using set while the current state keeps accumulating cache fills
+    /// computed from pre-mutation topology, leaving a compiled chain permanently missing an
+    /// interceptor. The full fence closes that without touching the query path.
     /// </summary>
     private void PublishState(ContextState state)
     {

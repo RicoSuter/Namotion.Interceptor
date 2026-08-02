@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Testing;
 
-namespace Namotion.Interceptor.Tests;
+namespace Namotion.Interceptor.Tests.Context;
 
 public class ContextConcurrencyTests
 {
@@ -129,8 +129,19 @@ public class ContextConcurrencyTests
                 }, TaskCreationOptions.LongRunning)
             };
 
-            // Act
-            await Task.WhenAll(adders);
+            // Act: bounded so that a deadlock regression fails the run instead of hanging it
+            // without a message. Awaited rather than polled, because this runs thousands of times
+            // and a poll interval would dominate the whole test.
+            try
+            {
+                await Task.WhenAll(adders).WaitAsync(TimeSpan.FromSeconds(15));
+            }
+            catch (TimeoutException exception)
+            {
+                throw new TimeoutException(
+                    $"Two concurrent TryAddService calls deadlocked on attempt {attempt} of {ConcurrentAttempts}.",
+                    exception);
+            }
 
             // Assert
             if (results[0] == results[1])

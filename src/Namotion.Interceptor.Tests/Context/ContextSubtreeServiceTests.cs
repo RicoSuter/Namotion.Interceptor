@@ -2,7 +2,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
 
-namespace Namotion.Interceptor.Tests;
+namespace Namotion.Interceptor.Tests.Context;
 
 /// <summary>
 /// A subject may register services of its own, and they apply to that subject and everything below

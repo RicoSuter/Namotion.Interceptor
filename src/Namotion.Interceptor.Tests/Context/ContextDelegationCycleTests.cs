@@ -3,7 +3,7 @@ using System.Reflection;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 
-namespace Namotion.Interceptor.Tests;
+namespace Namotion.Interceptor.Tests.Context;
 
 /// <summary>
 /// A context without own services and with exactly one fallback context resolves everything through
@@ -77,7 +77,7 @@ public class ContextDelegationCycleTests
         // Arrange: deep enough that the recursion this replaced would die on it. That version
         // overflowed at roughly 75,000 frames on an 8 MB stack and far earlier on the 1 MB stacks
         // some hosts use, so a few hundred levels would pass either way and prove nothing.
-        const int ChainLength = 100_000;
+        const int chainLength = 100_000;
 
         var interceptor = new CountingWriteInterceptor();
         var rootContext = InterceptorSubjectContext.Create();
@@ -85,7 +85,7 @@ public class ContextDelegationCycleTests
         rootContext.AddService<IWriteInterceptor>(interceptor);
 
         var deepestContext = rootContext;
-        for (var index = 0; index < ChainLength; index++)
+        for (var index = 0; index < chainLength; index++)
         {
             var context = InterceptorSubjectContext.Create();
             context.AddFallbackContext(deepestContext);
@@ -334,7 +334,7 @@ public class ContextDelegationCycleTests
             "ResolveDelegationChain",
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(resolveMethod);
-        var arguments = new object?[] { oldState };
+        var arguments = new[] { oldState };
 
         // Act: invoking the private walk with the stale caller-pinned state directly places the
         // test at the retry boundary. Correct code re-pins the current entry state and reaches the
@@ -418,10 +418,45 @@ public class ContextDelegationCycleTests
         Assert.NotNull(confirmationMethod);
 
         // Act
-        var confirmed = (bool)confirmationMethod.Invoke(null, [path, context])!;
+        var arguments = new object?[] { path, context, null };
+        var confirmed = (bool)confirmationMethod.Invoke(null, arguments)!;
 
         // Assert
         Assert.False(confirmed);
+    }
+
+    /// <summary>
+    /// The confirmation re-reads the states of the loop and of nothing else, so only the loop may
+    /// record the verdict. A context ahead of it reaches the loop according to an edge the walk
+    /// read earlier, which a concurrent rewiring can have moved since, and a marker recorded there
+    /// makes every query raise until a pending invalidation replaces that state.
+    /// </summary>
+    [Fact]
+    public void WhenAcyclicPrefixLeadsIntoDelegationCycle_ThenOnlyTheCycleRecordsTheVerdict()
+    {
+        // Arrange: two contexts leading into a two context cycle.
+        var cycleFirst = InterceptorSubjectContext.Create();
+        var cycleSecond = InterceptorSubjectContext.Create();
+        cycleFirst.AddFallbackContext(cycleSecond);
+        cycleSecond.AddFallbackContext(cycleFirst);
+
+        var prefixInner = InterceptorSubjectContext.Create();
+        prefixInner.AddFallbackContext(cycleFirst);
+
+        var prefixOuter = InterceptorSubjectContext.Create();
+        prefixOuter.AddFallbackContext(prefixInner);
+
+        // Act
+        Assert.Throws<InvalidOperationException>(() => prefixOuter.GetServices<MarkerService>());
+
+        // Assert: the cycle carries the verdict, the run leading into it carries nothing.
+        Assert.Same(CyclicDelegationMarker, GetResolvedTerminal(cycleFirst));
+        Assert.Same(CyclicDelegationMarker, GetResolvedTerminal(cycleSecond));
+        Assert.Null(GetResolvedTerminal(prefixOuter));
+        Assert.Null(GetResolvedTerminal(prefixInner));
+
+        // Assert: recording nothing there means walking again, which has to reach the same verdict.
+        Assert.Throws<InvalidOperationException>(() => prefixOuter.GetServices<MarkerService>());
     }
 
     /// <summary>
@@ -438,10 +473,10 @@ public class ContextDelegationCycleTests
         // The long branch decides how many invalidations happen between the collecting context
         // getting its final state and the branch head losing what it recorded, so it is what makes
         // the window wide enough to hit.
-        const int BranchLength = 50;
-        const int Iterations = 25;
+        const int branchLength = 50;
+        const int iterations = 25;
 
-        for (var iteration = 0; iteration < Iterations; iteration++)
+        for (var iteration = 0; iteration < iterations; iteration++)
         {
             // Arrange
             var terminal = InterceptorSubjectContext.Create();
@@ -451,7 +486,7 @@ public class ContextDelegationCycleTests
             middle.AddFallbackContext(terminal);
 
             var longBranch = middle;
-            for (var index = 0; index < BranchLength; index++)
+            for (var index = 0; index < branchLength; index++)
             {
                 var context = InterceptorSubjectContext.Create();
                 context.AddFallbackContext(longBranch);
@@ -498,6 +533,25 @@ public class ContextDelegationCycleTests
                 $"The collecting context still resolves a service of a context the graph no longer reaches, " +
                 $"cached on a state that nothing invalidates again (iteration {iteration}).");
         }
+    }
+
+    private static readonly object CyclicDelegationMarker = typeof(InterceptorSubjectContext)
+        .GetField("CyclicDelegationMarker", BindingFlags.Static | BindingFlags.NonPublic)
+        ?.GetValue(null)
+        ?? throw new InvalidOperationException("InterceptorSubjectContext.CyclicDelegationMarker was renamed, this test needs updating.");
+
+    private static object? GetResolvedTerminal(InterceptorSubjectContext context)
+    {
+        var stateField = typeof(InterceptorSubjectContext)
+            .GetField("_state", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(stateField);
+
+        var resolvedTerminalField = typeof(InterceptorSubjectContext)
+            .GetNestedType("ContextState", BindingFlags.NonPublic)
+            ?.GetField("_resolvedTerminal", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(resolvedTerminalField);
+
+        return resolvedTerminalField.GetValue(stateField.GetValue(context));
     }
 
     private sealed class MarkerService;
