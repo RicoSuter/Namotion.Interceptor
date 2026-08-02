@@ -17,7 +17,7 @@ public class FluentPathProviderTests
         registry.AddPropertyMetadata(typeof(FluentPathTestSensor), "Temperature", "temp", new Meta());
         var provider = new FluentPathProvider<Meta>(registry, '/');
 
-        var subject = new FluentPathTestSensor(new InterceptorSubjectContext());
+        var subject = new FluentPathTestSensor(InterceptorSubjectContext.Create());
         var registered = new RegisteredSubject(subject);
         var property = registered.TryGetProperty("Temperature")!;
 
@@ -38,7 +38,7 @@ public class FluentPathProviderTests
         registry.AddPropertyMetadata(typeof(FluentPathTestSensor), "Temperature", segment: null, new Meta());
         var provider = new FluentPathProvider<Meta>(registry);
 
-        var subject = new FluentPathTestSensor(new InterceptorSubjectContext());
+        var subject = new FluentPathTestSensor(InterceptorSubjectContext.Create());
         var registered = new RegisteredSubject(subject);
         var property = registered.TryGetProperty("Temperature")!;
 
@@ -56,7 +56,7 @@ public class FluentPathProviderTests
         var registry = new FluentMappingRegistry<Meta>();
         var provider = new FluentPathProvider<Meta>(registry);
 
-        var subject = new FluentPathTestSensor(new InterceptorSubjectContext());
+        var subject = new FluentPathTestSensor(InterceptorSubjectContext.Create());
         var registered = new RegisteredSubject(subject);
         var property = registered.TryGetProperty("Temperature")!;
 

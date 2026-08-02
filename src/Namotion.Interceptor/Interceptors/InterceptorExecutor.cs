@@ -2,7 +2,7 @@
 
 namespace Namotion.Interceptor.Interceptors;
 
-public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecutor
+public sealed class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecutor
 {
     private readonly IInterceptorSubject _subject;
 

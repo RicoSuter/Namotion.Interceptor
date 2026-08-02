@@ -32,6 +32,18 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private InterceptorSubjectContext? _noServicesSingleFallbackContext;
 
+    /// <summary>
+    /// Restricts context inheritance to this assembly because topology tracking requires context
+    /// reference identity.
+    /// </summary>
+    private protected InterceptorSubjectContext()
+    {
+    }
+
+    /// <summary>
+    /// Creates a new interceptor subject context.
+    /// </summary>
+    /// <returns>The newly created context.</returns>
     public static InterceptorSubjectContext Create()
     {
         return new InterceptorSubjectContext();
