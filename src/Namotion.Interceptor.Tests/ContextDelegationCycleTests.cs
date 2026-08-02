@@ -19,7 +19,7 @@ public class ContextDelegationCycleTests
         // registration closes the cycle underneath it.
         var contextA = InterceptorSubjectContext.Create();
         var contextB = InterceptorSubjectContext.Create();
-        var subject = new FuzzSubject(contextA);
+        var subject = new ContextProbeSubject(contextA);
 
         contextB.AddFallbackContext(contextA);
         contextA.AddFallbackContext(contextB);
@@ -49,7 +49,7 @@ public class ContextDelegationCycleTests
             .Select(_ => InterceptorSubjectContext.Create())
             .ToArray();
 
-        var subject = new FuzzSubject(contexts[0]);
+        var subject = new ContextProbeSubject(contexts[0]);
 
         for (var index = 0; index < cycleLength; index++)
         {
@@ -89,7 +89,7 @@ public class ContextDelegationCycleTests
             deepestContext = context;
         }
 
-        var subject = new FuzzSubject(deepestContext);
+        var subject = new ContextProbeSubject(deepestContext);
 
         // Act
         var services = deepestContext.GetServices<MarkerService>();
@@ -163,7 +163,7 @@ public class ContextDelegationCycleTests
         contextA.AddService(new MarkerService());
         contextA.AddService<IWriteInterceptor>(interceptor);
 
-        var subject = new FuzzSubject(contextB);
+        var subject = new ContextProbeSubject(contextB);
 
         contextA.AddFallbackContext(contextB);
         contextB.AddFallbackContext(contextA);

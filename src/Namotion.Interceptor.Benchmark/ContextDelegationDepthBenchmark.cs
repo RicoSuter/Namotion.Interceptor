@@ -15,10 +15,10 @@ namespace Namotion.Interceptor.Benchmark;
 /// subject and the context holding the services; the subject's own executor adds one more hop.
 /// </summary>
 [MemoryDiagnoser]
-public class DelegationDepthBenchmark
+public class ContextDelegationDepthBenchmark
 {
-    private Tire _tire;
-    private Tire _ownedTire;
+    private Tire _delegatingTire;
+    private Tire _nonDelegatingTire;
     private int _writeCounter;
 
     [Params(1, 8, 64)]
@@ -38,27 +38,27 @@ public class DelegationDepthBenchmark
             context = proxy;
         }
 
-        _tire = new Tire(context);
+        _delegatingTire = new Tire(context);
 
         // The same services, registered on the subject's own context instead of inherited, so it
         // has services of its own and therefore never delegates.
-        _ownedTire = new Tire();
-        ((IInterceptorSubject)_ownedTire).Context.WithFullPropertyTracking();
+        _nonDelegatingTire = new Tire();
+        ((IInterceptorSubject)_nonDelegatingTire).Context.WithFullPropertyTracking();
     }
 
     [Benchmark]
-    public void Write()
+    public void WriteWithDelegation()
     {
         var value = (decimal)Interlocked.Increment(ref _writeCounter);
-        _tire.Pressure = value;
-        _tire.Pressure_Minimum = value + 1;
-        _tire.Pressure_Maximum = value + 2;
+        _delegatingTire.Pressure = value;
+        _delegatingTire.Pressure_Minimum = value + 1;
+        _delegatingTire.Pressure_Maximum = value + 2;
     }
 
     [Benchmark]
-    public decimal Read()
+    public decimal ReadWithDelegation()
     {
-        return _tire.Pressure + _tire.Pressure_Minimum + _tire.Pressure_Maximum;
+        return _delegatingTire.Pressure + _delegatingTire.Pressure_Minimum + _delegatingTire.Pressure_Maximum;
     }
 
     /// <summary>
@@ -76,14 +76,14 @@ public class DelegationDepthBenchmark
     public void WriteWithoutDelegation()
     {
         var value = (decimal)Interlocked.Increment(ref _writeCounter);
-        _ownedTire.Pressure = value;
-        _ownedTire.Pressure_Minimum = value + 1;
-        _ownedTire.Pressure_Maximum = value + 2;
+        _nonDelegatingTire.Pressure = value;
+        _nonDelegatingTire.Pressure_Minimum = value + 1;
+        _nonDelegatingTire.Pressure_Maximum = value + 2;
     }
 
     [Benchmark]
     public decimal ReadWithoutDelegation()
     {
-        return _ownedTire.Pressure + _ownedTire.Pressure_Minimum + _ownedTire.Pressure_Maximum;
+        return _nonDelegatingTire.Pressure + _nonDelegatingTire.Pressure_Minimum + _nonDelegatingTire.Pressure_Maximum;
     }
 }

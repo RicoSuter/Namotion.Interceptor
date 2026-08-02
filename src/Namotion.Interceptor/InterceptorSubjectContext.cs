@@ -29,7 +29,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // predicate that mutates a different context, which the public contract forbids for that reason
     // (see IInterceptorSubjectContext.TryAddService).
 
-    private const int MaximumRetainedDelegationBufferCapacity = 1024;
+    private const int MaximumRetainedTraversalSize = 1024;
 
     // Declared before the marker below, which constructs a context and must not read it at zero.
     private static int _lastPropertyTypeIndex = -1;
@@ -38,7 +38,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // rather than one per query. A context rather than a marker object so that the slot can be
     // typed: this class is not sealed, so a type test on an object slot compiles to a runtime
     // helper call on every intercepted access.
-    private static readonly InterceptorSubjectContext CyclicDelegationChain = CreateCyclicDelegationChain();
+    private static readonly InterceptorSubjectContext CyclicDelegationMarker = CreateCyclicDelegationMarker();
 
     /// <summary>
     /// A dense index per intercepted property type, so that a compiled chain is found by indexing
@@ -100,7 +100,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return new InterceptorSubjectContext();
     }
 
-    private static InterceptorSubjectContext CreateCyclicDelegationChain()
+    private static InterceptorSubjectContext CreateCyclicDelegationMarker()
     {
         var marker = new InterceptorSubjectContext();
         marker.AddFallbackContext(marker);
@@ -294,7 +294,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private InterceptorSubjectContext ResolveDelegationTarget(ref ContextState state)
     {
         var terminal = state.ResolvedTerminal;
-        if (terminal is not null && !ReferenceEquals(terminal, CyclicDelegationChain))
+        if (terminal is not null && !ReferenceEquals(terminal, CyclicDelegationMarker))
         {
             var terminalState = Volatile.Read(ref terminal._state);
 
@@ -343,7 +343,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 // the using set it is leaving. Trusting a record from further down would then cache
                 // a resolution of a context the graph no longer reaches, on a state that nothing
                 // invalidates again.
-                if (ReferenceEquals(currentState.ResolvedTerminal, CyclicDelegationChain))
+                if (ReferenceEquals(currentState.ResolvedTerminal, CyclicDelegationMarker))
                 {
                     throw CreateDelegationCycleException();
                 }
@@ -370,7 +370,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
                 if (DelegationLoopStillClosed(path, current))
                 {
-                    CacheResolvedTerminal(path, CyclicDelegationChain);
+                    CacheResolvedTerminal(path, CyclicDelegationMarker);
                     throw CreateDelegationCycleException();
                 }
 
@@ -383,7 +383,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // Dropped rather than cleared past the threshold: Clear() keeps the capacity, so one
             // walk down a deep chain would hold an entry per level on this thread for the rest of
             // the process, on every thread that ever touches such a graph.
-            if (path.Capacity > MaximumRetainedDelegationBufferCapacity)
+            if (path.Capacity > MaximumRetainedTraversalSize)
             {
                 _delegationCycleVisited = null;
                 _delegationCyclePath = null;
@@ -408,7 +408,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         for (var index = 0; index < path.Count; index++)
         {
-            path[index].State.TrySetResolvedTerminal(resolvedTerminal);
+            path[index].State.SetResolvedTerminalIfAbsent(resolvedTerminal);
         }
     }
 
@@ -519,7 +519,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var function = MethodInvocationFactory.Create(methodInterceptors);
 
         // The CAS winner is returned so that every caller invokes the same canonical chain.
-        return (InvokeFunc)state.SetMethodInvocationFunction(function);
+        return (InvokeFunc)state.GetOrSetMethodInvocationFunction(function);
     }
 
     /// <summary>
@@ -558,7 +558,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
         finally
         {
-            if (visited.Count > MaximumRetainedDelegationBufferCapacity)
+            if (visited.Count > MaximumRetainedTraversalSize)
             {
                 _serviceQueryVisited = null;
             }
@@ -856,7 +856,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // Keyed on what the visited set grew to, not on the worklist: the using graph of a deep
             // chain queues one context per pop, so the worklist never grows while the visited set
             // takes an entry per level.
-            if (visited.Count > MaximumRetainedDelegationBufferCapacity)
+            if (visited.Count > MaximumRetainedTraversalSize)
             {
                 _invalidationVisited = null;
                 _invalidationPending = null;
@@ -960,7 +960,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         private Delegate?[]? _readFunctions;
         private Delegate?[]? _writeFunctions;
 
-        // The context this state's delegation chain ends on, or CyclicDelegationChain when that
+        // The context this state's delegation chain ends on, or CyclicDelegationMarker when that
         // chain runs in a circle and nothing resolves. Null until the chain is first walked. A
         // context and never a state, because the state of a context is replaced whenever anything
         // below it changes, so a cached state would keep serving the caches of an abandoned one.
@@ -981,7 +981,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             get => Volatile.Read(ref _resolvedTerminal);
         }
 
-        internal void TrySetResolvedTerminal(InterceptorSubjectContext resolvedTerminal)
+        internal void SetResolvedTerminalIfAbsent(InterceptorSubjectContext resolvedTerminal)
         {
             Interlocked.CompareExchange(ref _resolvedTerminal, resolvedTerminal, null);
         }
@@ -1081,7 +1081,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
         }
 
-        internal Delegate SetMethodInvocationFunction(Delegate function)
+        internal Delegate GetOrSetMethodInvocationFunction(Delegate function)
         {
             return Interlocked.CompareExchange(ref _methodInvocationFunction, function, null) ?? function;
         }

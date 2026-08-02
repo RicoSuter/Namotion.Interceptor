@@ -2,7 +2,7 @@ using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Tests;
 
-public class ContextLockingTests
+public class ContextConcurrencyTests
 {
     private const int Attempts = 200;
     private const int Mutations = 50;

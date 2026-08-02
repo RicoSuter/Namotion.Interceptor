@@ -136,10 +136,10 @@ public class ContextConcurrencyFuzzTests
         ?.GetField("_resolvedTerminal", BindingFlags.NonPublic | BindingFlags.Instance)
         ?? throw new InvalidOperationException("ContextState._resolvedTerminal was renamed, this oracle needs updating.");
 
-    private static readonly object CyclicDelegationChain = typeof(InterceptorSubjectContext)
-        .GetField("CyclicDelegationChain", BindingFlags.NonPublic | BindingFlags.Static)
+    private static readonly object CyclicDelegationMarker = typeof(InterceptorSubjectContext)
+        .GetField("CyclicDelegationMarker", BindingFlags.NonPublic | BindingFlags.Static)
         ?.GetValue(null)
-        ?? throw new InvalidOperationException("InterceptorSubjectContext.CyclicDelegationChain was renamed, this oracle needs updating.");
+        ?? throw new InvalidOperationException("InterceptorSubjectContext.CyclicDelegationMarker was renamed, this oracle needs updating.");
 
     /// <summary>
     /// The oracle for the resolved chain cache itself, rather than for what it produces. The two
@@ -169,13 +169,13 @@ public class ContextConcurrencyFuzzTests
             var depth = topology.DelegationDepth(node);
             if (depth < 0)
             {
-                Assert.True(ReferenceEquals(cached, CyclicDelegationChain),
+                Assert.True(ReferenceEquals(cached, CyclicDelegationMarker),
                     $"Context {node.Name} resolves through a delegation cycle in the final topology but its cache " +
                     $"holds a context to resolve through. {topology.Describe(roundSeed)}");
                 continue;
             }
 
-            Assert.False(ReferenceEquals(cached, CyclicDelegationChain),
+            Assert.False(ReferenceEquals(cached, CyclicDelegationMarker),
                 $"Context {node.Name} is marked as running in a circle but its chain ends after {depth} hops in " +
                 $"the final topology. {topology.Describe(roundSeed)}");
 
@@ -341,7 +341,7 @@ public class ContextConcurrencyFuzzTests
         var subjectCount = random.Next(1, contextCount + 1);
         for (var index = 0; index < subjectCount; index++)
         {
-            var subject = new FuzzSubject();
+            var subject = new ContextProbeSubject();
             var executor = (InterceptorSubjectContext)((IInterceptorSubject)subject).Context;
             nodes.Add(new ContextNode($"s{index}", executor, null, false, subject));
         }
@@ -519,7 +519,7 @@ public class ContextConcurrencyFuzzTests
     private static void RunOperation(
         Edge[] ownedEdges,
         ContextNode node,
-        FuzzSubject subject,
+        ContextProbeSubject subject,
         int choice,
         int operation,
         Random random)
@@ -759,7 +759,7 @@ public class ContextConcurrencyFuzzTests
         InterceptorSubjectContext context,
         RecordingInterceptor? interceptor,
         bool hasOwnService,
-        FuzzSubject? subject,
+        ContextProbeSubject? subject,
         bool isProxy = false)
     {
         /// <summary>
@@ -792,7 +792,7 @@ public class ContextConcurrencyFuzzTests
         internal bool HasOwnService { get; } = hasOwnService;
 
         /// <summary>Set when this node is the executor of a subject, otherwise <c>null</c>.</summary>
-        internal FuzzSubject? Subject { get; } = subject;
+        internal ContextProbeSubject? Subject { get; } = subject;
     }
 
     private sealed class Edge(ContextNode source, ContextNode target, bool isPresent)
@@ -849,7 +849,7 @@ public class ContextConcurrencyFuzzTests
 }
 
 [InterceptorSubject]
-public partial class FuzzSubject
+public partial class ContextProbeSubject
 {
     public partial int Value { get; set; }
 

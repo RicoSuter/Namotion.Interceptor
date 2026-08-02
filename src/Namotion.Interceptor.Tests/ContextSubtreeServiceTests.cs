@@ -28,14 +28,14 @@ public class ContextSubtreeServiceTests
             .Create()
             .WithFullPropertyTracking();
 
-        var rootSensor = new Sensor(rootContext);
+        var rootSensor = new SubtreeSensor(rootContext);
 
         var ownedInterceptor = new CountingWriteInterceptor();
-        var ownedSensor = new Sensor { Name = "owned" };
-        var ownedChild = new Sensor { Name = "owned child" };
+        var ownedSensor = new SubtreeSensor { Name = "owned" };
+        var ownedChild = new SubtreeSensor { Name = "owned child" };
 
-        var foreignSensor = new Sensor { Name = "foreign" };
-        var foreignChild = new Sensor { Name = "foreign child" };
+        var foreignSensor = new SubtreeSensor { Name = "foreign" };
+        var foreignChild = new SubtreeSensor { Name = "foreign child" };
 
         rootSensor.Child = ownedSensor;
         ownedSensor.Child = ownedChild;
@@ -78,7 +78,7 @@ public class ContextSubtreeServiceTests
         var rootContext = InterceptorSubjectContext.Create();
         rootContext.AddService<IWriteInterceptor>(rootInterceptor);
 
-        var subject = new Sensor(rootContext);
+        var subject = new SubtreeSensor(rootContext);
         ((IInterceptorSubject)subject).Context.AddService<IWriteInterceptor>(new RecordingWriteInterceptor("subject", order));
 
         // Act
@@ -101,8 +101,8 @@ public class ContextSubtreeServiceTests
             .Create()
             .WithFullPropertyTracking();
 
-        var parent = new Sensor(rootContext);
-        var child = new Sensor();
+        var parent = new SubtreeSensor(rootContext);
+        var child = new SubtreeSensor();
         parent.Child = child;
 
         // Resolves and caches the chain of both subjects while neither has services.
@@ -142,11 +142,11 @@ public class ContextSubtreeServiceTests
 }
 
 [InterceptorSubject]
-public partial class Sensor
+public partial class SubtreeSensor
 {
     public partial string? Name { get; set; }
 
     public partial int Value { get; set; }
 
-    public partial Sensor? Child { get; set; }
+    public partial SubtreeSensor? Child { get; set; }
 }

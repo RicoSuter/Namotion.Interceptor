@@ -4,7 +4,7 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
-public class FallbackContextAttachTests
+public class FallbackContextInvalidationTests
 {
     [Fact]
     public void WhenFallbackIsAttachedToContextUsedByAnotherContext_ThenTheUsingContextChainIsRebuilt()
