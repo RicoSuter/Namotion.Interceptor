@@ -83,6 +83,18 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // never replaced, so every thread locks the same canonical object without a second allocation.
     private HashSet<InterceptorSubjectContext>? _usedByContexts;
 
+    /// <summary>
+    /// Restricts context inheritance to this assembly because topology tracking requires context
+    /// reference identity.
+    /// </summary>
+    private protected InterceptorSubjectContext()
+    {
+    }
+
+    /// <summary>
+    /// Creates a new interceptor subject context.
+    /// </summary>
+    /// <returns>The newly created context.</returns>
     public static InterceptorSubjectContext Create()
     {
         return new InterceptorSubjectContext();

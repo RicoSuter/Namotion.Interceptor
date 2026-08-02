@@ -8,8 +8,8 @@ public class ContextRecursionTests
     public void WhenContextsHaveCircularDependency_ThenOnContextChangedDoesNotStackOverflow()
     {
         // Arrange
-        var context1 = new InterceptorSubjectContext();
-        var context2 = new InterceptorSubjectContext();
+        var context1 = InterceptorSubjectContext.Create();
+        var context2 = InterceptorSubjectContext.Create();
 
         // Create circular dependency
         context1.AddFallbackContext(context2);

@@ -81,7 +81,6 @@ namespace Namotion.Interceptor
     }
     public class InterceptorSubjectContext : Namotion.Interceptor.IInterceptorSubjectContext
     {
-        public InterceptorSubjectContext() { }
         public virtual bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public void AddService<TService>(TService service) { }
         public System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>() { }
@@ -193,7 +192,7 @@ namespace Namotion.Interceptor.Interceptors
     {
         void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next);
     }
-    public class InterceptorExecutor : Namotion.Interceptor.InterceptorSubjectContext, Namotion.Interceptor.IInterceptorSubjectContext, Namotion.Interceptor.Interceptors.IInterceptorExecutor
+    public sealed class InterceptorExecutor : Namotion.Interceptor.InterceptorSubjectContext, Namotion.Interceptor.IInterceptorSubjectContext, Namotion.Interceptor.Interceptors.IInterceptorExecutor
     {
         public InterceptorExecutor(Namotion.Interceptor.IInterceptorSubject subject) { }
         public override bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
