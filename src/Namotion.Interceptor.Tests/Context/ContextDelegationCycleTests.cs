@@ -3,6 +3,8 @@ using System.Reflection;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 
+using static Namotion.Interceptor.Tests.Context.ContextStateReflection;
+
 namespace Namotion.Interceptor.Tests.Context;
 
 /// <summary>
@@ -200,6 +202,25 @@ public class ContextDelegationCycleTests
         Assert.Contains("test", services);
     }
 
+    [Fact]
+    public void WhenTryAddServiceIsCalledOnDelegationCycle_ThenItAddsServiceAndBreaksCycle()
+    {
+        // Arrange
+        var contextA = InterceptorSubjectContext.Create();
+        var contextB = InterceptorSubjectContext.Create();
+        contextA.AddFallbackContext(contextB);
+        contextB.AddFallbackContext(contextA);
+        Assert.Throws<InvalidOperationException>(() => contextA.GetServices<string>());
+
+        // Act
+        var added = contextA.TryAddService(() => "test", _ => true);
+        var services = contextA.GetServices<string>();
+
+        // Assert
+        Assert.True(added);
+        Assert.Equal("test", Assert.Single(services));
+    }
+
     [Theory]
     [InlineData(1, 1)]
     [InlineData(20, 3)]
@@ -322,15 +343,12 @@ public class ContextDelegationCycleTests
         entry.AddFallbackContext(other);
         other.AddFallbackContext(entry);
 
-        var contextType = typeof(InterceptorSubjectContext);
-        var stateField = contextType.GetField("_state", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(stateField);
-        var oldState = stateField.GetValue(entry)!;
+        var oldState = GetState(entry);
 
         entry.RemoveFallbackContext(other);
         entry.AddFallbackContext(terminal);
 
-        var resolveMethod = contextType.GetMethod(
+        var resolveMethod = typeof(InterceptorSubjectContext).GetMethod(
             "ResolveDelegationChain",
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(resolveMethod);
@@ -393,11 +411,9 @@ public class ContextDelegationCycleTests
         var context = InterceptorSubjectContext.Create();
         context.AddFallbackContext(InterceptorSubjectContext.Create());
 
-        var contextType = typeof(InterceptorSubjectContext);
-        var stateField = contextType.GetField("_state", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(stateField);
-        var oldState = stateField.GetValue(context)!;
+        var oldState = GetState(context);
 
+        var contextType = typeof(InterceptorSubjectContext);
         var hopType = contextType.GetNestedType("DelegationHop", BindingFlags.NonPublic);
         Assert.NotNull(hopType);
         var hop = Activator.CreateInstance(
@@ -533,25 +549,6 @@ public class ContextDelegationCycleTests
                 $"The collecting context still resolves a service of a context the graph no longer reaches, " +
                 $"cached on a state that nothing invalidates again (iteration {iteration}).");
         }
-    }
-
-    private static readonly object CyclicDelegationMarker = typeof(InterceptorSubjectContext)
-        .GetField("CyclicDelegationMarker", BindingFlags.Static | BindingFlags.NonPublic)
-        ?.GetValue(null)
-        ?? throw new InvalidOperationException("InterceptorSubjectContext.CyclicDelegationMarker was renamed, this test needs updating.");
-
-    private static object? GetResolvedTerminal(InterceptorSubjectContext context)
-    {
-        var stateField = typeof(InterceptorSubjectContext)
-            .GetField("_state", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(stateField);
-
-        var resolvedTerminalField = typeof(InterceptorSubjectContext)
-            .GetNestedType("ContextState", BindingFlags.NonPublic)
-            ?.GetField("_resolvedTerminal", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(resolvedTerminalField);
-
-        return resolvedTerminalField.GetValue(stateField.GetValue(context));
     }
 
     private sealed class MarkerService;

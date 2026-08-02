@@ -25,6 +25,10 @@ public interface IInterceptorSubjectContext
     /// holds the mutation locks of two contexts, and two threads that each register into one context
     /// from a factory mutating the other acquire those locks in opposite orders and deadlock. Create
     /// the instance in the factory and register it into any other context after this call returns.
+    ///
+    /// Unlike service resolution, this operation can enter a fallback graph that consists only of a
+    /// delegation cycle. If no matching service is found, registering one on this context breaks the
+    /// cycle and makes subsequent service resolution possible.
     /// </remarks>
     /// <typeparam name="TService">The type of service to register.</typeparam>
     /// <param name="factory">Factory function to create the service instance.</param>

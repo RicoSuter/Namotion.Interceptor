@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
 using Namotion.Interceptor.Interceptors;
@@ -31,7 +32,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private const int MaximumRetainedTraversalSize = 1024;
 
-    // Declared before the marker below, which constructs a context and must not read it at zero.
+    // Declared before the marker below as a defensive ordering rule. Marker construction does not
+    // currently take a property type index, but keeping the counter first prevents a future change
+    // on that path from observing its zero-initialized value.
     private static int _lastPropertyTypeIndex = -1;
 
     // Recorded on a state whose chain was proven cyclic, so the verdict costs one walk per state
@@ -50,6 +53,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// </summary>
     private static class PropertyTypeIndex<TProperty>
     {
+        // ReSharper disable once StaticMemberInGenericType
         internal static readonly int Value = Interlocked.Increment(ref _lastPropertyTypeIndex);
     }
 
@@ -370,6 +374,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
                 if (DelegationLoopStillClosed(path, current, out var loopStart))
                 {
+                    // Every hop that entered visited also entered path, and the break above fires
+                    // only on a context already in visited, so the repeat is always on the path.
+                    Debug.Assert(loopStart < path.Count, "The repeated context was not found on the walked path.");
+
                     // Only from the loop, never from the acyclic run that led into it: the
                     // confirmation re-reads the states of the loop and of nothing else, so a
                     // context ahead of it reaches the loop only according to an edge read earlier
@@ -538,7 +546,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var methodInterceptors = GetServicesFromState<IMethodInterceptor>(state);
         var function = MethodInvocationFactory.Create(methodInterceptors);
 
-        // The CAS winner is returned so that every caller invokes the same canonical chain.
+        // A single slot, so returning the CAS winner is free. The read and write paths return what
+        // they built instead; that is equivalent because racers compile from the services of this
+        // one state, so their chains differ only in identity and a losing build is used once.
         return (InvokeFunc)state.GetOrSetMethodInvocationFunction(function);
     }
 
@@ -549,7 +559,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// </summary>
     private ImmutableArray<TInterface> GetServicesFromState<TInterface>(ContextState state)
     {
-        // Empty contexts skip cache creation entirely so that fresh contexts stay allocation-free.
+        // An empty context creates no service cache, which keeps a fresh one free of that
+        // allocation. It says nothing about the compiled chain arrays: an empty state that answers
+        // intercepted access still fills those, see ContextState.SetFunction.
         if (state.IsEmpty)
         {
             return ImmutableArray<TInterface>.Empty;
@@ -689,7 +701,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             {
                 return true;
             }
-
 
             context = delegationTarget;
             enteredState = Volatile.Read(ref delegationTarget._state);

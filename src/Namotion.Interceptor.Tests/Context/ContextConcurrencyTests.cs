@@ -185,6 +185,39 @@ public class ContextConcurrencyTests
     }
 
     [Fact]
+    public async Task WhenServiceExistsPredicateRegistersIntoSameContext_ThenNoDeadlockOccurs()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(new MarkerService());
+        var predicateRan = false;
+        var added = false;
+
+        // Act: the predicate reenters the mutation lock of the context it is querying.
+        var work = Task.Run(() =>
+        {
+            added = context.TryAddService(
+                () => new MarkerService(),
+                _ =>
+                {
+                    predicateRan = true;
+                    context.AddService(new OtherMarkerService());
+                    return false;
+                });
+        });
+
+        await AsyncTestHelpers.WaitUntilAsync(() => work.IsCompleted,
+            message: "TryAddService deadlocked while its exists predicate mutated the same context");
+        await work;
+
+        // Assert
+        Assert.True(predicateRan);
+        Assert.True(added);
+        Assert.Equal(2, context.GetServices<MarkerService>().Length);
+        Assert.Single(context.GetServices<OtherMarkerService>());
+    }
+
+    [Fact]
     public async Task WhenFallbackGraphContainsCycle_ThenQueriesAndMutationsDoNotDeadlock()
     {
         // Arrange: both contexts keep an own service so that neither one purely delegates to
@@ -348,6 +381,65 @@ public class ContextConcurrencyTests
 
         Assert.Equal(2, contextA.GetServices<MarkerService>().Length);
         Assert.Equal(2, contextB.GetServices<MarkerService>().Length);
+    }
+
+    [Fact]
+    public async Task WhenSameFallbackIsAddedAndRemovedConcurrently_ThenFinalTopologyAndInvalidationAgree()
+    {
+        // Arrange: own services keep the source context from delegating, so it owns a service cache
+        // whose invalidation also checks the reverse edge maintained by add and remove.
+        const int mutationsPerWorker = 2_000;
+
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(new MarkerService());
+
+        var fallbackContext = InterceptorSubjectContext.Create();
+        fallbackContext.AddService(new MarkerService());
+
+        using var start = new Barrier(2);
+        var successfulAdds = 0;
+        var successfulRemoves = 0;
+
+        var adder = Task.Factory.StartNew(() =>
+        {
+            start.SignalAndWait();
+            for (var index = 0; index < mutationsPerWorker; index++)
+            {
+                if (context.AddFallbackContext(fallbackContext))
+                {
+                    successfulAdds++;
+                }
+            }
+        }, TaskCreationOptions.LongRunning);
+
+        var remover = Task.Factory.StartNew(() =>
+        {
+            start.SignalAndWait();
+            for (var index = 0; index < mutationsPerWorker; index++)
+            {
+                if (context.RemoveFallbackContext(fallbackContext))
+                {
+                    successfulRemoves++;
+                }
+            }
+        }, TaskCreationOptions.LongRunning);
+
+        // Act
+        var workers = new[] { adder, remover };
+        await AsyncTestHelpers.WaitUntilAsync(() => workers.All(worker => worker.IsCompleted),
+            message: "Concurrent add and remove of the same fallback context did not finish");
+        await Task.WhenAll(workers);
+
+        var fallbackIsPresent = successfulAdds == successfulRemoves + 1;
+        var servicesBeforeMutation = context.GetServices<MarkerService>();
+        fallbackContext.AddService(new MarkerService());
+        var servicesAfterMutation = context.GetServices<MarkerService>();
+
+        // Assert: successful transitions determine the final edge exactly. If the edge remains,
+        // the fallback mutation must also invalidate the source cache through its reverse edge.
+        Assert.True(successfulAdds == successfulRemoves || fallbackIsPresent);
+        Assert.Equal(fallbackIsPresent ? 2 : 1, servicesBeforeMutation.Length);
+        Assert.Equal(fallbackIsPresent ? 3 : 1, servicesAfterMutation.Length);
     }
 
     [Fact]

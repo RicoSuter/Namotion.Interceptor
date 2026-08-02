@@ -1,7 +1,8 @@
-using System.Reflection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
+
+using static Namotion.Interceptor.Tests.Context.ContextStateReflection;
 
 namespace Namotion.Interceptor.Tests.Context;
 
@@ -126,20 +127,6 @@ public class ContextConcurrencyFuzzTests
             "No context ended a round with a resolved delegation chain in its cache, so the oracle for that " +
             "cache compared nothing.");
     }
-
-    private static readonly FieldInfo StateField = typeof(InterceptorSubjectContext)
-        .GetField("_state", BindingFlags.NonPublic | BindingFlags.Instance)
-        ?? throw new InvalidOperationException("InterceptorSubjectContext._state was renamed, this oracle needs updating.");
-
-    private static readonly FieldInfo ResolvedTerminalField = typeof(InterceptorSubjectContext)
-        .GetNestedType("ContextState", BindingFlags.NonPublic)
-        ?.GetField("_resolvedTerminal", BindingFlags.NonPublic | BindingFlags.Instance)
-        ?? throw new InvalidOperationException("ContextState._resolvedTerminal was renamed, this oracle needs updating.");
-
-    private static readonly object CyclicDelegationMarker = typeof(InterceptorSubjectContext)
-        .GetField("CyclicDelegationMarker", BindingFlags.NonPublic | BindingFlags.Static)
-        ?.GetValue(null)
-        ?? throw new InvalidOperationException("InterceptorSubjectContext.CyclicDelegationMarker was renamed, this oracle needs updating.");
 
     /// <summary>
     /// The oracle for the resolved chain cache itself, rather than for what it produces. The two

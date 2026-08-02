@@ -1,3 +1,5 @@
+using static Namotion.Interceptor.Tests.Context.ContextStateReflection;
+
 namespace Namotion.Interceptor.Tests.Context;
 
 /// <summary>
@@ -69,8 +71,8 @@ public class ContextDeepGraphTests
     {
         // Arrange: the same chain, but every 10,000th level carries a second fallback context with
         // an own service, the last level included.
-        const int BranchInterval = 10_000;
-        const int BranchCount = ChainLength / BranchInterval;
+        const int branchInterval = 10_000;
+        const int branchCount = ChainLength / branchInterval;
 
         var rootContext = InterceptorSubjectContext.Create();
         var rootService = new MarkerService();
@@ -83,7 +85,7 @@ public class ContextDeepGraphTests
             var context = InterceptorSubjectContext.Create();
             context.AddFallbackContext(deepestContext);
 
-            if ((index + 1) % BranchInterval == 0)
+            if ((index + 1) % branchInterval == 0)
             {
                 var branchContext = InterceptorSubjectContext.Create();
                 var branchService = new MarkerService();
@@ -99,7 +101,7 @@ public class ContextDeepGraphTests
         var services = deepestContext.GetServices<MarkerService>();
 
         // Assert
-        Assert.Equal(BranchCount + 1, services.Length);
+        Assert.Equal(branchCount + 1, services.Length);
         Assert.Contains(rootService, services);
         Assert.All(branchServices, branchService => Assert.Contains(branchService, services));
 
@@ -108,7 +110,7 @@ public class ContextDeepGraphTests
         rootContext.AddService(new MarkerService());
 
         // Assert: a cache that the invalidation did not reach would still answer with the old count.
-        Assert.Equal(BranchCount + 2, deepestContext.GetServices<MarkerService>().Length);
+        Assert.Equal(branchCount + 2, deepestContext.GetServices<MarkerService>().Length);
     }
 
     /// <summary>
@@ -224,24 +226,6 @@ public class ContextDeepGraphTests
 
         // Assert
         Assert.NotSame(stateBefore, GetState(usingContext));
-    }
-
-    private static object GetState(InterceptorSubjectContext context)
-    {
-        var field = typeof(InterceptorSubjectContext)
-            .GetField("_state", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-        Assert.True(field is not null, "_state was renamed, this test needs updating.");
-        return field!.GetValue(context)!;
-    }
-
-    private static object? GetThreadStaticBuffer(string fieldName)
-    {
-        var field = typeof(InterceptorSubjectContext)
-            .GetField(fieldName, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        Assert.True(field is not null, $"{fieldName} was renamed, this test needs updating.");
-        return field!.GetValue(null);
     }
 
     private sealed class MarkerService;
