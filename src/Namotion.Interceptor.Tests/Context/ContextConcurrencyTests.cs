@@ -81,15 +81,20 @@ public class ContextConcurrencyTests
                 }
             }, TaskCreationOptions.LongRunning);
 
-            // Act
+            // Act & Assert
             start.Set();
             var both = Task.WhenAll(writer, mutator);
-            var finished = await Task.WhenAny(both, Task.Delay(TimeSpan.FromSeconds(15)));
-
-            // Assert
-            Assert.True(ReferenceEquals(finished, both),
-                $"Deadlock on attempt {attempt} of {Attempts}: writing a property and calling {mutation} " +
-                "on a fallback context acquired the two context locks in opposite orders.");
+            try
+            {
+                await both.WaitAsync(TimeSpan.FromSeconds(15));
+            }
+            catch (TimeoutException exception)
+            {
+                throw new TimeoutException(
+                    $"Deadlock on attempt {attempt} of {Attempts}: writing a property and calling {mutation} " +
+                    "on a fallback context acquired the two context locks in opposite orders.",
+                    exception);
+            }
         }
     }
 

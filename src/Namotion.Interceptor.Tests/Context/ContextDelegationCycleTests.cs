@@ -1,4 +1,7 @@
+using System.Collections;
+using System.Reflection;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Tests;
 
@@ -303,82 +306,48 @@ public class ContextDelegationCycleTests
     }
 
     /// <summary>
-    /// A cycle that is broken while queries are running must not leave a walker spinning. The walk
-    /// starts over when the loop it found came apart underneath it, and if it started over from the
-    /// state the caller pinned rather than re-reading it, a single rewiring of the queried context
-    /// would make every pass replay the same stale first hop and never terminate, long after the
-    /// graph stopped changing.
+    /// A delegation retry must re-read the entry context instead of replaying the cyclic state
+    /// pinned by its caller. Replaying that stale first hop would find the same unconfirmed loop
+    /// forever, while accepting the stale loop would report a cycle that no longer exists.
     /// </summary>
     [Fact]
-    public async Task WhenCycleIsBrokenAndReformedWhileQueried_ThenNoQueryHangs()
+    public async Task WhenCallerPinnedCyclicStateWasReplacedWithTerminal_ThenRetryResolvesTerminal()
     {
-        // Arrange: a long cycle, so that one walk over it takes long enough for a mutation to land
-        // inside it. The mutation is at the far end and only ever restores the same shape, which
-        // replaces the state of every context above it, including the entry, WITHOUT changing what
-        // the entry delegates to. That is the case that spins: a walk holding the entry's older
-        // state keeps finding the same loop and keeps failing the same confirmation.
-        const int CycleLength = 2_000;
+        // Arrange: capture an entry state that participates in a cycle, then replace its fallback
+        // with a terminal context. The old first hop still appears to close a loop through entry,
+        // but that loop cannot be confirmed against entry's current state.
+        var entry = InterceptorSubjectContext.Create();
+        var other = InterceptorSubjectContext.Create();
+        var terminal = InterceptorSubjectContext.Create();
+        entry.AddFallbackContext(other);
+        other.AddFallbackContext(entry);
 
-        var cycle = Enumerable
-            .Range(0, CycleLength)
-            .Select(_ => InterceptorSubjectContext.Create())
-            .ToArray();
+        var contextType = typeof(InterceptorSubjectContext);
+        var stateField = contextType.GetField("_state", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(stateField);
+        var oldState = stateField.GetValue(entry)!;
 
-        for (var index = 0; index < CycleLength; index++)
-        {
-            cycle[index].AddFallbackContext(cycle[(index + 1) % CycleLength]);
-        }
+        entry.RemoveFallbackContext(other);
+        entry.AddFallbackContext(terminal);
 
-        var entry = cycle[0];
-        var last = cycle[^1];
-        var stopReaders = false;
-        var stopMutator = false;
-        var completedQueries = 0;
+        var resolveMethod = contextType.GetMethod(
+            "ResolveDelegationChain",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(resolveMethod);
+        var arguments = new object?[] { oldState };
 
-        var readers = Enumerable.Range(0, 4).Select(_ => Task.Factory.StartNew(() =>
-        {
-            while (!Volatile.Read(ref stopReaders))
-            {
-                try
-                {
-                    entry.GetServices<MarkerService>();
-                }
-                catch (InvalidOperationException)
-                {
-                    // The chain is a cycle almost all of the time, so raising is the expected
-                    // outcome. Only a walk that never returns at all fails this test.
-                }
-
-                Interlocked.Increment(ref completedQueries);
-            }
-        }, TaskCreationOptions.LongRunning)).ToArray();
-
-        var mutator = Task.Factory.StartNew(() =>
-        {
-            while (!Volatile.Read(ref stopMutator))
-            {
-                last.RemoveFallbackContext(entry);
-                last.AddFallbackContext(entry);
-            }
-        }, TaskCreationOptions.LongRunning);
-
-        // Act: the mutations stop first, so the readers are then asked to finish against a graph
-        // that no longer changes. A walk that reuses the state its caller pinned does not finish
-        // even then, which is what separates a livelock from ordinary contention.
-        await Task.Delay(TimeSpan.FromSeconds(3));
-        Volatile.Write(ref stopMutator, true);
-        await mutator;
-
-        Volatile.Write(ref stopReaders, true);
-        var allReaders = Task.WhenAll(readers);
-        var finished = await Task.WhenAny(allReaders, Task.Delay(TimeSpan.FromSeconds(20))) == allReaders;
+        // Act: invoking the private walk with the stale caller-pinned state directly places the
+        // test at the retry boundary. Correct code re-pins the current entry state and reaches the
+        // terminal. Reusing the supplied state would livelock, while accepting its stale loop would
+        // throw instead of returning the terminal.
+        var invocation = Task.Run(() => resolveMethod.Invoke(entry, arguments));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => invocation.IsCompleted,
+            message: "Delegation retry reused the caller-pinned stale state and did not terminate");
+        var resolved = await invocation;
 
         // Assert
-        Assert.True(finished,
-            "A delegation walk did not return after the graph stopped changing, so it restarted forever on a " +
-            $"state that no longer exists. {Volatile.Read(ref completedQueries)} queries completed.");
-
-        Assert.True(Volatile.Read(ref completedQueries) > 0, "No query completed at all.");
+        Assert.Same(terminal, resolved);
     }
 
     /// <summary>
@@ -415,88 +384,44 @@ public class ContextDelegationCycleTests
         Assert.Same(marker, Assert.Single(services));
     }
 
-    /// <summary>
-    /// A graph that is acyclic at every single instant must never be reported as a cycle. The walk
-    /// reads one edge at a time, so it follows a path through time rather than a topology at an
-    /// instant, and a sequence of rewirings that is acyclic throughout can still make it arrive at
-    /// a context it already passed. That is why a repeat is confirmed before it is reported, and
-    /// this is the test that a confirmation which stops being strict enough would fail.
-    ///
-    /// The fuzzer cannot cover this: its workers tolerate the cycle exception, because which of its
-    /// contexts sit on a cycle changes with every edge they toggle. Here nothing is ever cyclic, so
-    /// any exception at all is a defect.
-    /// </summary>
     [Fact]
-    public async Task WhenChainIsRewiredButNeverCyclic_ThenResolvingNeverReportsACycle()
+    public void WhenCandidateDelegationLoopContainsReplacedState_ThenItIsNotConfirmed()
     {
-        // Arrange: a chain of delegating contexts ending on one that answers. The mutator moves the
-        // last hop between two contexts that both lead to the answering one, so every intermediate
-        // state of the graph is acyclic, while the walk keeps seeing edges change underneath it.
-        const int ChainLength = 400;
+        // Arrange: reproduce the candidate a concurrent walk would have collected before a
+        // rewiring replaced the context state. State identity is the proof that every loop edge
+        // existed at one instant, so this stale candidate must not be accepted as a real cycle.
+        var context = InterceptorSubjectContext.Create();
+        context.AddFallbackContext(InterceptorSubjectContext.Create());
 
-        var answering = InterceptorSubjectContext.Create();
-        answering.AddService(new MarkerService());
+        var contextType = typeof(InterceptorSubjectContext);
+        var stateField = contextType.GetField("_state", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(stateField);
+        var oldState = stateField.GetValue(context)!;
 
-        var firstBridge = InterceptorSubjectContext.Create();
-        var secondBridge = InterceptorSubjectContext.Create();
-        firstBridge.AddFallbackContext(answering);
-        secondBridge.AddFallbackContext(answering);
+        var hopType = contextType.GetNestedType("DelegationHop", BindingFlags.NonPublic);
+        Assert.NotNull(hopType);
+        var hop = Activator.CreateInstance(
+            hopType,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null,
+            args: [context, oldState],
+            culture: null)!;
 
-        var chain = new InterceptorSubjectContext[ChainLength];
-        var deepest = firstBridge;
-        for (var index = 0; index < ChainLength; index++)
-        {
-            chain[index] = InterceptorSubjectContext.Create();
-            chain[index].AddFallbackContext(deepest);
-            deepest = chain[index];
-        }
+        var path = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(hopType))!;
+        path.Add(hop);
 
-        var entry = deepest;
-        var swing = chain[ChainLength / 2];
-        var stop = false;
-        var completedQueries = 0;
-        var falsePositives = 0;
+        context.AddService(new MarkerService());
 
-        var readers = Enumerable.Range(0, 4).Select(_ => Task.Factory.StartNew(() =>
-        {
-            while (!Volatile.Read(ref stop))
-            {
-                try
-                {
-                    entry.GetServices<MarkerService>();
-                }
-                catch (InvalidOperationException)
-                {
-                    Interlocked.Increment(ref falsePositives);
-                }
-
-                Interlocked.Increment(ref completedQueries);
-            }
-        }, TaskCreationOptions.LongRunning)).ToArray();
-
-        var mutator = Task.Factory.StartNew(() =>
-        {
-            while (!Volatile.Read(ref stop))
-            {
-                // Two fallback contexts for a moment, never zero, so the chain below always
-                // resolves and the graph is acyclic throughout.
-                swing.AddFallbackContext(secondBridge);
-                swing.RemoveFallbackContext(chain[(ChainLength / 2) - 1]);
-                swing.AddFallbackContext(chain[(ChainLength / 2) - 1]);
-                swing.RemoveFallbackContext(secondBridge);
-            }
-        }, TaskCreationOptions.LongRunning);
+        var confirmationMethod = contextType.GetMethod(
+            "DelegationLoopStillClosed",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(confirmationMethod);
 
         // Act
-        await Task.Delay(TimeSpan.FromSeconds(3));
-        Volatile.Write(ref stop, true);
-        await Task.WhenAll([.. readers, mutator]);
+        var confirmed = (bool)confirmationMethod.Invoke(null, [path, context])!;
 
         // Assert
-        Assert.True(Volatile.Read(ref completedQueries) > 0, "No query completed at all.");
-        Assert.True(Volatile.Read(ref falsePositives) == 0,
-            $"{Volatile.Read(ref falsePositives)} of {Volatile.Read(ref completedQueries)} queries reported a " +
-            "delegation cycle on a graph that is acyclic at every instant.");
+        Assert.False(confirmed);
     }
 
     /// <summary>
