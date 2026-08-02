@@ -1042,10 +1042,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Delegate? TryGetFunction(ref Delegate?[]? functions, int propertyTypeIndex)
         {
-            // The element is read plainly. Reading it through Volatile.Read takes a reference into
-            // the array and emits the element address helper on the hot path, while the acquire
-            // read of the array itself already orders this load after it, so the only thing a plain
-            // element read can miss is an entry stored just now, costing the caller one rebuild.
+            // The element is intentionally read plainly to avoid the array element address helper
+            // on the hot path. Modern .NET guarantees atomic managed-reference reads and safe
+            // publication for state reached through an object reference without an acquiring read.
+            // A concurrent fill can therefore only be missed, costing this caller one rebuild; it
+            // cannot expose a partial delegate.
             var current = Volatile.Read(ref functions);
             return current is not null && propertyTypeIndex < current.Length
                 ? current[propertyTypeIndex]
@@ -1071,6 +1072,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 // Doubled rather than sized to the index: filling the indices of a process with
                 // many property types one at a time would otherwise reallocate once per type.
                 var grown = new Delegate?[Math.Max(propertyTypeIndex + 1, (current?.Length ?? 0) * 2)];
+                // CopyTo can likewise miss a slot filled concurrently. If this array wins the CAS,
+                // the lost cache entry is rebuilt on its next use; copied references remain atomic
+                // and are safely published when the grown array itself is installed below.
                 current?.CopyTo(grown, 0);
                 grown[propertyTypeIndex] = function;
 
