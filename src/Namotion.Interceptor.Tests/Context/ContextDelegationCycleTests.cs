@@ -537,7 +537,10 @@ public class ContextDelegationCycleTests
                 }
             }, TaskCreationOptions.LongRunning);
 
-            readerStarted.Wait();
+            // Bounded so that a reader that faults before signalling fails the test with this
+            // message instead of blocking the run forever with no diagnostic.
+            Assert.True(readerStarted.Wait(TimeSpan.FromSeconds(30)),
+                $"The reader never signalled that it had started resolving (iteration {iteration}).");
 
             // Act: the terminal leaves the graph, so nothing resolves a service any more.
             middle.RemoveFallbackContext(terminal);

@@ -51,7 +51,11 @@ public class ContextServiceWalkOrderTests
                     // themselves resolves nothing and raises instead, which the walk has to
                     // reach the same way.
                     coverage.DelegationCycles++;
-                    Assert.Throws<InvalidOperationException>(() => node.Context.GetServices<OrderedService>());
+                    var exception = Assert.Throws<InvalidOperationException>(() => node.Context.GetServices<OrderedService>());
+
+                    // Checked, because the arity check of TryGetService and a failed ordering
+                    // resolution raise the same type and would otherwise pass for a cycle.
+                    Assert.Contains("delegation cycle", exception.Message, StringComparison.Ordinal);
                     continue;
                 }
 
@@ -73,8 +77,8 @@ public class ContextServiceWalkOrderTests
             }
         }
 
-        // The corpus has to keep containing every shape the walk has to get right, otherwise this
-        // test could pass by never producing one.
+        // Assert: the corpus has to keep containing every shape the walk has to get right,
+        // otherwise this test could pass by never producing one.
         Assert.True(coverage.DelegationChains > 0, "No graph contained a delegating context.");
         Assert.True(coverage.DelegationCycles > 0, "No graph contained a delegation cycle.");
         Assert.True(coverage.FallbackCycles > 0, "No graph contained a fallback cycle.");

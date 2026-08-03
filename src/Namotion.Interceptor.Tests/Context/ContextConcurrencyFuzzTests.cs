@@ -109,10 +109,10 @@ public class ContextConcurrencyFuzzTests
             }
         }
 
-        // The corpus has to contain the shapes this test claims to cover, otherwise it passes by
-        // never building them. Both of these were absent before delegation chains between contexts
-        // without services were allowed: the deepest chain the generator could produce was two
-        // hops and a chain that resolves nothing could not occur at all.
+        // Assert: the corpus has to contain the shapes this test claims to cover, otherwise it
+        // passes by never building them. Both of these were absent before delegation chains
+        // between contexts without services were allowed: the deepest chain the generator could
+        // produce was two hops and a chain that resolves nothing could not occur at all.
         Assert.True(deepChains > 0,
             $"No final topology contained a delegation chain of three or more hops, so the corpus does not " +
             $"cover the shape a deep subject graph produces. Deepest chain seen: {maximumDepth}.");
@@ -314,8 +314,12 @@ public class ContextConcurrencyFuzzTests
 
             if (index == 0)
             {
-                // Exactly one instance exists in the whole graph, so TryGetService can never see
-                // two of them and its arity check doubles as an in flight duplicate detector.
+                // One instance, reachable from every context that resolves through this one, so
+                // TryGetService exercises the arity path against a service the walk reaches over
+                // many routes at once. It does NOT detect a service admitted twice: the walk
+                // deduplicates by reference before returning, so one instance registered any
+                // number of times still resolves to one. Detecting that needs two instances that
+                // compare equal, which no worker here creates.
                 context.AddService(new SingletonProbeService());
             }
 
@@ -493,7 +497,7 @@ public class ContextConcurrencyFuzzTests
                 // those are changes with every edge the workers toggle, so it cannot be predicted
                 // here; the oracles decide it against the final topology once everyone joined.
                 // Every other InvalidOperationException still fails the round, in particular the
-                // arity check of TryGetService that detects a service admitted twice.
+                // arity check of TryGetService reporting more than one match.
             }
         }
     }

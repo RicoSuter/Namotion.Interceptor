@@ -494,8 +494,10 @@ public class ContextConcurrencyTests
             message: "Concurrent registrations into one shared parent context did not finish");
         await Task.WhenAll(registrations);
 
+        // Assert: every child sees both services the registering threads added.
         Assert.All(childContexts, childContext => Assert.Equal(2, childContext.GetServices<MarkerService>().Length));
 
+        // Act: a later mutation on the shared parent has to reach every child that registered.
         parentContext.AddService(new MarkerService());
 
         // Assert: every child was registered, so every child observes the new parent topology.
