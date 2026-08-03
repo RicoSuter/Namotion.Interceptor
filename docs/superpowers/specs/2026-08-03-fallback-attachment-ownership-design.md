@@ -1,6 +1,6 @@
 # Fallback attachment ownership in InterceptorExecutor
 
-Design for #402. Closes all five defects listed there, with no public API change and no follow-up issue.
+Design for #402. Closes four of its five defects and mitigates the fifth, with no public API change.
 
 ## Problem
 
@@ -76,25 +76,11 @@ A generated subject's executor has no services of its own, so that resolve retur
 - **attach callbacks must run after the edge is committed**
 - **detach callbacks must run before the edge is removed**
 
-This was verified, not assumed. Inverting the remove path so `base` decides first, which is what #402 originally proposed, fails four tests in `Namotion.Interceptor.Tracking.Tests`. `WhenRemovingInterceptors_ThenAllChildrenAreDetached` loses every detach event:
-
-```
-Verified (expected)                          Received (with the inversion)
-[                                            [
-  + NA (attached, refs: 0),                    + NA (attached, refs: 0),
-  + Mother1.Mother -> Mother2 (attached),      + Mother1.Mother -> Mother2 (attached),
-  + Mother2.Mother -> Mother3 (attached),      + Mother2.Mother -> Mother3 (attached)
-  - Mother1.Mother -> Mother2 (detached),    ]
-  - Mother2.Mother -> Mother3 (detached),
-  - Mother1 (detached, refs: 0)
-]
-```
-
-`SubjectRegistry` and `ContextInheritanceHandler` live on the parent context and become unreachable the moment the edge is gone, so nothing is detached and nothing is unregistered.
+This was verified, not assumed. Inverting the remove path so `base` decides first, which is what #402 originally proposed, fails exactly four tests in `Namotion.Interceptor.Tracking.Tests`: `WhenRemovingInterceptors_ThenAllChildrenAreDetached`, `WhenRemovingInterceptors_ThenAllArrayChildrenAreDetached`, `WhenAssigningSubject_ThenAllSubjectsAreAttached` and `LifecycleEventsTests.SubjectAttached_FiresAfterHandler_And_SubjectDetaching_FiresBeforeHandler`. The first loses every detach event, because `SubjectRegistry` and `ContextInheritanceHandler` live on the parent context and become unreachable the moment the edge is gone.
 
 Any future change to these overrides has to preserve both orderings. They are pinned by tests 6 and 7 below.
 
-Note the distinction that the rest of this design depends on: the *resolve* of `ILifecycleInterceptor` reads the **parent's** chain and does not need the edge, while the *callbacks* read **this** executor's chain and do. So the resolve can move earlier even though the callbacks cannot.
+Note the distinction the rest of this design depends on: the *resolve* of `ILifecycleInterceptor` reads the **parent's** chain and does not need the edge, while the *callbacks* read **this** executor's chain and do. So the resolve can move earlier even though the callbacks cannot.
 
 ## Design
 
@@ -112,8 +98,8 @@ private sealed class ContextState
 
     // Parallel to FallbackContexts by index. Default when this context has no recorded
     // attachments at all, which is every context that is not an InterceptorExecutor. An
-    // individual entry is default when that edge carries no record, either because it was
-    // added through the plain mutator or because its record has already been taken.
+    // individual entry is default when that edge's record has already been taken by a
+    // removal that has not yet completed its second phase.
     internal readonly ImmutableArray<ImmutableArray<ILifecycleInterceptor>> FallbackAttachments;
     ...
 }
@@ -123,7 +109,32 @@ Invariant: `FallbackAttachments.IsDefault || FallbackAttachments.Length == Fallb
 
 A parallel array rather than widening `FallbackContexts` into pairs, because that array is walked by `ComputeServices` and read by the `DelegationTarget` derivation, and doubling its stride would cost on paths this design has no business touching. The parallel array is read only by the two executor overrides.
 
-`WithoutCaches()` must carry `FallbackAttachments` through unchanged. It is topology, not a cache.
+### Every construction site must carry it
+
+`ContextState` is constructed at **six** sites in `InterceptorSubjectContext.cs`, and all six must preserve `FallbackAttachments`:
+
+| line | site | what it must do |
+|---|---|---|
+| 71 | field initializer | default |
+| 141 | `AddFallbackContext` | append a default entry, or materialize when adding a record |
+| 167 | `RemoveFallbackContext` | remove the entry at the same index |
+| 205 | `TryAddService` | **carry unchanged** |
+| 217 | `AddService` | **carry unchanged** |
+| 1002 | `WithoutCaches` | **carry unchanged** |
+
+The two service mutators are the dangerous ones. They rebuild the state as `new ContextState(state.Services.Add(service!), state.FallbackContexts)`, keeping the edges and silently wiping the records. A prototype built without those two carries fails all 8 seeds of `ContextConcurrencyFuzzTests` on the first round ("resolved 69 marker services but the final topology contains 40"), and adding them turns the whole solution green.
+
+It is also reachable single-threaded, through the documented subtree-service feature that `ContextSubtreeServiceTests` covers:
+
+```
+parent(root) -> child; childContext.AddService<IWriteInterceptor>(...); parent.Child = null;
+  without the carries:  child fallbacks after detach = [InterceptorExecutor#45658036]
+  with the carries:     child fallbacks after detach = []
+```
+
+`RemoveFallbackContext` returns `false` and the edge is retained forever. That is defect 5 reintroduced by the fix for defect 5.
+
+`WithoutCaches()` carrying it is equally load-bearing: attachments are topology, not a cache.
 
 ### Base API
 
@@ -136,25 +147,41 @@ private protected bool TryAddFallbackContextWithAttachment(
     ImmutableArray<ILifecycleInterceptor> interceptors);
 
 // Phase one of removal: takes the record, leaves the edge. Exactly one caller can win.
+// Returns false when the edge is absent OR its entry is already default, which on an
+// executor means another thread took it and is between the phases.
 private protected bool TryTakeFallbackAttachment(
     IInterceptorSubjectContext context,
     out ImmutableArray<ILifecycleInterceptor> interceptors);
 
-// Phase two: removes the edge. Re-derives the index, so a concurrent mutation between the
-// phases is tolerated. No-op when the edge is already gone.
+// Phase two: removes the edge and its entry. Re-derives the index, so a concurrent
+// mutation of a different edge between the phases is tolerated. No-op when already gone.
 private protected void CompleteFallbackContextRemoval(IInterceptorSubjectContext context);
 ```
 
-All three take `_mutationLock` and publish exactly as the existing mutators do, including the R4 `_usedByContexts` ordering and the trailing `InvalidateUsingContexts()`. The existing public `AddFallbackContext` and `RemoveFallbackContext` keep working unchanged for contexts that are not executors, appending and removing a default attachment entry.
+Contract details that are otherwise ambiguous enough for two implementers to diverge:
+
+- **`TryTakeFallbackAttachment` returns `false` on a default entry**, and never returns `true` with a default `ImmutableArray` (whose `.Length` throws). On an executor a default entry can only mean "already taken", because the overrides always record, even an empty array. The taker completes phase two in its `finally`, so returning `false` to the second thread does not strand the edge. This reasoning depends entirely on all six sites carrying the array; if `TryAddService` wipes it, `false` here is what makes the edge permanently unremovable.
+- **`CompleteFallbackContextRemoval` removes the attachment entry as well as the edge**, keeping the two arrays aligned.
+- **The plain mutators must preserve `IsDefault`** rather than call `.Add(default)` on it, which throws on a default `ImmutableArray`. Only materialize when a real record arrives.
+
+`TryAddFallbackContextWithAttachment` and `CompleteFallbackContextRemoval` take `_mutationLock`, publish, and run the trailing `InvalidateUsingContexts()` exactly as the existing mutators do, including the R4 `_usedByContexts` ordering. **`TryTakeFallbackAttachment` must not invalidate**, see Performance.
 
 ### The overrides
+
+`InterceptorExecutor.cs` needs `using System.Collections.Immutable;`, which it does not have today.
 
 ```csharp
 public override bool AddFallbackContext(IInterceptorSubjectContext context)
 {
-    // Resolves the parent's chain, so it does not need the edge and must not be inside the
-    // publish. Empty and not default: a default ImmutableArray throws on .Length, and this
-    // is the value a later remove reads back when the resolve below throws.
+    // Guard first, for two reasons: it preserves today's behaviour that a duplicate add
+    // neither resolves nor throws, and it validates the type so the finally below cannot
+    // fail on a cast while an exception is already propagating. Racy by nature, and that is
+    // fine: a false negative costs one wasted resolve, because the publish arbitrates.
+    if (HasFallbackContext(context))
+    {
+        return false;
+    }
+
     var interceptors = ImmutableArray<ILifecycleInterceptor>.Empty;
     bool added;
     try
@@ -213,104 +240,120 @@ The `added` local exists because C# forbids returning from a `finally` (CS0157).
 
 **Remove is two phases, and the gap between them is harmless.** Phase one drops the record and keeps the edge. Phase two drops the edge. In between, the edge exists with no record, and that is safe in both directions:
 
-- a concurrent **remove** finds no record, returns `false`, and does not touch the edge, which the first remover is about to take out
-- a concurrent **add** finds the edge present, so `TryAddFallbackContextWithAttachment` returns `false` and cannot slip a record in
+- a concurrent **remove** finds a default entry, returns `false`, and does not touch the edge, which the first remover is about to take out
+- a concurrent **add** finds the edge present, so the publish returns `false` and cannot slip a record in
 
-The gap has to exist, because the callbacks must run with the edge intact and cannot run under `_mutationLock`. Placing the record take before it is what makes the gap benign.
+The gap has to exist, because the callbacks must run with the edge intact and they run outside `_mutationLock`. Placing the record take before it is what makes the gap benign.
 
-### How each defect closes
+### How each defect fares
 
-| # | Defect | Closed by |
+| # | Defect | Outcome |
 |---|---|---|
-| 1 | Remove racing add undoes a live registration | Taking the record is a single arbiter under `_mutationLock`. A losing thread returns `false` and never reaches phase two, so it cannot remove an edge it does not own. |
-| 2 | Double detach | Exactly one thread takes the record, so the callbacks run once by construction rather than by relying on `LifecycleInterceptor` being idempotent. |
-| 3 | Cyclic chain blocks detach | The executor no longer resolves on the detach path, so nothing can throw before the removal is guaranteed. Phase two is in the `finally` and always runs. See the caveat below. |
-| 4 | Half-attached subject on the add path | The record is written in the `finally`, so a throwing resolve still leaves a removable edge. |
-| 5 | Retained subtree | Follows from 3: the edge and its reverse `_usedByContexts` entry always come out. |
+| 1 | Remove racing add undoes a live registration | **Closed.** Taking the record is a single arbiter under `_mutationLock`. A losing thread returns `false` and never reaches phase two, so it cannot remove an edge it does not own. |
+| 2 | Double detach | **Closed.** Exactly one thread takes the record, so the callbacks run once by construction rather than by relying on `LifecycleInterceptor` being idempotent. |
+| 3 | Cyclic chain blocks detach | **Closed** for removability. The executor no longer resolves on the detach path, so nothing can throw before the removal is guaranteed. See the caveat below on what still throws. |
+| 4 | Half-attached subject on the add path | **Mitigated, not closed.** See below. |
+| 5 | Retained subtree | **Closed.** Follows from 3: the edge and its reverse `_usedByContexts` entry always come out. |
+
+### Defect 4 is deliberately not closed
+
+#402 describes defect 4 as: the edge is registered, no attach callback ran, and the caller cannot tell how far it got. This design **preserves that outcome**. The `finally` guarantees the edge and an empty record are committed even when the resolve throws.
+
+#402's own preferred remedy was to resolve before committing so the attach fails atomically with no edge registered. That is rejected here because `ContextConcurrencyFuzzTests` already models the edge as present after a throwing add (`:462-468`, `:519-527`), documenting it as intended behaviour: "The edge is in place, so the topology stays exactly as declared."
+
+What the design does improve is that the edge stays *removable* and the caller still gets the exception. Closing defect 4 properly means rollback with per-interceptor unwind, which is #384's problem. Calling it closed here would be false.
 
 ### Exception contract on both paths
 
-Neither `try` swallows. On the add path a throwing resolve propagates with the edge registered and the record empty, so the caller learns the attach did not complete and the edge is still removable. On the remove path a throwing callback propagates with the edge already removed, because phase two runs in the `finally`. Removal must never be blocked by a handler failure, which is the same principle #384 argues for elsewhere.
+Neither `try` swallows. On the add path a throwing resolve propagates with the edge registered and the record empty. On the remove path a throwing callback propagates with the edge already removed, because phase two runs in the `finally`. Removal must never be blocked by a handler failure, which is the same principle #384 argues for elsewhere.
+
+One hazard the `finally` on the add path introduces: it runs during exception propagation and can itself throw, replacing the original exception. The `HasFallbackContext` guard removes the cast as a cause; what remains is `OutOfMemoryException` and the stack overflow in the invalidation walk tracked by #405, neither of which is recoverable anyway.
 
 ### Caveat on defect 3: removing a cyclic edge still throws
 
 Removing the executor's own resolve is necessary but not sufficient. The recorded `LifecycleInterceptor.DetachSubjectFromContext` resolves its handlers through `subject.Context` (`LifecycleInterceptor.cs:70,73,195,278`), which is this executor, whose chain is the cycle. So the callback throws mid-loop, leaving `_attachedSubjects` and the reference counts partially updated.
 
-What the design guarantees is that the edge comes out anyway, via the `finally`, so the graph is recoverable. What it does not do is make the call succeed cleanly. `RemoveFallbackContext` on a cyclic chain **throws to the caller with the edge removed**. That is strictly better than today, where it throws with the edge still in place and the subtree retained, but it must be stated on the override and asserted that way in test 3 rather than left to the implementer to guess.
+Verified on a pure two-executor cycle: `RemoveFallbackContext` raises `InvalidOperationException("...delegation cycle...")` to the caller **and** the fallback array is `[]` afterwards. That is strictly better than today, where it throws with the edge still in place and the subtree retained, but it must be stated on the override and asserted that way in test 3.
 
 ### Accepted anomalies
 
-**A remove and an add racing on the same edge can end with the add having returned `false` while the edge ends up absent.**
+All are documented on the overrides rather than fixed.
 
-```
-A: TryTakeFallbackAttachment -> wins, edge still present
-C: AddFallbackContext -> the edge is present, so this returns false and does not attach
-A: detach callbacks, CompleteFallbackContextRemoval -> edge gone
-```
+**An add can return `false` while the edge ends up absent.** A takes the record, C's add sees the edge still present and returns `false` without attaching, then A completes phase two. C read `false` as "already present" and the edge is gone. A legitimate linearization of two concurrent mutations.
 
-C read `false` as "already present" and the edge is gone. This is a legitimate linearization of two concurrent mutations, and unlike today's behaviour the topology and the lifecycle bookkeeping still agree afterwards.
+**A remove and an add on one caller can return two contradictory `false`s.** During A's gap, B's remove returns `false` (the edge *was* present) and B's follow-up add also returns `false` (the edge is *still* present), and the edge ends absent.
 
-**A detach callback that throws mid-loop loses the remaining callbacks permanently.** The record is already taken and the `finally` removes the edge, so there is nothing left to retry against. Today the edge survives a throw, so a caller can retry and the idempotent callbacks converge. This is the deliberate trade for guaranteeing removability.
+**Topology and bookkeeping can still disagree in one interleaving.** C's add publishes and C is still inside its attach loop when A takes the record and completes phase two. The subject ends up in `_attachedSubjects` with an incremented reference count and no edge. This is narrower than today's defect 1, which loses an established registration, but the claim "topology and bookkeeping always agree afterwards" would be false and is not made.
 
-Both are documented on the overrides rather than fixed.
+**A detach callback that throws mid-loop loses the remaining callbacks permanently.** The record is already taken and the `finally` removes the edge, so there is nothing to retry against. The deliberate trade for guaranteeing removability.
 
 ### Reentrancy
 
-These callbacks normally run with `lock (_attachedSubjects)` already held by `LifecycleInterceptor` further up the stack, and `Monitor` is reentrant, so a handler can call back into these overrides on the same thread. The relevant case is a handler that calls `RemoveFallbackContext` for the same context from inside an attach callback: the record is already published, so the take succeeds, the edge is removed, and the outer add then continues attaching the remaining interceptors against an edge that no longer exists.
+These callbacks normally run with `lock (_attachedSubjects)` held by `LifecycleInterceptor` further up the stack, and `Monitor` is reentrant, so a handler can call back into these overrides on the same thread. Two same-thread holes, neither made worse by this design and both present today:
 
-This is not made worse by the design, and the analogous hole exists today. It is called out because the exactly-once argument is otherwise easy to misread as covering it: it covers concurrent threads, not a handler reentering on the same one. No guard is proposed. A handler that mutates the topology it is being notified about is outside the contract, which is the same position `LifecycleInterceptor` already documents for handlers writing the property being reconciled.
+- a handler calling `RemoveFallbackContext` for the same context from inside an **attach** callback: the record is already published, the take succeeds, the edge goes, and the outer add keeps attaching against an edge that no longer exists
+- a handler calling `AddFallbackContext` from inside a **detach** callback: it gets `false` because the edge is still present, and is then wiped by the outer `finally`
+
+No guard is proposed. A handler that mutates the topology it is being notified about is outside the contract, the same position `LifecycleInterceptor` already documents for handlers writing the property being reconciled.
+
+Note that "the callbacks run outside `_mutationLock`" is true of these paths but is not a global invariant: `TryAddService` invokes `exists` and `factory` under the lock, and `ContextConcurrencyTests:180-222` exercises that reentrancy. It is not relied on here.
 
 ### Behaviour change: attach and detach become symmetric
 
-Detach now notifies exactly the interceptors that were *resolved* at attach time. Today the set is resolved fresh at detach time, so an `ILifecycleInterceptor` registered on the parent after the attach receives a detach it never saw an attach for, and one unregistered in between misses its detach. The new pairing is balanced by construction. This is deliberate and is the defensible semantic, but it is a behaviour change and belongs in the release notes.
+Detach now notifies exactly the interceptors that were *resolved* at attach time. Today the set is resolved fresh at detach time, so an `ILifecycleInterceptor` registered on the parent after the attach receives a detach it never saw an attach for, and one unregistered in between misses its detach. The new pairing is balanced by construction. Deliberate, defensible, and it belongs in the release notes.
 
-"Resolved at attach time" and not "notified at attach time": if an attach callback throws at index k, the interceptors after it never received an attach, yet a later remove still detaches all of them from the record. So the exception case continues to rely on consumer detach idempotency, which defect 2 correctly notes the contract does not require. Closing that would mean recording how far the attach loop got, which is #384's rollback problem and is out of scope.
+"Resolved at attach time" and not "notified at attach time": if an attach callback throws at index k, the interceptors after it never received an attach, yet a later remove still detaches all of them from the record. So the exception case continues to rely on consumer detach idempotency, which defect 2 correctly notes the contract does not require. Closing that is #384's rollback problem.
 
 ### What remains, and why it is not a follow-up
 
 In a pure delegation cycle every context on the loop resolves nothing, so the lifecycle handlers are unreachable from every route, not just from the one we happened to pick. The edge is still removed and the graph still recovers, but the registry bookkeeping for that subtree stays stale until it is rebuilt. Breaking the cycle first does not help: that is the inversion shown above, which leaves the executor with nothing to resolve.
 
-The route that produces this shape in practice is the stranded-detach path tracked by #410, which is already open. A cycle built deliberately through the public API is a programming error, and "removable, recoverable, with stale registry entries until re-attach" is the right level of service for it. This gets documented on the overrides, not filed.
+The route that produces this shape in practice is the stranded-detach path tracked by #410, which is already open. A cycle built deliberately through the public API is a programming error, and "removable, recoverable, with stale registry entries until re-attach" is the right level of service for it. Documented on the overrides, not filed.
 
 ## Interaction with #400
 
 The design adds a field to `ContextState`, which #400 landed a day earlier, so its invariants need checking rather than assuming.
 
-- **"A `ContextState` is never installed twice"** holds. Every publish still constructs a fresh instance, including both removal phases. The cycle confirmation, which proves a loop existed at one instant from a state having been installed exactly once, is unaffected.
-- **`WithoutCaches()` must keep allocating** and must copy `FallbackAttachments` forward. Returning `this` would break the invalidation CAS, which its own comment already warns about.
+- **"A `ContextState` is never installed twice"** holds. Every publish still constructs a fresh instance, including both removal phases. The cycle confirmation is unaffected.
+- **`WithoutCaches()` must keep allocating** and must copy `FallbackAttachments` forward.
 - **`DelegationTarget`** stays derived from `Services` and `FallbackContexts` only. Attachments never affect delegation collapse.
 - **The resolution and invalidation paths never read `FallbackAttachments`**, so the hot path is untouched.
-- **R4** (`_usedByContexts` is always a superset of the true using set) is preserved because the new mutators reuse the existing register-before-publish and unregister-after-publish ordering. Phase two performs the unregister, exactly as `RemoveFallbackContext` does today.
+- **R4** (`_usedByContexts` is always a superset of the true using set) is preserved: phase two performs the unregister after the publish, exactly as `RemoveFallbackContext` does today. Phase one changes no edges, so it has no R4 obligation.
 
 ## Performance
 
-The remove path loses two operations and gains one publish:
+**Phase one must not call `InvalidateUsingContexts`.** It changes no topology, only the record, and no resolution path reads the record, so the upward walk is pure waste. Worse, it walks the entire upward cone while the subtree is still fully connected and destroys the caches immediately before the detach issues one `GetServices<ILifecycleHandler>()` per subject through them (`LifecycleInterceptor.cs:278`). Today's single publish happens *after* the callbacks, when the subtree is already progressively disconnected.
 
-| | today | after |
-|---|---|---|
-| `HasFallbackContext` | `Volatile.Read` plus `ImmutableArray.Contains` scan | gone |
-| `GetServices<ILifecycleInterceptor>` on detach | delegation target resolve plus cache lookup | gone |
-| publishes | one | two |
+Measured on a prototype, Release, a chain of N subjects, attach then detach the root edge, best of 3 by 20 iterations:
 
-The second publish is the cost of the two-phase removal. It allocates one `ContextState` and runs one extra `InvalidateUsingContexts` walk. Removal is a topology mutation, not a hot path, but on a large re-parenting this doubles the invalidation work, which is the one number worth watching.
+| depth | detach today | with phase-one invalidation | without it |
+|---|---|---|---|
+| 50 | 1 ms | 5 ms | |
+| 100 | 3 ms | 17 ms | |
+| 200 | 7 ms | 63 ms | |
+| 400 | 13 ms | 128 ms | 28 ms |
 
-The add path is neutral: the same resolve, the same single publish.
+So the cost is superlinear in depth if phase one invalidates, and roughly 2x if it does not. The residual 2x is phase one publishing a fresh state and therefore discarding this context's own caches, which is inherent to taking the record atomically.
 
-Memory: one reference field on `ContextState`, 8 bytes, plus one `ImmutableArray` of the same length as `FallbackContexts` for executors that have recorded attachments. For the dominant single-edge subject that is a 32 byte array. Non-executor contexts keep it default and pay only the 8 byte field. The stored interceptor `ImmutableArray` is the instance the parent context already caches, so it is a pointer copy and not a second allocation.
+This matters more than it first appears: `ContextInheritanceHandler.cs:25` calls `RemoveFallbackContext` once per subject during a subtree detach, so the factor applies per node, not per user-initiated call.
 
-This must be measured, not assumed. `RegistryBenchmark` is the relevant one because it is attach heavy, and it should be read for both allocation and the extra invalidation walk. Treat a material regression as a gate on the design rather than something to tune afterwards.
+The add path pays one `HasFallbackContext` guard and is otherwise unchanged. Without that guard a duplicate add would newly resolve, which both costs a delegation resolve where it used to cost an `ImmutableArray.Contains` scan, and can newly throw when the parent's chain is cyclic. `SubjectUpdateApplier.cs:145`, `SubjectItemsUpdateApplier.cs:229` and `OpcUaSubjectLoader.cs:280` call this per item, so the guard is not optional.
+
+Memory: one reference field per **`ContextState`**, not per context, and a `ContextState` is allocated on every mutation and every invalidation. Plus one `ImmutableArray` the length of `FallbackContexts` for executors that have records, 32 bytes for the dominant single-edge case. Non-executor contexts keep it default.
+
+Confirm on `RegistryBenchmark`, reading both allocation and the detach path.
 
 ## Testing
 
 Regression tests for the defects:
 
 1. `WhenSameFallbackIsRemovedConcurrently_ThenDetachCallbacksRunOnce` (defect 2)
-2. `WhenRemoveRacesAdd_ThenTheAddIsNotUndone` (defect 1), asserting that the edge and the lifecycle bookkeeping agree afterwards
-3. `WhenChainIsDelegationCycle_ThenTheEdgeIsRemovedAndTheCallThrows` (defect 3). Asserts both halves: the `InvalidOperationException` reaches the caller *and* the edge is gone afterwards. Asserting a clean `true` would be wrong, see the caveat above.
-4. `WhenAttachResolveThrows_ThenTheEdgeRemainsRemovable` (defect 4)
+2. `WhenRemoveRacesAdd_ThenTheAddIsNotUndone` (defect 1)
+3. `WhenChainIsDelegationCycle_ThenTheEdgeIsRemovedAndTheCallThrows` (defect 3). Asserts both halves: the `InvalidOperationException` reaches the caller *and* the edge is gone afterwards.
+4. `WhenAttachResolveThrows_ThenTheEdgeIsRegisteredAndRemainsRemovable` (defect 4, pinning the deliberate non-closure)
 5. `WhenCyclicSubtreeIsDetached_ThenItBecomesCollectable` (defect 5), by weak reference probe
 
-Guards for the two forced orderings, so a future refactor cannot silently reintroduce the inversion:
+Guards for the two forced orderings:
 
 6. `WhenFallbackIsAdded_ThenAttachCallbacksSeeTheEdge`
 7. `WhenFallbackIsRemoved_ThenDetachCallbacksStillSeeTheEdge`
@@ -319,28 +362,29 @@ For the deliberate semantic change:
 
 8. `WhenInterceptorIsRegisteredAfterAttach_ThenItIsNotNotifiedOnDetach`
 
-For the state invariant, since a parallel array is the one place this design can silently rot:
+For the state, and this one needs care:
 
-9. `WhenFallbacksAreAddedAndRemoved_ThenAttachmentsStayIndexAlignedWithFallbacks`, driving an interleaving of adds and removes across several contexts and asserting the invariant through `ContextStateReflection`.
+9. `WhenServicesAreAddedAfterAFallback_ThenItsAttachmentSurvives`. It must assert that a **record still exists for every edge**, not merely that the two arrays are the same length. The `TryAddService` and `AddService` failure mode wipes the array to `default`, which *satisfies* a length invariant, so a length assertion is blind to the exact bug it exists to catch. Drive it through `AddService` and `TryAddService` on a context that already has a fallback, then assert the edge is still removable.
 
-The existing `LifecycleInterceptorTests` snapshots stay untouched. If any of them move, the change is wrong.
+The existing `LifecycleInterceptorTests` snapshots stay untouched. If any of them move, the change is wrong. `ContextConcurrencyFuzzTests` and `ContextSubtreeServiceTests` are the two suites that catch the carry bug, so both must be run.
 
-Conventions per AGENTS.md: `When<Condition>_Then<ExpectedBehavior>`, explicit `// Arrange`, `// Act`, `// Assert`, and no hardcoded waits. Concurrency tests use `CountdownEvent` plus `ManualResetEventSlim` rendezvous and `AsyncTestHelpers.WaitUntilAsync`, matching `ContextFunctionCacheTests`.
+Conventions per AGENTS.md: `When<Condition>_Then<ExpectedBehavior>`, explicit `// Arrange`, `// Act`, `// Assert`, no hardcoded waits. Concurrency tests use `CountdownEvent` plus `ManualResetEventSlim` rendezvous and `AsyncTestHelpers.WaitUntilAsync`, matching `ContextFunctionCacheTests`.
 
-Tests 1, 2 and 9 must be verified by mutation, not by passing once: break the arbiter and confirm they fail.
+Tests 1, 2 and 9 must be verified by mutation, not by passing once: break the arbiter, drop a carry, and confirm they fail.
 
 ## Scope
 
-Three files:
+Four files:
 
-- `src/Namotion.Interceptor/InterceptorSubjectContext.cs`: the `FallbackAttachments` field on `ContextState`, `WithoutCaches` carrying it, and the three `private protected` members
-- `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs`: the two overrides
-- one new test file
+- `src/Namotion.Interceptor/InterceptorSubjectContext.cs`: the `FallbackAttachments` field, all six construction sites carrying it, and the three `private protected` members
+- `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs`: the two overrides and the missing `using`
+- `src/Namotion.Interceptor.Tests/Context/ContextStateReflection.cs`: it exposes `_state`, `_resolvedTerminal`, the function arrays and the marker, but not `FallbackContexts` or `FallbackAttachments`, which test 9 needs
+- one new test file, which can live in `Namotion.Interceptor.Tests` since it reaches Tracking transitively through `Namotion.Interceptor.Testing`
 
 Not touched: `ContextInheritanceHandler.cs`, `LifecycleInterceptor.cs`.
 
-No public API change expected. `InterceptorExecutor` is sealed, the two overrides already exist, `ContextState` is private, and `private protected` members are not part of the public surface. Confirm by running `VerifyChecksTests.PublicApi` rather than by assuming, since this is the one claim in this design that a build can settle outright.
+No public API change expected: `InterceptorExecutor` is sealed, the overrides exist, `ContextState` is private, and `private protected` members are not public surface. A prototype confirmed all six `VerifyChecksTests.PublicApi` snapshots pass unchanged, but re-confirm rather than assume.
 
-`InterceptorSubjectContext.HasFallbackContext` loses its only production caller. Leave it: it is `protected` on a public unsealed class, so removing it would break a consumer subclass, and tests 3 and 7 use it.
+`InterceptorSubjectContext.HasFallbackContext` keeps its caller, as the guard on the add path. Note for anyone tempted to remove it later: it cannot be called by a consumer subclass, because the only constructor is `private protected` and deliberately so, and it cannot be called by tests without reflection for the same reason.
 
-Out of scope: #410 (stranded fallback edges on a partial detach), #207 (constructor context leak), #404 (factory under the mutation lock), #405 (invalidation walk recursion). None of them touch these files.
+Out of scope: #410 (stranded fallback edges on a partial detach), #207 (constructor context leak), #404 (factory under the mutation lock), #405 (invalidation walk recursion).
