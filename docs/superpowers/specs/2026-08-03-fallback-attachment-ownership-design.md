@@ -157,15 +157,26 @@ Neither `try` swallows. On the add path a throwing resolve propagates to the cal
 |---|---|---|
 | 1 | Remove racing add undoes a live registration | The interlocked take is the single arbiter. A losing thread returns `false` and never reaches `base`, so it cannot destroy the winner's edge. |
 | 2 | Double detach | Exactly one thread takes the record, so the callbacks run once by construction rather than by relying on `LifecycleInterceptor` being idempotent. |
-| 3 | Cyclic chain blocks detach | There is no resolve on the detach path, so nothing can throw before the removal. |
+| 3 | Cyclic chain blocks detach | The executor no longer resolves on the detach path, so nothing can throw *before* the removal is guaranteed. The removal itself is in the `finally` and always runs. See the caveat below: the call can still throw *after* that point. |
 | 4 | Half-attached subject on the add path | The `finally` records the attachment even when the resolve throws, so the edge never becomes unremovable. |
 | 5 | Retained subtree | Follows from 3: the edge and its reverse `_usedByContexts` entry always come out. |
 
-### Why the record can be read after the take
+### The record must be one atomically swapped unit
 
-`_attachedInterceptors` is written only by a thread whose `base.AddFallbackContext` returned `true`, meaning it moved the edge from absent to present. A taker reads the record while the edge is still present and is the only thread that can remove it, and it does so after the read. So no second writer can appear in the window between the take and the read.
+An earlier revision of this design stored the context and its interceptor array in two separate fields and put a CAS on the context field alone. That is not atomic and cannot be made atomic, because two concurrent adds of *different* contexts both pass `base.AddFallbackContext` and then race for the same slot:
 
-### The one accepted anomaly
+- writing the interceptors before the CAS pairs the loser's array with the winner's context, so a later remove detaches the wrong set
+- writing them after the CAS lets a taker read in between and observe a default `ImmutableArray`, whose `.Length` throws, or the stale array of a previous occupant
+
+Reading the array before the CAS does not fix it either: an edge that is removed and re-added is ABA on the context field, so the CAS can succeed against a stale pairing. The context and its interceptors must move together in a single interlocked operation.
+
+### Caveat on defect 3: removing a cyclic edge still throws
+
+Removing the executor's own resolve is necessary but not sufficient. The recorded `LifecycleInterceptor.DetachSubjectFromContext` resolves its handlers through `subject.Context` (`LifecycleInterceptor.cs:70,73,195,278`), which is this executor, whose chain is the cycle. So the callback throws mid-loop, leaving `_attachedSubjects` and the reference counts partially updated.
+
+What the design does guarantee is that the edge comes out anyway, via the `finally`, and that the graph is therefore recoverable. What it does not do is make the call succeed cleanly. `RemoveFallbackContext` on a cyclic chain **throws to the caller with the edge removed**. That is strictly better than today, where it throws with the edge still in place and the subtree retained, but it must be stated on the override and asserted that way in test 3 rather than left to the implementer to guess.
+
+### Accepted anomalies
 
 A remove and an add racing on the same edge can end with the add having returned `false` while the edge ends up absent:
 
@@ -175,27 +186,51 @@ C: AddFallbackContext -> base sees the edge still present -> returns false, no a
 A: detach callbacks, base.RemoveFallbackContext -> edge gone
 ```
 
-C read `false` as "already present" and the edge is gone. This is a legitimate linearization of two concurrent mutations, and unlike today's behaviour the topology and the lifecycle bookkeeping still agree afterwards. Documented on the override rather than fixed.
+C read `false` as "already present" and the edge is gone. This is a legitimate linearization of two concurrent mutations, and unlike today's behaviour the topology and the lifecycle bookkeeping still agree afterwards.
+
+Two more, of the same kind. All three are documented on the overrides rather than fixed.
+
+**A remove during an in-flight add returns `false` and leaves the edge.** Between `base.AddFallbackContext` committing and `StoreAttachment` running, the edge exists but no record does, so a concurrent remove finds nothing to take. Today it would have removed the edge. The window is the resolve in between, which can walk a chain, so it is not negligible.
+
+**A detach callback that throws mid-loop loses the remaining callbacks permanently.** The record is already consumed and the `finally` removes the edge, so there is nothing left to retry against. Today the edge survives a throw, so a caller can retry and the idempotent callbacks converge. This is the deliberate trade for guaranteeing removability, and it is the same trade #384 argues for.
 
 ### Storage
 
-The dominant shape is exactly one fallback context per executor: a subject constructed without a context gets one inherited edge, and `ContextInheritanceHandler` adds an edge only on the first reference (`ReferenceCount: 1, IsContextAttach: true`), so a second parent adds nothing. Two edges occur when a subject is constructed with an explicit context and then placed under a parent, or when a caller uses the public API directly.
+An immutable singly linked list in one field, swapped with `Interlocked.CompareExchange`. This handles one edge and many edges uniformly, so there is no fast path plus overflow split, and no lock at all.
 
 ```csharp
-private IInterceptorSubjectContext? _attachedContext;
-private ImmutableArray<ILifecycleInterceptor> _attachedInterceptors;
-private List<(IInterceptorSubjectContext Context, ImmutableArray<ILifecycleInterceptor> Interceptors)>? _additionalAttachments;
+private sealed class Attachment(
+    IInterceptorSubjectContext context,
+    ImmutableArray<ILifecycleInterceptor> interceptors,
+    Attachment? next)
+{
+    public readonly IInterceptorSubjectContext Context = context;
+    public readonly ImmutableArray<ILifecycleInterceptor> Interceptors = interceptors;
+    public readonly Attachment? Next = next;
+}
+
+private Attachment? _attachments;
 ```
 
-- `StoreAttachment` first tries `Interlocked.CompareExchange(ref _attachedContext, context, null)`. On failure it falls back to `_additionalAttachments` under that list's own lock, creating the list on demand.
-- `TryTakeAttachment` compares against `_attachedContext` and takes it with a CAS back to `null`, otherwise scans `_additionalAttachments` under the lock.
-- The same context can never be in both, because two concurrent adds of one context cannot both pass `base.AddFallbackContext`.
+- `StoreAttachment` is a CAS loop that prepends a new node.
+- `TryTakeAttachment` is a CAS loop that rebuilds the list without the node for the requested context, and returns `false` when that context is not in the list. Two threads taking the same context both rebuild, one CAS wins, the loser retries, no longer finds the context, and returns `false`. So exactly one taker wins, which is the property the whole design rests on.
+- Nodes are immutable and rebuilt rather than mutated, so an unlinked node is unreachable and cannot retain the parent's interceptors after a detach.
 
-`_additionalAttachments` and its lock are a leaf: nothing is invoked while it is held, and in particular no callback runs under it. This keeps it outside the lock order noted at the top of `InterceptorSubjectContext`.
+Removing the overflow list also removes its lock, so the leaf-lock question and its interaction with the lock order at the top of `InterceptorSubjectContext` and with `lock (_attachedSubjects)` in `LifecycleInterceptor` disappears rather than needing an argument.
+
+For context on list length: the dominant shape is exactly one fallback context per executor, since a subject constructed without a context gets one inherited edge and `ContextInheritanceHandler` adds an edge only on the first reference (`ReferenceCount: 1, IsContextAttach: true`), so a second parent adds nothing. Two edges occur when a subject is constructed with an explicit context and then placed under a parent, or when a caller uses the public API directly. The list is walked only on add and remove, never on a resolution path.
+
+### Reentrancy
+
+These callbacks normally run with `lock (_attachedSubjects)` already held by `LifecycleInterceptor` further up the stack, and `Monitor` is reentrant, so a handler can call back into these overrides on the same thread. The relevant case is a handler that calls `RemoveFallbackContext` for the same context from inside an attach callback: the record is already stored, so the take succeeds, the edge is removed, and the outer add then continues attaching the remaining interceptors against an edge that no longer exists.
+
+This is not made worse by the design, and the analogous hole exists today. It is called out because the design's exactly-once argument is otherwise easy to misread as covering it: it covers concurrent threads, not a handler reentering on the same one. No guard is proposed. A handler that mutates the topology it is being notified about is outside the contract, which is the same position `LifecycleInterceptor` already documents for handlers writing the property being reconciled.
 
 ### Behaviour change: attach and detach become symmetric
 
-Detach now notifies exactly the interceptors that attach notified. Today the set is resolved fresh at detach time, so an `ILifecycleInterceptor` registered on the parent after the attach receives a detach it never saw an attach for, and one unregistered in between misses its detach. The new pairing is balanced by construction. This is deliberate and is the defensible semantic, but it is a behaviour change and belongs in the release notes.
+Detach now notifies exactly the interceptors that were *resolved* at attach time. Today the set is resolved fresh at detach time, so an `ILifecycleInterceptor` registered on the parent after the attach receives a detach it never saw an attach for, and one unregistered in between misses its detach. The new pairing is balanced by construction. This is deliberate and is the defensible semantic, but it is a behaviour change and belongs in the release notes.
+
+"Resolved at attach time" and not "notified at attach time": if an attach callback throws at index k, the interceptors after it never received an attach, yet a later remove still detaches all of them from the record. So the exception case continues to rely on consumer detach idempotency, which defect 2 correctly notes the contract does not require. Closing that would mean recording how far the attach loop got, which is #384's rollback problem and is out of scope here.
 
 ### What remains, and why it is not a follow-up
 
@@ -215,9 +250,11 @@ The remove path loses two operations and gains one:
 
 The add path is neutral: the same resolve, plus one store.
 
-The cost is memory. Two reference-sized fields on every `InterceptorExecutor`, so 16 bytes per subject on x64, or 160 KB for a 10,000 node graph. The stored `ImmutableArray` is the instance the parent context already caches, so recording it is a pointer copy and not an allocation. `_additionalAttachments` allocates only for subjects with more than one fallback edge.
+The cost is memory, and it is larger than a field-only scheme would have been. Per executor: one reference field, 8 bytes. Per fallback edge: one `Attachment` node, 40 bytes on x64 (16 header, plus `Context`, the one-reference `ImmutableArray` struct, and `Next`). A subject with the dominant single edge therefore costs 48 bytes, or roughly 480 KB for a 10,000 node graph. The `ImmutableArray` itself is the instance the parent context already caches, so it is a pointer copy and not a second allocation.
 
-This must be measured, not assumed. `RegistryBenchmark` is the relevant one because it is attach heavy. The expectation is that the removed `GetServices` call offsets the field cost, but that is a prediction.
+That is the price of making the pairing atomic, and it is not negotiable: the two-field scheme that would have cost 24 bytes is incorrect, as shown above.
+
+This must be measured, not assumed, and it is the one part of this design that could force a rethink. `RegistryBenchmark` is the relevant one because it is attach heavy. The removed `GetServices` call on every detach offsets some of it, but that is a prediction. Treat a material regression there as a gate: if it does not hold, the fallback option is to intern the node for the common single-edge case rather than to reintroduce the unsound two-field split.
 
 ## Testing
 
@@ -225,7 +262,7 @@ Regression tests for the defects:
 
 1. `WhenSameFallbackIsRemovedConcurrently_ThenDetachCallbacksRunOnce` (defect 2)
 2. `WhenRemoveRacesAdd_ThenTheAddIsNotUndone` (defect 1), asserting that the edge and the lifecycle bookkeeping agree afterwards
-3. `WhenChainIsDelegationCycle_ThenSubjectCanStillBeDetached` (defect 3)
+3. `WhenChainIsDelegationCycle_ThenTheEdgeIsRemovedAndTheCallThrows` (defect 3). Asserts both halves: the `InvalidOperationException` reaches the caller *and* `HasFallbackContext` is false afterwards. Asserting a clean `true` would be wrong, see the caveat above.
 4. `WhenAttachResolveThrows_ThenTheEdgeRemainsRemovable` (defect 4)
 5. `WhenCyclicSubtreeIsDetached_ThenItBecomesCollectable` (defect 5), by weak reference probe
 
@@ -238,6 +275,10 @@ And for the deliberate semantic change:
 
 8. `WhenInterceptorIsRegisteredAfterAttach_ThenItIsNotNotifiedOnDetach`
 
+And for the storage, since its correctness is the whole design and a plain functional test will not exercise the race:
+
+9. `WhenDifferentFallbacksAreAddedConcurrently_ThenEachRecordKeepsItsOwnInterceptors`. This is the case that killed the two-field scheme, so it must fail against that scheme and pass against the linked list. Verify by mutation, not by passing once.
+
 The existing `LifecycleInterceptorTests` snapshots stay untouched. If any of them move, the change is wrong.
 
 Conventions per AGENTS.md: `When<Condition>_Then<ExpectedBehavior>`, explicit `// Arrange`, `// Act`, `// Assert`, and no hardcoded waits. Concurrency tests use `CountdownEvent` plus `ManualResetEventSlim` rendezvous and `AsyncTestHelpers.WaitUntilAsync`, matching `ContextFunctionCacheTests`.
@@ -248,6 +289,8 @@ One production file, `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.
 
 Not touched: `InterceptorSubjectContext.cs`, `ContextInheritanceHandler.cs`, `LifecycleInterceptor.cs`.
 
-No public API change. `InterceptorExecutor` is sealed, the two overrides already exist, and the new fields are private, so `VerifyChecksTests.PublicApi.verified.txt` does not move. No new exception type is needed, because the design removes the resolve that would have thrown.
+No public API change. `InterceptorExecutor` is sealed, the two overrides already exist, and the new field and nested type are private, so `VerifyChecksTests.PublicApi.verified.txt` does not move. No new exception type is needed, because the design removes the executor's own resolve on the detach path.
+
+`InterceptorSubjectContext.HasFallbackContext` loses its only caller. Leave it: it is `protected` on a public unsealed class, so removing it would be a breaking change for a consumer subclass, and it is still the natural way to ask the question. Tests 3 and 7 use it.
 
 Out of scope: #410 (stranded fallback edges on a partial detach), #207 (constructor context leak), #404 (factory under the mutation lock), #405 (invalidation walk recursion). None of them touch this file.
