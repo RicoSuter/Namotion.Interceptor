@@ -8,7 +8,7 @@
 
 **Tech Stack:** C# 13, .NET Standard 2.0 (core project), xUnit, BenchmarkDotNet, PublicApiGenerator + Verify.
 
-**Reference implementation:** commit `a4723531` is a validated prototype of this design (full solution suite 2653 passed, 0 failed). It placed all the machinery inside `InterceptorSubjectContext.cs`; this plan splits it into separate files instead. Use `git show a4723531:<path>` to consult it.
+**Reference implementation:** commit `a4723531` is a validated prototype of this design (full solution suite 2653 passed, 0 failed). It is the source of truth for the code in this plan. Use `git show a4723531:<path>` to consult it.
 
 **Design spec:** `docs/superpowers/specs/2026-08-03-fallback-attachment-ownership-design.md`. Where the spec and this plan disagree, the plan wins: the spec predates the prototype and still describes a phase-only refusal that was measured to strand edges.
 
@@ -18,7 +18,7 @@
 - No em dashes in docs, READMEs or PR descriptions.
 - Comments explain only the non-obvious. Do not narrate what the code already says.
 - Do not reference issue numbers from production code. Reference code from issues instead.
-- `src/Namotion.Interceptor/InterceptorSubjectContext.cs` must not grow. It is already over 1,100 lines. It may gain only the `partial` keyword and one field declaration. All new members go in a separate partial-class file.
+- Correctness and test coverage come first. `InterceptorSubjectContext.cs` is already over 1,100 lines and this work adds roughly 110 more, which is accepted for now: Task 8 is a separate structural round once the behaviour is proven. Do not use `partial` to hide the growth.
 - Test naming: `When<Condition>_Then<ExpectedBehavior>`. Explicit `// Arrange`, `// Act`, `// Assert` comments (`// Act & Assert` for exception tests).
 - No hardcoded waits. Use `AsyncTestHelpers.WaitUntilAsync` or `ManualResetEventSlim` / `CountdownEvent` rendezvous. Never `Task.Delay` or `Thread.Sleep`.
 - The core project targets .NET Standard 2.0. `ExceptionDispatchInfo`, `ImmutableArray<T>` and `private protected` are all available there. `SpinWait.SpinOnce(int)` is not.
@@ -33,8 +33,7 @@
 | File | Responsibility |
 |---|---|
 | `src/Namotion.Interceptor/FallbackAttachment.cs` (create) | The record type and the removal-outcome enum. Pure data, no logic, no locking. |
-| `src/Namotion.Interceptor/InterceptorSubjectContext.FallbackAttachments.cs` (create) | Partial class holding the four locked operations that keep the record and the topology in step. Everything here runs under `_mutationLock`. |
-| `src/Namotion.Interceptor/InterceptorSubjectContext.cs` (modify) | Gains `partial` and one field. Nothing else. |
+| `src/Namotion.Interceptor/InterceptorSubjectContext.cs` (modify) | One field plus the four locked operations that keep the record and the topology in step. They need `_mutationLock`, `_state`, `PublishState`, `InvalidateUsingContexts` and `GetOrCreateUsedByContexts`, all private, so they live here for now. Task 8 revisits the placement. |
 | `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs` (modify) | The two overrides and the shared detach helper. Callback sequencing lives here. |
 | `src/Namotion.Interceptor.Tests/Context/FallbackAttachmentOwnershipTests.cs` (create) | All new behaviour tests. |
 | `src/Namotion.Interceptor.Tests/Context/ContextConcurrencyFuzzTests.cs` (modify) | Two model sites that assume a failed add leaves its edge behind. |
@@ -47,8 +46,7 @@ This is the core mechanism. The record, the phase and the handoff are interdepen
 
 **Files:**
 - Create: `src/Namotion.Interceptor/FallbackAttachment.cs`
-- Create: `src/Namotion.Interceptor/InterceptorSubjectContext.FallbackAttachments.cs`
-- Modify: `src/Namotion.Interceptor/InterceptorSubjectContext.cs` (class declaration at line 11, and the field block near line 74)
+- Modify: `src/Namotion.Interceptor/InterceptorSubjectContext.cs` (the field block near line 74, and the new members before TryAddService)
 - Modify: `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs`
 - Test: `src/Namotion.Interceptor.Tests/Context/FallbackAttachmentOwnershipTests.cs`
 
@@ -233,48 +231,24 @@ internal enum FallbackRemovalOutcome
 }
 ```
 
-- [ ] **Step 4: Make the context class partial and add the field**
+- [ ] **Step 4: Add the field**
 
-In `src/Namotion.Interceptor/InterceptorSubjectContext.cs`, change the class declaration at line 11:
-
-```csharp
-public partial class InterceptorSubjectContext : IInterceptorSubjectContext
-```
-
-And immediately after the `_mutationLock` declaration (around line 74), add:
+In `src/Namotion.Interceptor/InterceptorSubjectContext.cs`, immediately after the `_mutationLock` declaration (around line 74), add:
 
 ```csharp
     // Ownership records for fallback edges added through InterceptorExecutor. Null on every other
-    // context. Read and written only under _mutationLock, and never on a resolution path. See
-    // InterceptorSubjectContext.FallbackAttachments.cs.
+    // context. Read and written only under _mutationLock, which is what makes a record atomic with
+    // the edge it owns, and never touched by a resolution or invalidation path.
     private FallbackAttachment? _fallbackAttachments;
 ```
 
-Do not add anything else to this file.
+- [ ] **Step 5: Add the four locked operations**
 
-- [ ] **Step 5: Create the partial-class file with the four locked operations**
+In the same file, insert immediately before `public bool TryAddService<TService>(...)`. They keep a fallback edge and its record in step: both are mutated under `_mutationLock`, so no observer that takes the lock can see one without the other.
 
-Create `src/Namotion.Interceptor/InterceptorSubjectContext.FallbackAttachments.cs`:
+Removal is two phases because the detach callbacks have to run while the edge is still resolvable, and they cannot run under the lock. Phase one claims the record and leaves the edge; phase two drops the edge. Between them the edge exists with no record, which is safe in both directions: a concurrent remove finds nothing to claim, and a concurrent add sees the edge present and declines.
 
 ```csharp
-using System.Collections.Immutable;
-using Namotion.Interceptor.Interceptors;
-
-namespace Namotion.Interceptor;
-
-/// <summary>
-/// Keeps a fallback edge and its <see cref="FallbackAttachment"/> in step. Both are mutated under
-/// <c>_mutationLock</c>, so no observer that takes the lock can see one without the other.
-/// </summary>
-/// <remarks>
-/// Removal is two phases because the detach callbacks have to run while the edge is still
-/// resolvable, and they cannot run under the lock. Phase one claims the record and leaves the
-/// edge; phase two drops the edge. Between them the edge exists with no record, which is safe in
-/// both directions: a concurrent remove finds nothing to claim, and a concurrent add sees the edge
-/// present and declines.
-/// </remarks>
-public partial class InterceptorSubjectContext
-{
     /// <summary>
     /// Publishes the edge and its record in one locked section. Returns null when the edge exists.
     /// </summary>
@@ -421,7 +395,6 @@ public partial class InterceptorSubjectContext
             previous.Next = attachment.Next;
         }
     }
-}
 ```
 
 - [ ] **Step 6: Rewrite the executor overrides**
@@ -569,7 +542,6 @@ Expected: PASS, 143 tests.
 
 ```bash
 git add src/Namotion.Interceptor/FallbackAttachment.cs \
-        src/Namotion.Interceptor/InterceptorSubjectContext.FallbackAttachments.cs \
         src/Namotion.Interceptor/InterceptorSubjectContext.cs \
         src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs \
         src/Namotion.Interceptor.Tests/Context/FallbackAttachmentOwnershipTests.cs
@@ -826,7 +798,7 @@ never be balanced by a later removal."
 `TryBeginFallbackAttachment` publishes, then invalidates, then returns the record. If the invalidation throws, the caller's `finally` never runs, the record stays unattached, and every later removal defers to an attach that will never complete. The edge becomes permanently unremovable.
 
 **Files:**
-- Modify: `src/Namotion.Interceptor/InterceptorSubjectContext.FallbackAttachments.cs`
+- Modify: `src/Namotion.Interceptor/InterceptorSubjectContext.cs`
 
 **Interfaces:**
 - Consumes: `CompleteFallbackAttachment` from Task 1.
@@ -869,7 +841,7 @@ This step has no dedicated test. `InvalidateUsingContexts` fails only on `OutOfM
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/Namotion.Interceptor/InterceptorSubjectContext.FallbackAttachments.cs
+git add src/Namotion.Interceptor/InterceptorSubjectContext.cs
 git commit -m "Keep a published fallback edge removable when its invalidation fails
 
 The record is linked and the edge published before the invalidation walk runs.
@@ -1134,12 +1106,59 @@ Only after the amendment is approved and posted.
 
 ---
 
+### Task 8: Structural round, once the behaviour is proven
+
+Tasks 1 through 5 add roughly 110 lines to a file already over 1,100. That is accepted while the behaviour is being established, and paid back here. Do this only after everything above is green, so a structural change is never mixed with a behavioural one and the test suite is the safety net for the move.
+
+**Files:**
+- Modify: `src/Namotion.Interceptor/InterceptorSubjectContext.cs`
+- Create: whatever the chosen shape needs
+
+**Interfaces:**
+- Consumes: everything from Tasks 1 through 5.
+- Produces: identical behaviour. No test may change.
+
+- [ ] **Step 1: Pick a shape**
+
+Not `partial`, which hides the size rather than reducing it. Two candidates, both mechanical:
+
+- a `static class FallbackAttachmentList` taking `ref FallbackAttachment? head`, holding find, link and unlink. Removes about 40 lines and makes the list independently testable, leaving the four locked operations on the context because they need `_mutationLock`, `_state`, `PublishState`, `InvalidateUsingContexts` and `GetOrCreateUsedByContexts`, all private.
+- a `sealed class FallbackAttachmentRegistry` instance field owning the list and its phase transitions, with the context passing the locked section in. Removes more, at the cost of one extra allocation per context that uses it, so it needs the Task 6 benchmark rerun.
+
+Prefer the first unless the second measurably reads better; it has no allocation cost and no benchmark obligation.
+
+- [ ] **Step 2: Move the code with no behavioural change**
+
+Cut and paste only. If a diff line changes behaviour, it belongs in an earlier task, not here.
+
+- [ ] **Step 3: Verify nothing moved**
+
+Run: `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration" -v q --nologo`
+
+Expected: PASS, same counts as after Task 5. Any change in behaviour means the move was not mechanical.
+
+Run: `dotnet build src/Namotion.Interceptor.slnx -v q --nologo`
+
+Expected: `Build succeeded. 0 Warning(s) 0 Error(s)`.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/Namotion.Interceptor/
+git commit -m "Extract the fallback attachment list from the context class
+
+Pure move, no behaviour change. The list operations are independent of the
+context's locking and read better on their own."
+```
+
+---
+
 ## Definition of Done
 
 - `dotnet build src/Namotion.Interceptor.slnx` succeeds with 0 warnings
 - `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"` passes in full
 - `VerifyChecksTests.PublicApi.verified.txt` is unchanged
-- `src/Namotion.Interceptor/InterceptorSubjectContext.cs` has grown by exactly the `partial` keyword and one field
+- no `partial` was used to split `InterceptorSubjectContext`, and Task 8 has reduced its growth
 - the handoff mutation in Task 1 Step 8 has been shown to fail a test
 - the benchmark comparison is recorded in the PR description
 - the #402 amendment is approved and posted
