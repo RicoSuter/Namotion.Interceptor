@@ -331,6 +331,88 @@ public class ChangeDeduplicatorTests
         deduplicator.Dispose();
     }
 
+    [Fact]
+    public void WhenAnEarlierFlushAlreadyDeliveredANewerCommit_ThenTheSurvivorIsSuppressed()
+    {
+        // Arrange: collapsing a batch cannot see across flushes, so a change enqueued late enough to
+        // land in the next batch would otherwise overwrite the source with an older commit's value.
+        using var deduplicator = new ChangeDeduplicator();
+        var emittedRevisions = new EmittedRevisionTracker(_ => true);
+
+        var subject = new Person();
+        var firstName = new PropertyReference(subject, nameof(Person.FirstName));
+        var lastName = new PropertyReference(subject, nameof(Person.LastName));
+
+        SubjectPropertyChange[] baseline =
+        [
+            CreateChange(firstName, "Old", "Newest", revision: 10),
+            CreateChange(lastName, "Old", "Newest", revision: 10)
+        ];
+
+        Assert.Equal(2, deduplicator.Deduplicate(baseline, emittedRevisions).Length);
+        deduplicator.Reset();
+
+        SubjectPropertyChange[] straggler =
+        [
+            CreateChange(firstName, "Old", "Stale", revision: 8),
+            CreateChange(lastName, "Newest", "Newer", revision: 12)
+        ];
+
+        // Act
+        var deduplicated = deduplicator.Deduplicate(straggler, emittedRevisions).ToArray();
+
+        // Assert: the superseded commit is dropped, the newer one still flows.
+        var survivor = Assert.Single(deduplicated);
+        Assert.Equal(nameof(Person.LastName), survivor.Property.Name);
+        Assert.Equal("Newer", survivor.GetNewValue<string>());
+    }
+
+    /// <summary>
+    /// Suppression shrinks the survivor count, and <see cref="ChangeDeduplicator.Reset"/> only clears
+    /// the prefix that count describes. Without clearing the dropped tail, those slots would keep their
+    /// subjects and boxed values alive inside the pooled buffer, which outlives the batch.
+    /// </summary>
+    [Fact]
+    public void WhenSurvivorsAreSuppressed_ThenTheDroppedSlotsHoldNoReferences()
+    {
+        // Arrange
+        using var deduplicator = new ChangeDeduplicator();
+        var emittedRevisions = new EmittedRevisionTracker(_ => true);
+
+        var subject = new Person();
+        var firstName = new PropertyReference(subject, nameof(Person.FirstName));
+        var lastName = new PropertyReference(subject, nameof(Person.LastName));
+
+        deduplicator.Deduplicate(
+            [CreateChange(firstName, "Old", "Newest", revision: 10), CreateChange(lastName, "Old", "Newest", revision: 10)],
+            emittedRevisions);
+        deduplicator.Reset();
+
+        // Act: the first is superseded and dropped, the second survives.
+        var deduplicated = deduplicator.Deduplicate(
+            [CreateChange(firstName, "Old", "Stale", revision: 8), CreateChange(lastName, "Newest", "Newer", revision: 12)],
+            emittedRevisions);
+
+        // Assert
+        Assert.Equal(1, deduplicated.Length);
+
+        var buffer = GetBuffer(deduplicator);
+        for (var index = deduplicated.Length; index < buffer.Length; index++)
+        {
+            Assert.True(buffer[index].Property.Subject is null,
+                $"slot {index} past the survivor count still references a subject");
+        }
+    }
+
+    private static SubjectPropertyChange[] GetBuffer(ChangeDeduplicator deduplicator)
+    {
+        var field = typeof(ChangeDeduplicator)
+            .GetField("_buffer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        Assert.True(field is not null, "_buffer was renamed, this test needs updating.");
+        return (SubjectPropertyChange[])field!.GetValue(deduplicator)!;
+    }
+
     private static SubjectPropertyChange CreateChange(
         PropertyReference property,
         string? oldValue,

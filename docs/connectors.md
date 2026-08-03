@@ -121,7 +121,7 @@ Per property, the surviving old value comes from the change with the *lowest* `S
 
 Revisions are monotonic per subject and are not comparable across subjects; see [Delivery Guarantees](tracking.md#delivery-guarantees) for the full contract, including what the old value does and does not promise.
 
-Deduplication covers one flush batch only. An inversion that straddles a flush tick can still deliver the older value last, so compare `Revision` in `WriteChangesAsync` if your source needs strict convergence.
+Delivery converges across flushes as well as within one. A change is enqueued after its commit and outside the subject lock, so a writer preempted between the two can land an older commit in a later batch than a newer one. The processor remembers the newest commit already delivered per property and drops anything that commit has superseded, so `WriteChangesAsync` never receives a value that is already stale and never has to compare revisions itself. Nothing bounds how long that preemption lasts, which is why buffering longer would not have closed it.
 
 ### Write Retry Queue
 

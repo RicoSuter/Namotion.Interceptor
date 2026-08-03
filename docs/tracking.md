@@ -160,7 +160,7 @@ The revision exists because arrival order can differ from commit order. Dispatch
 
 (a) A throwing lifecycle handler or a throwing earlier observer suppresses delivery for the rest of that write's consumers, so delivery is exactly-once only while those no-throw contracts hold.
 
-(b) Deduplication is scoped to one flush batch, so an inversion straddling a flush tick can still emit the older value last. Compare `Revision` in the write handler if that matters. See [Change Batching and Deduplication](connectors.md#change-batching-and-deduplication) for what a flush survivor carries.
+(b) Per property, only the newest commit is delivered: a batch collapses to its newest, and a commit that a delivered one already superseded is dropped rather than emitted late. See [Change Batching and Deduplication](connectors.md#change-batching-and-deduplication) for what a survivor carries.
 
 Note what the old value is and is not, on every channel. Revisions decide *which* change's old value survives a collapse, not that it is the value the property held at the preceding revision: the old value is captured by the generated setter at the call site, outside the subject lock, so under concurrent writers it can be a value that was already superseded. The new value is exact, the old value is a best-effort diff baseline. Compare `Revision` or re-read the property if you need more than that.
 

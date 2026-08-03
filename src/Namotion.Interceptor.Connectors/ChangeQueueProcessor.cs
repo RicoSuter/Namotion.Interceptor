@@ -36,6 +36,10 @@ public class ChangeQueueProcessor : IDisposable
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private readonly ChangeDeduplicator _flushDeduplicator = new();
 
+    // Spans flushes, unlike the deduplicator's per-batch state: batch collapse fixes inversions inside
+    // one flush, this fixes the ones that straddle a flush boundary. Driven only from the dequeue loop.
+    private readonly EmittedRevisionTracker _emittedRevisions;
+
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
 
@@ -71,6 +75,7 @@ public class ChangeQueueProcessor : IDisposable
     {
         _source = source;
         _propertyFilter = propertyFilter;
+        _emittedRevisions = new EmittedRevisionTracker(propertyFilter);
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
@@ -146,6 +151,13 @@ public class ChangeQueueProcessor : IDisposable
 
                 if (periodicTimer is null)
                 {
+                    // The buffered path applies this inside the deduplicator, where it can compact the
+                    // batch in place; here there is no batch, so it gates the single write.
+                    if (!_emittedRevisions.TryAdmit(in change))
+                    {
+                        continue;
+                    }
+
                     // Immediate path: send a single change without buffering (zero allocation)
                     _immediateBuffer[0] = change;
                     try
@@ -217,7 +229,7 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            var dedupedChanges = _flushDeduplicator.Deduplicate(CollectionsMarshal.AsSpan(_flushChanges));
+            var dedupedChanges = _flushDeduplicator.Deduplicate(CollectionsMarshal.AsSpan(_flushChanges), _emittedRevisions);
 
             if (dedupedChanges.Length > 0)
             {

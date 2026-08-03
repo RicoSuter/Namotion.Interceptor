@@ -58,7 +58,12 @@ internal sealed class ChangeDeduplicator : IDisposable
     /// <returns>The deduplicated changes. The memory points into the pooled buffer and stays valid until
     /// the next <see cref="Deduplicate"/>, <see cref="Reset"/> or <see cref="Dispose"/> call, so the caller
     /// can await a write handler on it before resetting. Empty once <see cref="Dispose"/> has run.</returns>
-    public ReadOnlyMemory<SubjectPropertyChange> Deduplicate(ReadOnlySpan<SubjectPropertyChange> changes)
+    /// <param name="emittedRevisions">When given, drops survivors that an earlier batch already
+    /// superseded, which is what makes delivery converge across flushes rather than only within one.
+    /// Optional so the batch collapse can be exercised on its own.</param>
+    public ReadOnlyMemory<SubjectPropertyChange> Deduplicate(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        EmittedRevisionTracker? emittedRevisions = null)
     {
         if (_buffer is null)
         {
@@ -165,7 +170,46 @@ internal sealed class ChangeDeduplicator : IDisposable
             Array.Reverse(_buffer, 0, _count);
         }
 
+        if (emittedRevisions is not null && _count > 0)
+        {
+            SuppressAlreadyDeliveredCommits(emittedRevisions);
+        }
+
         return new ReadOnlyMemory<SubjectPropertyChange>(_buffer, 0, _count);
+    }
+
+    /// <summary>
+    /// Drops survivors whose commit an earlier batch already superseded, compacting what remains.
+    /// </summary>
+    private void SuppressAlreadyDeliveredCommits(EmittedRevisionTracker emittedRevisions)
+    {
+        var kept = 0;
+        for (var index = 0; index < _count; index++)
+        {
+            ref readonly var survivor = ref _buffer[index];
+            if (!emittedRevisions.TryAdmit(in survivor))
+            {
+                continue;
+            }
+
+            if (kept != index)
+            {
+                _buffer[kept] = survivor;
+            }
+
+            kept++;
+        }
+
+        if (kept == _count)
+        {
+            return;
+        }
+
+        // The slots past the compacted prefix still hold the dropped changes, and therefore their
+        // subjects and boxed values. Reset only clears [0, _count), so shrinking the count without
+        // clearing here would strand those references in the pooled buffer.
+        Array.Clear(_buffer, kept, _count - kept);
+        _count = kept;
     }
 
     /// <summary>
