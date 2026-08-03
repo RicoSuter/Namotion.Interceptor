@@ -92,9 +92,11 @@ public class FallbackAttachmentOwnershipTests
     public void WhenAttachInterceptorThrows_ThenOnlyTheInvokedPrefixIsDetached()
     {
         // Arrange: the first interceptor throws on attach, so the second never receives one and
-        // must not receive a detach either.
+        // must not receive a detach either. The thrower itself does: it may have mutated itself
+        // before raising, so the prefix is inclusive of it.
         var parentContext = InterceptorSubjectContext.Create();
-        parentContext.AddService<ILifecycleInterceptor>(new ThrowingAttachInterceptor());
+        var thrower = new ThrowingAttachInterceptor();
+        parentContext.AddService<ILifecycleInterceptor>(thrower);
         var neverAttached = new CountingLifecycleInterceptor();
         parentContext.AddService<ILifecycleInterceptor>(neverAttached);
 
@@ -105,6 +107,7 @@ public class FallbackAttachmentOwnershipTests
         Assert.True(childContext.RemoveFallbackContext(parentContext));
 
         // Assert
+        Assert.Equal(1, thrower.DetachCount);
         Assert.Equal(0, neverAttached.DetachCount);
     }
 
@@ -208,6 +211,48 @@ public class FallbackAttachmentOwnershipTests
         Assert.False(probe.IsAlive, "The parent context still retains the detached child.");
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(8)]
+    public async Task WhenSameFallbackIsRemovedConcurrently_ThenDetachCallbacksRunOnce(int removerCount)
+    {
+        for (var round = 0; round < 200; round++)
+        {
+            // Arrange: every remover starts from a rendezvous so they contend on the same record.
+            // Without a single arbiter both would pass a check and both would detach.
+            var parentContext = InterceptorSubjectContext.Create();
+            var interceptor = new CountingLifecycleInterceptor();
+            parentContext.AddService<ILifecycleInterceptor>(interceptor);
+
+            var childContext = ((IInterceptorSubject)new ContextProbeSubject()).Context;
+            Assert.True(childContext.AddFallbackContext(parentContext));
+
+            var results = new bool[removerCount];
+            using var ready = new CountdownEvent(removerCount);
+            using var start = new ManualResetEventSlim(false);
+
+            // Act
+            var removers = Enumerable
+                .Range(0, removerCount)
+                .Select(index => Task.Factory.StartNew(() =>
+                {
+                    ready.Signal();
+                    start.Wait();
+                    results[index] = childContext.RemoveFallbackContext(parentContext);
+                }, TaskCreationOptions.LongRunning))
+                .ToArray();
+
+            ready.Wait();
+            start.Set();
+            await Task.WhenAll(removers);
+
+            // Assert
+            Assert.Equal(1, results.Count(removed => removed));
+            Assert.Equal(1, interceptor.DetachCount);
+            Assert.True(childContext.GetServices<ILifecycleInterceptor>().IsEmpty);
+        }
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference AttachAndDetach(InterceptorSubjectContext parentContext)
     {
@@ -254,21 +299,9 @@ public class FallbackAttachmentOwnershipTests
 
     private static bool HasFallback(IInterceptorSubjectContext context, IInterceptorSubjectContext fallback)
     {
-        var state = ContextStateReflection.GetState((InterceptorSubjectContext)context);
-        var fallbackContexts = (System.Collections.IEnumerable)state
-            .GetType()
-            .GetField("FallbackContexts", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .GetValue(state)!;
-
-        foreach (var entry in fallbackContexts)
-        {
-            if (ReferenceEquals(entry, fallback))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return ContextStateReflection.HasFallbackContext(
+            (InterceptorSubjectContext)context,
+            (InterceptorSubjectContext)fallback);
     }
 
     private sealed class ThrowingDetachInterceptor : ILifecycleInterceptor
@@ -285,6 +318,10 @@ public class FallbackAttachmentOwnershipTests
 
     private sealed class ThrowingAttachInterceptor : ILifecycleInterceptor
     {
+        private int _detachCount;
+
+        public int DetachCount => Volatile.Read(ref _detachCount);
+
         public void AttachSubjectToContext(IInterceptorSubject subject)
         {
             throw new InvalidOperationException("Attach failed.");
@@ -292,48 +329,7 @@ public class FallbackAttachmentOwnershipTests
 
         public void DetachSubjectFromContext(IInterceptorSubject subject)
         {
-        }
-    }
-
-    [Theory]
-    [InlineData(2)]
-    [InlineData(8)]
-    public async Task WhenSameFallbackIsRemovedConcurrently_ThenDetachCallbacksRunOnce(int removerCount)
-    {
-        // Arrange: every remover starts from a rendezvous so they contend on the same record.
-        // Without a single arbiter both would pass a check and both would detach.
-        for (var round = 0; round < 200; round++)
-        {
-            var parentContext = InterceptorSubjectContext.Create();
-            var interceptor = new CountingLifecycleInterceptor();
-            parentContext.AddService<ILifecycleInterceptor>(interceptor);
-
-            var childContext = ((IInterceptorSubject)new ContextProbeSubject()).Context;
-            Assert.True(childContext.AddFallbackContext(parentContext));
-
-            var results = new bool[removerCount];
-            using var ready = new CountdownEvent(removerCount);
-            using var start = new ManualResetEventSlim(false);
-
-            // Act
-            var removers = Enumerable
-                .Range(0, removerCount)
-                .Select(index => Task.Factory.StartNew(() =>
-                {
-                    ready.Signal();
-                    start.Wait();
-                    results[index] = childContext.RemoveFallbackContext(parentContext);
-                }, TaskCreationOptions.LongRunning))
-                .ToArray();
-
-            ready.Wait();
-            start.Set();
-            await Task.WhenAll(removers);
-
-            // Assert
-            Assert.Equal(1, results.Count(removed => removed));
-            Assert.Equal(1, interceptor.DetachCount);
-            Assert.True(childContext.GetServices<ILifecycleInterceptor>().IsEmpty);
+            Interlocked.Increment(ref _detachCount);
         }
     }
 

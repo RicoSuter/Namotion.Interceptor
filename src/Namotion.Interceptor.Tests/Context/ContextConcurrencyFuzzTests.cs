@@ -521,16 +521,19 @@ public class ContextConcurrencyFuzzTests
             if (random.Next(2) == 0)
             {
                 // Recorded after the call: the executor resolves the lifecycle interceptors before
-                // publishing, so an add that raises on a circular chain leaves no edge. Removal is
-                // the other way round, it keeps the edge visible for the detach callbacks and
-                // drops it in a finally, so a raise there still means the edge is gone.
+                // publishing, so an add that raises on a circular chain leaves no edge. A raise
+                // therefore always means the model was already false, because an add over an
+                // existing edge short circuits before it can reach the resolve.
                 edge.Source.Context.AddFallbackContext(edge.Target.Context);
                 edge.IsPresent = true;
             }
             else
             {
-                edge.Source.Context.RemoveFallbackContext(edge.Target.Context);
+                // Recorded before the call, the other way round: removal keeps the edge visible
+                // for the detach callbacks and drops it from a finally, so a raise there still
+                // means the edge is gone. Recording it afterwards would lose exactly that case.
                 edge.IsPresent = false;
+                edge.Source.Context.RemoveFallbackContext(edge.Target.Context);
             }
         }
         else if (choice < 30)

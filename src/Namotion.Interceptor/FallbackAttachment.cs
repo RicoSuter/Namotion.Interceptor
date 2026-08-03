@@ -9,18 +9,22 @@ namespace Namotion.Interceptor;
 /// matching attach resolved so the detach replays exactly those.
 /// </summary>
 /// <remarks>
-/// Every field is written under the owning context's mutation lock, which is what makes a record
-/// atomic with the edge it owns. Nothing here is thread safe on its own.
+/// Every mutable field is written under the owning context's mutation lock, which is what makes a
+/// record atomic with the edge it owns. Nothing here is thread safe on its own.
 ///
-/// A claimed record is read without the lock while its detach callbacks run, which is safe because
-/// claiming unlinks it under the lock and leaves exactly one owner, so the claim publishes every
-/// earlier write to that owner and no writer remains.
+/// A claimed record is read without the lock while its detach callbacks run. On the claiming
+/// thread that is safe because claiming unlinks the record under the lock and leaves exactly one
+/// owner, so the claim publishes every earlier write to that owner and no writer remains. On the
+/// deferred path the attaching thread wrote those fields itself, so the reads are trivially
+/// ordered.
 /// </remarks>
-internal sealed class FallbackAttachment
+internal sealed class FallbackAttachment(
+    InterceptorSubjectContext context,
+    ImmutableArray<ILifecycleInterceptor> interceptors)
 {
-    internal InterceptorSubjectContext Context = null!;
+    internal readonly InterceptorSubjectContext Context = context;
 
-    internal ImmutableArray<ILifecycleInterceptor> Interceptors;
+    internal readonly ImmutableArray<ILifecycleInterceptor> Interceptors = interceptors;
 
     /// <summary>How far the attach loop got, so a detach replays exactly that prefix.</summary>
     internal int InvokedInterceptorCount;

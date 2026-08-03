@@ -23,6 +23,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // each other cannot deadlock. No path takes a second _mutationLock; the only way to nest them
     // is a TryAddService factory or exists predicate that mutates a different context, which the
     // contract forbids for that reason.
+    //
+    // A delegate may reenter THIS context to add a service, but it must not mutate this context's
+    // fallback contexts. On a subject context that reaches the lifecycle callbacks with the outer
+    // _mutationLock still held, so they take the lifecycle lock under it and invert the documented
+    // _attachedSubjects -> _mutationLock order (see docs/design/tracking-lifecycle.md and #404).
 
     private const int MaximumRetainedTraversalSize = 1024;
 
@@ -126,27 +131,80 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         lock (_mutationLock)
         {
-            var state = Volatile.Read(ref _state);
-            if (state.FallbackContexts.Contains(contextImpl))
+            if (!TryPublishFallbackContext(contextImpl, null))
             {
                 return false;
             }
-
-            // R4: register into the fallback BEFORE publishing, so its _usedByContexts is always a
-            // superset of the true using set. A missing entry leaves a compiled chain above
-            // permanently stale. An extra entry costs a spurious invalidation and lets the
-            // invalidation walk arrive out of chain order, which is why no walk may trust what a
-            // context further down recorded (see ResolveDelegationChain).
-            var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
-            lock (usedByContexts)
-            {
-                usedByContexts.Add(this);
-            }
-
-            PublishState(new ContextState(state.Services, state.FallbackContexts.Add(contextImpl)));
         }
 
         InvalidateUsingContexts();
+        return true;
+    }
+
+    /// <summary>
+    /// Publishes the edge to <paramref name="contextImpl"/> and, when given, links the ownership
+    /// record that owns it. Returns false when the edge is already present. The caller holds
+    /// <see cref="_mutationLock"/> and invalidates afterwards.
+    /// </summary>
+    private bool TryPublishFallbackContext(InterceptorSubjectContext contextImpl, FallbackAttachment? attachment)
+    {
+        var state = Volatile.Read(ref _state);
+        if (state.FallbackContexts.Contains(contextImpl))
+        {
+            return false;
+        }
+
+        // R4: register into the fallback BEFORE publishing, so its _usedByContexts is always a
+        // superset of the true using set. A missing entry leaves a compiled chain above
+        // permanently stale. An extra entry costs a spurious invalidation and lets the
+        // invalidation walk arrive out of chain order, which is why no walk may trust what a
+        // context further down recorded (see ResolveDelegationChain).
+        var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
+        lock (usedByContexts)
+        {
+            usedByContexts.Add(this);
+        }
+
+        // Built before the record is linked, so a failure to allocate it cannot leave a record
+        // owning an edge that was never published, which nothing would ever be able to remove.
+        var published = new ContextState(state.Services, state.FallbackContexts.Add(contextImpl));
+
+        if (attachment is not null)
+        {
+            FallbackAttachmentList.Link(ref _fallbackAttachments, attachment);
+        }
+
+        PublishState(published);
+        return true;
+    }
+
+    /// <summary>
+    /// Drops the edge to <paramref name="contextImpl"/>. Returns false when there is none. The
+    /// caller holds <see cref="_mutationLock"/> and invalidates afterwards.
+    /// </summary>
+    private bool TryUnpublishFallbackContext(InterceptorSubjectContext contextImpl)
+    {
+        var state = Volatile.Read(ref _state);
+        var index = state.FallbackContexts.IndexOf(contextImpl);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        PublishState(new ContextState(state.Services, state.FallbackContexts.RemoveAt(index)));
+
+        // R4: unregister from the fallback only AFTER publishing so that its _usedByContexts
+        // stays a superset of the true using set for the whole transition (see
+        // TryPublishFallbackContext).
+        var usedByContexts = Volatile.Read(ref contextImpl._usedByContexts);
+        if (usedByContexts is not null)
+        {
+            lock (usedByContexts)
+            {
+                usedByContexts.Remove(this);
+            }
+        }
+
         return true;
     }
 
@@ -162,25 +220,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         lock (_mutationLock)
         {
-            var state = Volatile.Read(ref _state);
-            var index = state.FallbackContexts.IndexOf(contextImpl);
-            if (index < 0)
+            if (!TryUnpublishFallbackContext(contextImpl))
             {
                 return false;
-            }
-
-            PublishState(new ContextState(state.Services, state.FallbackContexts.RemoveAt(index)));
-
-            // R4: unregister from the fallback only AFTER publishing so that its _usedByContexts
-            // stays a superset of the true using set for the whole transition (see
-            // AddFallbackContext).
-            var usedByContexts = Volatile.Read(ref contextImpl._usedByContexts);
-            if (usedByContexts is not null)
-            {
-                lock (usedByContexts)
-                {
-                    usedByContexts.Remove(this);
-                }
             }
         }
 
@@ -195,30 +237,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         InterceptorSubjectContext contextImpl,
         ImmutableArray<ILifecycleInterceptor> interceptors)
     {
-        var attachment = new FallbackAttachment
-        {
-            Context = contextImpl,
-            Interceptors = interceptors
-        };
+        var attachment = new FallbackAttachment(contextImpl, interceptors);
 
         lock (_mutationLock)
         {
-            var state = Volatile.Read(ref _state);
-            if (state.FallbackContexts.Contains(contextImpl))
+            if (!TryPublishFallbackContext(contextImpl, attachment))
             {
                 return null;
             }
-
-            // R4: register into the fallback before publishing, as AddFallbackContext does.
-            var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
-            lock (usedByContexts)
-            {
-                usedByContexts.Add(this);
-            }
-
-            FallbackAttachmentList.Link(ref _fallbackAttachments, attachment);
-
-            PublishState(new ContextState(state.Services, state.FallbackContexts.Add(contextImpl)));
         }
 
         try
@@ -240,16 +266,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     /// <summary>
     /// Leaves the record linked and claimable after an attach that ran no callbacks and will not
-    /// return to its caller. A removal that deferred to this attach cannot be honoured, so its
-    /// request is dropped in favour of keeping the edge removable by whoever asks next. The
-    /// deferring caller was already told the removal was committed, so that promise is broken
-    /// here, which is why this is reachable only from an unrecoverable failure.
+    /// return to its caller. A removal that deferred to this attach cannot be honoured, because
+    /// nobody is left to perform it, so its request is dropped to keep the edge removable by
+    /// whoever asks next. That breaks the promise the deferring caller was given, which is why
+    /// this is reachable only from an unrecoverable failure.
     /// </summary>
     private void MarkFallbackAttachmentClaimable(FallbackAttachment attachment)
     {
         lock (_mutationLock)
         {
-            attachment.InvokedInterceptorCount = 0;
             attachment.IsAttachCompleted = true;
             attachment.IsPendingRemoval = false;
         }
@@ -316,23 +341,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         lock (_mutationLock)
         {
-            var state = Volatile.Read(ref _state);
-            var index = state.FallbackContexts.IndexOf(contextImpl);
-            if (index < 0)
+            if (!TryUnpublishFallbackContext(contextImpl))
             {
                 return;
-            }
-
-            PublishState(new ContextState(state.Services, state.FallbackContexts.RemoveAt(index)));
-
-            // R4: unregister only after publishing, as RemoveFallbackContext does.
-            var usedByContexts = Volatile.Read(ref contextImpl._usedByContexts);
-            if (usedByContexts is not null)
-            {
-                lock (usedByContexts)
-                {
-                    usedByContexts.Remove(this);
-                }
             }
         }
 

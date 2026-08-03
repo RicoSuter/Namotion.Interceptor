@@ -129,18 +129,19 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     {
         var contextImpl = (InterceptorSubjectContext)context;
 
-        switch (TryTakeFallbackAttachment(contextImpl, out var attachment))
+        var outcome = TryTakeFallbackAttachment(contextImpl, out var attachment);
+        if (outcome == FallbackRemovalOutcome.NotPresent)
         {
-            case FallbackRemovalOutcome.NotPresent:
-                return false;
-
-            case FallbackRemovalOutcome.Deferred:
-                return true;
-
-            default:
-                DetachAndCompleteRemoval(attachment!);
-                return true;
+            return false;
         }
+
+        // Deferred means the attaching thread runs the callbacks and the removal instead.
+        if (outcome == FallbackRemovalOutcome.Claimed)
+        {
+            DetachAndCompleteRemoval(attachment!);
+        }
+
+        return true;
     }
 
     /// <summary>
