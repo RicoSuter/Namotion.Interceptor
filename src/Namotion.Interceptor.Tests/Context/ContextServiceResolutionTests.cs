@@ -1,8 +1,8 @@
 using Namotion.Interceptor.Attributes;
 
-namespace Namotion.Interceptor.Tests;
+namespace Namotion.Interceptor.Tests.Context;
 
-public class InterceptorSubjectContextTests
+public class ContextServiceResolutionTests
 {
     [Fact]
     public void WhenAddingSingleService_ThenItCanBeRetrieved()
