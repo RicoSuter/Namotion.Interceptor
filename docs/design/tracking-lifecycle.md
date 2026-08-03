@@ -167,12 +167,15 @@ No leak.
 
 ## Lock Ordering
 
-Two locks exist in the lifecycle/registry system:
+Three locks are involved:
 
 1. `_attachedSubjects` in `LifecycleInterceptor`
 2. `_knownSubjects` in `SubjectRegistry`
+3. `_mutationLock` in `InterceptorSubjectContext`
 
 Acquisition order is always: `_attachedSubjects` → `_knownSubjects`. The `SubjectRegistry` never calls back into `LifecycleInterceptor` while holding `_knownSubjects`. No deadlock is possible.
+
+`_mutationLock` is reached the same way round: `ContextInheritanceHandler` calls `Add`/`RemoveFallbackContext` from a lifecycle change, so the order is `_attachedSubjects` → `_mutationLock`. **Nothing may wait on a context mutation while holding `_attachedSubjects`.** The attaching thread runs its callbacks outside `_mutationLock` and takes `_attachedSubjects` there, so a waiter holding that lock would deadlock against it. This is why a removal that arrives while a fallback is still attaching hands its work to the attaching thread instead of waiting for it.
 
 The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled — this is a documented contract requirement.
 
