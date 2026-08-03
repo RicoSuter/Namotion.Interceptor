@@ -182,9 +182,13 @@ as well as its parent link, so it has two outgoing edges and is not a pure deleg
 cycle exception is therefore unreachable through inheritance, and the service walk's visited set handles
 the rest, exactly as it does today for a cycle containing a context that owns services.
 
-This is what removes #410's core complaint, that the graph builds a cycle nobody asked for with pure
-delegators on both sides and every resolution raising. That shape needed a stranded edge surviving a
-partial detach, and the link is now cleared unconditionally at reference count zero.
+This is weaker than saying it fixes #410 symptom 1, and deliberately so. A comment on that issue argues
+symptom 1 may not be organically reachable at all: a pure delegation cycle needs every context on the
+loop to have no services and exactly one fallback, but a stranded edge means the earlier fallback
+survives and a later re-attach adds a second, so two fallbacks mean no delegation collapse and no cycle.
+Stranding pushes away from symptom 1 rather than toward it. That reasoning is derived from reading rather
+than from a test, so the first deliverable for #410 is the reproduction attempt, not the fix. If the
+shape cannot be built, symptom 1 is struck rather than closed.
 
 The cycle machinery stays, since a consumer can still build a cycle deliberately with
 `AddFallbackContext`, but it stops being exercised by ordinary graph construction. #402's "a subject on a
@@ -290,6 +294,39 @@ Repointing is possible only within one graph, because the detaching interceptor 
 in its own `_attachedSubjects` and has no visibility into another graph's. Under the one-graph model
 that is the only case that exists.
 
+### The reconciliation ledger, and #210
+
+`_lastProcessedValues` is cleaned up in two places today, both inside detach loops, and the rule that
+keeps it correct is written nowhere. #210 reports that an entry orphans when a property is removed from a
+still-attached subject. That is not reachable: `IInterceptorSubject.Properties` is an
+`IReadOnlyDictionary` whose only mutator is `AddProperties`, and neither `RegisteredSubject`,
+`RegisteredSubjectProperty` nor `Namotion.Interceptor.Dynamic` offers a removal counterpart. The issue
+appears to have been written from reading the code rather than from a repro.
+
+Rather than leave a trap for whoever adds a removal API, the ledger's lifetime is bound to a notification
+that already exists and that such an API would have to fire anyway, since every other
+`IPropertyLifecycleHandler` depends on it:
+
+```csharp
+void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
+{
+    if (!change.Property.Metadata.Type.CanContainSubjects()) return;
+    lock (_attachedSubjects) _lastProcessedValues.Remove(change.Property);
+}
+```
+
+The two explicit `Remove` calls in `DetachFromContext` and `DetachFromProperty` then delete. The undo in
+`WriteProperty`'s parent-dead check stays, because that is a rollback rather than a property leaving.
+
+Two consequences, both recorded rather than absorbed. `LifecycleInterceptor` joins
+`GetServices<IPropertyLifecycleHandler>()`, which is behaviour change 8 and needs no-op `AttachProperty`
+and `RefreshCollectionProperty` implementations. And the lock edge from property detach to
+`_attachedSubjects` becomes explicit, so a future removal API must not hold
+`SubjectRegistry._knownSubjects` across `DetachSubjectProperty`, which is the documented order already.
+
+The stronger fix, storing the value on the property's own data so removal is structural, is rejected: it
+sits on the hot write path, and per-property data storage is exactly what #222 is trying to eliminate.
+
 ## 6. Public API and migration
 
 | Change | Kind |
@@ -352,6 +389,22 @@ and roughly 15 MB per cycle the issue measured. The released edge is precisely t
 created, so this is not the library deleting a consumer's registration. A subject that is only ever a
 root never reaches a property detach, so only an explicit `DetachFromContext` releases its edge.
 
+The issue's first comment records a **second reproduction with no constructor mismatch at all**, and it
+has to be closed separately because the two paths diverge before they converge:
+
+```
+p1.Children = [child];   // count 1, registers P1.Context
+p2.Children = [child];   // count 2, registers nothing
+p1.Children = [];        // count 1, removes nothing
+p2.Children = [];        // count 0, removes P2.Context, which the child never had
+```
+
+The add fires on the first attach and names P1, the remove fires on the last detach and names P2, so
+P1's edge survives and retains the detached child. Change 4 closes it, because the link is cleared at
+reference count zero regardless of which property the change happens to name. Change 5 additionally
+removes the interim staleness at step three, where the child would otherwise still resolve through a
+parent it has left. Both paths get their own reproduction test.
+
 ### Temporary fallback contexts
 
 The three connector sites give a subject services before it enters the graph, so its property writes
@@ -399,7 +452,7 @@ partial bookkeeping, exactly as on `master`. That is #384 and it stays out.
 
 ## 8. Behaviour changes
 
-The complete list. Anything discovered beyond these seven is escalated, not absorbed.
+The complete list. Anything discovered beyond these eight is escalated, not absorbed.
 
 1. `AddFallbackContext` stops attaching.
 2. `RemoveFallbackContext` stops detaching a root, and throws if aimed at the attach edge.
@@ -409,6 +462,9 @@ The complete list. Anything discovered beyond these seven is escalated, not abso
 5. #410 symptom 2: the parent link repoints when its target leaves and other references survive.
 6. Attaching a subject owned by another graph throws instead of half-attaching silently.
 7. A throwing detach interceptor no longer prevents the attach edge from being removed.
+8. `LifecycleInterceptor` appears in `GetServices<IPropertyLifecycleHandler>()`, one extra entry in that
+   list. The relative order of the existing entries is unchanged, since adding a node to the resolver's
+   input cannot reorder the others under its lowest-registration-index tie-break.
 
 Ordering is deliberately **not** in this list. Fixing the traversal order to top-down was considered and
 rejected: the audit shows it would break nothing in the codebases we can see and would strictly improve
@@ -418,18 +474,41 @@ evidence.
 
 ## 9. Verification
 
-### Characterization tests first
+### Two categories with opposite gates
 
-These land before any production change and must pass on unmodified `master`. If one does not, the test
-is wrong. None of this is pinned today.
+Every test added by this work belongs to exactly one of these, and the gate is what makes it worth
+writing:
+
+- **Characterization tests must pass on unmodified `master`.** They lock down behaviour we intend to
+  preserve. If one fails on `master`, the test is wrong, not the code.
+- **Reproduction tests must fail on unmodified `master`.** One per closed issue, written from the issue's
+  own repro. If one passes on `master`, either the issue is already fixed or we have misunderstood it,
+  and both are worth knowing before any production code is written.
+
+The second gate is the stronger one. It is what stops us declaring an issue closed on the strength of a
+test written after the fix, which necessarily agrees with the fix.
+
+This is also why the first commit of the pull request adds tests only. At that commit the production code
+is still `master`'s, so both gates are verifiable by checking it out and running the suite. Folded into a
+mixed commit, neither claim can be checked again.
+
+### Characterization tests
+
+These land first and must pass on unmodified `master`. None of this is pinned today.
 
 1. Attach and detach event sequences for a three-level graph, capturing both channels.
 2. The resolved-position dependency, including that `ParentTrackingHandler`'s `[RunsBefore]` pulls
    `SubjectRegistry` to position 0 through the tie-break.
 3. The root's own attach fires last.
 4. Grandchildren do not attach under `WithLifecycle()` alone.
-5. A child's own context resolves the parent's services, via `TryGetService<ISubjectRegistry>()`.
+5. A child's own context resolves the parent's services, and so does a grandchild's, via
+   `TryGetService<ISubjectRegistry>()` and `TryGetLifecycleInterceptor()`. Depth is asserted explicitly
+   because it is where a parent link differs most from a fallback edge. This is the one requirement the
+   audited external consumer depends on and nothing currently tests it: `CommunicationSource`'s
+   constructor does `subject.Context.TryGetLifecycleInterceptor() ?? throw` on a child subject.
 6. Multi-parent attach-once and detach-once counts.
+7. `IPropertyLifecycleHandler` invocation order on property attach and detach, which the #210 fix adds an
+   entry to.
 
 ### Each change to its evidence
 
@@ -437,7 +516,7 @@ is wrong. None of this is pinned today.
 |---|---|
 | 1 | root attach through `AttachToContext` only |
 | 2 | rewritten `SubjectDetaching_FiresForRootSubject_WhenContextRemoved` |
-| 3 | the issue's own repro, plus a weak-reference probe on `_usedByContexts` |
+| 3 | both of the issue's repros, the constructor-mismatch path and the two-parent path, each with a weak-reference probe on `_usedByContexts` |
 | 4 | detach that leaves property values set |
 | 5 | two parents, remove the first, assert resolution follows the survivor |
 | 6 | both shapes: parent-to-parent, and root-in-A-then-child-in-B |
@@ -468,25 +547,79 @@ repoint. Each must fail its corresponding test.
 
 ## 10. Staging
 
-Five pull requests, each release-safe alone, with no public API landing ahead of its callers.
+One pull request on `design/context-inheritance-parent-link`, built from commits in this order. The
+ordering is not cosmetic: each commit is a point at which the suite should be green, and the first two
+carry gates that stop meaning anything once they are folded into later work.
 
-| PR | Content | Notes |
+| Commit | Content | Gate |
 |---|---|---|
-| 1 | Characterization tests only | no production change |
-| 2 | `AttachToContext` / `DetachFromContext`, migrate root call sites | behaviour-neutral, since `AttachSubjectToContext` is idempotent while `AddFallbackContext` still attaches |
-| 3 | `ContextState.Parent`, internal setters, `LifecycleInterceptor` sets and clears it, handler body becomes the descent trigger | snapshots are the gate; closes #410 |
-| 4 | Remove the executor overrides, add the loud errors, add `AddTemporaryFallbackContext`, migrate the three connector sites | the breaking one |
-| 5 | Owner field and multi-graph exception, attach-edge release, repoint, `finally` | closes #207 and #402 |
+| 1 | Characterization tests only | must be green with `master`'s production code |
+| 2 | Reproduction tests: #207 both paths, #410 symptom 2, #402 defect 1, the two-graph shapes | must be **red**, each for the reason its issue states |
+| 3 | `AttachToContext` / `DetachFromContext`, migrate root call sites | behaviour-neutral, since `AttachSubjectToContext` is idempotent while `AddFallbackContext` still attaches |
+| 4 | `ContextState.Parent`, internal setters, `LifecycleInterceptor` sets and clears it, handler body becomes the descent trigger | snapshots must not move; #410 turns green |
+| 5 | Remove the executor overrides, add the loud errors, add `AddTemporaryFallbackContext`, migrate the three connector sites | the breaking one |
+| 6 | Owner field and multi-graph exception, attach-edge release, repoint, `finally` | #207 and #402 turn green |
+| 7 | The #210 fix: ledger cleanup bound to `IPropertyLifecycleHandler.DetachProperty` | characterization test 7 records the new handler entry |
+| 8 | Consumer and design docs | see below |
 
-PRs 3 and 4 change allocations per attach. The prediction is one fewer allocation and roughly 24 fewer
-bytes per attached subject, because a one-element `ImmutableArray` is replaced by a field, so both carry
-a `RegistryBenchmark` run on `AddLotsOfPreviousCars` and `ChangeAllTires`.
+Commits 4 and 5 change allocations per attach. The prediction is one fewer allocation and roughly 24
+fewer bytes per attached subject, because a one-element `ImmutableArray` is replaced by a field, so the
+branch carries a `RegistryBenchmark` run on `AddLotsOfPreviousCars` and `ChangeAllTires` before it is
+proposed for merge.
 
-PR #412 is closed unmerged rather than reverted, since it never landed on `master`. Two things from it
-are carried forward: the `TryPublishFallbackContext` / `TryUnpublishFallbackContext` extraction, which
-serves the surviving primitive, and the corrected XML documentation on `IInterceptorSubjectContext`. Its
-tests go with the protocol they test. Issue #402 is closed by this design instead, and #411 disappears
-with the two-phase removal window that created it.
+If review stalls on the whole, the natural cut line is between commits 4 and 5: everything up to and
+including 4 is behaviour-neutral for existing callers.
+
+### Documentation
+
+Consumer-facing, `docs/interceptor.md` and `docs/tracking.md`:
+
+- the three kinds of edge and who owns each
+- `AttachToContext` / `DetachFromContext` as the way a root joins and leaves a graph, replacing
+  `AddFallbackContext` for that purpose
+- `AddTemporaryFallbackContext` and the pattern it exists for
+- one graph per subject, and what the exception means when it fires
+
+Design-facing, `docs/design/tracking-lifecycle.md`:
+
+- the parent link, its ownership, and the gate that sets it
+- that `_lastProcessedValues` entries live exactly as long as their property is attached, and that any
+  future property removal API must route through `DetachSubjectProperty` without holding
+  `SubjectRegistry._knownSubjects`
+- the resolved-position ordering dependency from section 2, since this design deliberately preserves it
+  and no issue records it
+- the global versus per-graph reference count distinction, and why one graph per subject collapses it
+
+### PR #412
+
+Closed unmerged rather than reverted, since it never landed on `master`. Two things carry forward: the
+`TryPublishFallbackContext` / `TryUnpublishFallbackContext` extraction, which serves the surviving
+primitive, and the corrected XML documentation on `IInterceptorSubjectContext`. Its tests go with the
+protocol they test.
+
+### Final step, human gated
+
+Updating issues and merging the pull request are **not** part of the implementation plan and are not done
+autonomously. The plan ends at commits and pushes to this branch. The list below is what a human then
+approves and executes.
+
+Each row below was checked against the issue's comments, not only its body, because several carry
+corrections that the body does not.
+
+| Issue | Action |
+|---|---|
+| #402 | Close. All five defects dissolve: no callbacks inside the edge mutation means nothing to order, claim or hand off. Its first comment concluded that "the complete fix needs a decision about where lifecycle callbacks run, not just a reordering", which is what this design decides. |
+| #207 | Close, citing **both** reproductions. The body's path is a constructor context differing from the lifecycle parent. The first comment adds a second path with no constructor mismatch at all: two parents, where the add fires on the first attach and names P1 while the remove fires on the last detach and names P2, so P1's edge survives. Commit 2 carries a reproduction for each, since the comment notes they diverge before they converge. |
+| #410 | Close symptom 2 and the retention it causes. **Do not claim symptom 1** without the reproduction attempt: its own comment argues the pure delegation cycle may be organically unreachable, because stranding leaves two fallbacks rather than one and two fallbacks cannot collapse. If the attempt fails, symptom 1 is struck and the issue closes narrower. |
+| #210 | Close as not reachable, with the finding that no property removal API exists, and note that commit 7 makes the leak structurally impossible if one is added later. |
+| #411 | Update, do not close. Both windows its comment documents, the claimed record and the deferred handoff, are artifacts of PR #412 and vanish with it. What remains is the shape that predates #412: `DetachFromContext` runs interceptors before removing the edge, so a concurrent add can be told `false` and then lose the edge. Narrowed from every child detach to an explicit concurrent root detach. The comment's OOM-stranding motivation disappears entirely with the record list. |
+| #384 | Update, narrowed on two of its three recorded cases. The attach-tail case loses route 2, since the deferred handoff that created it goes with #412; route 1, a handler whose write orphans the subject being attached, is pre-existing and untouched. The detach-half case still raises on a cyclic chain, but such a chain now requires a consumer to have built one deliberately. Its stated blocker is removed, since inheritance is no longer a handler, and the remaining work is rollback on throw inside `AttachToProperty`. |
+| #412 | Close unmerged, referencing this design. |
+
+Two findings from section 2 have no issue and none is being filed: the two-graph half-support, which
+change 6 closes, and the resolved-position ordering dependency, which this design preserves deliberately.
+Both live in this spec and in `docs/design/tracking-lifecycle.md`, and the pull request description
+records them.
 
 ## 11. Out of scope
 
@@ -512,8 +645,15 @@ Stated explicitly so the spec cannot be read as covering them.
 - **A subject inheriting from a parent it left, across graphs.** Under the one-graph model this cannot
   arise.
 
-## 12. Open question
+## 12. Rejected: running the external consumer's suite as a gate
 
-Whether the library can be built locally and the external consumer's test suite run against it, through
-a `ProjectReference` swap or a local feed. If so it becomes a merge gate on PRs 3, 4 and 5, and it is the
-strongest evidence available that the seven behaviour changes are the only behaviour changes.
+Building the library locally and running the audited consumer's test suite against it, through a
+`ProjectReference` swap or a local feed, was considered as a merge gate and rejected. It would add a
+build dependency on a repository this one does not control, for coverage of behaviours nobody has written
+down.
+
+The one requirement it was protecting is specific and testable here: a child subject's own context must
+resolve services registered further up, because `CommunicationSource`'s constructor does
+`subject.Context.TryGetLifecycleInterceptor() ?? throw`. Characterization test 5 asserts exactly that, at
+child and grandchild depth. What is given up is breadth over unenumerated behaviour, which is a real but
+unbounded loss and not worth the coupling.
