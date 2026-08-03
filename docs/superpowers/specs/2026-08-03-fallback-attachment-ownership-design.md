@@ -1,6 +1,6 @@
 # Fallback attachment ownership in InterceptorExecutor
 
-Design for #402. Closes four of its five defects and mitigates the fifth, with no public API change.
+Design for #402. Closes all five defects, with no public API change.
 
 ## Problem
 
@@ -173,28 +173,19 @@ Contract details that are otherwise ambiguous enough for two implementers to div
 ```csharp
 public override bool AddFallbackContext(IInterceptorSubjectContext context)
 {
-    // Guard first, for two reasons: it preserves today's behaviour that a duplicate add
-    // neither resolves nor throws, and it validates the type so the finally below cannot
-    // fail on a cast while an exception is already propagating. Racy by nature, and that is
-    // fine: a false negative costs one wasted resolve, because the publish arbitrates.
+    // Preserves today's behaviour that a duplicate add neither resolves nor throws. Racy by
+    // nature, and that is fine: a false negative costs one wasted resolve, because the
+    // publish below arbitrates.
     if (HasFallbackContext(context))
     {
         return false;
     }
 
-    var interceptors = ImmutableArray<ILifecycleInterceptor>.Empty;
-    bool added;
-    try
-    {
-        interceptors = context.GetServices<ILifecycleInterceptor>();
-    }
-    finally
-    {
-        // Recorded even on a throw, so the edge never becomes unremovable.
-        added = TryAddFallbackContextWithAttachment(context, interceptors);
-    }
+    // Reads the parent's chain, so it does not need the edge. A throw here leaves nothing
+    // committed, which is what closes defect 4.
+    var interceptors = context.GetServices<ILifecycleInterceptor>();
 
-    if (!added)
+    if (!TryAddFallbackContextWithAttachment(context, interceptors))
     {
         return false;
     }
@@ -232,7 +223,7 @@ public override bool RemoveFallbackContext(IInterceptorSubjectContext context)
 }
 ```
 
-The `added` local exists because C# forbids returning from a `finally` (CS0157). The record has to be written in the `finally` so a throwing resolve still leaves a removable edge, but the duplicate-add result has to be acted on outside it. Nothing is swallowed: when the resolve throws, the record is written and the exception then propagates past the `if`.
+An earlier revision wrapped the resolve in a `try` and committed from a `finally`, so the edge landed even when the resolve threw. That was circular: it committed the edge in order to keep the edge removable, when the removability problem only exists because it committed. Letting the exception skip the commit closes defect 4 and removes three hazards with it, namely the CS0157 dance around returning from a `finally`, a `finally` that could throw during exception propagation and mask the original, and the default-versus-empty `ImmutableArray` trap, since `interceptors` now only exists when the resolve succeeded.
 
 ### Why there is no window
 
@@ -252,22 +243,29 @@ The gap has to exist, because the callbacks must run with the edge intact and th
 | 1 | Remove racing add undoes a live registration | **Closed.** Taking the record is a single arbiter under `_mutationLock`. A losing thread returns `false` and never reaches phase two, so it cannot remove an edge it does not own. |
 | 2 | Double detach | **Closed.** Exactly one thread takes the record, so the callbacks run once by construction rather than by relying on `LifecycleInterceptor` being idempotent. |
 | 3 | Cyclic chain blocks detach | **Closed** for removability. The executor no longer resolves on the detach path, so nothing can throw before the removal is guaranteed. See the caveat below on what still throws. |
-| 4 | Half-attached subject on the add path | **Mitigated, not closed.** See below. |
+| 4 | Half-attached subject on the add path | **Closed.** The resolve happens before the commit, so a throw leaves no edge and no attach. See below for the one shape that still commits, and why that is correct. |
 | 5 | Retained subtree | **Closed.** Follows from 3: the edge and its reverse `_usedByContexts` entry always come out. |
 
-### Defect 4 is deliberately not closed
+### Defect 4, and the one shape that still commits
 
-#402 describes defect 4 as: the edge is registered, no attach callback ran, and the caller cannot tell how far it got. This design **preserves that outcome**. The `finally` guarantees the edge and an empty record are committed even when the resolve throws.
+The resolve throws only when the chain it reads is a pure delegation cycle, or when a consumer's `Equals` or `GetHashCode` throws during the service walk's dedup. Two shapes reach it, and resolving before the commit separates them:
 
-#402's own preferred remedy was to resolve before committing so the attach fails atomically with no edge registered. That is rejected here because `ContextConcurrencyFuzzTests` already models the edge as present after a throwing add (`:462-468`, `:519-527`), documenting it as intended behaviour: "The edge is in place, so the topology stays exactly as declared."
+| shape | today | after |
+|---|---|---|
+| the parent's chain is **already** cyclic | edge committed, resolve throws, nothing attached | resolve throws first, **nothing committed** |
+| the add itself **closes** the cycle | edge committed, resolve throws, nothing attached | resolve succeeds, edge committed, the *callbacks* throw |
 
-What the design does improve is that the edge stays *removable* and the caller still gets the exception. Closing defect 4 properly means rollback with per-interceptor unwind, which is #384's problem. Calling it closed here would be false.
+The first is defect 4 and it is now an atomic failure. So is the unrelated-exception case, which today also leaves a half-attached subject.
+
+The second is not defect 4. Resolving first means the parent is not yet on a loop, so the resolve succeeds and the commit is what closes the circle; the callbacks then throw because *this* context is now on it. The caller asked for an edge and got one, and what failed was notifying handlers that the caller's own topology made unreachable. That is the same caveat the detach side carries, and committing is the correct outcome because the topology is exactly what was requested.
+
+`ContextConcurrencyFuzzTests` needs a small change for this. It records `edge.IsPresent = true` **before** the call (`:519-527`), with a comment explaining that the executor registers the edge and only then resolves. That comment documents the current implementation rather than requiring it. The model stays correct for the cycle-closing shape and becomes wrong for the already-cyclic shape, so the fuzzer must mark the edge absent when the call throws.
 
 ### Exception contract on both paths
 
-Neither `try` swallows. On the add path a throwing resolve propagates with the edge registered and the record empty. On the remove path a throwing callback propagates with the edge already removed, because phase two runs in the `finally`. Removal must never be blocked by a handler failure, which is the same principle #384 argues for elsewhere.
+Neither path swallows. On the add path a throwing resolve propagates with nothing committed. On the remove path a throwing callback propagates with the edge already removed, because phase two runs in the `finally`. Removal must never be blocked by a handler failure, which is the same principle #384 argues for elsewhere.
 
-One hazard the `finally` on the add path introduces: it runs during exception propagation and can itself throw, replacing the original exception. The `HasFallbackContext` guard removes the cast as a cause; what remains is `OutOfMemoryException` and the stack overflow in the invalidation walk tracked by #405, neither of which is recoverable anyway.
+The asymmetry is deliberate: an add that cannot complete should leave no trace, while a remove that cannot complete must still remove, because a blocked removal is what strands edges and retains subtrees.
 
 ### Caveat on defect 3: removing a cyclic edge still throws
 
@@ -350,7 +348,7 @@ Regression tests for the defects:
 1. `WhenSameFallbackIsRemovedConcurrently_ThenDetachCallbacksRunOnce` (defect 2)
 2. `WhenRemoveRacesAdd_ThenTheAddIsNotUndone` (defect 1)
 3. `WhenChainIsDelegationCycle_ThenTheEdgeIsRemovedAndTheCallThrows` (defect 3). Asserts both halves: the `InvalidOperationException` reaches the caller *and* the edge is gone afterwards.
-4. `WhenAttachResolveThrows_ThenTheEdgeIsRegisteredAndRemainsRemovable` (defect 4, pinning the deliberate non-closure)
+4. `WhenAttachResolveThrows_ThenNoEdgeIsRegistered` (defect 4). Its companion pins the shape that still commits: `WhenAddClosesADelegationCycle_ThenTheEdgeIsRegisteredAndTheCallThrows`
 5. `WhenCyclicSubtreeIsDetached_ThenItBecomesCollectable` (defect 5), by weak reference probe
 
 Guards for the two forced orderings:
@@ -374,10 +372,11 @@ Tests 1, 2 and 9 must be verified by mutation, not by passing once: break the ar
 
 ## Scope
 
-Four files:
+Five files:
 
 - `src/Namotion.Interceptor/InterceptorSubjectContext.cs`: the `FallbackAttachments` field, all six construction sites carrying it, and the three `private protected` members
 - `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs`: the two overrides and the missing `using`
+- `src/Namotion.Interceptor.Tests/Context/ContextConcurrencyFuzzTests.cs`: the edge model must mark an edge absent when a throwing add left nothing committed, instead of recording it present before the call
 - `src/Namotion.Interceptor.Tests/Context/ContextStateReflection.cs`: it exposes `_state`, `_resolvedTerminal`, the function arrays and the marker, but not `FallbackContexts` or `FallbackAttachments`, which test 9 needs
 - one new test file, which can live in `Namotion.Interceptor.Tests` since it reaches Tracking transitively through `Namotion.Interceptor.Testing`
 
