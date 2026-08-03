@@ -239,13 +239,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Marks the attach finished and reports whether a remover handed its removal to this thread.
-    /// Must be called from a finally, so a throwing attach still leaves a removable edge.
-    /// </summary>
-    /// <summary>
     /// Leaves the record linked and claimable after an attach that ran no callbacks and will not
     /// return to its caller. A removal that deferred to this attach cannot be honoured, so its
-    /// request is dropped in favour of keeping the edge removable by whoever asks next.
+    /// request is dropped in favour of keeping the edge removable by whoever asks next. The
+    /// deferring caller was already told the removal was committed, so that promise is broken
+    /// here, which is why this is reachable only from an unrecoverable failure.
     /// </summary>
     private void MarkFallbackAttachmentClaimable(FallbackAttachment attachment)
     {
@@ -257,6 +255,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
+    /// <summary>
+    /// Marks the attach finished and reports whether a remover handed its removal to this thread.
+    /// Must be called from a finally, so a throwing attach still leaves a removable edge.
+    /// </summary>
     private protected bool CompleteFallbackAttachment(FallbackAttachment attachment, int invokedInterceptorCount)
     {
         lock (_mutationLock)

@@ -295,6 +295,48 @@ public class FallbackAttachmentOwnershipTests
         }
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(8)]
+    public async Task WhenSameFallbackIsRemovedConcurrently_ThenDetachCallbacksRunOnce(int removerCount)
+    {
+        // Arrange: every remover starts from a rendezvous so they contend on the same record.
+        // Without a single arbiter both would pass a check and both would detach.
+        for (var round = 0; round < 200; round++)
+        {
+            var parentContext = InterceptorSubjectContext.Create();
+            var interceptor = new CountingLifecycleInterceptor();
+            parentContext.AddService<ILifecycleInterceptor>(interceptor);
+
+            var childContext = ((IInterceptorSubject)new ContextProbeSubject()).Context;
+            Assert.True(childContext.AddFallbackContext(parentContext));
+
+            var results = new bool[removerCount];
+            using var ready = new CountdownEvent(removerCount);
+            using var start = new ManualResetEventSlim(false);
+
+            // Act
+            var removers = Enumerable
+                .Range(0, removerCount)
+                .Select(index => Task.Factory.StartNew(() =>
+                {
+                    ready.Signal();
+                    start.Wait();
+                    results[index] = childContext.RemoveFallbackContext(parentContext);
+                }, TaskCreationOptions.LongRunning))
+                .ToArray();
+
+            ready.Wait();
+            start.Set();
+            await Task.WhenAll(removers);
+
+            // Assert
+            Assert.Equal(1, results.Count(removed => removed));
+            Assert.Equal(1, interceptor.DetachCount);
+            Assert.True(childContext.GetServices<ILifecycleInterceptor>().IsEmpty);
+        }
+    }
+
     private sealed class ParkingLifecycleInterceptor(
         ManualResetEventSlim attachStarted,
         ManualResetEventSlim releaseAttach) : ILifecycleInterceptor

@@ -6,7 +6,7 @@ namespace Namotion.Interceptor;
 /// nothing but a null field.
 /// </summary>
 /// <remarks>
-/// Every operation takes the head by reference and does no locking of its own. The caller holds the
+/// Mutating operations take the head by reference. None of them locks: the caller holds the
 /// owning context's mutation lock, which is what keeps a record atomic with the edge it owns.
 /// </remarks>
 internal static class FallbackAttachmentList

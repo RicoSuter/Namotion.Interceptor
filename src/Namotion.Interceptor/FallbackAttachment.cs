@@ -9,8 +9,12 @@ namespace Namotion.Interceptor;
 /// matching attach resolved so the detach replays exactly those.
 /// </summary>
 /// <remarks>
-/// Every field is read and written under the owning context's mutation lock, which is what makes a
-/// record atomic with the edge it owns. Nothing here is thread safe on its own.
+/// Every field is written under the owning context's mutation lock, which is what makes a record
+/// atomic with the edge it owns. Nothing here is thread safe on its own.
+///
+/// A claimed record is read without the lock while its detach callbacks run, which is safe because
+/// claiming unlinks it under the lock and leaves exactly one owner, so the claim publishes every
+/// earlier write to that owner and no writer remains.
 /// </remarks>
 internal sealed class FallbackAttachment
 {

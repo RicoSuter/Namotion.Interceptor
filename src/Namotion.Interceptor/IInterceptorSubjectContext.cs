@@ -63,6 +63,12 @@ public interface IInterceptorSubjectContext
     /// Adds a fallback context for service resolution.
     /// Services not found in this context will be looked up in fallback contexts.
     /// </summary>
+    /// <remarks>
+    /// On a subject's context this also notifies the lifecycle interceptors of <paramref name="context"/>,
+    /// and records that set so the matching removal notifies exactly it. Under concurrent mutation
+    /// of the same edge, false can also mean that the edge is present but a removal already owns it
+    /// and is about to drop it.
+    /// </remarks>
     /// <param name="context">The fallback context to add.</param>
     /// <returns>True if the fallback context was added, false if it was already present.</returns>
     bool AddFallbackContext(IInterceptorSubjectContext context);
@@ -70,6 +76,13 @@ public interface IInterceptorSubjectContext
     /// <summary>
     /// Removes a previously added fallback context.
     /// </summary>
+    /// <remarks>
+    /// On a subject's context this first notifies the lifecycle interceptors recorded by the
+    /// matching add, while the fallback is still resolvable. True therefore means the removal is
+    /// committed rather than necessarily already applied: when an add is still running its attach
+    /// callbacks, the removal completes on that thread and the fallback stays visible until it does.
+    /// False can also mean that another caller already owns the removal.
+    /// </remarks>
     /// <param name="context">The fallback context to remove.</param>
     /// <returns>True if the fallback context was removed, false if it was not present.</returns>
     bool RemoveFallbackContext(IInterceptorSubjectContext context);
