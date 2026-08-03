@@ -335,7 +335,7 @@ public class ChangeQueueProcessorTests
         // Arrange - a change is enqueued after its commit and outside the subject lock, so two writers to
         // one property can enqueue in the opposite order they committed. The flush must resolve that by
         // revision, not by queue position.
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
