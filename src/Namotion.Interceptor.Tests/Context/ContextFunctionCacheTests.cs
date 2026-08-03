@@ -102,9 +102,81 @@ public class ContextFunctionCacheTests
         Assert.Same(first, secondResult);
     }
 
+    [Fact]
+    public async Task WhenMethodInvocationFunctionIsSetConcurrently_ThenEveryCallerObservesOneWinner()
+    {
+        // Arrange: the single slot is filled by a CAS, so unlike the read and write arrays every
+        // racing caller has to come back with the winner rather than with what it brought.
+        const int callerCount = 32;
+        var context = InterceptorSubjectContext.Create();
+        var candidates = Enumerable
+            .Range(0, callerCount)
+            .Select(index => (Delegate)(Action)(() => GC.KeepAlive(index)))
+            .ToArray();
+
+        // The closures capture index, so these are distinct instances rather than one cached lambda.
+        Assert.Equal(callerCount, candidates.Distinct().Count());
+
+        var results = new Delegate[callerCount];
+        using var ready = new CountdownEvent(callerCount);
+        using var start = new ManualResetEventSlim(false);
+        var callers = candidates
+            .Select((candidate, index) => Task.Factory.StartNew(() =>
+            {
+                ready.Signal();
+                start.Wait();
+                results[index] = GetOrSetMethodInvocationFunction(context, candidate);
+            }, TaskCreationOptions.LongRunning))
+            .ToArray();
+
+        // Act
+        ready.Wait();
+        start.Set();
+        await AsyncTestHelpers.WaitUntilAsync(() => callers.All(caller => caller.IsCompleted),
+            message: "Concurrent method invocation function callers did not finish");
+        await Task.WhenAll(callers);
+
+        // Assert
+        Assert.Single(results.Distinct());
+        Assert.Contains(results[0], candidates);
+    }
+
+    [Fact]
+    public void WhenFunctionArrayGrowsPastItsLength_ThenItDoublesInsteadOfSizingToTheIndex()
+    {
+        // Arrange: a run of indices, so the two used below are far enough from zero that doubling
+        // the first array overshoots the second index. That is what makes the assertion below
+        // distinguish doubling from sizing exactly to the index.
+        var propertyTypes = CreateDoublingPropertyTypes(16);
+        var propertyTypeIndices = propertyTypes.Select(GetPropertyTypeIndex).ToArray();
+        var firstIndex = propertyTypeIndices[^2];
+        var secondIndex = propertyTypeIndices[^1];
+        Assert.True(secondIndex > firstIndex, "The property type indices are not increasing.");
+        Assert.True(secondIndex + 1 < (firstIndex + 1) * 2,
+            $"Index {secondIndex} is beyond double of {firstIndex}, so this cannot tell the two sizing rules apart.");
+
+        var subject = new ContextProbeSubject();
+        var executor = Assert.IsType<InterceptorExecutor>(((IInterceptorSubject)subject).Context);
+
+        // Act: the first fill sizes the array to its own index, the second has to grow it.
+        ExerciseFunctionCachesMethod.MakeGenericMethod(propertyTypes[^2]).Invoke(null, [executor]);
+        var lengthAfterFirst = Assert.IsType<Delegate?[]>(GetReadFunctions(executor)).Length;
+        ExerciseFunctionCachesMethod.MakeGenericMethod(propertyTypes[^1]).Invoke(null, [executor]);
+
+        // Assert
+        Assert.Equal(firstIndex + 1, lengthAfterFirst);
+        Assert.Equal(lengthAfterFirst * 2, Assert.IsType<Delegate?[]>(GetReadFunctions(executor)).Length);
+        Assert.Equal(lengthAfterFirst * 2, Assert.IsType<Delegate?[]>(GetWriteFunctions(executor)).Length);
+    }
+
     private static Type[] CreatePropertyTypes(int count)
     {
         return CreatePropertyTypes(count, typeof(PropertyType<>), typeof(PropertyTypeRoot));
+    }
+
+    private static Type[] CreateDoublingPropertyTypes(int count)
+    {
+        return CreatePropertyTypes(count, typeof(DoublingPropertyType<>), typeof(DoublingPropertyTypeRoot));
     }
 
     private static Type[] CreateHighIndexPropertyTypes(int count)
@@ -142,4 +214,8 @@ public class ContextFunctionCacheTests
     private sealed class HighIndexPropertyType<TProperty>;
 
     private sealed class HighIndexPropertyTypeRoot;
+
+    private sealed class DoublingPropertyType<TProperty>;
+
+    private sealed class DoublingPropertyTypeRoot;
 }
