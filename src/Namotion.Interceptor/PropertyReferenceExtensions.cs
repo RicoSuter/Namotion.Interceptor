@@ -21,14 +21,11 @@ public static class PropertyReferenceExtensions
     /// new <see cref="PropertyWriteContext{TProperty}"/>'s cache is seeded directly. Bypasses
     /// the <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope-push
     /// dance the derived-cascade would otherwise need to share the trigger's captured time.
-    /// Pass <c>finalValueIsNewValue</c> as true when the new value is already the stabilized getter
-    /// output, so publishing reuses it instead of invoking the getter again (see
-    /// <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
     /// </summary>
     internal static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue,
-        object? currentValue, Action<IInterceptorSubject, object?> writeValue, long rawTimestamp, bool finalValueIsNewValue)
+        object? currentValue, Action<IInterceptorSubject, object?> writeValue, long rawTimestamp)
     {
         var executor = property.Subject.Context as InterceptorExecutor;
-        executor?.SetPropertyValue(property.Name, newValue, currentValue, writeValue, rawTimestamp, finalValueIsNewValue);
+        executor?.SetPropertyValue(property.Name, newValue, currentValue, writeValue, rawTimestamp);
     }
 }

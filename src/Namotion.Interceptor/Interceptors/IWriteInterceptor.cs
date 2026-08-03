@@ -50,10 +50,13 @@ public struct PropertyWriteContext<TProperty>
     // per-call state belongs on the per-call context, which is also robust against reentrant writes.
     internal Action<IInterceptorSubject, TProperty>? Terminal;
 
-    // The executor that started this write. Always the executor of Property.Subject: both construction
-    // sites pass their own 'this' alongside a PropertyReference over their own subject. Threaded through
-    // the context so the terminal can stamp the commit revision with a plain field increment, instead of
-    // resolving the subject's context (an interface dispatch plus a type test) on every committed write.
+    // The executor that started this write, and always the executor of Property.Subject: both library
+    // construction sites pass their own 'this' alongside a PropertyReference over their own subject.
+    // The constructors are also visible to the test and benchmark assemblies, which construct contexts
+    // of their own, which is why the terminal asserts that pairing instead of assuming it.
+    // Threaded through the context so the terminal can stamp the commit revision with a plain field
+    // increment, instead of resolving the subject's context (an interface dispatch plus a type test)
+    // on every committed write.
     internal readonly InterceptorExecutor Executor;
 
     /// <summary>
@@ -63,7 +66,7 @@ public struct PropertyWriteContext<TProperty>
     internal long Revision;
 
     /// <summary>
-    /// Set by the derived recalculation entry point, where <see cref="NewValue"/> is already the
+    /// Set by the cascade re-entry constructor, where <see cref="NewValue"/> is already the
     /// stabilized getter output. Stops <see cref="GetFinalValue"/> from re-invoking the getter,
     /// which would run user code at publish time and could return a value that never paired
     /// atomically with this change's old value.
@@ -135,8 +138,11 @@ public struct PropertyWriteContext<TProperty>
     /// already-resolved raw timestamp, so the dependent's write does not need to lazy-resolve
     /// (and therefore does not need an active <c>WithChangedTimestamp</c> scope to share state
     /// with the trigger). Pass 0 to leave the cache uninitialized (the default lazy behavior).
-    /// Like the public constructor, this consumes the thread-static pending origin stamp for
+    /// Like the other constructor, this consumes the thread-static pending origin stamp for
     /// this property (see <see cref="PendingOrigin"/>) as a side effect of construction.
+    ///
+    /// Cascade re-entry is only ever reached with a new value that is already the stabilized getter
+    /// output, so <see cref="FinalValueIsNewValue"/> is set here rather than passed in.
     /// </summary>
     internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp)
     {
@@ -145,6 +151,7 @@ public struct PropertyWriteContext<TProperty>
         CurrentValue = currentValue;
         NewValue = newValue;
         IsWritten = false;
+        FinalValueIsNewValue = true;
         _writeTimestamp = rawTimestamp;
         PendingOrigin.TryConsume(in property, out _attempted);
     }

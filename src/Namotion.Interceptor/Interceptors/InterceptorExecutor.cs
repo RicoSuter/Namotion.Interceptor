@@ -15,8 +15,11 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// <summary>
     /// Monotonic per-subject commit counter. Incremented by the terminal write while the subject's
     /// SyncRoot is held, so a plain increment is exclusive: no Interlocked needed. Dense over
-    /// committed writes and never reset, so it stays comparable across detach and reattach. A label
-    /// only: ordering does not depend on it.
+    /// committed writes and never reset, so it stays comparable across detach and reattach.
+    ///
+    /// It records commit order, it does not establish it: the lock is what serializes the commits, and
+    /// this counter labels them afterwards. Consumers do order changes by comparing it (see the flush
+    /// deduplication in docs/tracking.md), but nothing in the write path depends on its value.
     ///
     /// Consumes a revision exactly when the terminal write runs. A vetoed write and a write stopped
     /// by the equality check never reach the terminal and consume nothing, but a derived property's
@@ -53,22 +56,19 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// Cascade re-entry path: skips the lazy-resolve machinery by pre-populating the new write
     /// context's timestamp cache. Lets the cascade share the trigger's captured time without
     /// pushing a <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope.
-    /// Pass <c>finalValueIsNewValue</c> as true when the new value is already the stabilized getter
-    /// output, so publishing reuses it instead of invoking the getter again (see
+    /// The new value is already the stabilized getter output on this path, so publishing reuses it
+    /// instead of invoking the getter again (see
     /// <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp, bool finalValueIsNewValue)
+    internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp)
     {
         var context = new PropertyWriteContext<TProperty>(
             this,
             new PropertyReference(_subject, propertyName),
             currentValue,
             newValue,
-            rawTimestamp)
-        {
-            FinalValueIsNewValue = finalValueIsNewValue
-        };
+            rawTimestamp);
 
         ExecuteInterceptedWrite(ref context, writeValue);
         return context.IsWritten;
