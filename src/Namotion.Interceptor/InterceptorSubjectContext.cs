@@ -314,6 +314,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var visited = _delegationCycleVisited ??= [];
         var path = _delegationCyclePath ??= [];
 
+        var backoff = new SpinWait();
+
         try
         {
             while (true)
@@ -372,7 +374,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 }
 
                 // The loop came apart under the walk, so it was a rewiring and not a cycle. A real
-                // cycle has no state to lose and confirms on the next pass.
+                // cycle has no state to lose and confirms on the next pass. Backing off because
+                // reaching here means a mutator is rewiring right now and nothing else bounds this
+                // loop; only retries pay it.
+                backoff.SpinOnce();
             }
         }
         finally
