@@ -53,6 +53,12 @@ jobs:
               - 'src/Namotion.Interceptor.Registry/**'
               - 'src/Namotion.Interceptor.Connectors/**'
               - 'src/Namotion.Interceptor.Dynamic/**'
+              # Referenced by the connector integration test projects rather than by the connectors
+              # themselves, so a change here can break a suite without touching anything above.
+              - 'src/Namotion.Interceptor.Testing/**'
+              - 'src/Namotion.Interceptor.Hosting/**'
+              - 'src/Namotion.Interceptor.Validation/**'
+              - 'src/Namotion.Interceptor.AspNetCore/**'
             homeblaze:
               - 'src/HomeBlaze/**'
             nugetplugins:

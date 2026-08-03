@@ -1,11 +1,15 @@
 namespace Namotion.Interceptor.Dynamic.Tests;
 
 /// <summary>
-/// <see cref="DynamicSubject"/> publishes its executor with the same compare-and-swap the generator
-/// emits, and for the same reason: a lazy assignment lets two threads racing the first access each
-/// build an executor and discard one, along with the per-subject commit revision counter on it.
-/// The generated path is covered by <c>ExecutorPublicationTests</c>; this pins the hand-written twin,
-/// which is a separate copy of the same code and can drift independently.
+/// <see cref="DynamicSubject"/> must publish its executor race-free: a lazy assignment lets two
+/// threads racing the first access each build an executor and discard one, along with the per-subject
+/// commit revision counter on it.
+///
+/// It shares the implementation with the generated subjects through
+/// <c>InterceptorExecutor.GetOrCreate</c>, so this does not pin a second copy of that logic. What it
+/// pins is that this accessor still routes through the shared helper at all, which
+/// <c>ExecutorPublicationTests</c> cannot see: that test would keep passing if only this type
+/// regressed to a lazy assignment.
 /// </summary>
 public class DynamicSubjectExecutorPublicationTests
 {

@@ -238,6 +238,13 @@ public struct PropertyWriteContext<TProperty>
     /// <summary>
     /// Reads the current property value (might be different from <see cref="NewValue"/> if the property is derived).
     /// Must only be used after the 'next()' call in the write interceptor.
+    ///
+    /// One exception: on a derived property's own recalculation, <see cref="NewValue"/> is already the
+    /// stabilized getter output, so this returns it directly instead of invoking the getter again. That
+    /// keeps the published new value paired with the old value it was compared against, and keeps user
+    /// code off the publish path, where a throwing getter used to suppress the notification entirely.
+    /// An interceptor that rewrites <see cref="NewValue"/> on that path therefore changes what is
+    /// published, which the previous getter re-read would have masked.
     /// </summary>
     /// <returns>The property value.</returns>
     public TProperty GetFinalValue()

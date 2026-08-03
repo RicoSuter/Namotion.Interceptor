@@ -300,6 +300,37 @@ public class ChangeDeduplicatorTests
         return subjects;
     }
 
+    /// <summary>
+    /// The disposed deduplicator is reachable: <see cref="ChangeQueueProcessor"/> releases the buffer
+    /// once its Dispose wins the flush gate, and the periodic flush task can outlive that and tick
+    /// again on whatever was enqueued in between. Throwing there escapes the flush, kills the periodic
+    /// loop for good and leaves the queue growing unbounded, so the guards are load-bearing rather
+    /// than defensive tidiness, and nothing else exercises them.
+    /// </summary>
+    [Fact]
+    public void WhenDisposed_ThenDeduplicateIsEmptyAndResetIsANoOp()
+    {
+        // Arrange
+        var deduplicator = new ChangeDeduplicator();
+
+        var subject = new Person();
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        SubjectPropertyChange[] changes = [CreateChange(property, "Value1", "Value2", revision: 1)];
+
+        Assert.Single(deduplicator.Deduplicate(changes).ToArray());
+        deduplicator.Reset();
+
+        // Act
+        deduplicator.Dispose();
+
+        // Assert: a flush that reaches a released buffer skips the write handler instead of throwing.
+        Assert.True(deduplicator.Deduplicate(changes).IsEmpty);
+
+        // And the calls that would follow it in that same flush stay no-ops.
+        deduplicator.Reset();
+        deduplicator.Dispose();
+    }
+
     private static SubjectPropertyChange CreateChange(
         PropertyReference property,
         string? oldValue,

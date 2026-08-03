@@ -26,7 +26,10 @@ internal sealed class ChangeDeduplicator : IDisposable
     // work: the walk goes backwards, so the last extension on each side is the batch extremum.
     // Revisions are only comparable within one subject, which holds here because the key pins the
     // collapse to a single property. A committed write never takes revision 0, so a zero lower bound
-    // doubles as the "this property has an unordered change" flag the merge falls back on.
+    // doubles as the "this property has an unordered change" flag the merge falls back on. Zero is
+    // read as a sentinel rather than as an ordinary minimum, so a change carrying a negative revision
+    // (constructible through the public factory, never produced by the write path) is outside the
+    // contract and orders arbitrarily.
     private readonly Dictionary<PropertyReference, (int Index, int SeedIndex, long LowestRevision, long HighestRevision)> _propertyIndices
         = new(PropertyReference.Comparer);
 
@@ -69,7 +72,17 @@ internal sealed class ChangeDeduplicator : IDisposable
         }
 
         _propertyIndices.Clear();
-        _count = 0;
+
+        // Release the previous batch here rather than only trusting Reset to have done it. A missed
+        // Reset would otherwise hand a dirty array back to the shared pool on the growth path below,
+        // keeping its subjects and boxed values alive, or leave references stranded past a smaller
+        // new count where no later Reset would ever clear them. Free on the normal path, where the
+        // count is already zero.
+        if (_count > 0)
+        {
+            Array.Clear(_buffer, 0, _count);
+            _count = 0;
+        }
 
         if (changes.Length == 0)
         {
@@ -79,9 +92,8 @@ internal sealed class ChangeDeduplicator : IDisposable
         // Pre-size to avoid resizes under bursts
         _propertyIndices.EnsureCapacity(changes.Length);
 
-        // Ensure the buffer is large enough (rent from pool to avoid allocations).
-        // Returning without clearing is safe because Reset() released the previous batch, which leaves
-        // the whole array clear.
+        // Ensure the buffer is large enough (rent from pool to avoid allocations). Returning without
+        // clearing is safe because the release above leaves the whole array clear.
         if (_buffer.Length < changes.Length)
         {
             ArrayPool<SubjectPropertyChange>.Shared.Return(_buffer);
