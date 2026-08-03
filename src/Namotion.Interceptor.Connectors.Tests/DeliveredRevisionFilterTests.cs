@@ -133,6 +133,56 @@ public class DeliveredRevisionFilterTests
         Assert.True(filter.TryAdmit(CreateChange(property, revision: 21)));
     }
 
+    [Fact]
+    public void WhenTheSourceHoldsTheNewestValue_ThenNoWriteBackIsNeeded()
+    {
+        // Arrange: nothing this processor wrote is newer, so the source still holds what it was given.
+        var filter = new DeliveredRevisionFilter();
+        var property = new PropertyReference(new Person(), nameof(Person.FirstName));
+
+        // Act
+        filter.RecordDelivered(CreateChange(property, revision: 10));
+
+        // Assert
+        Assert.False(filter.WasWrittenOut(property));
+    }
+
+    [Fact]
+    public void WhenThisProcessorWroteTheProperty_ThenAWriteBackIsNeeded()
+    {
+        // Arrange: our write may have landed on the source after a transaction's, so a later
+        // confirmation has to be sent out to restore the confirmed value.
+        var filter = new DeliveredRevisionFilter();
+        var property = new PropertyReference(new Person(), nameof(Person.FirstName));
+
+        // Act
+        Assert.True(filter.TryAdmit(CreateChange(property, revision: 10)));
+
+        // Assert
+        Assert.True(filter.WasWrittenOut(property));
+    }
+
+    [Fact]
+    public void WhenAConfirmationIsWrittenBack_ThenItDoesNotAskForAnotherWriteBack()
+    {
+        // Arrange: writing a confirmation out leaves the source holding that same confirmed value, so
+        // it is not an overwrite the next confirmation would need to repair.
+        var filter = new DeliveredRevisionFilter();
+        var subject = new Person();
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+
+        filter.TryAdmit(CreateChange(property, revision: 10));
+        Assert.True(filter.WasWrittenOut(property));
+
+        // Act
+        var confirmation = SubjectPropertyChange.Create(
+            property, ChangeOrigin.Confirmed(new object()), DateTimeOffset.UnixEpoch, null, "old", "new", 11L);
+        Assert.True(filter.TryAdmit(confirmation));
+
+        // Assert
+        Assert.False(filter.WasWrittenOut(property));
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference[] RecordAndAbandon(DeliveredRevisionFilter filter)
     {

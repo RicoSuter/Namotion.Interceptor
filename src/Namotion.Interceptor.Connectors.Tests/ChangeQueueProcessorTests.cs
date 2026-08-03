@@ -427,6 +427,99 @@ public class ChangeQueueProcessorTests
         try { await processing; } catch (OperationCanceledException) { /* expected */ }
     }
 
+    /// <summary>
+    /// A transaction writes to the source itself and then applies locally, and that apply arrives as a
+    /// confirmation. If a write of ours landed on the source in between, the source is left holding the
+    /// older commit while the subject holds the confirmed one, and nothing would ever correct it.
+    /// </summary>
+    [Fact]
+    public async Task WhenAConfirmationFollowsOurOwnWrite_ThenItIsSentBackToRepairTheSource()
+    {
+        // Arrange
+        var (context, subject, written, source, processor) = CreateImmediateProcessor();
+        using var _ = processor;
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act: our own write reaches the source first, so the source may since have been overwritten.
+        subject.FirstName = "Ours";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Ours"));
+
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        using (PendingOrigin.Set(property, ChangeOrigin.Confirmed(source), "Confirmed"))
+        {
+            subject.FirstName = "Confirmed";
+        }
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Confirmed"));
+
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    [Fact]
+    public async Task WhenAConfirmationDoesNotFollowOurOwnWrite_ThenItIsNotSentBack()
+    {
+        // Arrange: nothing of ours reached the source for this property, so the source still holds what
+        // the transaction wrote and sending it again would be a redundant round trip.
+        var (context, subject, written, source, processor) = CreateImmediateProcessor();
+        using var _ = processor;
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        using (PendingOrigin.Set(property, ChangeOrigin.Confirmed(source), "Confirmed"))
+        {
+            subject.FirstName = "Confirmed";
+        }
+
+        // A change on another property proves the loop ran past the confirmation rather than stalling.
+        subject.LastName = "Other";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Other"));
+        Assert.DoesNotContain("Confirmed", written);
+
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    private static (IInterceptorSubjectContext Context, Person Subject, List<string?> Written, object Source, ChangeQueueProcessor Processor)
+        CreateImmediateProcessor()
+    {
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var written = new List<string?>();
+        var source = new object();
+
+        var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Add(change.GetNewValue<string>());
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        return (context, subject, written, source, processor);
+    }
+
     private static void SeedDeliveredRevision(ChangeQueueProcessor processor, PropertyReference property, long revision)
     {
         var field = typeof(ChangeQueueProcessor)
