@@ -215,19 +215,29 @@ root in A with reference count 0 so B's attach looks like an ordinary first atta
 
 ### Root attach
 
+The subject records the context it was attached through, in one of three states:
+
+```
+null       not attached
+context    attached through this context
+Detaching  a detach is in progress
+```
+
 ```csharp
 public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
 {
-    subject.Context.AddFallbackContext(context);
+    // null -> context. No-op if already this context. Throws on Detaching.
     subject.ClaimAttachContext(context);
+
+    subject.Context.AddFallbackContext(context);
     foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
         interceptor.AttachSubjectToContext(subject);
 }
 
 public static void DetachFromContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
 {
-    // Interlocked compare-exchange from context to null: exactly one caller proceeds.
-    if (!subject.TryReleaseAttachContext(context)) return;
+    // context -> Detaching. Exactly one caller proceeds.
+    if (!subject.TryBeginDetach(context)) return;
 
     try
     {
@@ -237,6 +247,7 @@ public static void DetachFromContext(this IInterceptorSubject subject, IIntercep
     finally
     {
         subject.Context.RemoveFallbackContext(context);
+        subject.EndDetach();   // Detaching -> null, after the edge is gone
     }
 }
 ```
@@ -244,16 +255,43 @@ public static void DetachFromContext(this IInterceptorSubject subject, IIntercep
 The context's mutation lock is released before any interceptor runs. That is everything PR #412 was
 protecting, achieved by writing two statements in order.
 
-The compare-exchange on the detach path is what closes #402 defect 2, the double detach. Without it, two
-concurrent `DetachFromContext` calls both run the interceptor loop. `LifecycleInterceptor`'s detach
-happens to be idempotent, but #402 is explicit that nothing in the `ILifecycleInterceptor` contract
-requires that of a consumer implementation, so relying on it is relying on an accident. PR #412 closed
-this with its ownership record; here the same guarantee costs one interlocked operation on a field the
-owner machinery adds anyway. The loser returns having called nothing, which also makes it a full no-op
-rather than one that runs callbacks and then finds no edge to remove.
+Both transitions are interlocked compare-exchanges, and between them they close two of #402's defects
+that would otherwise be reopened by deleting PR #412's ownership record.
 
-What this does **not** cover is a `DetachFromContext` racing an `AttachToContext` on the same root, where
-the two-statement sequences can interleave. That is the residual recorded on #411 and it stays open.
+**Defect 2, the double detach.** Two concurrent `DetachFromContext` calls would both run the interceptor
+loop. `LifecycleInterceptor`'s detach happens to be idempotent, but #402 is explicit that nothing in the
+`ILifecycleInterceptor` contract requires that of a consumer implementation, so relying on it is relying
+on an accident. Only the caller that wins `context -> Detaching` proceeds; the loser returns having
+called nothing, which also makes it a full no-op rather than one that runs callbacks and then finds no
+edge to remove.
+
+**Defect 1, a remove racing an add.** Its stated mechanism, a check-then-act with callbacks in the gap
+inside `RemoveFallbackContext`, is gone because that method is now atomic. But the outcome is reachable
+one level up, since `AttachToContext` and `DetachFromContext` are two-step sequences with user code
+between the steps:
+
+```
+A: DetachFromContext -> starts detach interceptors
+C: AttachToContext   -> AddFallbackContext returns false, the edge is still there
+                     -> runs attach interceptors
+A: finally -> RemoveFallbackContext -> edge gone
+```
+
+Attached according to the bookkeeping, detached according to `_attachedSubjects`, and no edge. The
+`Detaching` sentinel makes that unreachable: C's claim finds the sentinel and throws instead of
+proceeding. This closes defect 1 by loud failure rather than by atomicity, which is the same choice
+change 6 makes for the multi-graph case. Making it atomic instead would require a removal that can
+detect an in-flight attach and negotiate with it, which is PR #412's record and handoff rebuilt.
+
+Two consequences worth stating. The claim now precedes the edge add, so an attach that throws during
+resolution leaves no edge. And if `AddFallbackContext` itself throws after a successful claim, the claim
+is stranded: the subject reads as attached with no edge, and a later `DetachFromContext` runs detach
+interceptors that find nothing in `_attachedSubjects` and return early. Benign, and not worth a rollback.
+
+What this does **not** close is #411. A bare `AddFallbackContext` during the detach window is a
+legitimate composition call rather than an attach, so it is not gated by the sentinel: it returns `false`
+and then loses its edge. Narrowed from every child detach to an explicit concurrent root detach, and
+recorded there.
 
 The detach ordering is forced rather than chosen: detach callbacks resolve their handlers through
 `subject.Context`, which is the executor, and a generated subject's executor owns no services, so the
@@ -455,6 +493,7 @@ so no rule can separate them while both go through one method.
 | Condition | Result |
 |---|---|
 | Attaching a subject owned by another graph | `InvalidOperationException`, before any mutation |
+| `AttachToContext` while a detach of the same subject is in progress | `InvalidOperationException`, before any mutation; the caller may retry |
 | `RemoveFallbackContext` targeting a subject's attach edge | `InvalidOperationException` naming `DetachFromContext` |
 | `AddFallbackContext` adding a lifecycle-bearing context to an unattached subject | `InvalidOperationException` naming `AttachToContext` and `AddTemporaryFallbackContext` |
 | Delegation cycle on resolution | unchanged |
@@ -467,7 +506,7 @@ partial bookkeeping, exactly as on `master`. That is #384 and it stays out.
 
 ## 8. Behaviour changes
 
-The complete list. Anything discovered beyond these nine is escalated, not absorbed.
+The complete list. Anything discovered beyond these ten is escalated, not absorbed.
 
 1. `AddFallbackContext` stops attaching.
 2. `RemoveFallbackContext` stops detaching a root, and throws if aimed at the attach edge.
@@ -483,6 +522,9 @@ The complete list. Anything discovered beyond these nine is escalated, not absor
 9. Concurrent `DetachFromContext` calls for the same subject and context run the detach interceptors
    exactly once instead of once per caller. This closes #402 defect 2 without depending on consumer
    implementations being idempotent.
+10. `AttachToContext` throws when a detach of the same subject is in progress, rather than proceeding
+    into a state where the bookkeeping and `_attachedSubjects` disagree. This closes #402 defect 1 at the
+    composite level by loud failure.
 
 Ordering is deliberately **not** in this list. Fixing the traversal order to top-down was considered and
 rejected: the audit shows it would break nothing in the codebases we can see and would strictly improve
@@ -541,6 +583,7 @@ These land first and must pass on unmodified `master`. None of this is pinned to
 | 7 | throwing detach interceptor, assert the edge is gone |
 | 8 | characterization test 7, the `IPropertyLifecycleHandler` invocation order |
 | 9 | two threads calling `DetachFromContext` on the same subject and context, assert exactly one interceptor pass |
+| 10 | rendezvous: pause a detach inside its interceptor loop, call `AttachToContext`, assert it throws and that the final state is detached with no edge |
 
 ### Oracles that must not move
 
@@ -578,14 +621,24 @@ carry gates that stop meaning anything once they are folded into later work.
 | 3 | `AttachToContext` / `DetachFromContext`, migrate root call sites | behaviour-neutral, since `AttachSubjectToContext` is idempotent while `AddFallbackContext` still attaches |
 | 4 | `ContextState.Parent`, internal setters, `LifecycleInterceptor` sets and clears it, handler body becomes the descent trigger | snapshots must not move; #410 turns green |
 | 5 | Remove the executor overrides, add the loud errors, add `AddTemporaryFallbackContext`, migrate the three connector sites | the breaking one |
-| 6 | Owner field and multi-graph exception, attach-edge claim and interlocked release, repoint, `finally` | #207 and #402 turn green, including defect 2 |
+| 6 | Owner field and multi-graph exception, the three-state attach context with its claim and detach transitions, repoint, `finally` | #207 and #402 turn green, including defects 1 and 2 |
 | 7 | The #210 fix: ledger cleanup bound to `IPropertyLifecycleHandler.DetachProperty` | characterization test 7 records the new handler entry |
 | 8 | Consumer and design docs | see below |
 
-Commits 4 and 5 change allocations per attach. The prediction is one fewer allocation and roughly 24
-fewer bytes per attached subject, because a one-element `ImmutableArray` is replaced by a field, so the
-branch carries a `RegistryBenchmark` run on `AddLotsOfPreviousCars` and `ChangeAllTires` before it is
-proposed for merge.
+### Benchmark gates
+
+Three runs, not one at the end and not one per commit. Measuring only at the head means bisecting a
+regression across eight commits with a benchmark that costs minutes per run; measuring after commits that
+cannot move the number is waste. Commits 1, 2, 3, 7 and 8 are tests, behaviour-neutral wrappers and docs.
+
+| After | Benchmarks | Why |
+|---|---|---|
+| Commit 4 | `RegistryBenchmark`, `ContextDelegationDepthBenchmark` | Allocations on the attach path must **drop**: a one-element `ImmutableArray` becomes a field, predicted at one fewer allocation and roughly 24 fewer bytes per attached subject. This is a correctness signal as much as a performance one, because if they do not drop the parent link is not actually replacing the edge. The depth benchmark guards the other half: a delegating context goes from one fallback to zero fallbacks and one parent, and `DelegationTarget` derivation changes with it. #400 used that benchmark to prove depth is free, and it is what would catch us undoing it. |
+| Commit 6 | `RegistryBenchmark` | The attach path gains interlocked operations and a subject-data entry for the three-state attach context. Small, but it is the only commit that adds work to a hot path. |
+| Branch head | Both, against `master` | The numbers that go in the pull request description. |
+
+Run through `scripts/benchmark.ps1` with multiple launches, since #412 recorded that a single launch on a
+busy machine inverted its own result across runs.
 
 If review stalls on the whole, the natural cut line is between commits 4 and 5: everything up to and
 including 4 is behaviour-neutral for existing callers.
@@ -628,7 +681,7 @@ corrections that the body does not.
 
 | Issue | Action |
 |---|---|
-| #402 | Close. All five defects dissolve. Four follow from there being no callbacks inside the edge mutation, so nothing to order, claim or hand off. Defect 2, the double detach, needs the interlocked release on `DetachFromContext` in change 9, because PR #412 closed it with the ownership record this design deletes and `LifecycleInterceptor`'s idempotence is an accident rather than a contract. Its first comment concluded that "the complete fix needs a decision about where lifecycle callbacks run, not just a reordering", which is what this design decides. |
+| #402 | Close. All five defects dissolve. Four follow from there being no callbacks inside the edge mutation, so nothing to order, claim or hand off. Defects 1 and 2 would otherwise be reopened by deleting PR #412's ownership record, and are closed instead by the three-state attach context: changes 9 and 10. Its first comment concluded that "the complete fix needs a decision about where lifecycle callbacks run, not just a reordering", which is what this design decides. |
 | #207 | Close, citing **both** reproductions. The body's path is a constructor context differing from the lifecycle parent. The first comment adds a second path with no constructor mismatch at all: two parents, where the add fires on the first attach and names P1 while the remove fires on the last detach and names P2, so P1's edge survives. Commit 2 carries a reproduction for each, since the comment notes they diverge before they converge. |
 | #410 | Close symptom 2 and the retention it causes. **Do not claim symptom 1** without the reproduction attempt: its own comment argues the pure delegation cycle may be organically unreachable, because stranding leaves two fallbacks rather than one and two fallbacks cannot collapse. If the attempt fails, symptom 1 is struck and the issue closes narrower. |
 | #210 | Close as not reachable, with the finding that no property removal API exists, and note that commit 7 makes the leak structurally impossible if one is added later. |
