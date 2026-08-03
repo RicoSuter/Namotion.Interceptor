@@ -113,6 +113,16 @@ Provenance-aware validators receive the origin via `PropertyValidationContext` a
 
 A write's origin moves through a lifecycle: it starts as a pending stamp set by the apply call (`SetValueFromSource`, `ApplySubjectUpdate`), becomes the attempted origin carried by the write while interceptors and validators run (this is what `PropertyValidationContext.Origin` exposes), and is finalized at the actual write, where a stamped origin whose stored value does not equal the sent value is demoted to `Local`; published changes always carry the finalized origin.
 
+### Change Batching and Deduplication
+
+A source with a `bufferTime` above zero batches outbound changes and collapses each flush to one change per property, so `WriteChangesAsync` sees at most one entry per property per flush.
+
+Per property, the surviving old value comes from the change with the *lowest* `SubjectPropertyChange.Revision` in that batch and the new value from the one with the *highest*, so the survivor spans the batch even when changes were enqueued in the opposite order they committed. Enqueuing happens after the commit and outside the subject lock, so under concurrent writers that inversion is real rather than theoretical. The survivor's `Revision`, `Origin`, `ChangedTimestamp` and `ReceivedTimestamp` all come from that same highest-revision change, so a handler that keys off `Origin.Source`, for example to suppress echoes, sees the origin of the newest commit. Emit order is the arrival order of each property's last occurrence.
+
+Revisions are monotonic per subject and are not comparable across subjects; see [Delivery Guarantees](tracking.md#delivery-guarantees) for the full contract, including what the old value does and does not promise.
+
+Deduplication covers one flush batch only. An inversion that straddles a flush tick can still deliver the older value last, so compare `Revision` in `WriteChangesAsync` if your source needs strict convergence.
+
 ### Write Retry Queue
 
 `SubjectSourceBase` provides a write retry queue that buffers writes during disconnection. Each connector exposes the queue size through its own configuration (for example, `OpcUaClientConfiguration.WriteRetryQueueSize`); when implementing a custom source, pass `writeRetryQueueSize` to the `SubjectSourceBase` constructor (default: 1000, pass 0 to disable).

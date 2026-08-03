@@ -160,13 +160,9 @@ The revision exists because arrival order can differ from commit order. Dispatch
 
 (a) A throwing lifecycle handler or a throwing earlier observer suppresses delivery for the rest of that write's consumers, so delivery is exactly-once only while those no-throw contracts hold.
 
-(b) Deduplication is scoped to one flush batch, so an inversion straddling a flush tick can still emit the older value last. Compare `Revision` in the write handler if that matters.
+(b) Deduplication is scoped to one flush batch, so an inversion straddling a flush tick can still emit the older value last. Compare `Revision` in the write handler if that matters. See [Change Batching and Deduplication](connectors.md#change-batching-and-deduplication) for what a flush survivor carries.
 
-**Flush deduplication semantics**: a `ChangeQueueProcessor` with a buffer time collapses each flush batch to one change per property. Per property, the surviving old value comes from the change with the *lowest* revision in that batch and the new value from the change with the *highest*, so the survivor spans the batch even when the enqueue order was inverted. The survivor's `Revision`, `Origin`, `ChangedTimestamp` and `ReceivedTimestamp` come from that same highest-revision change, so under an inverted batch they follow commit order rather than the last arrival: a consumer that keys off `Origin.Source`, for example to suppress echoes, sees the origin of the newest commit. Emit order is the arrival order of each property's last occurrence.
-
-Note what the old value is and is not. Revisions decide *which* change's old value survives, not that it is the value the property held at the preceding revision: the old value is captured by the generated setter at the call site, outside the subject lock, so under concurrent writers it can be a value that was already superseded. The new value is exact, the old value is a best-effort diff baseline. Compare `Revision` or re-read the property if you need more than that.
-
-A change built outside a terminal write carries revision `0`, which orders against nothing, and deduplication falls back for that property to arrival position (first arrival's old value, last arrival's new value). This is defensive rather than a case you can currently hit: a change only reaches a queue subscription after committing, and committing is what stamps the revision, so every change a `ChangeQueueProcessor` sees carries a revision of 1 or more.
+Note what the old value is and is not, on every channel. Revisions decide *which* change's old value survives a collapse, not that it is the value the property held at the preceding revision: the old value is captured by the generated setter at the call site, outside the subject lock, so under concurrent writers it can be a value that was already superseded. The new value is exact, the old value is a best-effort diff baseline. Compare `Revision` or re-read the property if you need more than that.
 
 ## Property Value Equality Check
 

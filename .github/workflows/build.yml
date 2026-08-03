@@ -40,12 +40,6 @@ jobs:
         id: filter
         with:
           filters: |
-            # The chain every connector is built on: Interceptor -> Tracking -> Registry ->
-            # Connectors, plus the generator that emits the interception code and Dynamic, which
-            # the OPC UA client uses. A change in here alters change delivery for every connector
-            # without touching any connector project, so it has to trigger all of their suites.
-            # Without this, a change to something like ChangeQueueProcessor runs no integration
-            # test at all on a pull request and is only covered once it reaches master.
             shared: &shared
               - 'src/Namotion.Interceptor/**'
               - 'src/Namotion.Interceptor.Generator/**'
@@ -53,8 +47,7 @@ jobs:
               - 'src/Namotion.Interceptor.Registry/**'
               - 'src/Namotion.Interceptor.Connectors/**'
               - 'src/Namotion.Interceptor.Dynamic/**'
-              # Referenced by the connector integration test projects rather than by the connectors
-              # themselves, so a change here can break a suite without touching anything above.
+              # Test-only references: not used by the connectors, only by their test projects.
               - 'src/Namotion.Interceptor.Testing/**'
               - 'src/Namotion.Interceptor.Hosting/**'
               - 'src/Namotion.Interceptor.Validation/**'
