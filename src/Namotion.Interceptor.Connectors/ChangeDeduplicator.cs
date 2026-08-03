@@ -21,14 +21,13 @@ internal sealed class ChangeDeduplicator : IDisposable
     private const int BufferMinimumSize = 256;
     private const int BufferMaximumSize = 1024;
 
-    // Slot of a property whose surviving change has not been placed into the buffer yet.
-    private const int UnplacedIndex = -1;
-
-    // Per property: the slot of its surviving change and the revision bounds of the whole batch for that
-    // property. Revisions are only comparable within one subject, which holds here because the key pins
-    // the collapse to a single property. A committed write never takes revision 0, so a zero lower bound
+    // Per property: the slot of its surviving change, the arrival index that seeded that slot, and the
+    // revision bounds seen so far. Bounds are running, not global, which is what lets one pass do the
+    // work: the walk goes backwards, so the last extension on each side is the batch extremum.
+    // Revisions are only comparable within one subject, which holds here because the key pins the
+    // collapse to a single property. A committed write never takes revision 0, so a zero lower bound
     // doubles as the "this property has an unordered change" flag the merge falls back on.
-    private readonly Dictionary<PropertyReference, (int Index, long LowestRevision, long HighestRevision)> _propertyIndices
+    private readonly Dictionary<PropertyReference, (int Index, int SeedIndex, long LowestRevision, long HighestRevision)> _propertyIndices
         = new(PropertyReference.Comparer);
 
     // Reusable buffer for deduplicated changes (rented from ArrayPool to avoid allocations on resize)
@@ -89,63 +88,59 @@ internal sealed class ChangeDeduplicator : IDisposable
             _buffer = RentClearedBuffer(changes.Length);
         }
 
-        // First pass: collect the revision bounds per property, a lower bound of 0 meaning the property has
-        // to fall back to arrival position. Merging only starts once these are known for the whole batch,
-        // because a merge decided against partial bounds can promote a value that a later change invalidates.
-        for (var i = 0; i < changes.Length; i++)
+        // One backward pass. Keeps the lowest revision's old value and the highest revision's new value,
+        // or, for a property that has an unordered change, the first arrival's old value and the last
+        // arrival's new value. Backward iteration finds last occurrences first, which both preserves
+        // last-occurrence emit order and makes the running bounds sufficient: each side is only ever
+        // extended, so the final extension is the batch extremum and no prior pass is needed to know it.
+        //
+        // Relies on two changes to one property never sharing a nonzero revision. That holds by
+        // construction: a committed write takes a strictly incremented per-subject revision under the
+        // subject's lock, and the dictionary key pins the collapse to one property of one subject.
+        for (var i = changes.Length - 1; i >= 0; i--)
         {
             // By reference: a by-value copy of this struct is a 144 byte block move that the JIT emits a
-            // bulk write barrier for, once per change per pass, because the struct carries object fields.
+            // bulk write barrier for, because the struct carries object fields.
             ref readonly var change = ref changes[i];
 
             // Single lookup per change: the ref is only read and written before the next add.
-            ref var bounds = ref CollectionsMarshal.GetValueRefOrAddDefault(_propertyIndices, change.Property, out var propertyAlreadySeen);
+            ref var entry = ref CollectionsMarshal.GetValueRefOrAddDefault(_propertyIndices, change.Property, out var propertyAlreadySeen);
             if (!propertyAlreadySeen)
             {
-                bounds = (UnplacedIndex, change.Revision, change.Revision);
-            }
-            else if (change.Revision < bounds.LowestRevision)
-            {
-                // A change constructed outside a terminal write carries revision 0, which orders against
-                // nothing. Revisions start at 1, so such a change drives the lower bound to 0 through this
-                // plain minimum, and the merge reads that as the signal to fall back to arrival position.
-                bounds.LowestRevision = change.Revision;
-            }
-            else if (change.Revision > bounds.HighestRevision)
-            {
-                bounds.HighestRevision = change.Revision;
-            }
-        }
-
-        // Second pass: keep the lowest revision's old value and the highest revision's new value, or, for
-        // a property that has an unordered change, the first arrival's old value and the last arrival's
-        // new value. Backward iteration finds last occurrences first, preserving last-occurrence order.
-        for (var i = changes.Length - 1; i >= 0; i--)
-        {
-            ref readonly var change = ref changes[i];
-
-            ref var entry = ref CollectionsMarshal.GetValueRefOrNullRef(_propertyIndices, change.Property);
-            if (entry.Index == UnplacedIndex)
-            {
                 // The property's last arrival, which seeds the survivor with its old and new value.
-                entry.Index = _count;
+                entry = (_count, i, change.Revision, change.Revision);
                 _buffer[_count++] = change;
                 continue;
             }
 
             var survivingChange = _buffer[entry.Index];
-            if (entry.LowestRevision == 0 || change.Revision == entry.LowestRevision)
+            if (entry.LowestRevision == 0)
             {
-                // The earlier arrival, respectively the batch's baseline commit, supplies the old value.
-                // Under the fallback every earlier arrival overwrites it, so the first one wins.
+                // Already falling back to arrival position: every earlier arrival overwrites the old
+                // value, so the first arrival's wins, and no new value is ever promoted by revision.
                 _buffer[entry.Index] = change.MergeWithNewer(survivingChange);
             }
-            else if (change.Revision == entry.HighestRevision)
+            else if (change.Revision == 0)
             {
-                // Committed after the last arrival but enqueued before it: its new value is the current
-                // state. Two changes of one property cannot share a nonzero revision, because every
-                // committed write takes a strictly incremented revision under the subject's lock.
+                // A change constructed outside a terminal write, which orders against nothing, so the
+                // whole property falls back to arrival position from here on. Anything a revision
+                // promoted earlier in this pass has to be discarded, which is what the seed index is
+                // for: it restarts the survivor from the last arrival, still live in the input span.
+                _buffer[entry.Index] = change.MergeWithNewer(changes[entry.SeedIndex]);
+                entry.LowestRevision = 0;
+            }
+            else if (change.Revision < entry.LowestRevision)
+            {
+                // The oldest commit seen so far, which supplies the old value.
+                _buffer[entry.Index] = change.MergeWithNewer(survivingChange);
+                entry.LowestRevision = change.Revision;
+            }
+            else if (change.Revision > entry.HighestRevision)
+            {
+                // Committed after everything seen so far but enqueued before it, so its new value is
+                // the current state.
                 _buffer[entry.Index] = survivingChange.MergeWithNewer(change);
+                entry.HighestRevision = change.Revision;
             }
 
             // Any other revision lies inside the bounds, so it is neither the baseline nor the newest
