@@ -11,45 +11,38 @@ namespace Namotion.Interceptor;
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     // All topology (services, fallback contexts) and everything derived from it (delegation
-    // target, caches, compiled interceptor chains) lives in one immutable snapshot per context,
-    // published atomically. Queries take no context lock (R1): a query pins one snapshot with a
-    // single volatile read and walks other contexts' snapshots the same way, so the downward
-    // service walk and the upward invalidation walk cannot form a lock cycle, including in cyclic
-    // fallback graphs. Filling a cache still takes the internal bucket lock of a
-    // ConcurrentDictionary, which is a leaf and never spans two contexts.
+    // target, caches, compiled chains) lives in one immutable snapshot per context, published
+    // atomically.
     //
-    // Lock order: _mutationLock -> a _usedByContexts set lock, never reverse. A set lock is a
-    // leaf: its critical sections only touch that one set and never take another lock or call
-    // into another context. That leaf property is what makes per-context set locks safe where a
-    // single global one was: the wait graph has no edge out of a set lock, so two contexts
-    // registering into each other concurrently cannot form a cycle.
+    // R1: queries take no context lock. A query pins one snapshot with a single volatile read and
+    // walks other contexts' snapshots the same way, so the downward service walk and the upward
+    // invalidation walk cannot form a lock cycle, including in cyclic fallback graphs.
     //
-    // Two _mutationLock objects are never ordered against each other because no path in this class
-    // acquires a second one: mutators only touch another context's using set (a leaf lock) and the
-    // service walk is lock-free. The single way to nest them is a TryAddService factory or exists
-    // predicate that mutates a different context, which the public contract forbids for that reason
-    // (see IInterceptorSubjectContext.TryAddService).
+    // Lock order: _mutationLock -> a _usedByContexts set lock, never reverse. A set lock is a leaf,
+    // touching only that set and calling into no other context, so two contexts registering into
+    // each other cannot deadlock. No path takes a second _mutationLock; the only way to nest them
+    // is a TryAddService factory or exists predicate that mutates a different context, which the
+    // contract forbids for that reason.
 
     private const int MaximumRetainedTraversalSize = 1024;
 
-    // Declared before the marker below as a defensive ordering rule. Marker construction does not
-    // currently take a property type index, but keeping the counter first prevents a future change
-    // on that path from observing its zero-initialized value.
+    // Declared before the marker so that a future change to marker construction cannot observe
+    // its zero-initialized value.
     private static int _lastPropertyTypeIndex = -1;
 
-    // Recorded on a state whose chain was proven cyclic, so the verdict costs one walk per state
-    // rather than one per query. A context rather than a marker object so that the slot can be
-    // typed: this class is not sealed, so a type test on an object slot compiles to a runtime
-    // helper call on every intercepted access.
+    // Recorded on a state whose chain was proven cyclic, so a context on the loop pays one walk
+    // per state rather than one per query. A context merely leading into a loop records nothing
+    // and re-walks every query, which is the price of never raising from an unverified record.
+    // A context rather than a marker object so that the slot can be typed: this class is not
+    // sealed, so a type test on an object slot compiles to a runtime helper call on every
+    // intercepted access.
     private static readonly InterceptorSubjectContext CyclicDelegationMarker = CreateCyclicDelegationMarker();
 
     /// <summary>
-    /// A dense index per intercepted property type, so that a compiled chain is found by indexing
-    /// an array instead of hashing a <see cref="Type"/>. Being a static of a generic type, it is
-    /// computed once per property type in the process rather than once per access. Handing the
-    /// indices out process wide is what keeps the lookup a plain array read; the cost is that an
-    /// array is as long as the largest index its context has seen rather than as long as the number
-    /// of types that context uses.
+    /// A dense index per intercepted property type, so a compiled chain is found by indexing an
+    /// array instead of hashing a <see cref="Type"/>. Handed out process wide to keep the lookup a
+    /// plain array read; the cost is that an array is as long as the largest index its context has
+    /// seen rather than the number of types it uses.
     /// </summary>
     private static class PropertyTypeIndex<TProperty>
     {
@@ -72,11 +65,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [ThreadStatic]
     private static List<DelegationHop>? _delegationCyclePath;
 
-    // Written via Interlocked.Exchange and Interlocked.CompareExchange instead of being declared
-    // volatile, which would raise CS0420 when passed by ref to Interlocked under
-    // warnings-as-errors. Every context constructs its own initial state because caches live on
-    // the state: one shared empty instance would let unrelated contexts contaminate each other's
-    // caches.
+    // Written via Interlocked rather than declared volatile, which would raise CS0420 when passed
+    // by ref under warnings-as-errors. Every context builds its own initial state because caches
+    // live on the state: one shared empty instance would let contexts contaminate each other.
     private ContextState _state = new(ImmutableArray<object>.Empty, ImmutableArray<InterceptorSubjectContext>.Empty);
 
     // Serializes mutators; never held on a query path.
@@ -136,11 +127,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 return false;
             }
 
-            // R4: register into the fallback BEFORE publishing so that its _usedByContexts is
-            // always a superset of the true using set. A missing entry would leave a compiled chain
-            // above permanently stale. An extra entry costs a spurious invalidation, and lets the
-            // invalidation walk reach a context out of chain order, which is why no walk may trust
-            // what a context further down recorded about its chain (see ResolveDelegationChain).
+            // R4: register into the fallback BEFORE publishing, so its _usedByContexts is always a
+            // superset of the true using set. A missing entry leaves a compiled chain above
+            // permanently stale. An extra entry costs a spurious invalidation and lets the
+            // invalidation walk arrive out of chain order, which is why no walk may trust what a
+            // context further down recorded (see ResolveDelegationChain).
             var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
             lock (usedByContexts)
             {
@@ -207,10 +198,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
             var service = factory();
 
-            // The factory may reenter this context (Monitor is reentrant) and publish a mutation,
-            // so re-read the state to not lose it. A factory registering the same service type
-            // into the same context is its own responsibility; mutating a different context from
-            // here is forbidden, see the lock order note at the top of the class.
+            // The factory may reenter this context (Monitor is reentrant) and publish, so re-read
+            // the state to not lose it. Mutating a different context from here is forbidden, see
+            // the lock order note at the top of the class.
             state = Volatile.Read(ref _state);
             PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts));
         }
@@ -285,14 +275,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     /// <summary>
     /// Resolves the context that answers for this one and replaces <paramref name="state"/> with
-    /// the state that context was pinned on. A context with no own
-    /// service and exactly one fallback context resolves everything through it, so the chain is as
-    /// deep as the subject graph: every attached child inherits the context of its parent.
+    /// the state that context was pinned on. A context with no own service and exactly one fallback
+    /// resolves everything through it, so the chain is as deep as the subject graph.
     ///
-    /// The chain is walked once per state rather than once per query, which is what makes depth
-    /// free here. The record holds the terminal CONTEXT and never its state: a context's state is
-    /// replaced whenever anything below it changes, so re-reading it on every query is what keeps
-    /// the answer fresh, and that read cannot be removed.
+    /// Walked once per state rather than once per query, which is what makes depth free. The record
+    /// holds the terminal CONTEXT and never its state: a context's state is replaced whenever
+    /// anything below it changes, so the re-read below cannot be removed.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private InterceptorSubjectContext ResolveDelegationTarget(ref ContextState state)
@@ -325,6 +313,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         var visited = _delegationCycleVisited ??= [];
         var path = _delegationCyclePath ??= [];
+
         try
         {
             while (true)
@@ -338,14 +327,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 var current = this;
                 var currentState = Volatile.Read(ref current._state);
 
-                // Only the entry's own record may be trusted, and only for the chain that entry
-                // still has. Everything below is read for topology alone, which is the one thing an
-                // installed state always describes correctly. A record is a claim about contexts
-                // beyond the one carrying it, and an invalidation walk can reach a context out of
-                // chain order, because R4 keeps a using set a superset: RemoveFallbackContext
-                // publishes before it unregisters, so a context that now delegates can still sit in
-                // the using set it is leaving. Trusting a record from further down would then cache
-                // a resolution of a context the graph no longer reaches, on a state that nothing
+                // Only the entry's own record may be trusted. Everything below is read for topology
+                // alone, the one thing an installed state always describes correctly. A record is a
+                // claim about contexts further down, and because R4 keeps a using set a superset an
+                // invalidation can arrive out of chain order; trusting such a record would cache a
+                // resolution of a context the graph no longer reaches, on a state nothing
                 // invalidates again.
                 if (ReferenceEquals(currentState.ResolvedTerminal, CyclicDelegationMarker))
                 {
@@ -378,12 +364,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                     // only on a context already in visited, so the repeat is always on the path.
                     Debug.Assert(loopStart < path.Count, "The repeated context was not found on the walked path.");
 
-                    // Only from the loop, never from the acyclic run that led into it: the
-                    // confirmation re-reads the states of the loop and of nothing else, so a
-                    // context ahead of it reaches the loop only according to an edge read earlier
-                    // and possibly rewired since. Marking one of those would make every query on it
-                    // raise until a pending invalidation replaces its state, and a caller cannot
-                    // tell that from a cycle it really is on.
+                    // Only from the loop, never from the acyclic run leading into it: the
+                    // confirmation re-reads the loop's states and nothing else, so a context ahead
+                    // of it reaches the loop by an edge read earlier and possibly rewired since.
                     CacheResolvedTerminal(path, CyclicDelegationMarker, loopStart);
                     throw CreateDelegationCycleException();
                 }
@@ -395,8 +378,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         finally
         {
             // Dropped rather than cleared past the threshold: Clear() keeps the capacity, so one
-            // walk down a deep chain would hold an entry per level on this thread for the rest of
-            // the process, on every thread that ever touches such a graph.
+            // deep walk would hold an entry per level on this thread for the rest of the process.
             if (path.Capacity > MaximumRetainedTraversalSize)
             {
                 _delegationCycleVisited = null;
@@ -411,20 +393,18 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Records where the chain ends from <paramref name="startIndex"/> onwards, which turns the
-    /// next query on any of those contexts into a single hop. Written only to the objects the walk
-    /// pinned and never to a re-read of a context's current state.
+    /// Records where the chain ends from <paramref name="startIndex"/> onwards, turning the next
+    /// query on any of those contexts into a single hop. Written only to the objects the walk
+    /// pinned, never to a re-read of a context's current state.
     ///
-    /// What this guarantees is quiescent, not instantaneous. The walk reads each edge at its own
-    /// time, so the chain it records may never have existed all at once, and a query overlapping
-    /// two mutations can be answered from it. It converges because any change below a context
-    /// replaces that context's state, so a record that disagrees with the topology sits on a state
-    /// that the mutator's invalidation walk is on its way to replacing, and a replaced state is
-    /// never pinned by a later query.
+    /// The guarantee is quiescent, not instantaneous: the walk reads each edge at its own time, so
+    /// the chain it records may never have existed all at once. It converges because any change
+    /// below a context replaces that context's state, and a replaced state is never pinned again.
     ///
-    /// That is why the cyclic marker is recorded from the confirmed loop only. A stale terminal
-    /// resolves the wrong services for a moment and then converges; a stale marker raises, which
-    /// is not a value the caller can tell apart from a real cycle.
+    /// The cyclic marker is therefore recorded from the confirmed loop only. A stale terminal
+    /// resolves wrongly for a moment and converges; a stale marker raises, which a caller cannot
+    /// tell from a real cycle. On the loop that raise is bounded by the invalidation walk and its
+    /// callers were already raising anyway; a context leading into the loop has no such bound.
     /// </summary>
     private static void CacheResolvedTerminal(List<DelegationHop> path, InterceptorSubjectContext resolvedTerminal, int startIndex)
     {
@@ -438,13 +418,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// Reports whether every context on the candidate loop still holds the state the walk pinned.
     /// A state is never installed twice, so one still in place has been in place since it was
     /// pinned, and every edge of the loop therefore existed at the same moment. That is a cycle.
-    /// Comparing states rather than the fallback contexts they point at is what makes this exact:
-    /// a walk reads each edge at its own time, so a sequence of rewirings that is acyclic
-    /// throughout can otherwise produce a repeat that never was a cycle.
+    /// Comparing states rather than the fallback contexts they point at is what makes this exact: a
+    /// sequence of rewirings that is acyclic throughout can otherwise produce a repeat.
     ///
-    /// <paramref name="loopStart"/> reports where the loop begins, because the run of contexts
-    /// ahead of it is deliberately not re-read and therefore proves nothing, see
-    /// <see cref="CacheResolvedTerminal"/>.
+    /// <paramref name="loopStart"/> reports where the loop begins, because the run ahead of it is
+    /// deliberately not re-read and proves nothing, see <see cref="CacheResolvedTerminal"/>.
     /// </summary>
     private static bool DelegationLoopStillClosed(List<DelegationHop> path, InterceptorSubjectContext repeated, out int loopStart)
     {
@@ -547,21 +525,22 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var function = MethodInvocationFactory.Create(methodInterceptors);
 
         // A single slot, so returning the CAS winner is free. The read and write paths return what
-        // they built instead; that is equivalent because racers compile from the services of this
-        // one state, so their chains differ only in identity and a losing build is used once.
+        // they built instead, which is equivalent: racers compile from the same state's services,
+        // so their chains differ only in identity.
         return (InvokeFunc)state.GetOrSetMethodInvocationFunction(function);
     }
 
     /// <summary>
-    /// Resolves services from the given pinned snapshot, whose delegation target the caller has
-    /// already ruled out. The cache entry is computed from the same snapshot that owns the cache,
-    /// so a topology change (which publishes a new state) can never receive a stale entry.
+    /// Resolves services from the given pinned snapshot, normally one whose delegation the caller
+    /// already resolved. That is an expectation and not a precondition: the walk re-follows
+    /// delegation from whatever state it is handed. The cache entry is computed from the same
+    /// snapshot that owns the cache, so a topology change (which publishes a new state) can never
+    /// receive a stale entry.
     /// </summary>
     private ImmutableArray<TInterface> GetServicesFromState<TInterface>(ContextState state)
     {
-        // An empty context creates no service cache, which keeps a fresh one free of that
-        // allocation. It says nothing about the compiled chain arrays: an empty state that answers
-        // intercepted access still fills those, see ContextState.SetFunction.
+        // An empty context allocates no service cache. The compiled chain arrays are unaffected:
+        // an empty state that answers intercepted access still fills those.
         if (state.IsEmpty)
         {
             return ImmutableArray<TInterface>.Empty;
@@ -602,22 +581,18 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Collects the services of the given type from the pinned snapshot and from every context it
-    /// reaches, walked with an explicit worklist rather than by recursion. The fallback graph is as
-    /// deep as the subject graph that produced it, see <see cref="ResolveDelegationTarget"/>, so a
-    /// recursive walk died on an uncatchable <see cref="StackOverflowException"/> on a graph that is
-    /// otherwise legitimate.
+    /// Collects the services of the given type from the pinned snapshot and every context it
+    /// reaches, with an explicit worklist rather than recursion: the fallback graph is as deep as
+    /// the subject graph, so recursion died on an uncatchable <see cref="StackOverflowException"/>.
     ///
-    /// The shape of the recursive walk is preserved exactly, because the order of the result is
-    /// observable: <see cref="ServiceOrderResolver.OrderByDependencies"/> keeps the input order
-    /// among services that no ordering attribute separates. So the walk stays depth first and left
-    /// to right, every context contributes its own services before those of its fallback contexts,
-    /// and the collected services are made distinct and reordered once per context rather than once
-    /// at the end.
+    /// The shape of the recursive walk is preserved exactly, because the result order is
+    /// observable: <see cref="ServiceOrderResolver.OrderByDependencies"/> keeps input order among
+    /// services no ordering attribute separates. So the walk stays depth first and left to right,
+    /// each context contributes its own services first, and the result is made distinct and
+    /// reordered once per context rather than once at the end.
     ///
-    /// It terminates because a context is entered only when <c>visited</c> did not already hold it,
-    /// so every context is pushed at most once and every iteration either pushes one or pops one.
-    /// That bound is also what makes the walk safe on a cyclic fallback graph.
+    /// It terminates because a context is entered only when <c>visited</c> did not hold it, which
+    /// is also what makes the walk safe on a cyclic graph.
     /// </summary>
     private static List<object> CollectServices(
         Type type,
@@ -625,9 +600,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         ContextState state,
         HashSet<InterceptorSubjectContext> visited)
     {
-        // One buffer for the whole walk instead of one result per context: a context owns the tail
-        // of the buffer from its own start index onwards, and reducing that tail in place leaves
-        // everything the contexts below it already contributed untouched.
+        // One buffer for the whole walk instead of one result per context: a context owns the
+        // buffer from its own start index on, and reducing that region leaves the rest untouched.
         var collected = new List<object>();
         if (!TryEnterContext(context, state, visited, out var enteredState))
         {
@@ -673,18 +647,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Marks the given context visited and follows its delegation chain, which is the one shape the
-    /// walk collapses instead of giving it a frame: a context without own services and with exactly
-    /// one fallback context contributes nothing of its own and resolves to exactly what its target
-    /// resolves, so a whole chain shares the frame of the context it ends on. Returns <c>false</c>
-    /// when the chain runs into a context that was already visited, which contributes nothing.
+    /// Marks the context visited and follows its delegation chain, the one shape the walk collapses
+    /// instead of giving it a frame: a pure delegator contributes nothing and resolves to exactly
+    /// what its target does, so a whole chain shares the frame of the context it ends on. Returns
+    /// <c>false</c> when the chain runs into an already visited context.
     ///
-    /// It terminates because every hop adds a context to <c>visited</c> and it stops as soon as one
-    /// is already in it, so it takes at most one hop per context in the graph.
+    /// It terminates because every hop adds to <c>visited</c> and stops as soon as one is already
+    /// in it.
     ///
-    /// Every hop re-reads the state of the context it moves to and uses it for topology only, which
-    /// is load bearing rather than incidental. See <see cref="ResolveDelegationChain"/> for why no
-    /// walk may trust what a context further down recorded about the end of its chain.
+    /// Every hop re-reads the state it moves to and uses it for topology ONLY, which is load
+    /// bearing: see <see cref="ResolveDelegationChain"/> for why no walk may trust what a context
+    /// further down recorded about the end of its chain.
     /// </summary>
     private static bool TryEnterContext(
         InterceptorSubjectContext context,
@@ -731,16 +704,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Turns the buffer region that a context and its fallback contexts filled into the result of
-    /// that context: duplicates dropped keeping the first occurrence, then reordered by the ordering
-    /// attributes. That is what the recursive walk did per context with Distinct() and
-    /// OrderByDependencies, and doing it per context rather than once at the end is what the order
-    /// of the result depends on.
+    /// Turns the buffer region a context and its fallbacks filled into that context's result:
+    /// duplicates dropped keeping the first occurrence, then reordered by the ordering attributes.
+    /// Per context rather than once at the end, which is what the result order depends on.
     /// </summary>
     private static void ReduceFrame(List<object> collected, int resultStart, HashSet<object> distinctServices)
     {
-        // Compacted in place so that the duplicate removal needs no second buffer. The set uses the
-        // same default comparer that Distinct() used, so it keeps the same occurrence of a service.
+        // Compacted in place, so dedup needs no second buffer. Default comparer, matching the
+        // Distinct() this replaced, so the same occurrence survives.
         distinctServices.Clear();
         var writeIndex = resultStart;
         for (var readIndex = resultStart; readIndex < collected.Count; readIndex++)
@@ -757,16 +728,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var count = collected.Count - resultStart;
         if (count == 0)
         {
-            // OrderByDependencies returns an empty result for an empty input and does nothing else,
-            // so what is skipped here is the copy out of and back into the buffer, not the call.
+            // Skips the copy out of and back into the buffer, not any ordering work.
             return;
         }
 
         var services = new object[count];
         collected.CopyTo(resultStart, services, 0, count);
 
-        // OrderByDependencies returns a permutation of what it was given, same length, so the
-        // result goes straight back over the region it was taken from.
+        // A permutation of the input, same length, so it goes straight back over the same region.
         var ordered = ServiceOrderResolver.OrderByDependencies(services);
         for (var index = 0; index < ordered.Length; index++)
         {
@@ -793,22 +762,22 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// R2: mutators publish under <see cref="_mutationLock"/>, no CAS loop. Mutators serialize on
-    /// the lock, so none can lose another mutator's topology. The only lock-free writer is the
-    /// invalidation CAS, which never changes topology; the state published here carries fresh
-    /// caches, so overwriting a concurrent invalidation preserves its intent.
+    /// R2: mutators publish under <see cref="_mutationLock"/>, no CAS loop, so none can lose
+    /// another's topology. The only lock-free writer is the invalidation CAS, which never changes
+    /// topology, and the state published here is cache-free, so overwriting one preserves its
+    /// intent.
     ///
-    /// The publish is an interlocked exchange rather than a volatile write because the publisher
-    /// then reads the using sets and other contexts' states to drive the invalidation walk, and
-    /// those reads must not be reordered before it. Release semantics constrains only the accesses
-    /// ahead of the store, so it does not order this store against the later load, and store
-    /// followed by load is reordered under every mainstream memory model, x86-64 TSO included,
-    /// where the store sits in the store buffer while the load is already satisfied. A volatile
-    /// write plus Monitor.Exit is therefore not guaranteed to help on any architecture, whatever
-    /// fence a given runtime happens to emit for either. The consequence would be an invalidation
-    /// skipped against a stale using set while the current state keeps accumulating cache fills
-    /// computed from pre-mutation topology, leaving a compiled chain permanently missing an
-    /// interceptor. The full fence closes that without touching the query path.
+    /// Interlocked rather than a volatile write because the publisher then READS using sets and
+    /// other contexts' states to drive the invalidation walk. Release semantics does not order a
+    /// store against a later load, and store-then-load is reordered under every mainstream model,
+    /// x86-64 included, so a volatile write plus Monitor.Exit would not be enough. Without the
+    /// fence an invalidation could be skipped against a stale using set while the current state
+    /// keeps accepting fills computed from pre-mutation topology.
+    ///
+    /// InvalidateState needs one step more: an atomic read-modify-write becomes visible to every
+    /// thread when it executes, so a later read of another location cannot be satisfied from before
+    /// it. Every target provides this; the CLI memory model does not state it, so it is an
+    /// assumption rather than a guarantee.
     /// </summary>
     private void PublishState(ContextState state)
     {
@@ -817,13 +786,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     /// <summary>
     /// R3: one unconditional CAS attempt. No early-out when caches look absent, because a reader
-    /// may be lazily creating a cache concurrently and skipping would let its insert survive the
-    /// change. No retry on failure either, and that needs more than the competing write also being
-    /// cache-free at publication, since it starts accepting fills immediately afterwards: a
-    /// competing state can only win this CAS by being installed after the read above, which is
-    /// fenced after the mutation was published, so every fill into it is computed from reads that
-    /// see the mutation. That argument is what rests on the publish being interlocked rather than a
-    /// release store, see PublishState.
+    /// may be creating one concurrently and skipping would let its insert survive the change. No
+    /// retry either: a competing state can only win this CAS by being installed after the read
+    /// above, which is fenced after the mutation was published, so every fill into it already sees
+    /// the mutation. That rests on the publish being interlocked, see PublishState.
     /// </summary>
     private void InvalidateState()
     {
@@ -849,16 +815,16 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Invalidates every context that resolves through this one, walked with an explicit worklist
-    /// rather than by recursion. The using graph is the fallback graph reversed, so it is as deep as
-    /// the subject graph: every attached child inherits the context of its parent as a fallback
-    /// context, which makes a graph of depth N a using chain of length N. Recursing over it died on
-    /// an uncatchable <see cref="StackOverflowException"/> that no mutator could survive, while the
-    /// worklist grows on the heap alongside the graph it walks.
+    /// Invalidates every context that resolves through this one, with an explicit worklist rather
+    /// than recursion: the using graph is the fallback graph reversed and therefore as deep as the
+    /// subject graph, where recursion died on an uncatchable <see cref="StackOverflowException"/>.
     ///
-    /// It terminates because a context is queued only when <c>visited</c> did not already hold it,
-    /// so every context enters the worklist at most once and the loop removes one per iteration.
-    /// That bound is what also makes the walk safe on a cyclic graph.
+    /// It terminates because a context is queued only when <c>visited</c> did not hold it, which is
+    /// also what makes the walk safe on a cyclic graph.
+    ///
+    /// No user code runs here, so the only exits other than completing are OutOfMemoryException and
+    /// Thread.Interrupt; either leaves contexts not yet reached holding pre-mutation caches that
+    /// nothing repairs, as the recursive walk this replaced also did.
     /// </summary>
     private void InvalidateUsingContexts()
     {
@@ -873,9 +839,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
             while (pending.Count != 0)
             {
-                // Removing from the end keeps the worklist a stack, which costs no shifting. The
-                // order between two contexts is not observable: invalidating one is an independent
-                // CAS on its own state and never reads another context.
+                // Removing from the end costs no shifting. Order is not observable: invalidating
+                // one context is an independent CAS that never reads another.
                 var lastIndex = pending.Count - 1;
                 var usingContext = pending[lastIndex];
                 pending.RemoveAt(lastIndex);
@@ -886,9 +851,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
         finally
         {
-            // Keyed on what the visited set grew to, not on the worklist: the using graph of a deep
-            // chain queues one context per pop, so the worklist never grows while the visited set
-            // takes an entry per level.
+            // Keyed on the visited set, not the worklist: a deep chain queues one context per pop,
+            // so the worklist stays short while visited takes an entry per level.
             if (visited.Count > MaximumRetainedTraversalSize)
             {
                 _invalidationVisited = null;
@@ -911,17 +875,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         HashSet<InterceptorSubjectContext> visited,
         List<InterceptorSubjectContext> pending)
     {
-        // Contexts that are never used as a fallback take no lock at all. The field is written
-        // once by a CAS that is ordered before the registrant's own publish, so a registration
-        // racing this read either is visible here or belongs to a context that has not published
-        // yet, and that context's own walk then covers everything above it. This depends on the
-        // publish being a full fence, see PublishState: with a release-only store the read could
-        // be satisfied from before it and the registration would be missed in both directions.
+        // Contexts never used as a fallback take no lock. The field is written once by a CAS
+        // ordered before the registrant's own publish, so a racing registration is either visible
+        // here or belongs to a context that has not published yet, whose own walk then covers
+        // everything above it. This depends on the publish being a full fence, see PublishState.
         //
-        // The emptiness of the set is deliberately NOT checked here. HashSet.Count is a composite
-        // of two independently mutated fields, so an unlocked read can compute a count that was
-        // never true, and a using context that never left the set could be skipped for good. The
-        // locked block below handles an empty set without allocating anyway.
+        // Emptiness is deliberately NOT checked outside the lock: HashSet.Count is a composite of
+        // two independently mutated fields, so an unlocked read can compute a count that was never
+        // true and skip a using context for good.
         var usedByContexts = Volatile.Read(ref context._usedByContexts);
         if (usedByContexts is null)
         {
@@ -929,8 +890,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         // Snapshot under the set lock, queue after release: calling into another context while
-        // holding a set lock is forbidden by the lock order. The 0/1/many shapes avoid an array
-        // allocation in the common cases.
+        // holding a set lock is forbidden by the lock order. The 0/1/many shapes avoid an array.
         InterceptorSubjectContext? singleUsingContext = null;
         InterceptorSubjectContext[]? usingContexts = null;
 
@@ -972,8 +932,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private sealed class ContextState
     {
-        // Insertion order is kept and duplicate references are tolerated here; the Distinct()
-        // in the service walk preserves the previous HashSet storage semantics.
+        // Insertion order is kept and duplicate references tolerated: dedup moved from
+        // registration into the service walk, which keeps the same occurrence under the same
+        // comparer. It differs only in that the walk filters by the queried type first, so two
+        // services that compare equal while only the later matches that type now resolve to it
+        // and previously to nothing.
         internal readonly ImmutableArray<object> Services;
         internal readonly ImmutableArray<InterceptorSubjectContext> FallbackContexts;
 
@@ -981,22 +944,20 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // it disagreeing with them.
         internal readonly InterceptorSubjectContext? DelegationTarget;
 
-        // Caches belong to the state that produced them and are created lazily via CAS on first
-        // use. A topology change publishes a new state, so a late insert from a concurrent
-        // computation lands in a state that no later query pins.
+        // Caches belong to the state that produced them, created lazily via CAS. A topology change
+        // publishes a new state, so a late insert lands in a state no later query pins.
         private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
         private Delegate? _methodInvocationFunction;
 
         // Indexed by PropertyTypeIndex, grown by replacing the array. Only a context a chain ends
-        // on ever fills these, because everything above it resolves to that context, so a graph of
-        // delegating subjects has as many arrays as it has contexts that answer.
+        // on ever fills these, since everything above it resolves to that context.
         private Delegate?[]? _readFunctions;
         private Delegate?[]? _writeFunctions;
 
-        // The context this state's delegation chain ends on, or CyclicDelegationMarker when that
-        // chain runs in a circle and nothing resolves. Null until the chain is first walked. A
-        // context and never a state, because the state of a context is replaced whenever anything
-        // below it changes, so a cached state would keep serving the caches of an abandoned one.
+        // The context this state's chain ends on, or CyclicDelegationMarker when it runs in a
+        // circle. Null until first walked. A context and never a state: a context's state is
+        // replaced whenever anything below it changes, so a cached state would serve an abandoned
+        // one's caches.
         private InterceptorSubjectContext? _resolvedTerminal;
 
         internal ContextState(ImmutableArray<object> services, ImmutableArray<InterceptorSubjectContext> fallbackContexts)
@@ -1026,11 +987,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         /// <summary>
-        /// Always allocates, and must keep doing so. Returning this instance when it happens to
-        /// carry no caches would make the invalidation CAS a no-op, so a recorded chain end would
-        /// survive the change that invalidated it. It would also break the cycle confirmation,
-        /// which proves a loop existed at one instant from a state object still being installed,
-        /// and can only do that because a state is installed exactly once.
+        /// Always allocates, and must keep doing so. Returning this instance when it carries no
+        /// caches would make the invalidation CAS a no-op, so a recorded chain end would survive
+        /// the change that invalidated it, and would break the cycle confirmation, which proves a
+        /// loop existed at one instant from a state being installed exactly once.
         /// </summary>
         internal ContextState WithoutCaches()
         {
@@ -1075,11 +1035,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Delegate? TryGetFunction(ref Delegate?[]? functions, int propertyTypeIndex)
         {
-            // The element is intentionally read plainly to avoid the array element address helper
-            // on the hot path. Modern .NET guarantees atomic managed-reference reads and safe
-            // publication for state reached through an object reference without an acquiring read.
-            // A concurrent fill can therefore only be missed, costing this caller one rebuild; it
-            // cannot expose a partial delegate.
+            // Read plainly to avoid the array element address helper on the hot path. Managed
+            // reference reads are atomic and safely published, so a concurrent fill can only be
+            // missed (costing one rebuild), never observed partially.
             var current = Volatile.Read(ref functions);
             return current is not null && propertyTypeIndex < current.Length
                 ? current[propertyTypeIndex]
@@ -1088,8 +1046,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         /// <summary>
         /// Stores a compiled chain, growing the array when the index is beyond it. A store lost to
-        /// a concurrent growth costs the next caller one recompilation, which is what a caller that
-        /// loses the race already does: it invokes the chain it built rather than the one that won.
+        /// a concurrent growth costs the next caller one recompilation, which is what a caller
+        /// losing the race already does.
         /// </summary>
         private static void SetFunction(ref Delegate?[]? functions, int propertyTypeIndex, Delegate function)
         {
@@ -1102,12 +1060,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                     return;
                 }
 
-                // Doubled rather than sized to the index: filling the indices of a process with
-                // many property types one at a time would otherwise reallocate once per type.
+                // Doubled rather than sized to the index, which would reallocate once per property
+                // type in a process that has many.
                 var grown = new Delegate?[Math.Max(propertyTypeIndex + 1, (current?.Length ?? 0) * 2)];
-                // CopyTo can likewise miss a slot filled concurrently. If this array wins the CAS,
-                // the lost cache entry is rebuilt on its next use; copied references remain atomic
-                // and are safely published when the grown array itself is installed below.
+
+                // CopyTo can miss a slot filled concurrently; that entry is rebuilt on next use.
                 current?.CopyTo(grown, 0);
                 grown[propertyTypeIndex] = function;
 

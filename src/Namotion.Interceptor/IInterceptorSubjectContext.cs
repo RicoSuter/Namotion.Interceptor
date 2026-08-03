@@ -46,8 +46,17 @@ public interface IInterceptorSubjectContext
     /// <summary>
     /// Retrieves all registered services of the specified type.
     /// </summary>
+    /// <remarks>
+    /// A context with no own service and exactly one fallback context resolves everything through
+    /// that fallback context. When following those references leads back to a context already
+    /// visited, nothing can be resolved and this raises. A cycle containing at least one context
+    /// that has a service of its own resolves normally, so this only affects a chain that
+    /// delegates all the way round. Intercepted property and method access resolve the same way
+    /// and raise the same exception, so it can surface from an ordinary property getter or setter.
+    /// </remarks>
     /// <typeparam name="TInterface">The type of services to retrieve.</typeparam>
     /// <returns>An immutable array of all matching services.</returns>
+    /// <exception cref="InvalidOperationException">The fallback contexts form a delegation cycle.</exception>
     ImmutableArray<TInterface> GetServices<TInterface>();
 
     /// <summary>
