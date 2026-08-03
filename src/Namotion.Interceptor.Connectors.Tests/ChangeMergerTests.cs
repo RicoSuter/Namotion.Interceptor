@@ -5,13 +5,13 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
-public class ChangeDeduplicatorTests
+public class ChangeMergerTests
 {
     [Fact]
     public void WhenTwoChangesToOnePropertyHaveNoRevision_ThenTheyCollapseByArrivalPosition()
     {
         // Arrange
-        using var deduplicator = new ChangeDeduplicator();
+        using var deduplicator = new ChangeMerger();
 
         var subject = new Person();
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -23,7 +23,7 @@ public class ChangeDeduplicatorTests
         ];
 
         // Act
-        var deduplicated = deduplicator.Deduplicate(changes).ToArray();
+        var deduplicated = deduplicator.Merge(changes).ToArray();
 
         // Assert - the batch collapses to one change keeping the oldest old value and the newest new value
         var change = Assert.Single(deduplicated);
@@ -36,7 +36,7 @@ public class ChangeDeduplicatorTests
     {
         // Arrange - the enqueue order is inverted against the commit order, which is the race the
         // revision fixes: enqueuing happens after the commit and outside the subject lock.
-        using var deduplicator = new ChangeDeduplicator();
+        using var deduplicator = new ChangeMerger();
 
         var subject = new Person();
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -53,7 +53,7 @@ public class ChangeDeduplicatorTests
         ];
 
         // Act
-        var deduplicated = deduplicator.Deduplicate(changes).ToArray();
+        var deduplicated = deduplicator.Merge(changes).ToArray();
 
         // Assert
         var change = Assert.Single(deduplicated);
@@ -72,7 +72,7 @@ public class ChangeDeduplicatorTests
     public void WhenThreeCommitsArriveOutOfOrder_ThenTheSurvivorSpansTheLowestAndHighestRevision()
     {
         // Arrange
-        using var deduplicator = new ChangeDeduplicator();
+        using var deduplicator = new ChangeMerger();
 
         var subject = new Person();
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -85,7 +85,7 @@ public class ChangeDeduplicatorTests
         ];
 
         // Act
-        var deduplicated = deduplicator.Deduplicate(changes).ToArray();
+        var deduplicated = deduplicator.Merge(changes).ToArray();
 
         // Assert - the baseline comes from the lowest revision, the current state from the highest
         var change = Assert.Single(deduplicated);
@@ -99,7 +99,7 @@ public class ChangeDeduplicatorTests
     {
         // Arrange - a revision 0 change makes the whole property fall back to arrival position, even
         // though a later arrival carries the highest revision of the batch.
-        using var deduplicator = new ChangeDeduplicator();
+        using var deduplicator = new ChangeMerger();
 
         var subject = new Person();
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -112,7 +112,7 @@ public class ChangeDeduplicatorTests
         ];
 
         // Act
-        var deduplicated = deduplicator.Deduplicate(changes).ToArray();
+        var deduplicated = deduplicator.Merge(changes).ToArray();
 
         // Assert - the first arrival supplies the old value, the last arrival the new value
         var change = Assert.Single(deduplicated);
@@ -125,7 +125,7 @@ public class ChangeDeduplicatorTests
     {
         // Arrange - high revisions arrive both before and after the revision 0 change, so neither of
         // them may be promoted into the survivor once the fallback applies.
-        using var deduplicator = new ChangeDeduplicator();
+        using var deduplicator = new ChangeMerger();
 
         var subject = new Person();
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -139,7 +139,7 @@ public class ChangeDeduplicatorTests
         ];
 
         // Act
-        var deduplicated = deduplicator.Deduplicate(changes).ToArray();
+        var deduplicated = deduplicator.Merge(changes).ToArray();
 
         // Assert - the first arrival supplies the old value, the last arrival the new value
         var change = Assert.Single(deduplicated);
@@ -151,7 +151,7 @@ public class ChangeDeduplicatorTests
     public void WhenTheRevisionZeroChangeArrivesLast_ThenTheBatchCollapsesByArrivalPosition()
     {
         // Arrange - the fallback also holds when the unordered change closes the batch
-        using var deduplicator = new ChangeDeduplicator();
+        using var deduplicator = new ChangeMerger();
 
         var subject = new Person();
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -164,7 +164,7 @@ public class ChangeDeduplicatorTests
         ];
 
         // Act
-        var deduplicated = deduplicator.Deduplicate(changes).ToArray();
+        var deduplicated = deduplicator.Merge(changes).ToArray();
 
         // Assert - the first arrival supplies the old value, the last arrival the new value
         var change = Assert.Single(deduplicated);
@@ -177,7 +177,7 @@ public class ChangeDeduplicatorTests
     {
         // Arrange - revisions of different subjects are not comparable, so the two properties must be
         // collapsed against their own revisions only.
-        using var deduplicator = new ChangeDeduplicator();
+        using var deduplicator = new ChangeMerger();
 
         var firstSubject = new Person();
         var secondSubject = new Person();
@@ -194,7 +194,7 @@ public class ChangeDeduplicatorTests
         ];
 
         // Act
-        var deduplicated = deduplicator.Deduplicate(changes).ToArray();
+        var deduplicated = deduplicator.Merge(changes).ToArray();
 
         // Assert - both survive, in the arrival order of their last occurrence
         Assert.Equal(2, deduplicated.Length);
@@ -240,19 +240,19 @@ public class ChangeDeduplicatorTests
     // Not inlined, so the batches this builds are dead once it returns and the deduplicator's buffer is
     // the only thing that could still root their subjects.
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (ChangeDeduplicator Deduplicator, WeakReference[] PooledSubjects, WeakReference[] LargeBatchSubjects)
+    private static (ChangeMerger Deduplicator, WeakReference[] PooledSubjects, WeakReference[] LargeBatchSubjects)
         RunLargeBatchThenSmallBatch()
     {
         var pooledSubjects = LeaveChangesInThePool();
 
-        var deduplicator = new ChangeDeduplicator();
+        var deduplicator = new ChangeMerger();
 
         var largeBatch = CreateBatch(LargeBatchSize);
         var largeBatchSubjects = ToWeakReferences(largeBatch);
-        deduplicator.Deduplicate(largeBatch);
+        deduplicator.Merge(largeBatch);
         deduplicator.Reset();
 
-        deduplicator.Deduplicate(CreateBatch(SmallBatchSize));
+        deduplicator.Merge(CreateBatch(SmallBatchSize));
         deduplicator.Reset();
 
         return (deduplicator, pooledSubjects, largeBatchSubjects);
@@ -311,20 +311,20 @@ public class ChangeDeduplicatorTests
     public void WhenDisposed_ThenDeduplicateIsEmptyAndResetIsANoOp()
     {
         // Arrange
-        var deduplicator = new ChangeDeduplicator();
+        var deduplicator = new ChangeMerger();
 
         var subject = new Person();
         var property = new PropertyReference(subject, nameof(Person.FirstName));
         SubjectPropertyChange[] changes = [CreateChange(property, "Value1", "Value2", revision: 1)];
 
-        Assert.Single(deduplicator.Deduplicate(changes).ToArray());
+        Assert.Single(deduplicator.Merge(changes).ToArray());
         deduplicator.Reset();
 
         // Act
         deduplicator.Dispose();
 
         // Assert: a flush that reaches a released buffer skips the write handler instead of throwing.
-        Assert.True(deduplicator.Deduplicate(changes).IsEmpty);
+        Assert.True(deduplicator.Merge(changes).IsEmpty);
 
         // And the calls that would follow it in that same flush stay no-ops.
         deduplicator.Reset();
@@ -336,8 +336,8 @@ public class ChangeDeduplicatorTests
     {
         // Arrange: collapsing a batch cannot see across flushes, so a change enqueued late enough to
         // land in the next batch would otherwise overwrite the source with an older commit's value.
-        using var deduplicator = new ChangeDeduplicator();
-        var emittedRevisions = new EmittedRevisionTracker(_ => true);
+        using var deduplicator = new ChangeMerger();
+        var deliveredRevisions = new DeliveredRevisionFilter();
 
         var subject = new Person();
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
@@ -349,7 +349,7 @@ public class ChangeDeduplicatorTests
             CreateChange(lastName, "Old", "Newest", revision: 10)
         ];
 
-        Assert.Equal(2, deduplicator.Deduplicate(baseline, emittedRevisions).Length);
+        Assert.Equal(2, deduplicator.Merge(baseline, deliveredRevisions).Length);
         deduplicator.Reset();
 
         SubjectPropertyChange[] straggler =
@@ -359,7 +359,7 @@ public class ChangeDeduplicatorTests
         ];
 
         // Act
-        var deduplicated = deduplicator.Deduplicate(straggler, emittedRevisions).ToArray();
+        var deduplicated = deduplicator.Merge(straggler, deliveredRevisions).ToArray();
 
         // Assert: the superseded commit is dropped, the newer one still flows.
         var survivor = Assert.Single(deduplicated);
@@ -368,7 +368,7 @@ public class ChangeDeduplicatorTests
     }
 
     /// <summary>
-    /// Suppression shrinks the survivor count, and <see cref="ChangeDeduplicator.Reset"/> only clears
+    /// Suppression shrinks the survivor count, and <see cref="ChangeMerger.Reset"/> only clears
     /// the prefix that count describes. Without clearing the dropped tail, those slots would keep their
     /// subjects and boxed values alive inside the pooled buffer, which outlives the batch.
     /// </summary>
@@ -376,22 +376,22 @@ public class ChangeDeduplicatorTests
     public void WhenSurvivorsAreSuppressed_ThenTheDroppedSlotsHoldNoReferences()
     {
         // Arrange
-        using var deduplicator = new ChangeDeduplicator();
-        var emittedRevisions = new EmittedRevisionTracker(_ => true);
+        using var deduplicator = new ChangeMerger();
+        var deliveredRevisions = new DeliveredRevisionFilter();
 
         var subject = new Person();
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
-        deduplicator.Deduplicate(
+        deduplicator.Merge(
             [CreateChange(firstName, "Old", "Newest", revision: 10), CreateChange(lastName, "Old", "Newest", revision: 10)],
-            emittedRevisions);
+            deliveredRevisions);
         deduplicator.Reset();
 
         // Act: the first is superseded and dropped, the second survives.
-        var deduplicated = deduplicator.Deduplicate(
+        var deduplicated = deduplicator.Merge(
             [CreateChange(firstName, "Old", "Stale", revision: 8), CreateChange(lastName, "Newest", "Newer", revision: 12)],
-            emittedRevisions);
+            deliveredRevisions);
 
         // Assert
         Assert.Equal(1, deduplicated.Length);
@@ -404,9 +404,9 @@ public class ChangeDeduplicatorTests
         }
     }
 
-    private static SubjectPropertyChange[] GetBuffer(ChangeDeduplicator deduplicator)
+    private static SubjectPropertyChange[] GetBuffer(ChangeMerger deduplicator)
     {
-        var field = typeof(ChangeDeduplicator)
+        var field = typeof(ChangeMerger)
             .GetField("_buffer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         Assert.True(field is not null, "_buffer was renamed, this test needs updating.");

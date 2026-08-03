@@ -4,14 +4,14 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
-public class EmittedRevisionTrackerTests
+public class DeliveredRevisionFilterTests
 {
     [Fact]
     public void WhenACommitWasAlreadyDelivered_ThenAnOlderCommitForThatPropertyIsSuppressed()
     {
         // Arrange: the cross-flush inversion. A writer preempted between committing and enqueuing can
         // land revision 8 in the batch after the one that carried revision 10.
-        var tracker = new EmittedRevisionTracker(_ => true);
+        var tracker = new DeliveredRevisionFilter();
         var property = new PropertyReference(new Person(), nameof(Person.FirstName));
 
         // Act
@@ -27,7 +27,7 @@ public class EmittedRevisionTrackerTests
     public void WhenANewerCommitArrives_ThenItIsDeliveredAndBecomesTheNewBaseline()
     {
         // Arrange
-        var tracker = new EmittedRevisionTracker(_ => true);
+        var tracker = new DeliveredRevisionFilter();
         var property = new PropertyReference(new Person(), nameof(Person.FirstName));
 
         // Act
@@ -44,7 +44,7 @@ public class EmittedRevisionTrackerTests
     {
         // Arrange: revision 0 orders against nothing, so nothing can establish it as superseded, and
         // it must not suppress the real commits that follow it.
-        var tracker = new EmittedRevisionTracker(_ => true);
+        var tracker = new DeliveredRevisionFilter();
         var property = new PropertyReference(new Person(), nameof(Person.FirstName));
 
         // Act & Assert
@@ -59,7 +59,7 @@ public class EmittedRevisionTrackerTests
     {
         // Arrange: revisions are per subject, so two properties of one subject interleave. Suppressing
         // across properties would drop legitimate changes.
-        var tracker = new EmittedRevisionTracker(_ => true);
+        var tracker = new DeliveredRevisionFilter();
         var subject = new Person();
         var first = new PropertyReference(subject, nameof(Person.FirstName));
         var last = new PropertyReference(subject, nameof(Person.LastName));
@@ -74,65 +74,85 @@ public class EmittedRevisionTrackerTests
     }
 
     /// <summary>
-    /// The tracker keys by <see cref="PropertyReference"/>, which holds its subject strongly, so
-    /// without pruning it would keep every subject the connector ever wrote to alive for as long as
-    /// the connector runs. Pruning uses the processor's own property filter as the liveness signal:
-    /// a detached subject is unregistered and a released property loses its source, so both server and
-    /// source filters go false for it.
+    /// Keys hold their subject strongly, so without ageing the filter would keep every subject the
+    /// connector ever wrote to alive for as long as it runs. Rotation is what releases them, and it
+    /// needs no judgement about whether a property is still live.
     /// </summary>
     [Fact]
-    public void WhenPropertiesLeaveScope_ThenPruningReleasesTheirSubjects()
+    public void WhenPropertiesGoQuiet_ThenRotationReleasesTheirSubjects()
     {
-        // Arrange: enough properties to cross the prune threshold, all of which then leave scope.
-        var live = new HashSet<string>();
-        var tracker = new EmittedRevisionTracker(property => live.Contains(property.Name));
+        // Arrange
+        var filter = new DeliveredRevisionFilter();
+        var quiet = RecordAndAbandon(filter);
 
-        var (subjects, liveSubject) = FillBeyondPruneThreshold(tracker, live);
-
-        // Act: everything except the retained one leaves scope, then one more admitted change trips
-        // the prune.
-        live.Clear();
-        live.Add(nameof(Person.LastName));
-        TripPrune(tracker, live);
+        // Act: enough traffic on other subjects to rotate twice, which retires both generations that
+        // held the abandoned ones.
+        Churn(filter, 9000);
 
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
 
         // Assert
-        Assert.All(subjects, subject => Assert.False(subject.IsAlive,
-            "a subject whose property left the processor's scope must not be kept alive by the tracker"));
-        Assert.NotNull(liveSubject);
+        Assert.All(quiet, subject => Assert.False(subject.IsAlive,
+            "a subject that stopped being written must not be kept alive by the filter"));
     }
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (WeakReference[] Collectable, Person Retained) FillBeyondPruneThreshold(
-        EmittedRevisionTracker tracker, HashSet<string> live)
+    [Fact]
+    public void WhenAPropertyKeepsBeingWritten_ThenRotationDoesNotLoseItsBaseline()
     {
-        live.Add(nameof(Person.FirstName));
-        live.Add(nameof(Person.LastName));
+        // Arrange: rotation must not drop a property that is still active, or its stragglers would
+        // start being admitted again.
+        var filter = new DeliveredRevisionFilter();
+        var property = new PropertyReference(new Person(), nameof(Person.FirstName));
 
-        var collectable = new WeakReference[1200];
-        for (var index = 0; index < collectable.Length; index++)
+        // Act: keep it written across enough churn to rotate several times.
+        for (var round = 0; round < 3; round++)
         {
-            var subject = new Person();
-            collectable[index] = new WeakReference(subject);
-            tracker.TryAdmit(CreateChange(new PropertyReference(subject, nameof(Person.FirstName)), index + 1));
+            Assert.True(filter.TryAdmit(CreateChange(property, revision: 100 + round)));
+            Churn(filter, 5000);
         }
 
-        // One subject that stays in scope, to prove pruning is selective rather than a blanket clear.
-        var retained = new Person();
-        tracker.TryAdmit(CreateChange(new PropertyReference(retained, nameof(Person.LastName)), revision: 1));
-        return (collectable, retained);
+        // Assert
+        Assert.False(filter.TryAdmit(CreateChange(property, revision: 50)));
+    }
+
+    [Fact]
+    public void WhenAnEchoIsRecorded_ThenAnOlderLocalCommitIsSuppressed()
+    {
+        // Arrange: the source pushed a value in, so it already holds it. A local commit that predates
+        // that echo must not be written back over it.
+        var filter = new DeliveredRevisionFilter();
+        var property = new PropertyReference(new Person(), nameof(Person.FirstName));
+
+        // Act
+        filter.RecordDelivered(CreateChange(property, revision: 20));
+
+        // Assert
+        Assert.False(filter.TryAdmit(CreateChange(property, revision: 18)));
+        Assert.True(filter.TryAdmit(CreateChange(property, revision: 21)));
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void TripPrune(EmittedRevisionTracker tracker, HashSet<string> live)
+    private static WeakReference[] RecordAndAbandon(DeliveredRevisionFilter filter)
     {
-        live.Add(nameof(Person.FirstName_MaxLength_Unit));
-        for (var index = 0; index < 1200; index++)
+        var abandoned = new WeakReference[500];
+        for (var index = 0; index < abandoned.Length; index++)
         {
-            tracker.TryAdmit(CreateChange(new PropertyReference(new Person(), nameof(Person.FirstName_MaxLength_Unit)), index + 1));
+            var subject = new Person();
+            abandoned[index] = new WeakReference(subject);
+            filter.TryAdmit(CreateChange(new PropertyReference(subject, nameof(Person.FirstName)), index + 1));
+        }
+
+        return abandoned;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void Churn(DeliveredRevisionFilter filter, int count)
+    {
+        for (var index = 0; index < count; index++)
+        {
+            filter.TryAdmit(CreateChange(new PropertyReference(new Person(), nameof(Person.LastName)), index + 1));
         }
     }
 

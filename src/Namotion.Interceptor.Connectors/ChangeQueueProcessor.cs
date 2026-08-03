@@ -8,7 +8,7 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
-/// Processes property changes from a queue, buffering and deduplicating them before writing.
+/// Processes property changes from a queue, buffering and merging them before writing.
 /// Used by both client sources and server background services.
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
@@ -34,11 +34,13 @@ public class ChangeQueueProcessor : IDisposable
 
     // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
-    private readonly ChangeDeduplicator _flushDeduplicator = new();
+    private readonly ChangeMerger _flushMerger = new();
 
-    // Spans flushes, unlike the deduplicator's per-batch state: batch collapse fixes inversions inside
-    // one flush, this fixes the ones that straddle a flush boundary. Driven only from the dequeue loop.
-    private readonly EmittedRevisionTracker _emittedRevisions;
+    // Spans flushes, unlike the merger's per-batch state: merging fixes inversions inside one flush,
+    // this fixes the ones that straddle a flush boundary. Single-threaded because the two modes are
+    // mutually exclusive: with a buffer only the flush task reaches it, without one only the dequeue
+    // loop does.
+    private readonly DeliveredRevisionFilter _deliveredRevisions;
 
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
@@ -75,7 +77,7 @@ public class ChangeQueueProcessor : IDisposable
     {
         _source = source;
         _propertyFilter = propertyFilter;
-        _emittedRevisions = new EmittedRevisionTracker(propertyFilter);
+        _deliveredRevisions = new DeliveredRevisionFilter();
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
@@ -87,7 +89,7 @@ public class ChangeQueueProcessor : IDisposable
         }
         catch
         {
-            _flushDeduplicator.Dispose();
+            _flushMerger.Dispose();
             throw;
         }
     }
@@ -128,9 +130,9 @@ public class ChangeQueueProcessor : IDisposable
         {
             _logger.LogWarning(
                 "Change queue processor is running without buffering (bufferTime <= 0). " +
-                "Each property change will be processed individually without deduplication, " +
+                "Each property change will be processed individually without merging, " +
                 "which can cause high CPU usage under load. " +
-                "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and deduplication.");
+                "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and merging.");
         }
 
         try
@@ -141,6 +143,11 @@ public class ChangeQueueProcessor : IDisposable
             {
                 if (ReferenceEquals(change.Origin.Source, _source))
                 {
+                    // Not written back, but the source already holds this value at this revision, so
+                    // it still advances the baseline. Leaving it behind would let a local commit that
+                    // predates the echo be admitted afterwards and overwrite the newer value the
+                    // source just sent, which is the divergence this filter exists to prevent.
+                    _deliveredRevisions.RecordDelivered(in change);
                     continue;
                 }
 
@@ -151,9 +158,9 @@ public class ChangeQueueProcessor : IDisposable
 
                 if (periodicTimer is null)
                 {
-                    // The buffered path applies this inside the deduplicator, where it can compact the
+                    // The buffered path applies this inside the merger, where it can compact the
                     // batch in place; here there is no batch, so it gates the single write.
-                    if (!_emittedRevisions.TryAdmit(in change))
+                    if (!_deliveredRevisions.TryAdmit(in change))
                     {
                         continue;
                     }
@@ -229,13 +236,13 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            var dedupedChanges = _flushDeduplicator.Deduplicate(CollectionsMarshal.AsSpan(_flushChanges), _emittedRevisions);
+            var mergedChanges = _flushMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), _deliveredRevisions);
 
-            if (dedupedChanges.Length > 0)
+            if (mergedChanges.Length > 0)
             {
                 try
                 {
-                    await _writeHandler(dedupedChanges, cancellationToken).ConfigureAwait(false);
+                    await _writeHandler(mergedChanges, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -255,11 +262,11 @@ public class ChangeQueueProcessor : IDisposable
             if (Volatile.Read(ref _disposed) == 1)
             {
                 // Disposed while flushing - return buffer to pool now
-                _flushDeduplicator.Dispose();
+                _flushMerger.Dispose();
             }
             else
             {
-                _flushDeduplicator.Reset();
+                _flushMerger.Reset();
             }
 
             Volatile.Write(ref _flushGate, 0);
@@ -285,7 +292,7 @@ public class ChangeQueueProcessor : IDisposable
             try
             {
                 // Clear and return the buffer to the pool
-                _flushDeduplicator.Dispose();
+                _flushMerger.Dispose();
             }
             finally
             {

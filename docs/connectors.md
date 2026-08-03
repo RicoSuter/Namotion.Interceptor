@@ -121,7 +121,9 @@ Per property, the surviving old value comes from the change with the *lowest* `S
 
 Revisions are monotonic per subject and are not comparable across subjects; see [Delivery Guarantees](tracking.md#delivery-guarantees) for the full contract, including what the old value does and does not promise.
 
-Delivery converges across flushes as well as within one. A change is enqueued after its commit and outside the subject lock, so a writer preempted between the two can land an older commit in a later batch than a newer one. The processor remembers the newest commit already delivered per property and drops anything that commit has superseded, so `WriteChangesAsync` never receives a value that is already stale and never has to compare revisions itself. Nothing bounds how long that preemption lasts, which is why buffering longer would not have closed it.
+Delivery converges across flushes as well as within one. A change is enqueued after its commit and outside the subject lock, so a writer preempted between the two can land an older commit in a later batch than a newer one. The processor remembers the newest commit already delivered per property and drops anything that commit has superseded, so `WriteChangesAsync` does not have to compare revisions itself. Nothing bounds how long that preemption lasts, which is why buffering longer would not have closed it. Values the source itself pushed in count as delivered, since the source already holds them.
+
+Two limits are worth knowing. That memory ages out, so the guarantee covers properties written within a recent window rather than forever; a property that has been quiet for thousands of writes cannot have a straggler in flight anyway, which is the case the window is sized for. And writes issued by [source transactions](tracking-transactions.md), including their rollbacks, go to the source directly rather than through this processor, so they are not ordered against it. Their local apply does run through the normal write path, so it advances the baseline and later local changes stay ordered behind it.
 
 ### Write Retry Queue
 

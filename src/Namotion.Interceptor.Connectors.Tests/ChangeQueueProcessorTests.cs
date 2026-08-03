@@ -372,6 +372,77 @@ public class ChangeQueueProcessorTests
         Assert.Equal(2, change.Revision);
     }
 
+    /// <summary>
+    /// The immediate path (no buffer time) has no batch to merge, so it consults the delivered-revision
+    /// filter directly. Without that call it would write a commit the source has already moved past,
+    /// and nothing else in the suite covers it.
+    /// </summary>
+    [Fact]
+    public async Task WhenBufferTimeIsZero_ThenASupersededCommitIsNotWritten()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writtenValues = new List<string?>();
+        var source = new object();
+
+        using var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenValues.Add(change.GetNewValue<string>());
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        // The source is already past every revision this subject can reach in this test, so every
+        // change the immediate path sees is superseded.
+        SeedDeliveredRevision(processor, new PropertyReference(subject, nameof(Person.FirstName)), long.MaxValue);
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act
+        subject.FirstName = "Suppressed";
+        subject.LastName = "Delivered";
+
+        // Assert: LastName has no baseline, so it arrives and proves the loop is running, while
+        // FirstName is suppressed rather than merely slow.
+        await AsyncTestHelpers.WaitUntilAsync(() => writtenValues.Contains("Delivered"));
+        Assert.DoesNotContain("Suppressed", writtenValues);
+
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    private static void SeedDeliveredRevision(ChangeQueueProcessor processor, PropertyReference property, long revision)
+    {
+        var field = typeof(ChangeQueueProcessor)
+            .GetField("_deliveredRevisions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.True(field is not null, "_deliveredRevisions was renamed, this test needs updating.");
+
+        var filter = field!.GetValue(processor)!;
+        var record = filter.GetType()
+            .GetMethod("RecordDelivered", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        Assert.True(record is not null, "RecordDelivered was renamed, this test needs updating.");
+
+        var change = SubjectPropertyChange.Create(
+            property, ChangeOrigin.Local, DateTimeOffset.UnixEpoch, null, "old", "new", revision);
+        record!.Invoke(filter, [change]);
+    }
+
     private static void EnqueueChange(
         ChangeQueueProcessor processor,
         PropertyReference property,

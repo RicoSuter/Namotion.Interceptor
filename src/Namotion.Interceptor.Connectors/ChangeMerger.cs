@@ -14,9 +14,9 @@ namespace Namotion.Interceptor.Connectors;
 /// subject lock, so concurrent writers to one property can enqueue in the opposite order they committed.
 /// Owns the pooled scratch buffers so that a flush allocates nothing per batch.
 /// Not thread-safe: the caller must serialize all calls, which <see cref="ChangeQueueProcessor"/> does
-/// by holding its flush gate for the whole deduplicate, write and reset cycle.
+/// by holding its flush gate for the whole merge, write and reset cycle.
 /// </summary>
-internal sealed class ChangeDeduplicator : IDisposable
+internal sealed class ChangeMerger : IDisposable
 {
     private const int BufferMinimumSize = 256;
     private const int BufferMaximumSize = 1024;
@@ -33,7 +33,7 @@ internal sealed class ChangeDeduplicator : IDisposable
     private readonly Dictionary<PropertyReference, (int Index, int SeedIndex, long LowestRevision, long HighestRevision)> _propertyIndices
         = new(PropertyReference.Comparer);
 
-    // Reusable buffer for deduplicated changes (rented from ArrayPool to avoid allocations on resize)
+    // Reusable buffer for merged changes (rented from ArrayPool to avoid allocations on resize)
     private SubjectPropertyChange[] _buffer = RentClearedBuffer(BufferMinimumSize);
     private int _count;
 
@@ -55,15 +55,15 @@ internal sealed class ChangeDeduplicator : IDisposable
     /// each property's last occurrence.
     /// </summary>
     /// <param name="changes">The batch to collapse, in arrival order.</param>
-    /// <returns>The deduplicated changes. The memory points into the pooled buffer and stays valid until
-    /// the next <see cref="Deduplicate"/>, <see cref="Reset"/> or <see cref="Dispose"/> call, so the caller
+    /// <returns>The merged changes. The memory points into the pooled buffer and stays valid until
+    /// the next <see cref="Merge"/>, <see cref="Reset"/> or <see cref="Dispose"/> call, so the caller
     /// can await a write handler on it before resetting. Empty once <see cref="Dispose"/> has run.</returns>
-    /// <param name="emittedRevisions">When given, drops survivors that an earlier batch already
+    /// <param name="deliveredRevisions">When given, drops survivors that an earlier batch already
     /// superseded, which is what makes delivery converge across flushes rather than only within one.
     /// Optional so the batch collapse can be exercised on its own.</param>
-    public ReadOnlyMemory<SubjectPropertyChange> Deduplicate(
+    public ReadOnlyMemory<SubjectPropertyChange> Merge(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        EmittedRevisionTracker? emittedRevisions = null)
+        DeliveredRevisionFilter? deliveredRevisions = null)
     {
         if (_buffer is null)
         {
@@ -170,9 +170,9 @@ internal sealed class ChangeDeduplicator : IDisposable
             Array.Reverse(_buffer, 0, _count);
         }
 
-        if (emittedRevisions is not null && _count > 0)
+        if (deliveredRevisions is not null && _count > 0)
         {
-            SuppressAlreadyDeliveredCommits(emittedRevisions);
+            SuppressAlreadyDeliveredCommits(deliveredRevisions);
         }
 
         return new ReadOnlyMemory<SubjectPropertyChange>(_buffer, 0, _count);
@@ -181,13 +181,13 @@ internal sealed class ChangeDeduplicator : IDisposable
     /// <summary>
     /// Drops survivors whose commit an earlier batch already superseded, compacting what remains.
     /// </summary>
-    private void SuppressAlreadyDeliveredCommits(EmittedRevisionTracker emittedRevisions)
+    private void SuppressAlreadyDeliveredCommits(DeliveredRevisionFilter deliveredRevisions)
     {
         var kept = 0;
         for (var index = 0; index < _count; index++)
         {
             ref readonly var survivor = ref _buffer[index];
-            if (!emittedRevisions.TryAdmit(in survivor))
+            if (!deliveredRevisions.TryAdmit(in survivor))
             {
                 continue;
             }
@@ -214,7 +214,7 @@ internal sealed class ChangeDeduplicator : IDisposable
 
     /// <summary>
     /// Releases the batch state after the write handler has consumed the result, invalidating the memory
-    /// returned by <see cref="Deduplicate"/>. Must be called after every batch, because it is what keeps
+    /// returned by <see cref="Merge"/>. Must be called after every batch, because it is what keeps
     /// the pooled buffer free of stale references. A no-op once <see cref="Dispose"/> has run.
     /// </summary>
     public void Reset()
@@ -229,7 +229,7 @@ internal sealed class ChangeDeduplicator : IDisposable
 
         _propertyIndices.Clear();
 
-        // Only the prefix Deduplicate filled can hold object references (subjects, boxed values): every
+        // Only the prefix Merge filled can hold object references (subjects, boxed values): every
         // buffer is cleared once when it is rented and every batch is released here, so the rest of the
         // array is already clear. Clearing the whole rental instead would make a small batch pay for the
         // 256 slot minimum.
@@ -248,7 +248,7 @@ internal sealed class ChangeDeduplicator : IDisposable
 
     /// <summary>
     /// Clears and returns the pooled buffer, invalidating the memory returned by
-    /// <see cref="Deduplicate"/>. Idempotent, but not safe to call while a batch is in flight.
+    /// <see cref="Merge"/>. Idempotent, but not safe to call while a batch is in flight.
     /// </summary>
     public void Dispose()
     {
