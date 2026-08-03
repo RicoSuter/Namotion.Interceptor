@@ -73,6 +73,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // Serializes mutators; never held on a query path.
     private readonly object _mutationLock = new();
 
+    // Ownership records for fallback edges added through InterceptorExecutor. Null on every other
+    // context. Read and written only under _mutationLock, which is what makes a record atomic with
+    // the edge it owns, and never touched by a resolution or invalidation path.
+    private FallbackAttachment? _fallbackAttachments;
+
     // Contexts that resolve through this context, lazily allocated because most contexts are
     // never used as a fallback. The set instance is its own lock: it is created once via CAS and
     // never replaced, so every thread locks the same canonical object without a second allocation.
@@ -181,6 +186,155 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         InvalidateUsingContexts();
         return true;
+    }
+
+    /// <summary>
+    /// Publishes the edge and its record in one locked section. Returns null when the edge exists.
+    /// </summary>
+    private protected FallbackAttachment? TryBeginFallbackAttachment(
+        InterceptorSubjectContext contextImpl,
+        ImmutableArray<ILifecycleInterceptor> interceptors)
+    {
+        var attachment = new FallbackAttachment
+        {
+            Context = contextImpl,
+            Interceptors = interceptors
+        };
+
+        lock (_mutationLock)
+        {
+            var state = Volatile.Read(ref _state);
+            if (state.FallbackContexts.Contains(contextImpl))
+            {
+                return null;
+            }
+
+            // R4: register into the fallback before publishing, as AddFallbackContext does.
+            var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
+            lock (usedByContexts)
+            {
+                usedByContexts.Add(this);
+            }
+
+            FallbackAttachmentList.Link(ref _fallbackAttachments, attachment);
+
+            PublishState(new ContextState(state.Services, state.FallbackContexts.Add(contextImpl)));
+        }
+
+        try
+        {
+            InvalidateUsingContexts();
+        }
+        catch
+        {
+            // The edge is already visible and this thread is leaving without running any callback,
+            // so the record has to end up claimable by the next removal. Not CompleteFallbackAttachment:
+            // that honours a pending removal by unlinking, and nobody would be left to perform it,
+            // which is the one way to make a published edge permanently unremovable.
+            MarkFallbackAttachmentClaimable(attachment);
+            throw;
+        }
+
+        return attachment;
+    }
+
+    /// <summary>
+    /// Marks the attach finished and reports whether a remover handed its removal to this thread.
+    /// Must be called from a finally, so a throwing attach still leaves a removable edge.
+    /// </summary>
+    /// <summary>
+    /// Leaves the record linked and claimable after an attach that ran no callbacks and will not
+    /// return to its caller. A removal that deferred to this attach cannot be honoured, so its
+    /// request is dropped in favour of keeping the edge removable by whoever asks next.
+    /// </summary>
+    private void MarkFallbackAttachmentClaimable(FallbackAttachment attachment)
+    {
+        lock (_mutationLock)
+        {
+            attachment.InvokedInterceptorCount = 0;
+            attachment.IsAttachCompleted = true;
+            attachment.IsPendingRemoval = false;
+        }
+    }
+
+    private protected bool CompleteFallbackAttachment(FallbackAttachment attachment, int invokedInterceptorCount)
+    {
+        lock (_mutationLock)
+        {
+            attachment.InvokedInterceptorCount = invokedInterceptorCount;
+            attachment.IsAttachCompleted = true;
+
+            if (!attachment.IsPendingRemoval)
+            {
+                return false;
+            }
+
+            FallbackAttachmentList.Unlink(ref _fallbackAttachments, attachment);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Phase one of removal. Claims the record and deliberately leaves the edge, because the
+    /// detach callbacks resolve their handlers through it. Publishes nothing, so no invalidation.
+    /// </summary>
+    private protected FallbackRemovalOutcome TryTakeFallbackAttachment(
+        InterceptorSubjectContext contextImpl,
+        out FallbackAttachment? attachment)
+    {
+        lock (_mutationLock)
+        {
+            attachment = FallbackAttachmentList.Find(_fallbackAttachments, contextImpl);
+            if (attachment is null)
+            {
+                return FallbackRemovalOutcome.NotPresent;
+            }
+
+            if (!attachment.IsAttachCompleted)
+            {
+                // Waiting would deadlock: the attaching thread is inside callbacks that take the
+                // lifecycle lock, which this caller may already hold. Refusing would strand the
+                // edge. So hand the removal to the thread that owns the attach.
+                var alreadyHandedOver = attachment.IsPendingRemoval;
+                attachment.IsPendingRemoval = true;
+                attachment = null;
+                return alreadyHandedOver ? FallbackRemovalOutcome.NotPresent : FallbackRemovalOutcome.Deferred;
+            }
+
+            FallbackAttachmentList.Unlink(ref _fallbackAttachments, attachment);
+            return FallbackRemovalOutcome.Claimed;
+        }
+    }
+
+    /// <summary>
+    /// Phase two of removal: drops the edge once the detach callbacks have run. No-op when the
+    /// edge is already gone.
+    /// </summary>
+    private protected void CompleteFallbackContextRemoval(InterceptorSubjectContext contextImpl)
+    {
+        lock (_mutationLock)
+        {
+            var state = Volatile.Read(ref _state);
+            var index = state.FallbackContexts.IndexOf(contextImpl);
+            if (index < 0)
+            {
+                return;
+            }
+
+            PublishState(new ContextState(state.Services, state.FallbackContexts.RemoveAt(index)));
+
+            // R4: unregister only after publishing, as RemoveFallbackContext does.
+            var usedByContexts = Volatile.Read(ref contextImpl._usedByContexts);
+            if (usedByContexts is not null)
+            {
+                lock (usedByContexts)
+                {
+                    usedByContexts.Remove(this);
+                }
+            }
+        }
+
+        InvalidateUsingContexts();
     }
 
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
