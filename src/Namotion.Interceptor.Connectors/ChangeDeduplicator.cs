@@ -5,8 +5,11 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
-/// Collapses a flush batch to a single change per property, keeping the batch's baseline old value and
-/// its newest new value. Both ends are picked by <see cref="SubjectPropertyChange.Revision"/> (commit
+/// Collapses a flush batch to a single change per property, keeping the oldest commit's old value and
+/// the newest commit's new value. Note that the old value is only as good as what the write pipeline
+/// captured: the generated setter reads it outside the subject lock, so picking by revision decides
+/// WHICH change's old value survives, not that it is the value committed at the preceding revision.
+/// Both ends are picked by <see cref="SubjectPropertyChange.Revision"/> (commit
 /// order) rather than by arrival position, because a change is enqueued after its commit and outside the
 /// subject lock, so concurrent writers to one property can enqueue in the opposite order they committed.
 /// Owns the pooled scratch buffers so that a flush allocates nothing per batch.
@@ -60,8 +63,9 @@ internal sealed class ChangeDeduplicator : IDisposable
             // Reachable after disposal: ChangeQueueProcessor.Dispose releases the buffer once it wins the
             // flush gate, and the periodic flush task can outlive that and tick again on whatever was
             // enqueued in between. Returning empty skips the write handler, which is what a disposed
-            // processor owes its caller anyway. Without the guard the buffer read below throws and the
-            // flush task reports it as a write failure, which is a misleading log for an orderly shutdown.
+            // processor owes its caller anyway. Without the guard the buffer read below throws out of
+            // TryFlushAsync, past the periodic loop's own try, which logs "Failed to flush changes." and
+            // ends the loop for good.
             return ReadOnlyMemory<SubjectPropertyChange>.Empty;
         }
 
@@ -90,7 +94,9 @@ internal sealed class ChangeDeduplicator : IDisposable
         // because a merge decided against partial bounds can promote a value that a later change invalidates.
         for (var i = 0; i < changes.Length; i++)
         {
-            var change = changes[i];
+            // By reference: a by-value copy of this struct is a 144 byte block move that the JIT emits a
+            // bulk write barrier for, once per change per pass, because the struct carries object fields.
+            ref readonly var change = ref changes[i];
 
             // Single lookup per change: the ref is only read and written before the next add.
             ref var bounds = ref CollectionsMarshal.GetValueRefOrAddDefault(_propertyIndices, change.Property, out var propertyAlreadySeen);
@@ -116,7 +122,7 @@ internal sealed class ChangeDeduplicator : IDisposable
         // new value. Backward iteration finds last occurrences first, preserving last-occurrence order.
         for (var i = changes.Length - 1; i >= 0; i--)
         {
-            var change = changes[i];
+            ref readonly var change = ref changes[i];
 
             ref var entry = ref CollectionsMarshal.GetValueRefOrNullRef(_propertyIndices, change.Property);
             if (entry.Index == UnplacedIndex)
@@ -162,10 +168,9 @@ internal sealed class ChangeDeduplicator : IDisposable
     /// </summary>
     public void Reset()
     {
-        // Idempotent like Dispose and Deduplicate. Unlike those two this call cannot actually observe a
-        // released buffer: ChangeQueueProcessor only releases it while holding the flush gate, and the
-        // flush that reaches this line holds that same gate. The guard is here so the whole class is
-        // uniformly a no-op after disposal, not because a reaching interleaving is known.
+        // No known interleaving reaches this after disposal, since the only caller runs under the same
+        // flush gate the disposer needs to release the buffer. Kept so every member of this class is a
+        // no-op once disposed rather than this one alone throwing.
         if (_buffer is null)
         {
             return;
