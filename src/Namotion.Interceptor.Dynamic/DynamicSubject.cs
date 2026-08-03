@@ -28,23 +28,7 @@ public class DynamicSubject : IInterceptorSubject
     [JsonIgnore] object IInterceptorSubject.SyncRoot { get; } = new();
 
     [JsonIgnore]
-    IInterceptorSubjectContext IInterceptorSubject.Context
-    {
-        get
-        {
-            var context = _context;
-            if (context is not null)
-            {
-                return context;
-            }
-
-            // Compare-and-swap rather than ??=: two threads racing the first access
-            // would otherwise each publish an executor and one would be discarded
-            // along with its state, including the per-subject revision counter.
-            var created = new InterceptorExecutor(this);
-            return Interlocked.CompareExchange(ref _context, created, null) ?? created;
-        }
-    }
+    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
 
     [JsonIgnore] ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 

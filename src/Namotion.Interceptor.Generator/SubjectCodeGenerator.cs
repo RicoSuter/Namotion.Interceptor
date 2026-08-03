@@ -139,23 +139,7 @@ internal static class SubjectCodeGenerator
                     private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
                     [JsonIgnore]
-                    IInterceptorSubjectContext IInterceptorSubject.Context
-                    {
-                        get
-                        {
-                            var context = _context;
-                            if (context is not null)
-                            {
-                                return context;
-                            }
-
-                            // Compare-and-swap rather than ??=: two threads racing the first access
-                            // would otherwise each publish an executor and one would be discarded
-                            // along with its state, including the per-subject revision counter.
-                            var created = new InterceptorExecutor(this);
-                            return System.Threading.Interlocked.CompareExchange(ref _context, created, null) ?? created;
-                        }
-                    }
+                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
 
                     [JsonIgnore]
                     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();

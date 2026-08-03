@@ -31,7 +31,34 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     {
         _subject = subject;
     }
-    
+
+    /// <summary>
+    /// Returns the subject's executor, publishing one on first access. Call it from the subject's
+    /// <see cref="IInterceptorSubject.Context"/> accessor, passing that subject's own backing field.
+    /// Public because the source generator emits the call into the consumer's assembly.
+    /// </summary>
+    /// <remarks>
+    /// Compare-and-swap rather than <c>??=</c>: a lazy assignment lets two threads racing the first
+    /// access each publish an executor and discard one, along with everything that had been put on it,
+    /// including the per-subject commit revision counter. It is also the store that safely publishes
+    /// the new instance, which a plain assignment is not.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static IInterceptorExecutor GetOrCreate(ref IInterceptorExecutor? context, IInterceptorSubject subject)
+    {
+        // The allocation sits in a separate non-inlined method so the accessor stays a load and a
+        // branch, small enough to inline into its own callers.
+        return context ?? CreateAndPublish(ref context, subject);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static IInterceptorExecutor CreateAndPublish(ref IInterceptorExecutor? context, IInterceptorSubject subject)
+    {
+        var created = new InterceptorExecutor(subject);
+        return Interlocked.CompareExchange(ref context, created, null) ?? created;
+    }
+
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
