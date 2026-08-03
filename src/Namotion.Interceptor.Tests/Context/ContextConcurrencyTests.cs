@@ -98,15 +98,27 @@ public class ContextConcurrencyTests
         }
     }
 
+    /// <summary>
+    /// Pins the guarantee TryAddService actually makes: the exists check and the add are atomic
+    /// against another mutator of the SAME context, because both serialize on its mutation lock.
+    /// Two callers therefore have exactly one winner.
+    ///
+    /// Deliberately not a differential test. The same holds on the implementation this replaced,
+    /// which took one lock across the same pair, so this cannot distinguish the two and is a
+    /// contract guard rather than a regression guard for this rewrite. The case it does not cover
+    /// is a concurrent registration on a DIFFERENT context of the same chain, which neither
+    /// implementation serializes and which can still admit a duplicate; that is issue #403, and a
+    /// test asserting one winner there would fail by design.
+    /// </summary>
     [Fact]
     public async Task WhenTwoThreadsTryAddTheSameServiceOnDelegatingContext_ThenOnlyOneSucceeds()
     {
-        // Arrange: a context that delegates all service lookups to a single fallback context,
-        // which is the state in which the delegation fast-path field is set.
-        const int ConcurrentAttempts = 3_000;
+        // Arrange: a context that owns no service and resolves everything through one fallback, so
+        // the check runs the delegation walk rather than reading local services.
+        const int concurrentAttempts = 3_000;
         var violations = 0;
 
-        for (var attempt = 1; attempt <= ConcurrentAttempts; attempt++)
+        for (var attempt = 1; attempt <= concurrentAttempts; attempt++)
         {
             var fallbackContext = InterceptorSubjectContext.Create();
             var context = InterceptorSubjectContext.Create();
@@ -139,7 +151,7 @@ public class ContextConcurrencyTests
             catch (TimeoutException exception)
             {
                 throw new TimeoutException(
-                    $"Two concurrent TryAddService calls deadlocked on attempt {attempt} of {ConcurrentAttempts}.",
+                    $"Two concurrent TryAddService calls deadlocked on attempt {attempt} of {concurrentAttempts}.",
                     exception);
             }
 
@@ -151,7 +163,7 @@ public class ContextConcurrencyTests
         }
 
         Assert.True(violations == 0,
-            $"TryAddService was not atomic in {violations} of {ConcurrentAttempts} attempts: two concurrent " +
+            $"TryAddService was not atomic in {violations} of {concurrentAttempts} attempts: two concurrent " +
             "calls for the same service type must have exactly one winner.");
     }
 
@@ -222,7 +234,7 @@ public class ContextConcurrencyTests
     {
         // Arrange: both contexts keep an own service so that neither one purely delegates to
         // the other, then the fallback graph is closed into a cycle.
-        const int AddedServicesPerContext = 100;
+        const int addedServicesPerContext = 100;
 
         var contextA = InterceptorSubjectContext.Create();
         var contextB = InterceptorSubjectContext.Create();
@@ -257,14 +269,14 @@ public class ContextConcurrencyTests
             }),
             StartWorker(() =>
             {
-                for (var index = 0; index < AddedServicesPerContext; index++)
+                for (var index = 0; index < addedServicesPerContext; index++)
                 {
                     contextA.AddService(new MarkerService());
                 }
             }),
             StartWorker(() =>
             {
-                for (var index = 0; index < AddedServicesPerContext; index++)
+                for (var index = 0; index < addedServicesPerContext; index++)
                 {
                     contextB.AddService(new MarkerService());
                 }
@@ -278,28 +290,28 @@ public class ContextConcurrencyTests
         await Task.WhenAll(workers);
 
         // Assert: both contexts aggregate every service of the whole cycle once writes settled.
-        const int TotalServices = 2 + 2 * AddedServicesPerContext;
-        Assert.Equal(TotalServices, contextA.GetServices<MarkerService>().Length);
-        Assert.Equal(TotalServices, contextB.GetServices<MarkerService>().Length);
+        const int totalServices = 2 + 2 * addedServicesPerContext;
+        Assert.Equal(totalServices, contextA.GetServices<MarkerService>().Length);
+        Assert.Equal(totalServices, contextB.GetServices<MarkerService>().Length);
     }
 
     [Fact]
     public async Task WhenServicesAreAddedConcurrentlyWithQueries_ThenQuiescentStateSeesAllServices()
     {
         // Arrange
-        const int WriterCount = 4;
-        const int ReaderCount = 4;
-        const int ServicesPerWriter = 50;
+        const int writerCount = 4;
+        const int readerCount = 4;
+        const int servicesPerWriter = 50;
 
         var context = InterceptorSubjectContext.Create();
         using var start = new ManualResetEventSlim(false);
-        var activeWriters = WriterCount;
+        var activeWriters = writerCount;
 
-        var writers = Enumerable.Range(0, WriterCount)
+        var writers = Enumerable.Range(0, writerCount)
             .Select(_ => Task.Factory.StartNew(() =>
             {
                 start.Wait();
-                for (var index = 0; index < ServicesPerWriter; index++)
+                for (var index = 0; index < servicesPerWriter; index++)
                 {
                     context.AddService(new MarkerService());
                 }
@@ -308,7 +320,7 @@ public class ContextConcurrencyTests
             }, TaskCreationOptions.LongRunning))
             .ToArray();
 
-        var readers = Enumerable.Range(0, ReaderCount)
+        var readers = Enumerable.Range(0, readerCount)
             .Select(_ => Task.Factory.StartNew(() =>
             {
                 start.Wait();
@@ -331,7 +343,7 @@ public class ContextConcurrencyTests
         await Task.WhenAll(workers);
 
         // Assert
-        Assert.Equal(WriterCount * ServicesPerWriter, context.GetServices<MarkerService>().Length);
+        Assert.Equal(writerCount * servicesPerWriter, context.GetServices<MarkerService>().Length);
     }
 
     [Fact]
@@ -340,7 +352,7 @@ public class ContextConcurrencyTests
         // Arrange: both contexts keep an own service so that neither one purely delegates to the
         // other. Each thread mutates its own context and registers into the other one, which is
         // the interleaving that a per-context using-set lock has to survive.
-        const int MutualRegistrations = 2_000;
+        const int mutualRegistrations = 2_000;
 
         var contextA = InterceptorSubjectContext.Create();
         var contextB = InterceptorSubjectContext.Create();
@@ -353,7 +365,7 @@ public class ContextConcurrencyTests
             Task.Factory.StartNew(() =>
             {
                 start.SignalAndWait();
-                for (var index = 0; index < MutualRegistrations; index++)
+                for (var index = 0; index < mutualRegistrations; index++)
                 {
                     context.AddFallbackContext(other);
                     context.RemoveFallbackContext(other);
@@ -446,13 +458,13 @@ public class ContextConcurrencyTests
     public async Task WhenManyContextsAddTheSameFallbackConcurrently_ThenAllSeeLaterTopologyChanges()
     {
         // Arrange: the fan-in shape, all children register into the using set of one parent.
-        const int ChildCount = 32;
+        const int childCount = 32;
 
         var parentContext = InterceptorSubjectContext.Create();
         parentContext.AddService(new MarkerService());
 
         var childContexts = Enumerable
-            .Range(0, ChildCount)
+            .Range(0, childCount)
             .Select(_ =>
             {
                 // The own service keeps the child from delegating to the parent, so it maintains
@@ -463,7 +475,7 @@ public class ContextConcurrencyTests
             })
             .ToArray();
 
-        using var start = new Barrier(ChildCount);
+        using var start = new Barrier(childCount);
 
         var registrations = childContexts
             .Select(childContext => Task.Factory.StartNew(() =>
@@ -495,15 +507,15 @@ public class ContextConcurrencyTests
     {
         // Arrange: the writer invalidates through the using set of the parent context while the
         // churning child adds and removes itself from that very set.
-        const int StableChildCount = 8;
-        const int AddedServices = 200;
-        const int ChurnIterations = 200;
+        const int stableChildCount = 8;
+        const int addedServices = 200;
+        const int churnIterations = 200;
 
         var parentContext = InterceptorSubjectContext.Create();
         parentContext.AddService(new MarkerService());
 
         var childContexts = Enumerable
-            .Range(0, StableChildCount + 1)
+            .Range(0, stableChildCount + 1)
             .Select(_ =>
             {
                 var childContext = InterceptorSubjectContext.Create();
@@ -521,7 +533,7 @@ public class ContextConcurrencyTests
         var writer = Task.Factory.StartNew(() =>
         {
             start.Wait();
-            for (var index = 0; index < AddedServices; index++)
+            for (var index = 0; index < addedServices; index++)
             {
                 parentContext.AddService(new MarkerService());
             }
@@ -532,7 +544,7 @@ public class ContextConcurrencyTests
         var churner = Task.Factory.StartNew(() =>
         {
             start.Wait();
-            for (var index = 0; index < ChurnIterations; index++)
+            for (var index = 0; index < churnIterations; index++)
             {
                 churningChildContext.RemoveFallbackContext(parentContext);
                 churningChildContext.AddFallbackContext(parentContext);
@@ -563,8 +575,8 @@ public class ContextConcurrencyTests
 
         // Assert: the churn ends on a registration, so every child resolves its own service plus
         // every service of the parent context.
-        const int TotalServicesPerChild = 1 + 1 + AddedServices;
-        Assert.All(childContexts, childContext => Assert.Equal(TotalServicesPerChild, childContext.GetServices<MarkerService>().Length));
+        const int totalServicesPerChild = 1 + 1 + addedServices;
+        Assert.All(childContexts, childContext => Assert.Equal(totalServicesPerChild, childContext.GetServices<MarkerService>().Length));
     }
 
     private sealed class MarkerService;
