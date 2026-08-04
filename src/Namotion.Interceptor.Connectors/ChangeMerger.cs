@@ -183,8 +183,9 @@ internal sealed class ChangeMerger : IDisposable
     /// </summary>
     private void SuppressAlreadyDeliveredCommits(DeliveredRevisionFilter deliveredRevisions)
     {
-        // One acquisition for the batch rather than one per survivor, so the whole batch is decided
-        // against a single snapshot of the delivered state.
+        // Per property rather than per batch, which is all this ever needed: the collapse above leaves
+        // one change per property and the delivered state is keyed per property, so no survivor competes
+        // with another for the same slot.
         var kept = deliveredRevisions.SuppressDelivered(_buffer.AsSpan(0, _count));
 
         if (kept == _count)

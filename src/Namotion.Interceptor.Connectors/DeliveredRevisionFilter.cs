@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -6,69 +7,83 @@ namespace Namotion.Interceptor.Connectors;
 /// Remembers the newest commit already delivered for each property, so a change that a later commit
 /// has already superseded is dropped instead of overwriting the source with a stale value.
 ///
-/// Merging a flush batch only sees one batch. A change is enqueued after its commit and outside the
-/// subject lock, so a writer preempted between the two can land revision 8 in the batch after the one
-/// that carried revision 10, and the source would end up holding the older value. Nothing bounds how
-/// long that preemption lasts, so no amount of buffering closes it; remembering what already went out
-/// does.
+/// A change is enqueued after its commit and outside the subject lock, so a writer preempted between the
+/// two can land revision 8 in the batch after the one that carried revision 10, and the source would end
+/// up holding the older value. Nothing bounds how long that preemption lasts, so no amount of buffering
+/// closes it; remembering what already went out does.
 ///
-/// State is bounded by graph membership: <see cref="RemoveSubject"/> drops a subject's entries when it
-/// leaves the object graph. The key is a <see cref="PropertyReference"/>, which holds its subject
-/// strongly, so without that eviction a detached subject and everything it roots would stay alive for
-/// the processor's lifetime.
+/// The state lives on the subject, under a key this assembly owns, reached through the public property
+/// data API. A processor-side map keyed by <see cref="PropertyReference"/> holds its subjects strongly,
+/// so it needs eviction, eviction needs a liveness signal, and every available signal is either wrong
+/// during structural mutation or arrives too late to stop an in-flight change re-inserting the entry.
+/// Keyed on the subject, the baseline is collected with the subject and none of that is needed.
 ///
-/// Eviction replaced an ageing scheme that retired whole generations once enough distinct properties
-/// had been recorded. That bounded the entry count but not what those entries rooted, and it only
-/// triggered for models with more distinct properties than its threshold, so the fixed-size models
-/// most connectors serve never aged anything out at all. Graph membership is the signal that scheme
-/// was approximating, so using it directly is smaller and exact: a live property keeps its baseline
-/// for as long as it exists, with no window to reason about.
+/// The retention is therefore reversed rather than removed: a slot holds its source, so a subject holds
+/// the connector that delivers it. That is why <see cref="Release"/> exists and why the processor calls
+/// it on disposal. It is not optional. A connector can be recreated against a live graph, for example a
+/// HomeBlaze OPC UA server rebuilt on every configuration save, and without release each rebuild would
+/// strand a dead connector reachable from the graph and add an entry to the per-property slot scan.
 ///
-/// Every entry point is synchronized, because this is genuinely reached from three threads. A buffered
-/// processor records echoes and answers write-back questions on its dequeue thread while its flush task
-/// suppresses an outbound batch, and detach eviction arrives on whichever thread mutated the graph. An
-/// earlier version asserted the opposite, that the buffered and immediate modes made the callers
-/// mutually exclusive. That was wrong: the echo bookkeeping sits ahead of the mode check and so runs in
-/// both modes on the dequeue thread, while only the flush path moved to the flush thread.
+/// The price is a property data lookup per consulted change rather than a dictionary probe, and one
+/// small object per property this connector delivers. That is deliberate: the core library stays unaware
+/// of connector concerns, and the connector stops holding references to a graph it does not own.
+///
+/// Per source, because the state is now shared storage rather than a field of one processor: without the
+/// source dimension, two processors serving one property would suppress each other's deliveries. Slots
+/// are found by reference, and a property is served by one or two sources in practice.
+///
+/// This requires the source to outlive the subjects it delivers, because a slot holds it and nothing
+/// removes one. Every construction site passes a long-lived connector, and each keeps a single live
+/// processor across reconnects, so the array holds one entry per protocol. A source recreated per
+/// connection or per tenant would grow it without bound and turn the scan linear, so that is the
+/// invariant to preserve if a new caller appears.
+///
+/// Free of locks. Each slot is a single packed long, advanced with a compare-and-exchange that only ever
+/// moves a revision forward, so the dequeue thread and the flush task can consult the same property
+/// without coordinating.
 /// </summary>
 internal sealed class DeliveredRevisionFilter
 {
-    // Safety valve, not a policy knob: eviction is what bounds this, and it needs a lifecycle
-    // interceptor in the context to deliver detach events. A context configured without one still
-    // accumulates one entry per distinct property ever written, so this caps that at a size no real
-    // model reaches.
-    private const int MaximumEntries = 100_000;
+    // Short by convention: this is hashed on every consulted change, and string hash codes are not
+    // cached, so key length is per-call work. Matches the "ni.*" keys the tracking layer uses.
+    private const string DeliveredRevisionKey = "ni.drev";
 
-    // Guards the map. A leaf lock: nothing under it touches a subject, invokes a callback or performs
-    // I/O, so it cannot participate in a cycle. The subject's SyncRoot is released before a change is
-    // enqueued, and detach eviction takes this while the lifecycle interceptor holds its own lock, so
-    // the order is always lifecycle then this, never the reverse.
-    private readonly Lock _gate = new();
+    private readonly object _source;
 
-    // WrittenOut records whether the newest commit for this property was sent to the source by this
-    // processor, as opposed to already being there because the source sent or confirmed it. That is
-    // what tells a transaction confirmation whether the source may have been overwritten since.
-    private readonly Dictionary<PropertyReference, (long Revision, bool WrittenOut)> _entries = new(PropertyReference.Comparer);
+    // The slot holders this filter has put a slot into, so disposal can take them back out. Holding
+    // these retains no graph: a holder has no reference to its subject, only the subject's property data
+    // has a reference to the holder. One entry per property this connector has delivered, added on first
+    // touch rather than per change.
+    private readonly ConcurrentDictionary<DeliveredRevisionSlots, byte> _touchedSlots = new();
+    private volatile bool _released;
+
+    public DeliveredRevisionFilter(object? source = null)
+    {
+        // Null only in tests and in processors constructed without a source; the instance itself is then
+        // the identity, which keeps slot lookup total without a null branch on the hot path.
+        _source = source ?? this;
+    }
 
     /// <summary>
     /// Returns whether the change should be delivered, recording it as the newest delivered commit for
-    /// its property when it should. Used by the immediate path, which has a single change rather than a
-    /// batch; see <see cref="SuppressDelivered"/> for the buffered one.
+    /// its property when it should.
     /// </summary>
     public bool TryAdmit(in SubjectPropertyChange change)
     {
-        if (change.Revision == 0)
+        if (change.Revision <= 0)
         {
             // Orders against nothing, so nothing can establish that it is superseded. Delivered, and
-            // deliberately not recorded: a recorded 0 could never suppress anything anyway. Reads only
-            // the caller's own struct, so it needs no lock.
+            // deliberately not recorded: a recorded 0 could never suppress anything anyway. Negative
+            // revisions are outside the contract too (a committed write starts at 1) and take the same
+            // route rather than being dropped, matching how ChangeMerger treats them and erring toward
+            // delivering rather than silently discarding.
             return true;
         }
 
-        lock (_gate)
-        {
-            return TryAdmitCore(in change);
-        }
+        // A confirmation being written back leaves the source holding that same confirmed value, so it
+        // is not an overwrite that a later confirmation would need to repair.
+        return TryAdvance(change.Property, change.Revision,
+            writtenOut: change.Origin.Kind != ChangeOriginKind.Confirmed);
     }
 
     /// <summary>
@@ -76,33 +91,40 @@ internal sealed class DeliveredRevisionFilter
     /// the span and returning how many were kept. The caller owns clearing whatever is left past that
     /// prefix.
     /// </summary>
-    /// <remarks>
-    /// A batch is admitted under one lock acquisition rather than one per change, which is both cheaper
-    /// and stronger: the whole batch is decided against a single snapshot of the delivered state, so an
-    /// echo arriving mid-batch cannot suppress one change of a batch and not another.
-    /// </remarks>
     public int SuppressDelivered(Span<SubjectPropertyChange> survivors)
     {
-        lock (_gate)
+        var kept = 0;
+        for (var index = 0; index < survivors.Length; index++)
         {
-            var kept = 0;
-            for (var index = 0; index < survivors.Length; index++)
+            ref readonly var survivor = ref survivors[index];
+            if (!TryAdmit(in survivor))
             {
-                ref readonly var survivor = ref survivors[index];
-                if (!TryAdmitCore(in survivor))
-                {
-                    continue;
-                }
-
-                if (kept != index)
-                {
-                    survivors[kept] = survivor;
-                }
-
-                kept++;
+                continue;
             }
 
-            return kept;
+            if (kept != index)
+            {
+                survivors[kept] = survivor;
+            }
+
+            kept++;
+        }
+
+        return kept;
+    }
+
+    /// <summary>
+    /// Advances the baseline for a change the processor handles without writing it out, which means an
+    /// echo of the source's own value. The source already holds that value at that revision, so leaving
+    /// the baseline behind would let a local commit that predates the echo be admitted after it and
+    /// overwrite the newer value the source just sent.
+    /// </summary>
+    public void RecordDelivered(in SubjectPropertyChange change)
+    {
+        if (change.Revision > 0)
+        {
+            // Not written out by us: the source already holds this value, having sent or confirmed it.
+            TryAdvance(change.Property, change.Revision, writtenOut: false);
         }
     }
 
@@ -115,90 +137,66 @@ internal sealed class DeliveredRevisionFilter
     /// </summary>
     public bool WasWrittenOut(in PropertyReference property)
     {
-        lock (_gate)
-        {
-            return _entries.TryGetValue(property, out var entry) && entry.WrittenOut;
-        }
+        return property.TryGetPropertyData(DeliveredRevisionKey, out var value)
+               && value is DeliveredRevisionSlots slots
+               && slots.TryGetPacked(_source, out var packed)
+               && packed < 0;
     }
 
     /// <summary>
-    /// Advances the baseline for a change the processor handles without writing it out, which means an
-    /// echo of the source's own value. The source already holds that value at that revision, so leaving
-    /// the baseline behind would let a local commit that predates the echo be admitted after it and
-    /// overwrite the newer value the source just sent.
+    /// Records the revision as the newest delivered for this property, unless one at least as new is
+    /// already recorded. Returns whether it won, which is exactly whether the change should be delivered.
     /// </summary>
-    public void RecordDelivered(in SubjectPropertyChange change)
+    private bool TryAdvance(in PropertyReference property, long revision, bool writtenOut)
     {
-        if (change.Revision == 0)
+        if (_released)
         {
-            return;
-        }
-
-        lock (_gate)
-        {
-            if (IsSuperseded(change.Property, change.Revision))
-            {
-                return;
-            }
-
-            // Not written out by us: the source already holds this value, having sent or confirmed it.
-            Record(change.Property, change.Revision, writtenOut: false);
-        }
-    }
-
-    private bool TryAdmitCore(in SubjectPropertyChange change)
-    {
-        if (change.Revision == 0)
-        {
+            // Disposed while a flush was still in flight. Recording now would put back a slot nothing
+            // will ever remove, so deliver without recording rather than leak.
             return true;
         }
 
-        if (IsSuperseded(change.Property, change.Revision))
+        // Read first: GetOrSetPropertyData takes a value rather than a factory, so calling it
+        // unconditionally would allocate a slot holder on every change just to discard it.
+        if (!property.TryGetPropertyData(DeliveredRevisionKey, out var value) ||
+            value is not DeliveredRevisionSlots slots)
         {
-            return false;
+            // Tested rather than cast: property data is a public dictionary, so an unexpected value under
+            // this key must not throw here. A throw escapes the merge into the periodic flush loop's own
+            // handler, which logs and ends the loop for good, after which the queue grows unbounded.
+            if (property.GetOrSetPropertyData(DeliveredRevisionKey, new DeliveredRevisionSlots())
+                is not DeliveredRevisionSlots existing)
+            {
+                return true;
+            }
+
+            slots = existing;
         }
 
-        // A confirmation being written back leaves the source holding that same confirmed value, so it
-        // is not an overwrite that a later confirmation would need to repair.
-        Record(change.Property, change.Revision, writtenOut: change.Origin.Kind != ChangeOriginKind.Confirmed);
-        return true;
+        // Sign carries the written-out flag; see DeliveredRevisionSlots for why it is not a shift.
+        var admitted = slots.TryAdvance(_source, revision, writtenOut ? -revision : revision, out var slotCreated);
+        if (slotCreated)
+        {
+            _touchedSlots.TryAdd(slots, 0);
+        }
+
+        return admitted;
     }
 
     /// <summary>
-    /// Drops every baseline held for a subject that has left the object graph, releasing the subject
-    /// itself along with them. A detached subject can have no straggler in flight worth suppressing,
-    /// because nothing commits to it any more.
+    /// Takes this source's slots back out of every property it recorded against, releasing the source.
+    /// Called from <see cref="ChangeQueueProcessor.Dispose"/>; without it a connector rebuilt against a
+    /// live graph stays reachable from that graph for the lifetime of its subjects.
     /// </summary>
-    public void RemoveSubject(IInterceptorSubject subject)
+    public void Release()
     {
-        lock (_gate)
-        {
-            // Removing during enumeration is supported since .NET Core 3.0, so this needs no
-            // intermediate list and allocates nothing.
-            foreach (var entry in _entries)
-            {
-                if (ReferenceEquals(entry.Key.Subject, subject))
-                {
-                    _entries.Remove(entry.Key);
-                }
-            }
-        }
-    }
+        _released = true;
 
-    private bool IsSuperseded(in PropertyReference property, long revision)
-    {
-        return _entries.TryGetValue(property, out var entry) && revision <= entry.Revision;
-    }
-
-    private void Record(in PropertyReference property, long revision, bool writtenOut)
-    {
-        if (_entries.Count >= MaximumEntries && !_entries.ContainsKey(property))
+        foreach (var slots in _touchedSlots.Keys)
         {
-            // Safety valve only; see the constant. Losing every baseline degrades to not filtering,
-            // which is the behaviour before this filter existed, rather than to anything incorrect.
-            _entries.Clear();
+            slots.RemoveSource(_source);
         }
 
-        _entries[property] = (revision, writtenOut);
+        _touchedSlots.Clear();
     }
 }

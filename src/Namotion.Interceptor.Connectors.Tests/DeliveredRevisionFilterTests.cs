@@ -74,67 +74,22 @@ public class DeliveredRevisionFilterTests
     }
 
     [Fact]
-    public void WhenASubjectIsDetached_ThenItsBaselinesReleaseIt()
+    public void WhenASubjectIsCollected_ThenItsDeliveryStateGoesWithIt()
     {
-        // Arrange: the key holds its subject strongly, so a baseline kept for a subject that has left
-        // the graph would root it and everything below it for the processor's lifetime.
+        // Arrange: the state lives in the subject's own property data rather than in a map owned by the
+        // filter, so nothing has to evict it. A filter-side map keyed by PropertyReference would hold
+        // these subjects strongly for as long as the processor lived.
         var filter = new DeliveredRevisionFilter();
-        var abandoned = RecordAndAbandon(filter, out var subjects);
+        var abandoned = RecordAndAbandon(filter);
 
-        // Act: exactly what the detach event does. Note the model stays small throughout, which is the
-        // case the previous count-based ageing never triggered on and therefore leaked. Done in a
-        // separate frame so the loop variable holding the last subject is gone before collection.
-        RemoveAll(filter, subjects);
-
+        // Act
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
 
         // Assert
         Assert.All(abandoned, subject => Assert.False(subject.IsAlive,
-            "a detached subject must not be kept alive by the filter"));
-    }
-
-    [Fact]
-    public void WhenASubjectIsDetached_ThenOtherSubjectsKeepTheirBaselines()
-    {
-        // Arrange: eviction must be scoped to the subject that left, or the properties still in the
-        // graph would start admitting their stragglers again.
-        var filter = new DeliveredRevisionFilter();
-        var leaving = new Person();
-        var staying = new Person();
-        var leavingProperty = new PropertyReference(leaving, nameof(Person.FirstName));
-        var stayingProperty = new PropertyReference(staying, nameof(Person.FirstName));
-
-        Assert.True(filter.TryAdmit(CreateChange(leavingProperty, revision: 10)));
-        Assert.True(filter.TryAdmit(CreateChange(stayingProperty, revision: 10)));
-
-        // Act
-        filter.RemoveSubject(leaving);
-
-        // Assert: the survivor still suppresses an older commit, the evicted one no longer does.
-        Assert.False(filter.TryAdmit(CreateChange(stayingProperty, revision: 9)));
-        Assert.True(filter.TryAdmit(CreateChange(leavingProperty, revision: 9)));
-    }
-
-    [Fact]
-    public void WhenOtherPropertiesChurn_ThenALivePropertyKeepsItsBaseline()
-    {
-        // Arrange: a property that is still in the graph must keep its baseline no matter how much
-        // unrelated traffic passes through, or its stragglers would start being admitted again. The
-        // previous ageing scheme could drop it once enough other properties had been recorded.
-        var filter = new DeliveredRevisionFilter();
-        var property = new PropertyReference(new Person(), nameof(Person.FirstName));
-
-        // Act: keep it written across churn far larger than the old rotation threshold.
-        for (var round = 0; round < 3; round++)
-        {
-            Assert.True(filter.TryAdmit(CreateChange(property, revision: 100 + round)));
-            Churn(filter, 5000);
-        }
-
-        // Assert
-        Assert.False(filter.TryAdmit(CreateChange(property, revision: 50)));
+            "the filter must not keep a subject alive after everything else has dropped it"));
     }
 
     [Fact]
@@ -204,26 +159,13 @@ public class DeliveredRevisionFilterTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void RemoveAll(DeliveredRevisionFilter filter, List<IInterceptorSubject> subjects)
-    {
-        foreach (var subject in subjects)
-        {
-            filter.RemoveSubject(subject);
-        }
-
-        subjects.Clear();
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference[] RecordAndAbandon(DeliveredRevisionFilter filter, out List<IInterceptorSubject> subjects)
+    private static WeakReference[] RecordAndAbandon(DeliveredRevisionFilter filter)
     {
         var abandoned = new WeakReference[500];
-        subjects = new List<IInterceptorSubject>(abandoned.Length);
         for (var index = 0; index < abandoned.Length; index++)
         {
             var subject = new Person();
             abandoned[index] = new WeakReference(subject);
-            subjects.Add(subject);
             filter.TryAdmit(CreateChange(new PropertyReference(subject, nameof(Person.FirstName)), index + 1));
         }
 
@@ -239,153 +181,191 @@ public class DeliveredRevisionFilterTests
         }
     }
 
+    [Fact]
+    public void WhenTwoSourcesServeOneProperty_ThenTheirBaselinesAreIndependent()
+    {
+        // Arrange: a model exposed over two protocols gives one property two processors. Sharing a
+        // baseline would let the first one's delivery suppress the second's, so its clients would
+        // silently never receive the value.
+        var first = new DeliveredRevisionFilter(new object());
+        var second = new DeliveredRevisionFilter(new object());
+        var property = new PropertyReference(new Person(), nameof(Person.FirstName));
+
+        // Act
+        var deliveredByFirst = first.TryAdmit(CreateChange(property, revision: 10));
+        var deliveredBySecond = second.TryAdmit(CreateChange(property, revision: 10));
+
+        // Assert: both deliver the newest commit, and both still suppress an older one of their own.
+        Assert.True(deliveredByFirst);
+        Assert.True(deliveredBySecond);
+        Assert.False(first.TryAdmit(CreateChange(property, revision: 9)));
+        Assert.False(second.TryAdmit(CreateChange(property, revision: 9)));
+    }
+
+    [Fact]
+    public void WhenTwoThreadsAdmitOneProperty_ThenEachRevisionIsAdmittedAtMostOnce()
+    {
+        // Arrange: the dequeue thread and the flush task consult the same property with no lock between
+        // them, so the compare-and-exchange is the only thing keeping the baseline monotonic. Admitting
+        // one revision twice would write the same value out twice; losing one would drop a delivery.
+        const int revisions = 20_000;
+        var property = new PropertyReference(new Person(), nameof(Person.FirstName));
+        var filter = new DeliveredRevisionFilter(new object());
+        var admittedBy = new int[revisions + 1];
+
+        var barrier = new Barrier(2);
+        Exception? failure = null;
+
+        void Admit(int worker)
+        {
+            try
+            {
+                barrier.SignalAndWait();
+                for (var revision = 1; revision <= revisions; revision++)
+                {
+                    if (filter.TryAdmit(CreateChange(property, revision)))
+                    {
+                        Interlocked.Increment(ref admittedBy[revision]);
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                Interlocked.CompareExchange(ref failure, exception, null);
+            }
+        }
+
+        var one = new Thread(() => Admit(1));
+        var two = new Thread(() => Admit(2));
+
+        // Act
+        one.Start();
+        two.Start();
+        one.Join();
+        two.Join();
+
+        // Assert: a revision is admitted at most once, and the baseline ends on the newest.
+        Assert.Null(failure);
+        Assert.All(admittedBy.AsEnumerable().Skip(1), count => Assert.True(count <= 1,
+            "a revision was admitted by both threads, so the same value would be written out twice"));
+        Assert.False(filter.TryAdmit(CreateChange(property, revisions)));
+    }
+
     private static SubjectPropertyChange CreateChange(PropertyReference property, long revision) =>
         SubjectPropertyChange.Create(property, ChangeOrigin.Local, DateTimeOffset.UnixEpoch, null, "old", "new", revision);
 
     [Fact]
-    public void WhenEchoAndFlushTouchTheFilterConcurrently_ThenItStaysConsistent()
+    public void WhenTwoSourcesFirstTouchOnePropertyConcurrently_ThenNeitherSlotIsLost()
     {
-        // Arrange: the two real callers. A buffered processor records echoes and answers write-back
-        // questions on its dequeue thread while its flush task suppresses an outbound batch, so both
-        // reach this map at once. Fresh properties per iteration on purpose: value overwrites of
-        // existing entries do not restructure the bucket chains, so only inserts (and the Clear inside
-        // rotation) expose the corruption. The count clears RotationThreshold so rotation is covered.
-        const int iterations = 20_000;
-        var filter = new DeliveredRevisionFilter();
-        var echoProperties = new PropertyReference[iterations];
-        var flushProperties = new PropertyReference[iterations];
-        for (var index = 0; index < iterations; index++)
+        // Arrange: adding a source swaps a copy-on-write array. A plain assignment in place of the
+        // compare-and-exchange drops whichever add loses the race, and the loser's baseline silently
+        // never takes effect, so its superseded commits start being written out.
+        const int rounds = 20_000;
+        var properties = new PropertyReference[rounds];
+        for (var index = 0; index < rounds; index++)
         {
-            echoProperties[index] = new PropertyReference(new Person(), nameof(Person.FirstName));
-            flushProperties[index] = new PropertyReference(new Person(), nameof(Person.LastName));
+            properties[index] = new PropertyReference(new Person(), nameof(Person.FirstName));
         }
 
+        var first = new DeliveredRevisionFilter(new object());
+        var second = new DeliveredRevisionFilter(new object());
         var barrier = new Barrier(2);
-        Exception? dequeueFailure = null;
-        Exception? flushFailure = null;
+        Exception? failure = null;
 
-        var dequeueThread = new Thread(() =>
+        void Admit(DeliveredRevisionFilter filter)
         {
             try
             {
                 barrier.SignalAndWait();
-                for (var index = 0; index < iterations; index++)
+                for (var index = 0; index < rounds; index++)
                 {
-                    filter.WasWrittenOut(echoProperties[index]);
-                    filter.RecordDelivered(CreateChange(echoProperties[index], revision: 100));
+                    filter.TryAdmit(CreateChange(properties[index], revision: 10));
                 }
             }
             catch (Exception exception)
             {
-                dequeueFailure = exception;
+                Interlocked.CompareExchange(ref failure, exception, null);
             }
-        });
+        }
 
-        var flushThread = new Thread(() =>
-        {
-            try
-            {
-                barrier.SignalAndWait();
-                var batch = new SubjectPropertyChange[1];
-                for (var index = 0; index < iterations; index++)
-                {
-                    batch[0] = CreateChange(flushProperties[index], revision: 100);
-                    filter.SuppressDelivered(batch.AsSpan());
-                }
-            }
-            catch (Exception exception)
-            {
-                flushFailure = exception;
-            }
-        });
+        var one = new Thread(() => Admit(first));
+        var two = new Thread(() => Admit(second));
 
         // Act
-        dequeueThread.Start();
-        flushThread.Start();
-        dequeueThread.Join();
-        flushThread.Join();
+        one.Start();
+        two.Start();
+        one.Join();
+        two.Join();
 
-        // Assert: the map is structurally intact. Unsynchronized inserts corrupt the bucket chains,
-        // which Dictionary detects and reports by throwing out of whichever thread touches it next.
-        // Lost updates are covered separately below, because rotation makes them unobservable here.
-        Assert.Null(dequeueFailure);
-        Assert.Null(flushFailure);
+        // Assert: both sources kept a slot on every property, so each still suppresses its own older
+        // commit. A lost slot shows up as that source admitting revision 9.
+        Assert.Null(failure);
+        for (var index = 0; index < rounds; index++)
+        {
+            Assert.False(first.TryAdmit(CreateChange(properties[index], revision: 9)),
+                $"the first source lost its slot on property {index}");
+            Assert.False(second.TryAdmit(CreateChange(properties[index], revision: 9)),
+                $"the second source lost its slot on property {index}");
+        }
     }
 
     [Fact]
-    public void WhenEchoAndFlushRecordConcurrently_ThenNoBaselineIsLost()
+    public void WhenAFilterIsReleased_ThenTheSubjectStopsHoldingItsSource()
     {
-        // Arrange: the same two callers, but deliberately kept under RotationThreshold so nothing is
-        // retired and every baseline recorded must still be observable at the end. That makes a lost
-        // update assertable, which the rotating test above cannot do. The two threads own disjoint
-        // property sets, so a missing baseline is a lost write rather than a legitimate overwrite.
-        const int propertiesPerThread = 1_500;
-        var filter = new DeliveredRevisionFilter();
-        var echoProperties = new PropertyReference[propertiesPerThread];
-        var flushProperties = new PropertyReference[propertiesPerThread];
-        for (var index = 0; index < propertiesPerThread; index++)
-        {
-            echoProperties[index] = new PropertyReference(new Person(), nameof(Person.FirstName));
-            flushProperties[index] = new PropertyReference(new Person(), nameof(Person.LastName));
-        }
-
-        var barrier = new Barrier(2);
-        Exception? dequeueFailure = null;
-        Exception? flushFailure = null;
-
-        // Captured rather than left to propagate: an unhandled exception on a raw thread takes down the
-        // test host, which aborts the run instead of failing this test.
-        var dequeueThread = new Thread(() =>
-        {
-            try
-            {
-                barrier.SignalAndWait();
-                for (var index = 0; index < propertiesPerThread; index++)
-                {
-                    filter.RecordDelivered(CreateChange(echoProperties[index], revision: 100));
-                }
-            }
-            catch (Exception exception)
-            {
-                dequeueFailure = exception;
-            }
-        });
-
-        var flushThread = new Thread(() =>
-        {
-            try
-            {
-                barrier.SignalAndWait();
-                var batch = new SubjectPropertyChange[1];
-                for (var index = 0; index < propertiesPerThread; index++)
-                {
-                    batch[0] = CreateChange(flushProperties[index], revision: 100);
-                    filter.SuppressDelivered(batch.AsSpan());
-                }
-            }
-            catch (Exception exception)
-            {
-                flushFailure = exception;
-            }
-        });
+        // Arrange: a slot holds its source, and the subject holds the slot, so a connector rebuilt
+        // against a live graph would stay reachable from that graph forever. HomeBlaze rebuilds an OPC UA
+        // server on every configuration save, so this is a real shape rather than a hypothetical one.
+        var subject = new Person();
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        var abandoned = RecordAndRelease(property, release: true);
 
         // Act
-        dequeueThread.Start();
-        flushThread.Start();
-        dequeueThread.Join();
-        flushThread.Join();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
 
-        // Assert: every baseline from both threads still suppresses an older commit. Probing with an
-        // older revision does not record, so the check does not disturb what it measures.
-        Assert.Null(dequeueFailure);
-        Assert.Null(flushFailure);
+        // Assert
+        Assert.All(abandoned, source => Assert.False(source.IsAlive,
+            "a released connector must not stay reachable from the subject it delivered to"));
+    }
 
-        for (var index = 0; index < propertiesPerThread; index++)
+    [Fact]
+    public void WhenAFilterIsReleased_ThenAnotherSourceKeepsItsBaseline()
+    {
+        // Arrange: release must take out this source's slot only, or a connector still running would
+        // start admitting the commits it had already delivered.
+        var property = new PropertyReference(new Person(), nameof(Person.FirstName));
+        var leaving = new DeliveredRevisionFilter(new object());
+        var staying = new DeliveredRevisionFilter(new object());
+
+        Assert.True(leaving.TryAdmit(CreateChange(property, revision: 10)));
+        Assert.True(staying.TryAdmit(CreateChange(property, revision: 10)));
+
+        // Act
+        leaving.Release();
+
+        // Assert
+        Assert.False(staying.TryAdmit(CreateChange(property, revision: 9)));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference[] RecordAndRelease(PropertyReference property, bool release)
+    {
+        var abandoned = new WeakReference[50];
+        for (var index = 0; index < abandoned.Length; index++)
         {
-            Assert.False(filter.TryAdmit(CreateChange(echoProperties[index], revision: 99)),
-                $"echo baseline {index} was lost");
-            Assert.False(filter.TryAdmit(CreateChange(flushProperties[index], revision: 99)),
-                $"flush baseline {index} was lost");
+            var source = new object();
+            abandoned[index] = new WeakReference(source);
+
+            var filter = new DeliveredRevisionFilter(source);
+            filter.TryAdmit(CreateChange(property, revision: index + 1));
+
+            if (release)
+            {
+                filter.Release();
+            }
         }
+
+        return abandoned;
     }
 }

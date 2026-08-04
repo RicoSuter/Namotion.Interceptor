@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
@@ -422,6 +423,84 @@ public class ChangeQueueProcessorTests
         // FirstName is suppressed rather than merely slow.
         await AsyncTestHelpers.WaitUntilAsync(() => writtenValues.Contains("Delivered"));
         Assert.DoesNotContain("Suppressed", writtenValues);
+
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    [Fact]
+    public async Task WhenAnEchoIsDequeued_ThenAnOlderStragglerIsNotWritten()
+    {
+        // Arrange: the echo is skipped rather than written, so nothing downstream proves it was seen.
+        // Recording it is what suppresses a local commit that predates it. Nothing is delivered for
+        // FirstName beforehand on purpose: a delivered change records its own revision, which would
+        // suppress the straggler by itself and make this test pass with the bookkeeping removed.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var source = new object();
+        var written = new ConcurrentQueue<string?>();
+
+        var firstName = new PropertyReference(subject, nameof(Person.FirstName));
+        var lastName = new PropertyReference(subject, nameof(Person.LastName));
+
+        long echoRevision = 0;
+        using var observed = firstName.Subscribe((in SubjectPropertyChange change) =>
+        {
+            if (change.GetNewValue<string>() == "FromSource")
+            {
+                echoRevision = change.Revision;
+            }
+        });
+
+        using var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.GetNewValue<string>());
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMilliseconds(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Advances the subject's counter so the echo does not land on revision 1, which would leave no
+        // usable revision below it (0 orders against nothing and is never suppressed).
+        subject.LastName = "Warmup";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Warmup"));
+
+        // Act: the source pushes a value for FirstName, which this processor skips without writing.
+        using (PendingOrigin.Set(firstName, ChangeOrigin.FromSource(source), "FromSource"))
+        {
+            subject.FirstName = "FromSource";
+        }
+
+        // The dequeue loop is FIFO, so seeing this proves the echo ahead of it was already handled.
+        subject.LastName = "Fence";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Fence"));
+        Assert.True(echoRevision > 1, "the echo needs a revision with room below it");
+
+        // A commit that predates the echo, arriving late because enqueuing happens after the commit and
+        // outside the subject lock. Only the echo's recorded revision can suppress it.
+        EnqueueChange(processor, firstName, "Old", "Straggler", echoRevision - 1);
+        EnqueueChange(processor, lastName, "Fence", "SecondFence", long.MaxValue);
+
+        // Assert: the second fence shares the straggler's flush, so its arrival means the straggler was
+        // considered and dropped rather than merely still in flight.
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("SecondFence"));
+        Assert.DoesNotContain("Straggler", written);
 
         await cancellation.CancelAsync();
         try { await processing; } catch (OperationCanceledException) { /* expected */ }

@@ -4,7 +4,6 @@ using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Connectors;
 
@@ -38,15 +37,9 @@ public class ChangeQueueProcessor : IDisposable
     private readonly ChangeMerger _flushMerger = new();
 
     // Spans flushes, unlike the merger's per-batch state: merging fixes inversions inside one flush,
-    // this fixes the ones that straddle a flush boundary. Synchronized internally, because a buffered
-    // processor reaches it from both threads at once: the echo and write-back bookkeeping below runs
-    // ahead of the buffered/immediate split and therefore on the dequeue thread in both modes, while
-    // batch suppression runs on the flush task.
+    // this fixes the ones that straddle a flush boundary. Holds no collection of its own; the state it
+    // consults lives on each subject, so it needs no locking, no eviction and no size bound.
     private readonly DeliveredRevisionFilter _deliveredRevisions;
-
-    // Held so the detach subscription can be removed on dispose; an event on the long-lived lifecycle
-    // interceptor would otherwise keep this processor, and everything it holds, alive after disposal.
-    private readonly LifecycleInterceptor? _lifecycle;
 
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
@@ -82,8 +75,8 @@ public class ChangeQueueProcessor : IDisposable
         ILogger logger)
     {
         _source = source;
+        _deliveredRevisions = new DeliveredRevisionFilter(source);
         _propertyFilter = propertyFilter;
-        _deliveredRevisions = new DeliveredRevisionFilter();
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
@@ -98,21 +91,6 @@ public class ChangeQueueProcessor : IDisposable
             _flushMerger.Dispose();
             throw;
         }
-
-        // What bounds the delivered-revision state. Without it a detached subject stays rooted by the
-        // PropertyReference keys held for its properties, for as long as this processor lives. Null
-        // when the context has no lifecycle interceptor, which leaves the filter's own cap as the only
-        // bound; see DeliveredRevisionFilter.
-        _lifecycle = context.TryGetLifecycleInterceptor();
-        if (_lifecycle is not null)
-        {
-            _lifecycle.SubjectDetaching += OnSubjectDetaching;
-        }
-    }
-
-    private void OnSubjectDetaching(SubjectLifecycleChange change)
-    {
-        _deliveredRevisions.RemoveSubject(change.Subject);
     }
 
     /// <summary>
@@ -182,10 +160,11 @@ public class ChangeQueueProcessor : IDisposable
             {
                 if (ReferenceEquals(change.Origin.Source, _source) && !NeedsWriteBack(in change))
                 {
-                    // Not written back, but the source already holds this value at this revision, so
-                    // it still advances the baseline. Leaving it behind would let a local commit that
-                    // predates the echo be admitted afterwards and overwrite the newer value the
-                    // source just sent, which is the divergence this filter exists to prevent.
+                    // Load bearing, despite this change not being written anywhere. The source already
+                    // holds this value at this revision, and recording that is what lets a local commit
+                    // that predates the echo be suppressed afterwards instead of overwriting the newer
+                    // value the source just sent. Removing this call passes every other test in the
+                    // repository; WhenAnEchoIsDequeued_ThenAnOlderStragglerIsNotWritten is what fails.
                     _deliveredRevisions.RecordDelivered(in change);
                     continue;
                 }
@@ -325,12 +304,9 @@ public class ChangeQueueProcessor : IDisposable
 
         _subscription.Dispose();
 
-        // Before anything else: the lifecycle interceptor outlives this processor, so an attached
-        // handler would keep it and its buffers reachable for the context's lifetime.
-        if (_lifecycle is not null)
-        {
-            _lifecycle.SubjectDetaching -= OnSubjectDetaching;
-        }
+        // Takes this processor's slots off the subjects it delivered to. Not optional: those slots hold
+        // the source, so skipping this leaves a dead connector reachable from a live graph.
+        _deliveredRevisions.Release();
 
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
         if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)
