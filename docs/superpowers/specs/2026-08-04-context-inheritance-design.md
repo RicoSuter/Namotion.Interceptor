@@ -287,7 +287,7 @@ steps one without the kind of negotiation PR #412 built. This design does not pr
 
 What remains is deliberately small.
 
-**Two fields on `InterceptorExecutor`:**
+**Four fields on `InterceptorExecutor`:**
 
 ```csharp
 private IInterceptorSubjectContext? _attachContext;   // null, or the context this subject was attached through
@@ -407,17 +407,16 @@ public static void AttachToContext(this IInterceptorSubject subject, IIntercepto
 // core, so a consumer using core plus its own ILifecycleInterceptor can detach what it attached
 public static void DetachFromContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
 {
-    // The set the attach recorded. No resolution happens here, so a chain that has turned cyclic
-    // since cannot stop the edge coming out.
-    var interceptors = subject.Context.GetRecordedAttachInterceptors();
-
     // Pre-flight, before anything is cleared: a subject that is also a child must be removed from
     // its parents first.
     if (subject.GetReferenceCount() != 0)
         throw new InvalidOperationException(/* names the parents still holding it */);
 
-    if (!subject.Context.TryClearAttachContext(context))    // under _mutationLock; exactly one winner
-        return;
+    // Returns the recorded set from inside the same critical section that picks the winner, so the
+    // set cannot be stale relative to the record. Reading it first would be check-then-act across a
+    // lock boundary, which this design condemns elsewhere.
+    if (!subject.Context.TryClearAttachContext(context, out var interceptors))
+        return;                                            // under _mutationLock; exactly one winner
 
     try
     {
@@ -459,15 +458,19 @@ detach path entirely.
 
 It also makes attach and detach pair exactly, which is strictly more correct than re-resolving in both
 directions. Services can never be removed from a context, since no `RemoveService` API exists and
-`ContextState.Services` is only appended to, so the resolved set changes only when a whole fallback
+`ContextState.Services` is only appended to, so the resolved set shrinks only when a whole fallback
 context leaves the chain. Re-resolving then gives an interceptor registered after the attach an unpaired
 detach, and gives one whose context has since left the chain no detach at all, leaking whatever
 per-subject state it took at attach. The record gives the first nothing and the second its detach, which
 is what each of them should get. It costs one field, holding a reference to an `ImmutableArray` that
 `GetServices` already caches on the context state.
 
-Only the root path needs it. On the property path there is no attach edge, only the link, and the
-`finally` clears that whatever the handlers did.
+Only the root path uses the record, and the pairing claim is therefore about that path. The property
+path also releases an attach edge, at reference count zero on the #207 shape, and it does so through the
+internal removal, so no interceptor is notified there. `master` routes that same removal through
+`InterceptorExecutor.RemoveFallbackContext` and notifies everything resolved. The graph's own interceptor
+does not lose anything, because the descent has already detached the subject; a second interceptor
+co-registered on the attach context does. That is behaviour change 15.
 
 The reference-count guard reads the count directly, which it can because that field moved to the executor.
 Detaching a still-referenced subject would remove its `_attachedSubjects` entry
@@ -906,7 +909,7 @@ Unchanged. A throwing `ILifecycleHandler` still propagates and still leaves part
 
 ## 8. Behaviour changes
 
-The complete list. Anything discovered beyond these fifteen is escalated, not absorbed.
+The complete list. Anything discovered beyond these seventeen is escalated, not absorbed.
 
 1. `AddFallbackContext` stops attaching.
 2. `RemoveFallbackContext` stops detaching a root, and throws when aimed at the attach edge.
@@ -937,11 +940,20 @@ The complete list. Anything discovered beyond these fifteen is escalated, not ab
 13. The reference count no longer occupies an entry in `subject.Data`. `GetReferenceCount()` and
     `SubjectLifecycleChange.ReferenceCount` are unchanged, but the dictionary is public and enumerable,
     so its contents are technically observable.
-14. Detach notifies exactly the interceptors the attach resolved, rather than whatever resolves at
+14. An `AddFallbackContext` naming the attach context during a root detach window now throws instead of
+    returning `false` and then losing its edge. That is #411's silent wrong answer, made loud as an
+    emergent consequence of the guard rather than by a rule written for it: the record is cleared before
+    the interceptor window, so the re-add is no longer naming the recorded attach context.
+15. The attach edge released on the property path at reference count zero is released silently, through
+    the internal removal, where `master` routes it through `InterceptorExecutor.RemoveFallbackContext`
+    and notifies every resolved `ILifecycleInterceptor`. The graph's own interceptor is unaffected, since
+    the descent already detached the subject; what changes is that a second interceptor co-registered on
+    the attach context loses that notification.
+16. Detach notifies exactly the interceptors the attach resolved, rather than whatever resolves at
     detach time. An interceptor registered after the attach no longer receives an unpaired detach, and
     one whose context has since left the chain now receives the detach it was owed instead of leaking
     the state it took at attach.
-15. Re-attaching a subject from inside a lifecycle handler while its own detach is still unwinding now
+17. Re-attaching a subject from inside a lifecycle handler while its own detach is still unwinding now
     throws. `master`'s behaviour here is shape- and order-dependent and mostly already broken, measured:
     an ordinary child re-attached from a handler ordered *before* the inheritance handler ends up
     referenced and resolving but absent from `_attachedSubjects`, so the later removal no-ops at
@@ -1034,8 +1046,10 @@ someone improved the behaviour and the test should be updated deliberately, or s
 | 11 | pre-wire a child's context to a not-yet-attached parent, then attach; assert the grandchild is registered and resolves interceptors |
 | 12 | register a service on a parent's own executor, then place a constructor-attached child under it; assert the child now resolves it |
 | 13 | reference counts still behave identically across attach, multi-parent and detach, and `subject.Data` no longer carries the entry |
-| 14 | register an interceptor after an attach and remove a fallback carrying another before the detach; assert the first gets nothing and the second gets its detach |
-| 15 | a handler that re-attaches the subject it is being notified about throws, through both attach entry points; the backing store keeps the written value and the reference count stays zero. The test's handler catches the exception so the outer detach still completes; an uncaught one propagates and leaves the detach partial, which is #384's rule and not a separate outcome |
+| 14 | rendezvous: pause a root detach inside its interceptor loop, call `AddFallbackContext` naming the attach context, assert it throws |
+| 15 | a second interceptor co-registered on the attach context receives no detach when the edge is released by the property route, where `master` notifies it |
+| 16 | register an interceptor after an attach and remove a fallback carrying another before the detach; assert the first gets nothing and the second gets its detach |
+| 17 | a handler that re-attaches the subject it is being notified about throws, through both attach entry points; the backing store keeps the written value and the reference count stays zero. The test's handler catches the exception so the outer detach still completes; an uncaught one propagates and leaves the detach partial, which is #384's rule and not a separate outcome |
 
 ### Oracles that must not move
 
@@ -1101,7 +1115,7 @@ One pull request on `design/context-inheritance-parent-link`, built from commits
 |---|---|---|
 | 1 | Characterization tests only | green with `master`'s production code |
 | 2 | Reproduction tests expressible against `master`'s API: #207 both paths, #402 defects 2, 3, 4 and 5, the two-graph rejection, and re-attach during detach | **red**, each for its issue's stated reason |
-| 3 | **The whole production change**: the three executor fields, the guard hooks, `AttachToContext` / `DetachFromContext` / `IsAttached` / `TryGetAttachContext`, `ContextState.Parent` and its internal setters, the handler body, conditional reverse-entry unregistration, removal of the executor's method overrides, and every migrated call site | commits 1 and 2 flip together; the ordering snapshots must not move; the generator snapshots do |
+| 3 | **The whole production change**: the four executor fields, the guard hooks, `AttachToContext` / `DetachFromContext` / `IsAttached` / `TryGetAttachContext`, `ContextState.Parent` and its internal setters, the handler body, conditional reverse-entry unregistration, removal of the executor's method overrides, and every migrated call site | commits 1 and 2 flip together; the ordering snapshots must not move; the generator snapshots do |
 | 4 | Reproduction test that needs the new API: exactly-once detach | written and green here; the other two are expressible against `master` and live in commit 2 |
 | 5 | Consumer and design docs | see below |
 
@@ -1133,7 +1147,7 @@ gates on commit 3 and at the branch head. Note `reference_opcua_test_port_4840`:
 
 | After | Benchmarks | Why |
 |---|---|---|
-| Commit 3 | `RegistryBenchmark`, plus a subject-graph variant of `ContextDelegationDepthBenchmark` | Three fields on an object that already exists per subject, so no new allocation, against one `ConcurrentDictionary.AddOrUpdate` with a tuple key removed from every attach and every detach (`LifecycleInterceptorExtensions.cs:32-43`). Expected to improve. The offsetting cost is one `_mutationLock` acquisition per attach and detach, shared between the owner claim and the count. |
+| Commit 3 | `RegistryBenchmark`, plus a subject-graph variant of `ContextDelegationDepthBenchmark` | Four fields on an object that already exists per subject, so no new allocation, against one `ConcurrentDictionary.AddOrUpdate` with a tuple key removed from every attach and every detach (`LifecycleInterceptorExtensions.cs:32-43`). Expected to improve. The offsetting cost is one `_mutationLock` acquisition per attach and detach, shared between the owner claim and the count. |
 | Branch head | Both, against `master` | The numbers for the pull request description. |
 
 Run through `scripts/benchmark.ps1` with multiple launches: #412 recorded a single launch on a busy
@@ -1200,7 +1214,7 @@ comments, not only its body.
 | #207 | Close, citing both reproductions, both verified during review. |
 | #410 | **Update, keep open.** Symptom 2 is not closed. The route the issue names, a detach that leaves property values set, strands nothing when measured; stranding requires the subject to hold another reference, which is the multi-parent shape, and the connector shape fails the same way through its attach edge. Post all three measurements, and the correction that the subject resolves *nothing* rather than continuing to resolve through the departed context, which is more severe than the issue predicts. Symptom 1 only if the reproduction attempt succeeds; if it cannot be built, strike it with the reasoning recorded. |
 | #210 | Close as not reachable, with the constraint recorded that a future removal API must clear the ledger entry itself. |
-| #411 | **Update, keep open.** Narrowed the same way as #402 defect 1 and for the same reason, and closed by the same follow-up. An earlier version of this design added a loud rejection for it; that was part of the protocol option B removes, and serialising the two operations closes it properly rather than turning it into an exception the caller must handle. |
+| #411 | **Update, keep open.** The silent form is gone: an add naming the attach context during the window now throws, because the record is cleared before the interceptor loop, so the caller is no longer told `false` and then left without an edge. That is a consequence of the guard rather than a rule written for it. The issue stays open because the caller still cannot complete the add and must retry; the transparent fix, a deferred add performed by the removing thread, is follow-up 1. |
 | #384 | Update, narrowed. The attach-tail case loses route 2 with #412's deferred handoff; route 1 is pre-existing. The detach-half case still raises on a cyclic chain, but such a chain now requires a consumer to have built one deliberately. Its stated blocker is removed. See section 11. |
 | #412 | Close unmerged, referencing this design. |
 
