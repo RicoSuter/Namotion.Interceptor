@@ -189,22 +189,26 @@ non-empty by virtue of having a `DelegationTarget`, and that coupling is invisib
 ### The cycle argument, corrected
 
 The first version of this design claimed parent links can never produce a pure delegation cycle. Both
-reviewers refuted it, with different counterexamples, and both counterexamples ran through the
-repoint-on-partial-detach rule. **That rule is removed** (see section 5), and with it the counterexamples.
+reviewers refuted it, with different counterexamples, and both ran through the repoint-on-partial-detach
+rule. The claim is therefore split: the link has two write sites and each needs its own argument.
 
-What remains true is narrower. The link is set only at `count == 1`, so a link cycle needs two subjects
-each of which acquired its first property reference from the other. Reaching that requires one of them to
-be a root, and a root carries an attach edge as well as its link, so it has two outgoing edges and is not
-a pure delegator. The pure delegation cycle exception is therefore unreachable through inheritance, and
-the service walk's visited set handles the rest, as it already does for cycles containing a context that
-owns services.
+**The `count == 1` gate.** A link cycle formed here needs two subjects each of which acquired its first
+property reference from the other. Reaching that requires one of them to be a root, and a root carries an
+attach edge as well as its link, so it has two outgoing edges and is not a pure delegator. Unreachable.
 
-Two guards are load-bearing for that argument and are stated as rules rather than left implicit:
+**The repoint.** This one writes outside the gate and the argument above does not cover it. Both
+counterexamples needed the surviving parent to be a *descendant* of the subject being repointed, which
+only arises in a back-reference graph, so the repoint carries an explicit guard: skip when the
+candidate's delegation chain reaches this context. That guard is what makes the write safe, not the gate,
+and a concurrent rewiring can still slip past it. Section 5 records why the trade is worth taking.
+
+Two further rules are load-bearing and are stated rather than left implicit:
 
 - **The link is never set to the subject's own context.** `a.Mother = a` is legal and reaches
   `AttachToProperty` with the parent being the subject itself, which would otherwise self-delegate and
   make every access on that subject throw. Verified reachable during review.
-- **No link is set outside the `count == 1` gate.** This is what the removed repoint violated.
+- **The only two write sites are the `count == 1` gate and the guarded repoint.** Any third one needs its
+  own cycle argument.
 
 This design does not claim to fix #410 symptom 1. That issue's own comment argues it may be organically
 unreachable on `master`, because stranding leaves two fallbacks and two fallbacks cannot collapse. The
@@ -667,8 +671,8 @@ p2.Children = [];        // count 0, removes P2.Context, which the child never h
 ```
 
 Also reproduced: `p1.Context._usedByContexts` grows 1, 2, 3. A single field cleared at `count == 0`
-releases whatever it points at regardless of which property the change names, so this closes with no
-repoint. Both paths get their own reproduction test, since they diverge before they converge.
+releases whatever it points at regardless of which property the change names, so this path closes on the
+count-zero clear alone, independently of the repoint. Both paths get their own reproduction test, since they diverge before they converge.
 
 ### What throws
 
@@ -820,7 +824,7 @@ subject during its own detach survives the `finally`.
 
 Restore `IsContextAttach` to the link gate; release the parent link before the handlers instead of in the
 `finally`; delete the owner check; delete the `finally` on the detach edge removal; delete the
-self-context guard; delete the `if (!AddFallbackContext(...)) return` guard; reintroduce the repoint; set
+self-context guard; delete the `if (!AddFallbackContext(...)) return` guard; set
 the link and release the attach edge instead of skipping the link; trust the captured `count == 0` in the
 detach `finally` instead of re-reading `_attachedSubjects`; release `_owner` from a place that reads the
 reference count without holding `_attachedSubjects`; make the reverse-entry unregistration unconditional
@@ -828,7 +832,7 @@ again; route the detach cleanup through the public `RemoveFallbackContext`; drop
 guard on `DetachFromContext`; drop the last-property-detach release of the attach edge; drop the repoint, or drop its chain-reaches-this guard; make the
 lifecycle-bearing guard test "attach state is null" instead of "not lifecycle-attached".
 
-Each must fail its corresponding test. Everything from "reintroduce the repoint" onward is a mutant
+Each must fail its corresponding test. Everything from "set the link and release the attach edge" onward is a mutant
 precisely because a review found it and an earlier version of this design did not, so a test that does
 not catch it is not testing what we think it is.
 
