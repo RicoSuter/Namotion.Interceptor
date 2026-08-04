@@ -800,14 +800,17 @@ is never re-attached, and its subtree stays unmonitored.
 
 Retrying the load does not recover it, and neither does a structure change that keeps the child. The
 container is reassigned on every load, but the attach is skipped because the subject appears in both
-the old and the new value. What does end the state is removing the child from the parent value, or
-detaching and re-attaching the parent subtree, which re-walks the backing store and re-registers it.
-Collection children are also matched by index, so a later index shift can rebind the affected
-subject to a different node rather than healing it.
+the old and the new value. Collection children are also matched by index, so a later index shift can
+rebind the affected subject to a different node rather than healing it.
+
+**The only recovery is to remove or replace the affected child value**, which forces the next load
+to create and stage a fresh subject. Detaching and re-attaching the parent subtree does not work,
+even though it re-walks the backing store: a context detach does not decrement the subject's
+reference count, so the re-attach raises it to two, and `ContextInheritanceHandler` restores the
+fallback context only on the first attach. The subject is left unable to resolve the registry, so
+the loader keeps skipping its subtree. Recreating the client does not help either, because the
+affected state lives in the subject graph and the registry rather than in the client, so a new
+client runs the same loader over the same graph and takes the same reuse path.
 
 Closing this completely requires recording and reverting property assignments during rollback, which
-is a larger design change than the ordering fix. Applications that need a guaranteed-complete load
-should rebuild the affected subject graph, by detaching and re-attaching the parent subtree or by
-removing and re-adding the parent value. Recreating the client does not help: the affected state
-lives in the subject graph and the registry, not in the client, so a new client runs the same loader
-over the same graph and takes the same reuse path.
+is a larger design change than the ordering fix.

@@ -45,10 +45,15 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
     private readonly ConcurrentDictionary<uint, int> _healAttempts = new();
 
-    // Subjects that detached while the callback gate was closed, so their monitored items may have
-    // been added after the detach callback had already run. Drained by CompleteSetup's sweep. Used
-    // as a set; the value is ignored.
+    // Subjects that detached mid-setup, so their monitored items may have been added after the
+    // detach callback had already run. Drained by CompleteSetup's sweep. Used as a set; the value
+    // is ignored.
     private readonly ConcurrentDictionary<IInterceptorSubject, byte> _detachedDuringSetup = new();
+
+    // True only between clearing the collections and finishing CompleteSetup, which is exactly the
+    // span where a detach can be missed. Bounds _detachedDuringSetup: outside that span nothing
+    // would ever drain it.
+    private volatile bool _setupInProgress;
 
     // Consecutive failed heal ticks a retryable item tolerates before it is escalated to polling
     // instead of being retried forever. With polling disabled there is no escalation target, so the
@@ -138,64 +143,74 @@ internal class SubscriptionManager : IAsyncDisposable
         // entries behind, and the next cycle's sweep would drop items for a subject that has since
         // re-attached.
         _detachedDuringSetup.Clear();
+        _setupInProgress = true;
         // On reconnect, re-attempt every owned property as a real subscription; failed nodes are
         // re-added to polling. Prevents double delivery of an escalated item that later recovers.
         _pollingManager?.Clear();
 
-        var itemCount = monitoredItems.Count;
-        var maxItemsPerSubscription = _configuration.MaxItemsPerSubscription;
-        for (var i = 0; i < itemCount; i += maxItemsPerSubscription)
+        try
         {
-            var subscription = new Subscription(session.DefaultSubscription)
+            var itemCount = monitoredItems.Count;
+            var maxItemsPerSubscription = _configuration.MaxItemsPerSubscription;
+            for (var i = 0; i < itemCount; i += maxItemsPerSubscription)
             {
-                PublishingEnabled = true,
-                PublishingInterval = _configuration.DefaultPublishingInterval,
-                DisableMonitoredItemCache = true, // not needed as we use fast data change callback
-                MinLifetimeInterval = 60_000,
-                KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
-                LifetimeCount = _configuration.SubscriptionLifetimeCount,
-                Priority = _configuration.SubscriptionPriority,
-                MaxNotificationsPerPublish = _configuration.SubscriptionMaxNotificationsPerPublish,
-                RepublishAfterTransfer = true, // Enable SDK's automatic republish of missed messages after transfer
-                SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
-            };
-
-            if (!session.AddSubscription(subscription))
-            {
-                throw new InvalidOperationException("Failed to add OPC UA subscription.");
-            }
-
-            subscription.FastDataChangeCallback += OnFastDataChange;
-            await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
-
-            var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
-            for (var j = i; j < batchEnd; j++)
-            {
-                var item = monitoredItems[j];
-                subscription.AddItem(item);
-
-                if (item.Handle is RegisteredSubjectProperty property)
+                var subscription = new Subscription(session.DefaultSubscription)
                 {
-                    _monitoredItems[item.ClientHandle] = property;
+                    PublishingEnabled = true,
+                    PublishingInterval = _configuration.DefaultPublishingInterval,
+                    DisableMonitoredItemCache = true, // not needed as we use fast data change callback
+                    MinLifetimeInterval = 60_000,
+                    KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
+                    LifetimeCount = _configuration.SubscriptionLifetimeCount,
+                    Priority = _configuration.SubscriptionPriority,
+                    MaxNotificationsPerPublish = _configuration.SubscriptionMaxNotificationsPerPublish,
+                    RepublishAfterTransfer = true, // Enable SDK's automatic republish of missed messages after transfer
+                    SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
+                };
+
+                if (!session.AddSubscription(subscription))
+                {
+                    throw new InvalidOperationException("Failed to add OPC UA subscription.");
                 }
+
+                subscription.FastDataChangeCallback += OnFastDataChange;
+                await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
+
+                var batchEnd = Math.Min(i + maxItemsPerSubscription, itemCount);
+                for (var j = i; j < batchEnd; j++)
+                {
+                    var item = monitoredItems[j];
+                    subscription.AddItem(item);
+
+                    if (item.Handle is RegisteredSubjectProperty property)
+                    {
+                        _monitoredItems[item.ClientHandle] = property;
+                    }
+                }
+
+                try
+                {
+                    await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (ServiceResultException sre)
+                {
+                    _logger.LogWarning(sre, "ApplyChanges failed for a batch; attempting to keep valid OPC UA monitored items by removing failed ones.");
+                }
+
+                await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
+
+                // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
+                _subscriptions.TryAdd(subscription, 0);
             }
 
-            try
-            {
-                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (ServiceResultException sre)
-            {
-                _logger.LogWarning(sre, "ApplyChanges failed for a batch; attempting to keep valid OPC UA monitored items by removing failed ones.");
-            }
-
-            await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
-
-            // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
-            _subscriptions.TryAdd(subscription, 0);
+            CompleteSetup(_subscriptions.Keys.SelectMany(subscription => subscription.MonitoredItems));
         }
-
-        CompleteSetup(_subscriptions.Keys.SelectMany(subscription => subscription.MonitoredItems));
+        finally
+        {
+            // Also on the throw path. A setup that fails part way must not leave recording enabled,
+            // or every later detach accumulates in _detachedDuringSetup with no sweep to drain it.
+            _setupInProgress = false;
+        }
     }
 
     /// <summary>
@@ -548,7 +563,12 @@ internal class SubscriptionManager : IAsyncDisposable
         // once they exist. The sweep cannot detect this case on its own: it tests registry
         // membership, but the lifecycle interceptor raises SubjectDetaching before the registry
         // handler runs, so a subject detaching right now still looks registered.
-        if (!_callbacksEnabled)
+        //
+        // Conditioned on an explicit setup flag rather than on the callback gate. The gate is also
+        // closed before the first setup, after a setup that never runs (a load yielding no
+        // monitored items never calls this method at all), and after disposal, and in all of those
+        // states nothing would ever drain what was recorded.
+        if (_setupInProgress)
         {
             _detachedDuringSetup[subject] = 0;
         }
@@ -654,7 +674,25 @@ internal class SubscriptionManager : IAsyncDisposable
 
     internal IDictionary<uint, RegisteredSubjectProperty> MonitoredItemsForTesting => _monitoredItems;
 
+    /// <summary>
+    /// Enters the same state <see cref="CreateBatchedSubscriptionsAsync"/> establishes before it
+    /// starts creating subscriptions. Tests that drive <see cref="CompleteSetupForTesting"/>
+    /// directly need this, because a freshly constructed manager is deliberately NOT mid-setup:
+    /// recording detaches outside a real setup cycle would accumulate with nothing to drain it.
+    /// </summary>
+    internal void BeginSetupForTesting()
+    {
+        _detachedDuringSetup.Clear();
+        _setupInProgress = true;
+    }
+
     internal void CompleteSetupForTesting(IEnumerable<MonitoredItem> monitoredItems) => CompleteSetup(monitoredItems);
+
+    /// <summary>
+    /// Number of subjects recorded as having detached during the current setup cycle. Lets tests
+    /// assert the set is drained rather than growing without bound.
+    /// </summary>
+    internal int DetachedDuringSetupCountForTesting => _detachedDuringSetup.Count;
 
     /// <summary>
     /// Drives the live data-change callback without an SDK <see cref="Subscription"/>. The callback

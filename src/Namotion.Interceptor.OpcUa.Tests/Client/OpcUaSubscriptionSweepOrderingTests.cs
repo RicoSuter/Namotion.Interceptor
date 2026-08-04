@@ -8,12 +8,13 @@ public class OpcUaSubscriptionSweepOrderingTests
     [Fact]
     public void WhenSubjectDetachesBeforeItsItemsAreRegistered_ThenTheSweepStillDropsThem()
     {
-        // Arrange: a fresh manager is in the state CreateBatchedSubscriptionsAsync leaves behind,
-        // with the callback gate closed and the monitored-item dictionary cleared. Both child
-        // subjects are still in the registry, because the lifecycle interceptor raises
+        // Arrange: enter the state CreateBatchedSubscriptionsAsync establishes, with the callback
+        // gate closed, the monitored-item dictionary cleared, and setup marked as in progress. Both
+        // child subjects are still in the registry, because the lifecycle interceptor raises
         // SubjectDetaching before the registry handler runs, so a subject detaching right now looks
         // exactly like one that is staying.
         var harness = SubscriptionManagerTestHarness.Create();
+        harness.Manager.BeginSetupForTesting();
 
         var survivorProperty = harness.CreateAttachedChildSubjectProperty("Kept");
         var detachedProperty = harness.CreateAttachedChildSubjectProperty("Gone");
@@ -36,13 +37,20 @@ public class OpcUaSubscriptionSweepOrderingTests
         // Assert: the detached subject's handle (2) is gone and the survivor's (1) remains.
         Assert.False(harness.Manager.MonitoredItemsForTesting.ContainsKey(2));
         Assert.True(harness.Manager.MonitoredItemsForTesting.ContainsKey(1));
+
+        // Assert: the sweep drained what it recorded. A sweep that removed items by calling the
+        // recording entry point would re-add every subject it swept and hold those graphs alive
+        // until a reconnect that may never come.
+        Assert.Equal(0, harness.Manager.DetachedDuringSetupCountForTesting);
     }
 
     [Fact]
     public void WhenSubjectDetachesDuringSetup_ThenItIsSweptAndNeverRegisteredForReadAfterWrite()
     {
-        // Arrange
+        // Arrange: mid-setup, so the sweep runs with detach recording live, which is the state
+        // production is in when CompleteSetup calls it.
         var harness = SubscriptionManagerTestHarness.CreateWithReadAfterWriteSpy();
+        harness.Manager.BeginSetupForTesting();
 
         var survivorProperty = harness.RegisterMonitoredItem(clientHandle: 1, propertyName: "Kept");
         var detachedProperty = harness.RegisterMonitoredItemThenDetachSubject(clientHandle: 2, propertyName: "Gone");
@@ -66,5 +74,10 @@ public class OpcUaSubscriptionSweepOrderingTests
         // Assert: only the survivor is registered for read-after-write
         Assert.Contains(survivorProperty, harness.ReadAfterWriteSpy!.RegisteredSubjects);
         Assert.DoesNotContain(detachedProperty, harness.ReadAfterWriteSpy!.RegisteredSubjects);
+
+        // Assert: sweeping recorded nothing. The sweep runs with recording live, so removing items
+        // through the recording entry point would re-add every subject it just swept and pin those
+        // graphs until a reconnect that may never come.
+        Assert.Equal(0, harness.Manager.DetachedDuringSetupCountForTesting);
     }
 }
