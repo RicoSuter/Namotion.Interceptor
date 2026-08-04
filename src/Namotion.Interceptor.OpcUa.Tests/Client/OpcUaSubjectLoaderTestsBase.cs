@@ -5,7 +5,6 @@ using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -27,7 +26,40 @@ public class OpcUaSubjectLoaderTestsBase
         };
     }
 
-    private protected (OpcUaSubjectLoader Loader, SourceOwnershipManager PropertyTracker) CreateLoader(
+    /// <summary>
+    /// Creates the subject the test loads together with the source and loader rooted on it, which
+    /// is the shape production uses: <c>OpcUaSubjectClientSource</c> builds its loader over its own
+    /// root subject. That matters beyond tidiness. <c>SourceOwnershipManager</c> subscribes to the
+    /// <c>LifecycleInterceptor</c> reachable from the source's root subject, so a fixture that
+    /// loaded a different subject on a different context would wire the detach callback to a
+    /// lifecycle interceptor the loaded graph never touches, and every subject-detach path would go
+    /// untested.
+    /// </summary>
+    private protected (OpcUaSubjectLoader Loader, SourceOwnershipManager PropertyTracker, IInterceptorSubject Subject) CreateLoader(
+        Func<ReferenceDescription, CancellationToken, Task<bool>>? shouldAddDynamicProperties = null,
+        Func<ReferenceDescription, CancellationToken, Task<bool>>? shouldAddDynamicAttributes = null,
+        OpcUaTypeResolver? typeResolver = null,
+        int? maxAttributeTraversals = null)
+    {
+        var subject = new DynamicSubject(CreateSubjectContext());
+        var (loader, ownership) = CreateLoaderFor(
+            subject,
+            shouldAddDynamicProperties,
+            shouldAddDynamicAttributes,
+            typeResolver,
+            maxAttributeTraversals);
+
+        return (loader, ownership, subject);
+    }
+
+    /// <summary>
+    /// Builds the source and its loader over an already created subject, for tests that need a
+    /// statically modelled root instead of a <see cref="DynamicSubject"/>. The subject must live on
+    /// a context created by <see cref="CreateSubjectContext"/> so the source sees the same
+    /// lifecycle interceptor as the loaded graph.
+    /// </summary>
+    private protected (OpcUaSubjectLoader Loader, SourceOwnershipManager PropertyTracker) CreateLoaderFor(
+        IInterceptorSubject subject,
         Func<ReferenceDescription, CancellationToken, Task<bool>>? shouldAddDynamicProperties = null,
         Func<ReferenceDescription, CancellationToken, Task<bool>>? shouldAddDynamicAttributes = null,
         OpcUaTypeResolver? typeResolver = null,
@@ -45,8 +77,6 @@ public class OpcUaSubjectLoaderTestsBase
             MaxAttributeTraversals = maxAttributeTraversals ?? BaseConfiguration.MaxAttributeTraversals
         };
 
-        var context = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
-        var subject = new DynamicSubject(context);
         var source = new OpcUaSubjectClientSource(subject, config, NullLogger<OpcUaSubjectClientSource>.Instance);
         var loader = new OpcUaSubjectLoader(
             subject,
@@ -57,12 +87,13 @@ public class OpcUaSubjectLoaderTestsBase
         return (loader, source.Ownership);
     }
 
-    private protected static IInterceptorSubject CreateTestSubject()
+    /// <summary>
+    /// Creates the context that loaded subjects live on. <c>WithLifecycle</c> attaches the subject
+    /// through the context's own lifecycle interceptor, which is the one the source subscribes to.
+    /// </summary>
+    private protected static IInterceptorSubjectContext CreateSubjectContext()
     {
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var subject = new DynamicSubject(context);
-        new LifecycleInterceptor().AttachSubjectToContext(subject);
-        return subject;
+        return InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
     }
 
     private protected static ReferenceDescription CreateTestReferenceDescription(string name, NodeId nodeId)

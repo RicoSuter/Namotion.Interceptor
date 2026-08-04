@@ -4,7 +4,6 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -40,10 +39,9 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
         var mockSession = CreateMockSession();
         SetupBrowseAsync(mockSession, browseTree);
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         // Act
@@ -99,10 +97,9 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
         var mockSession = CreateMockSession();
         SetupBrowseAsync(mockSession, browseTree);
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         // Act
@@ -127,8 +124,7 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
     public async Task WhenSamePropertyAppearsViaDifferentReferenceTypes_ThenPropertyIsProcessedOnce()
     {
         // Arrange: a variable node appears twice in browse results (e.g., via HasComponent and HasProperty)
-        var (loader, _) = CreateLoader();
-        var subject = CreateTestSubject();
+        var (loader, _, subject) = CreateLoader();
         var registeredSubject = subject.TryGetRegisteredSubject()!;
 
         var sharedNodeId = new ExpandedNodeId("1001", "urn:test");
@@ -188,11 +184,10 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
             [stateNodeId] = (DataTypeIds.Int32, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
             shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         // Act - should not throw "duplicate key" exception
@@ -237,11 +232,10 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
             [stateNodeId] = (DataTypeIds.Int32, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
             shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         // Act - should not throw "duplicate key" exception
@@ -304,11 +298,10 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
             [qualityId] = (DataTypeIds.Int32, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
             shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         // Act
@@ -358,10 +351,9 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
             [stateNodeId2] = (DataTypeIds.Int32, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         // Act - must not throw "duplicate key" ArgumentException
@@ -420,10 +412,9 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
                 return new ReadResponse { Results = results, DiagnosticInfos = [] };
             });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
 
         // Act
@@ -460,11 +451,9 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
         var mockSession = CreateMockSession();
         var browsedNodeIds = SetupBrowseAsyncWithTracking(mockSession, browseTree);
 
-        var (loader, _) = CreateLoader();
-
-        var modelContext = InterceptorSubjectContext.Create().WithRegistry();
+        var modelContext = CreateSubjectContext();
         var container = new DuplicateSubjectRefContainer(modelContext);
-        new LifecycleInterceptor().AttachSubjectToContext(container);
+        var (loader, _) = CreateLoaderFor(container);
         var registry = modelContext.TryGetService<ISubjectRegistry>()!;
         var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
 
@@ -513,11 +502,9 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
         var mockSession = CreateMockSession();
         var browsedNodeIds = SetupBrowseAsyncWithTracking(mockSession, browseTree);
 
-        var (loader, _) = CreateLoader();
-
-        var modelContext = InterceptorSubjectContext.Create().WithRegistry();
+        var modelContext = CreateSubjectContext();
         var container = new DuplicateCollectionContainer(modelContext);
-        new LifecycleInterceptor().AttachSubjectToContext(container);
+        var (loader, _) = CreateLoaderFor(container);
         var registry = modelContext.TryGetService<ISubjectRegistry>()!;
         var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
 
@@ -566,11 +553,9 @@ public class OpcUaSubjectLoaderDedupTests : OpcUaSubjectLoaderTestsBase
         var mockSession = CreateMockSession();
         SetupBrowseAsync(mockSession, browseTree);
 
-        var (loader, _) = CreateLoader();
-
-        var modelContext = InterceptorSubjectContext.Create().WithRegistry();
+        var modelContext = CreateSubjectContext();
         var container = new StringKeyDictionaryContainer(modelContext);
-        new LifecycleInterceptor().AttachSubjectToContext(container);
+        var (loader, _) = CreateLoaderFor(container);
         var registry = modelContext.TryGetService<ISubjectRegistry>()!;
         var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
 

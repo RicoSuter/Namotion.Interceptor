@@ -39,12 +39,11 @@ public class OpcUaSubjectLoaderAttributeTests : OpcUaSubjectLoaderTestsBase
             [level4Id] = (DataTypeIds.Int32, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
             shouldAddDynamicAttributes: (_, _) => Task.FromResult(true),
             maxAttributeTraversals: 2);
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         // Act
@@ -85,9 +84,8 @@ public class OpcUaSubjectLoaderAttributeTests : OpcUaSubjectLoaderTestsBase
             ]
         });
 
-        var (loader, _) = CreateLoader(shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
+        var (loader, _, subject) = CreateLoader(shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var registeredSubject = subject.TryGetRegisteredSubject()!;
 
         var serverStatus = registeredSubject.AddProperty(
@@ -155,9 +153,8 @@ public class OpcUaSubjectLoaderAttributeTests : OpcUaSubjectLoaderTestsBase
             [unitsNodeId2] = (DataTypeIds.String, -1)
         });
 
-        var (loader, _) = CreateLoader(shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
+        var (loader, _, subject) = CreateLoader(shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var registeredSubject = subject.TryGetRegisteredSubject()!;
         var serverStatus = registeredSubject.AddProperty(
             "ServerStatus",
@@ -228,11 +225,10 @@ public class OpcUaSubjectLoaderAttributeTests : OpcUaSubjectLoaderTestsBase
             [sharedQualityId] = (DataTypeIds.Int32, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
             shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", rootId);
 
         // Act

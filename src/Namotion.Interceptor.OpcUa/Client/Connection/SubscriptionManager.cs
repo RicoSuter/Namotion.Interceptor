@@ -45,6 +45,11 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
     private readonly ConcurrentDictionary<uint, int> _healAttempts = new();
 
+    // Subjects that detached while the callback gate was closed, so their monitored items may have
+    // been added after the detach callback had already run. Drained by CompleteSetup's sweep. Used
+    // as a set; the value is ignored.
+    private readonly ConcurrentDictionary<IInterceptorSubject, byte> _detachedDuringSetup = new();
+
     // Consecutive failed heal ticks a retryable item tolerates before it is escalated to polling
     // instead of being retried forever. With polling disabled there is no escalation target, so the
     // item keeps being retried and self-heals once the node recovers.
@@ -129,6 +134,10 @@ internal class SubscriptionManager : IAsyncDisposable
         _subscriptions.Clear();
         _monitoredItems.Clear();
         _healAttempts.Clear();
+        // Scoped to one setup cycle. A setup that throws before CompleteSetup would otherwise leave
+        // entries behind, and the next cycle's sweep would drop items for a subject that has since
+        // re-attached.
+        _detachedDuringSetup.Clear();
         // On reconnect, re-attempt every owned property as a real subscription; failed nodes are
         // re-added to polling. Prevents double delivery of an escalated item that later recovers.
         _pollingManager?.Clear();
@@ -534,6 +543,27 @@ internal class SubscriptionManager : IAsyncDisposable
     /// </summary>
     public void RemoveItemsForSubject(IInterceptorSubject subject)
     {
+        // A detach arriving mid-setup finds nothing to remove, because setup cleared the dictionary
+        // and has not repopulated it yet. Recording it lets CompleteSetup's sweep drop the items
+        // once they exist. The sweep cannot detect this case on its own: it tests registry
+        // membership, but the lifecycle interceptor raises SubjectDetaching before the registry
+        // handler runs, so a subject detaching right now still looks registered.
+        if (!_callbacksEnabled)
+        {
+            _detachedDuringSetup[subject] = 0;
+        }
+
+        RemoveItemsForSubjectCore(subject);
+    }
+
+    /// <summary>
+    /// The removal itself, without the mid-setup recording. The sweep calls this rather than
+    /// <see cref="RemoveItemsForSubject"/> because it runs with the callback gate still closed, so
+    /// recording there would re-add every subject it just swept and hold those graphs alive until
+    /// a reconnect that may never come.
+    /// </summary>
+    private void RemoveItemsForSubjectCore(IInterceptorSubject subject)
+    {
         foreach (var kvp in _monitoredItems)
         {
             if (kvp.Value.Reference.Subject == subject)
@@ -549,6 +579,19 @@ internal class SubscriptionManager : IAsyncDisposable
     /// </summary>
     private void SweepDetachedSubjects()
     {
+        // Drop anything that detached while setup was running, before the registry check below,
+        // which cannot see those subjects (see RemoveItemsForSubject).
+        if (!_detachedDuringSetup.IsEmpty)
+        {
+            foreach (var entry in _detachedDuringSetup)
+            {
+                RemoveItemsForSubjectCore(entry.Key);
+                _pollingManager?.RemoveItemsForSubject(entry.Key);
+            }
+
+            _detachedDuringSetup.Clear();
+        }
+
         if (_monitoredItems.IsEmpty)
         {
             return;
@@ -563,7 +606,7 @@ internal class SubscriptionManager : IAsyncDisposable
             var subject = entry.Value.Reference.Subject;
             if (seen.Add(subject) && subject.TryGetRegisteredSubject() is null)
             {
-                RemoveItemsForSubject(subject);
+                RemoveItemsForSubjectCore(subject);
                 _pollingManager?.RemoveItemsForSubject(subject);
             }
         }

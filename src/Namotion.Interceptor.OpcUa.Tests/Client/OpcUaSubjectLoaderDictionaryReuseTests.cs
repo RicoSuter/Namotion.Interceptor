@@ -3,7 +3,6 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -38,11 +37,9 @@ public class OpcUaSubjectLoaderDictionaryReuseTests : OpcUaSubjectLoaderTestsBas
         var mockSession = CreateMockSession();
         SetupBrowseAsync(mockSession, browseTree);
 
-        var (loader, _) = CreateLoader();
-
-        var modelContext = InterceptorSubjectContext.Create().WithRegistry();
+        var modelContext = CreateSubjectContext();
         var container = new DictionaryReuseContainer(modelContext);
-        new LifecycleInterceptor().AttachSubjectToContext(container);
+        var (loader, _) = CreateLoaderFor(container);
 
         var itemOne = new DictionaryReuseItem(modelContext) { Name = "one" };
         var itemTwo = new DictionaryReuseItem(modelContext) { Name = "two" };
@@ -102,11 +99,9 @@ public class OpcUaSubjectLoaderDictionaryReuseTests : OpcUaSubjectLoaderTestsBas
                 return new BrowseResponse { Results = results, DiagnosticInfos = [] };
             });
 
-        var (loader, _) = CreateLoader();
-
-        var modelContext = InterceptorSubjectContext.Create().WithRegistry();
+        var modelContext = CreateSubjectContext();
         var container = new DictionaryReuseContainer(modelContext);
-        new LifecycleInterceptor().AttachSubjectToContext(container);
+        var (loader, _) = CreateLoaderFor(container);
 
         var itemOne = new DictionaryReuseItem(modelContext) { Name = "one" };
         var itemTwo = new DictionaryReuseItem(modelContext) { Name = "two" };
@@ -152,11 +147,9 @@ public class OpcUaSubjectLoaderDictionaryReuseTests : OpcUaSubjectLoaderTestsBas
         var mockSession = CreateMockSession();
         SetupBrowseAsync(mockSession, browseTree);
 
-        var (loader, _) = CreateLoader();
-
-        var modelContext = InterceptorSubjectContext.Create().WithRegistry();
+        var modelContext = CreateSubjectContext();
         var container = new StringKeyDictionaryContainer(modelContext);
-        new LifecycleInterceptor().AttachSubjectToContext(container);
+        var (loader, _) = CreateLoaderFor(container);
         var registry = modelContext.TryGetService<ISubjectRegistry>()!;
         var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
 

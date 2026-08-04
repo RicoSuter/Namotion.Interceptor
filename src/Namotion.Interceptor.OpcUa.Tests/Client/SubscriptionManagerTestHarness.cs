@@ -116,6 +116,26 @@ internal sealed class SubscriptionManagerTestHarness
     }
 
     /// <summary>
+    /// Adds a dynamic double property to a new child subject that stays attached to the graph, so
+    /// <c>TryGetRegisteredSubject()</c> keeps returning non-null. The property is deliberately not
+    /// put into the manager's monitored items, which lets a test drive a detach callback before the
+    /// items exist and then add them, the ordering a detach mid-setup produces.
+    /// </summary>
+    public RegisteredSubjectProperty CreateAttachedChildSubjectProperty(string propertyName)
+    {
+        var childSubject = new DynamicSubject(_subject.Context);
+
+        var registeredChild = childSubject.TryGetRegisteredSubject()
+            ?? throw new InvalidOperationException("Child subject has no registered subject.");
+
+        double storedValue = 0d;
+        return registeredChild.AddProperty<double>(
+            propertyName,
+            getValue: _ => storedValue,
+            setValue: (_, value) => storedValue = value is double d ? d : 0d);
+    }
+
+    /// <summary>
     /// Registers a monitored item for a new child subject, then immediately detaches that
     /// child subject from the registry so that <c>TryGetRegisteredSubject()</c> returns null.
     /// Returns the property whose subject is now detached.

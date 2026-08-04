@@ -672,6 +672,87 @@ public class OpcUaSubjectLoaderFailureTests
     }
 
     [Fact]
+    public async Task WhenASubjectReferenceLoadFailsUnderANonRootParent_ThenALaterLoadStillRegistersTheChild()
+    {
+        // Arrange: identical in shape to the collection and dictionary cases above, but through the
+        // single subject reference branch, which LoadPendingSubjectReferencesAsync binds on its own
+        // and so needs its own regression pin. Root.Parent is assigned before the load, so the
+        // parent is reused rather than staged and survives a failed load. Parent.Child is staged
+        // during discovery and its browse fails transiently on the first attempt. Because the parent
+        // is not the root subject, anything the loader binds to Parent.Child applies live, so a
+        // reference bound before its child finished loading would still point at the staged child
+        // after the rollback detached it. The next load then reuses that child from
+        // property.Children without re-staging it, so it is never re-attached and its subtree stays
+        // unregistered and unmonitored for good.
+        var parentId = new NodeId(4201, 2);
+        var childId = new NodeId(4202, 2);
+        var valueId = new NodeId(4203, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [RootId] = [MakeReference("Parent", parentId, NodeClass.Object)],
+            [parentId] = [MakeReference("Child", childId, NodeClass.Object)],
+            [childId] = [MakeReference("Value", valueId, NodeClass.Variable)]
+        };
+
+        var modelContext = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
+        var root = new RollbackReferenceRoot(modelContext);
+        root.Parent = new RollbackReferenceParent(modelContext);
+
+        var (loader, source) = CreateSourceAndLoaderFor(root, shouldAddDynamicProperties: false);
+
+        var failChildBrowse = true;
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection descriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var description in descriptions)
+                {
+                    if (failChildBrowse && description.NodeId == childId)
+                    {
+                        results.Add(new BrowseResult { StatusCode = StatusCodes.BadServerHalted, References = [] });
+                        continue;
+                    }
+
+                    var children = new ReferenceDescriptionCollection();
+                    if (browseTree.TryGetValue(description.NodeId, out var references))
+                    {
+                        children.AddRange(references);
+                    }
+                    results.Add(new BrowseResult { References = children });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        var rootNode = MakeReference("Root", RootId, NodeClass.Object);
+
+        // Act: the first load rolls back, the second runs against a healthy server.
+        await Assert.ThrowsAsync<OpcUaTransientServiceException>(
+            () => loader.LoadSubjectAsync(root, rootNode, mockSession.Object, CancellationToken.None));
+
+        failChildBrowse = false;
+        var monitoredItems = await loader.LoadSubjectAsync(
+            root, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: the child is back in the registry and monitored. A child left over from the
+        // rolled-back load shows up here as a null registration and a missing monitored item.
+        var child = root.Parent!.Child;
+        Assert.NotNull(child);
+        Assert.NotNull(child.TryGetRegisteredSubject());
+
+        var monitoredItem = Assert.Single(monitoredItems);
+        Assert.Equal(valueId, monitoredItem.StartNodeId);
+        Assert.Single(source.Ownership.Properties);
+    }
+
+    [Fact]
     public async Task WhenALoadFailsWhileHoldingTheStructureLock_ThenRollbackDoesNotDeadlock()
     {
         // Arrange: Root has a Sensor child whose own child fails with a transient browse status,
@@ -928,6 +1009,20 @@ public partial class RollbackCollectionItem
 {
     [OpcUaNode("Value")]
     public partial double Value { get; set; }
+}
+
+[InterceptorSubject]
+public partial class RollbackReferenceRoot
+{
+    [OpcUaNode("Parent")]
+    public partial RollbackReferenceParent? Parent { get; set; }
+}
+
+[InterceptorSubject]
+public partial class RollbackReferenceParent
+{
+    [OpcUaNode("Child")]
+    public partial RollbackCollectionItem? Child { get; set; }
 }
 
 [InterceptorSubject]

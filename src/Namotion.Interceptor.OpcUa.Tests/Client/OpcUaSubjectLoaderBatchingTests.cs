@@ -80,10 +80,9 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
 
         SetupReadAsync(mockSession, dataTypes);
 
-        var (loader, ownership) = CreateLoader(
+        var (loader, ownership, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", rootId);
 
         // Act
@@ -113,6 +112,11 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
         // a batched loader from a per-node one. The call count alone could be met by a per-node
         // loader on a smaller tree, but only batching puts several nodes in one request.
         Assert.Contains(nodesPerBrowseCall, nodeCount => nodeCount > 1);
+
+        // Assert: no call exceeded the configured MaxNodesPerBrowse of 2. A real server rejects an
+        // oversized request outright, so a chunking regression fails here on its own terms instead
+        // of only as a surprising total call count.
+        Assert.All(nodesPerBrowseCall, nodeCount => Assert.True(nodeCount <= 2));
     }
 
     /// <summary>
@@ -182,10 +186,9 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
         // Mock ReadAsync: return DataType + ValueRank for Variable nodes
         SetupReadAsync(mockSession, dataTypes);
 
-        var (loader, ownership) = CreateLoader(
+        var (loader, ownership, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateObjectReferenceDescription("Plant", new ExpandedNodeId(simulationId));
 
         // Act
@@ -295,10 +298,9 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
             [var2Id] = (DataTypeIds.Double, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", rootId);
 
         // Act
@@ -382,10 +384,9 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
             [var3Id] = (DataTypeIds.Int32, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", rootId);
 
         // Act
@@ -512,11 +513,10 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
             [attr2Id] = (DataTypeIds.String, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
             shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", rootId);
 
         // Act
@@ -565,10 +565,9 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
             [item1ValueId] = (DataTypeIds.Float, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         // Act
@@ -629,10 +628,9 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
             [sensorBValueId] = (DataTypeIds.Float, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         // Act
@@ -950,11 +948,10 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
             [attr2bId] = (DataTypeIds.Int32, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
             shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", rootId);
 
         // Act

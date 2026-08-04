@@ -12,8 +12,10 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     [Fact]
     public async Task WhenSubjectIsNotRegistered_ThenNoMonitoredItemsAreCreated()
     {
-        // Arrange
-        var (loader, _) = CreateLoader();
+        // Arrange: the one loader test that cannot load the source's own root subject. It exercises
+        // the guard for a subject that is absent from the registry, and the source's root subject
+        // is registered by construction.
+        var (loader, _, _) = CreateLoader();
         var subject = new Namotion.Interceptor.Dynamic.DynamicSubject(InterceptorSubjectContext.Create()); // no registry
 
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
@@ -30,8 +32,7 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     public async Task WhenTheNodeHasNoChildren_ThenNoMonitoredItemsAreCreated()
     {
         // Arrange
-        var (loader, _) = CreateLoader();
-        var subject = CreateTestSubject();
+        var (loader, _, subject) = CreateLoader();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
         var mockSession = CreateMockSessionWithNoChildren();
 
@@ -46,8 +47,7 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     public async Task WhenAChildNodeMatchesAProperty_ThenOneMonitoredItemIsCreatedForThatProperty()
     {
         // Arrange
-        var (loader, _) = CreateLoader();
-        var subject = CreateTestSubject();
+        var (loader, _, subject) = CreateLoader();
         var registeredSubject = subject.TryGetRegisteredSubject()!;
 
         // Add a property with OPC UA attribute
@@ -80,10 +80,9 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     public async Task WhenDynamicPropertiesAreEnabled_ThenUnmatchedChildNodesBecomeDynamicProperties()
     {
         // Arrange
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         var mockSession = CreateMockSessionWithChildren(
@@ -108,8 +107,7 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     public async Task WhenTwoChildNodesShareAPropertyName_ThenTheDuplicateIsNotMonitored()
     {
         // Arrange
-        var (loader, _) = CreateLoader();
-        var subject = CreateTestSubject();
+        var (loader, _, subject) = CreateLoader();
         var registeredSubject = subject.TryGetRegisteredSubject()!;
 
         // Add existing property
@@ -132,10 +130,9 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     public async Task WhenAChildNodeTypeCannotBeResolved_ThenNoPropertyIsAdded()
     {
         // Arrange: ReadAsync returns a bad status code so the type cannot be resolved
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
 
         var mockSession = CreateMockSessionWithChildren(
@@ -157,8 +154,7 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     public async Task WhenAPropertyIsMonitored_ThenItsNodeIdIsTrackedAgainstThePropertyReference()
     {
         // Arrange
-        var (loader, propertyTracker) = CreateLoader();
-        var subject = CreateTestSubject();
+        var (loader, propertyTracker, subject) = CreateLoader();
         var registeredSubject = subject.TryGetRegisteredSubject()!;
 
         registeredSubject.AddProperty(
@@ -189,10 +185,9 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     public async Task WhenDynamicPropertyHasNumberDataType_ThenPropertyTypeIsDouble()
     {
         // Arrange
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
         var mockSession = CreateMockSessionWithChildren(
         [
@@ -217,10 +212,9 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     public async Task WhenDynamicPropertyHasExtensionObjectDataType_ThenPropertyTypeIsExtensionObject()
     {
         // Arrange
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
         var mockSession = CreateMockSessionWithChildren(
         [
@@ -285,10 +279,9 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
                 return new BrowseResponse { Results = results, DiagnosticInfos = [] };
             });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
 
         // Act
@@ -328,10 +321,9 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
         var mockSession = CreateMockSession();
         SetupBrowseAsync(mockSession, browseTree);
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
 
         // Act
@@ -380,10 +372,9 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
             [badNodeId] = (DataTypeIds.Int32, -1)
         });
 
-        var (loader, _) = CreateLoader(
+        var (loader, _, subject) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
-        var subject = CreateTestSubject();
         var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
 
         // Act: should not throw
@@ -392,5 +383,53 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
         // Assert: the good node was processed despite the bad sibling
         var registeredSubject = subject.TryGetRegisteredSubject()!;
         Assert.Contains(registeredSubject.Properties, p => p.Name == "GoodVar");
+    }
+
+    [Fact]
+    public async Task WhenALoadedChildSubjectLeavesTheGraph_ThenTheSourceReleasesItsClaims()
+    {
+        // Arrange: Root.Sensor is a loaded child carrying one claimed variable. This pins the
+        // fixture shape as much as the release itself. SourceOwnershipManager subscribes to the
+        // LifecycleInterceptor reachable from source.RootSubject.Context, so a fixture that rooted
+        // the source on one subject and loaded another would wire the detach callback to an
+        // interceptor the loaded graph never raises anything on, and every subject-detach path
+        // (rollback, reload, reassignment) would silently go untested.
+        var rootId = new NodeId(1, 0);
+        var sensorId = new NodeId(2001, 2);
+        var temperatureId = new NodeId(2002, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] = [CreateObjectReferenceDescription("Sensor", new ExpandedNodeId(sensorId))],
+            [sensorId] = [CreateTestReferenceDescription("Temperature", new ExpandedNodeId(temperatureId))]
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId DataTypeId, int ValueRank)>
+        {
+            [temperatureId] = (DataTypeIds.Double, -1)
+        });
+
+        var (loader, ownership, subject) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var rootNode = CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId));
+
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var sensorProperty = registeredSubject.Properties.Single(property => property.Name == "Sensor");
+        var sensorSubject = Assert.IsAssignableFrom<IInterceptorSubject>(sensorProperty.GetValue());
+
+        var claimedProperty = Assert.Single(ownership.Properties);
+        Assert.Same(sensorSubject, claimedProperty.Subject);
+
+        // Act: drop the child out of the graph, the same lifecycle transition a rollback or a
+        // reload that no longer sees the node produces.
+        sensorProperty.SetValue(null);
+
+        // Assert
+        Assert.Empty(ownership.Properties);
     }
 }
