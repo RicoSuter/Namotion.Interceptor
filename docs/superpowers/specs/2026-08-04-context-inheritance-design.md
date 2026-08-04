@@ -219,7 +219,7 @@ on the base `InterceptorSubjectContext`.
 ```csharp
 // on InterceptorExecutor, which is the only context that has a subject
 private ILifecycleInterceptor? _owner;
-private object? _attachContext;   // null, an IInterceptorSubjectContext, or the Detaching sentinel
+private AttachState _attachContext;   // null | Attaching(ctx) | Attached(ctx) | Detaching(ctx)
 ```
 
 The alternative, putting them in `subject.Data` alongside the reference count, was in the first revision
@@ -447,8 +447,8 @@ it makes the `finally` fail.
 ### Child attach, inside `LifecycleInterceptor.AttachToProperty`
 
 ```
-1. claim ownership: Interlocked.CompareExchange on _owner, null -> this.
-     If another graph owns it, throw. The check and the claim are one operation.
+1. claim ownership under the executor's _mutationLock: null -> this.
+     If another graph owns it, throw. The check and the claim are one critical section.
 2. _attachedSubjects[subject].Add(property); count = IncrementReferenceCount()
 3. if (count == 1
        && parentContext is not subject.Context               // self-context guard
@@ -459,12 +459,12 @@ it makes the `finally` fail.
 5. if (isFirstAttach) SubjectAttached; AttachSubjectProperty per property
 ```
 
-**Step 1 is the check and the claim in one interlocked operation, per subject.** An earlier version
-hoisted a batch-level check into `WriteProperty` so it could claim to run "before any mutation". Review
-refuted that: hoisting the *check* separates it from the *claim*, and since two graphs hold different
+**Step 1 is the check and the claim in one critical section, per subject.** An earlier version hoisted a
+batch-level check into `WriteProperty` so it could claim to run "before any mutation". Review refuted
+that: hoisting the *check* separates it from the *claim*, and since two graphs hold different
 `_attachedSubjects` monitors, A-checks, B-checks, A-claims, B-throws is reachable, which is exactly what
-the hoist existed to prevent. A single compare-exchange per subject cannot be beaten by that
-interleaving.
+the hoist existed to prevent. Taking the executor's `_mutationLock` cannot be beaten by that interleaving,
+because both graphs contend for that same lock even though their monitors differ.
 
 The honest cost is stated rather than engineered away. `WriteProperty` calls `next(ref context)` before
 taking the lock (`LifecycleInterceptor.cs:294`), so the backing store already holds the new value when a
@@ -487,7 +487,7 @@ the seed runs again and clobbers `_lastProcessedValues`, which is the hazard the
 exists to prevent.
 
 Not setting the link achieves the same thing with none of that: one outgoing edge, so the subject stays a
-pure delegator, one record instead of two, and no state the three-state machine cannot express. The
+pure delegator, one record instead of two, and no state the machine in section 5 cannot express. The
 motivation is real and was measured during review: on `master` a connector item ends with exactly one
 fallback and a live `DelegationTarget`, because the inheritance handler's duplicate `AddFallbackContext`
 returns `false`. Doing nothing here would be a regression, not a neutral choice.
@@ -702,7 +702,7 @@ repoint. Both paths get their own reproduction test, since they diverge before t
 |---|---|
 | Attaching a subject owned by another graph | `InvalidOperationException` from a single compare-exchange per subject; earlier items of the same batch stay attached |
 | `AttachToContext` while a detach of the same subject is in progress | `InvalidOperationException`, before any mutation; retry after the detach |
-| `AddFallbackContext` while a detach is in progress on that executor | `InvalidOperationException`; this is #411's loud failure. The sentinel erases the context identity, so any add during the window throws |
+| `AddFallbackContext` naming the context an attach or detach is in flight for | `InvalidOperationException`; this is #411's loud failure. The state retains the context, so an add naming a different context is unaffected |
 | `AddFallbackContext` adding a lifecycle-bearing context to an unattached subject | `InvalidOperationException` naming `AttachToContext` |
 | `RemoveFallbackContext` targeting the attach edge | `InvalidOperationException` naming `DetachFromContext` |
 | Delegation cycle on resolution | unchanged |
@@ -875,7 +875,7 @@ One pull request on `design/context-inheritance-parent-link`, built from commits
 | 3 | `AttachToContext` / `DetachFromContext`, migrate the seven production call sites | behaviour-neutral |
 | 4 | `ContextState.Parent`, internal setters, `LifecycleInterceptor` sets and clears it with both guards, handler body becomes the descent trigger | snapshots must not move; #410 turns green |
 | 5 | Replace the executor's method overrides with guard hooks called inside the base's critical section, add the loud errors and the observability accessors | the breaking one; the guards must not be lost with the overrides |
-| 6 | Owner claim, three-state attach context under `_mutationLock`, the state-re-reading `finally` | #207 and #402 turn green |
+| 6 | The attach state machine and its transitions under `_mutationLock`, the owner claim, the state-re-reading `finally`, conditional reverse-entry unregistration | #207 and #402 turn green |
 | 7 | Reproduction tests for the shapes that need the new API (two-graph, rendezvous) | red before their commit, green after |
 | 8 | The #210 fix | characterization test 7 records the new handler entry |
 | 9 | Consumer and design docs | see below |
@@ -939,7 +939,7 @@ comments, not only its body.
 
 | Issue | Action |
 |---|---|
-| #402 | Close. Four defects follow from there being no callbacks inside the edge mutation. Defects 1 and 2 are closed by the three-state attach context, changes 7 and 8, because deleting PR #412's record would otherwise reopen them. |
+| #402 | Close. Four defects follow from there being no callbacks inside the edge mutation. Defects 1 and 2 are closed by the attach state machine, changes 7 and 8, because deleting PR #412's record would otherwise reopen them. |
 | #207 | Close, citing both reproductions, both verified during review. |
 | #410 | Close symptom 2 and the retention. Symptom 1 only if the reproduction attempt succeeds; if it cannot be built, strike it with the reasoning recorded. |
 | #210 | Close as not reachable, noting that commit 8 makes it structurally impossible if a removal API lands later. |
