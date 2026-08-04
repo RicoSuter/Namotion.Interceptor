@@ -286,7 +286,12 @@ attempt to pull the attach edge by hand; making detach run exactly once; and ans
 **`_owner` is claimed and released only by `LifecycleInterceptor`, always while it holds
 `_attachedSubjects`, with `_mutationLock` nested inside for the field write.** Both entry points claim
 it: `AttachToProperty` step 1, and `LifecycleInterceptor.AttachToContext` (`:86-110`), which is the only
-code that runs for a childless root and which the design otherwise leaves alone. Release is conditional
+code that runs for a childless root and which the design otherwise leaves alone. `TryRecordAttachContext`
+additionally *reads* it under `_mutationLock` and throws when a different graph owns the subject. That is
+a check rather than a claim, so it races a concurrent claim, but it is what makes the deterministic case
+publish nothing: without it, root-attaching a property-owned subject into a second graph would set the
+record and the edge and only then be rejected, leaving the one-graph rule violated by the design's own
+guard rather than by a handler. Release is conditional
 on `_owner == this`, so a detach in one graph can never clear a claim another graph holds. That placement is what
 makes it correct rather than clever. The reference count lives under that monitor, so ownership is only
 ever released where the count is already known, and the cross-graph race is still serialised, because two
@@ -326,6 +331,13 @@ behaviour and no worse. Both are already narrowed by the thesis, from every chil
 concurrent root operation, because `ContextInheritanceHandler` stops calling the public mutators
 entirely. Section 10 records the follow-up that closes them.
 
+`DetachFromContext` is also not atomic against a **property** attach, and that exclusion is deliberate
+rather than overlooked. Its reference-count check and the record transition are two steps, so a property
+attach landing between them lets the root detach proceed on a subject that has just become a child,
+which strands the count exactly as the guard exists to prevent. Closing it needs the check and the
+transition inside `LifecycleInterceptor`'s monitor, which means new API on `ILifecycleInterceptor`, so it
+goes with the same follow-up that serialises the two root operations.
+
 #### Aliasing is allowed and made safe
 
 Earlier versions tried to forbid two edges pointing at the same context. Review produced two-line
@@ -352,13 +364,23 @@ public static void AttachToContext(this IInterceptorSubject subject, IIntercepto
     // failing resolve leaves the edge registered with no attach callback ever having run.
     var interceptors = context.GetServices<ILifecycleInterceptor>();
 
-    if (!subject.Context.TryRecordAttachContext(context))   // under _mutationLock; false if already this context
+    // Rejects when another graph already owns the subject, so the deterministic misuse case
+    // publishes nothing. Under _mutationLock; false if the record already names this context.
+    if (!subject.Context.TryRecordAttachContext(context))
         return;
 
-    subject.Context.AddFallbackContext(context);
+    try
+    {
+        subject.Context.AddFallbackContext(context);
 
-    foreach (var interceptor in interceptors)
-        interceptor.AttachSubjectToContext(subject);        // claims _owner, under _attachedSubjects
+        foreach (var interceptor in interceptors)
+            interceptor.AttachSubjectToContext(subject);    // claims _owner, under _attachedSubjects
+    }
+    catch
+    {
+        subject.Context.ClearAttachContext(context);        // internal, rolls back the record and the edge
+        throw;
+    }
 }
 
 // Namotion.Interceptor.Tracking, because the reference-count guard needs the count
@@ -408,7 +430,8 @@ cannot distinguish the design's own cleanup from a consumer's call and either an
 |---|---|
 | The attach resolve throws (cyclic chain on `context`) | nothing changed, because the resolve precedes the record and the edge |
 | `TryRecordAttachContext` throws (another context already recorded) | nothing changed |
-| An attach interceptor throws | the edge and the record remain, and the subject is partly attached. This is #384's rollback problem and it is out of scope; a retry finds the record already set and returns, so the missed callbacks are not re-run |
+| Another graph already owns the subject | `TryRecordAttachContext` throws having published nothing, so no record and no edge |
+| An attach interceptor throws | the `catch` rolls back the record and the edge, so the context's own state is clean and a retry is possible. What it cannot roll back is anything the lifecycle system already did: `AttachSubjectToContext` seeds `_lastProcessedValues` and attaches children before the root claims ownership, so a throw part way leaves those. That residue is #384's rollback problem and it is out of scope |
 | The detach resolve throws (cyclic chain on `context`) | nothing changed, because the resolve precedes the guard and the transition |
 | A detach interceptor throws | the `finally` still removes the edge (change 6), and the record is already clear, so the subject can be re-attached |
 | `RemoveAttachEdge` throws | it replaces any in-flight exception. The record is already clear, so nothing is wedged |
@@ -864,8 +887,9 @@ not across graphs, so the owner claim nests the executor's `_mutationLock` insid
 two threads attaching the same subject to two graphs, exactly one wins, and the loser throws leaving
 earlier items of its batch attached, which is asserted rather than assumed. Plus a directed test that two
 concurrent `DetachFromContext` calls run the interceptors exactly once. Plus the two
-rendezvous tests for changes 8 and 9, a directed test that the `AddFallbackContext` guard and the
-attach-record write are serialised on `_mutationLock`, and a test that a handler which re-attaches a
+a directed test that the `AddFallbackContext` guard and the
+attach-record write are serialised on `_mutationLock`, one that root-attaching a property-owned subject
+into a second graph publishes no record and no edge, and a test that a handler which re-attaches a
 subject during its own detach survives the `finally`.
 
 ### Mutants that must die
