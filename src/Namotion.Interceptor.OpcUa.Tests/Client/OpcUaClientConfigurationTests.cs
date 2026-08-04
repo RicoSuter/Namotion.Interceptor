@@ -141,4 +141,54 @@ public class OpcUaClientConfigurationTests
         // Act & Assert - Should not throw
         config.Validate();
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void WhenMaxBrowseContinuationsIsNotPositive_ThenValidateThrows(int maxBrowseContinuations)
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.MaxBrowseContinuations = maxBrowseContinuations;
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Equal(nameof(OpcUaClientConfiguration.MaxBrowseContinuations), exception.ParamName);
+    }
+
+    [Fact]
+    public void WhenMaxBrowseContinuationsIsDefault_ThenValidateSucceeds()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+
+        // Act & Assert - Should not throw
+        configuration.Validate();
+        Assert.Equal(100, configuration.MaxBrowseContinuations);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void WhenMaxAttributeTraversalsIsNotPositive_ThenValidateThrows(int maxAttributeTraversals)
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.MaxAttributeTraversals = maxAttributeTraversals;
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Equal(nameof(OpcUaClientConfiguration.MaxAttributeTraversals), exception.ParamName);
+    }
+
+    [Fact]
+    public void WhenMaxAttributeTraversalsIsDefault_ThenValidateSucceeds()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+
+        // Act & Assert - Should not throw
+        configuration.Validate();
+        Assert.Equal(100, configuration.MaxAttributeTraversals);
+    }
 }

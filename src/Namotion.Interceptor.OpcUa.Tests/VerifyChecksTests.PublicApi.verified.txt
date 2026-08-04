@@ -97,6 +97,8 @@ namespace Namotion.Interceptor.OpcUa.Client
         public bool EnableReadAfterWrite { get; set; }
         public System.TimeSpan KeepAliveInterval { get; set; }
         public Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey> Mapper { get; set; }
+        public int MaxAttributeTraversals { get; set; }
+        public int MaxBrowseContinuations { get; set; }
         public int MaxItemsPerSubscription { get; set; }
         public System.TimeSpan MaxReconnectDuration { get; set; }
         public uint MaxReferencesPerNode { get; set; }
