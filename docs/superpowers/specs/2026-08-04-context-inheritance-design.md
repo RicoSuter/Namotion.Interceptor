@@ -962,6 +962,21 @@ Design-facing, `docs/design/tracking-lifecycle.md`:
   records
 - the global versus per-graph reference count distinction, and why one graph per subject collapses it
 
+### Follow-ups, to be filed or updated with the issues above
+
+Both are consequences of option B, which deliberately stops short of making the two composite root
+operations atomic against each other. Recorded so the decision is visible rather than inferred from what
+the design does not say.
+
+1. **Serialise `AttachToContext` and `DetachFromContext` per subject.** Closes #402 defect 1 and #411 by
+   making them not race, rather than by negotiating mid-flight. Viable only because this design removes
+   user code from the edge mutation, and it needs one documented contract: a lifecycle handler must not
+   call either method, since that is the one path that could deadlock against `LifecycleInterceptor`'s
+   monitor. Small, and its whole surface is two methods. Goes on #402 and #411.
+2. **The deferred handoff** from #411's own comment is the only thing that makes a concurrent add
+   transparent instead of serialised. It is PR #412's machinery and should be built only if follow-up 1
+   proves insufficient. Roots are attached at startup and detached at shutdown, so that is unlikely.
+
 ### PR #412
 
 Closed unmerged rather than reverted, since it never landed on `master`. Two things carry forward: the
@@ -976,11 +991,11 @@ comments, not only its body.
 
 | Issue | Action |
 |---|---|
-| #402 | Close. Four defects follow from there being no callbacks inside the edge mutation. Defects 1 and 2 are closed by the attach state machine, changes 7 and 8, because deleting PR #412's record would otherwise reopen them. |
+| #402 | **Update, keep open on defect 1 only.** Defects 3, 4 and 5 follow from there being no callbacks inside the edge mutation. Defect 2 is closed by change 7, the single clear-under-lock that makes detach run exactly once. Defect 1, a remove racing an add, stays at `master`'s behaviour, because `AttachToContext` and `DetachFromContext` are two-step operations and are not atomic against each other. It is narrowed from every child detach to an explicit concurrent root operation, since `ContextInheritanceHandler` no longer calls the public mutators. Follow-up 1 closes it. Its first comment concluded that "the complete fix needs a decision about where lifecycle callbacks run, not just a reordering", which is what this design decides. |
 | #207 | Close, citing both reproductions, both verified during review. |
 | #410 | Close symptom 2 and the retention. Symptom 1 only if the reproduction attempt succeeds; if it cannot be built, strike it with the reasoning recorded. |
 | #210 | Close as not reachable, noting that commit 8 makes it structurally impossible if a removal API lands later. |
-| #411 | **Update, keep open.** Change 9 makes the silent wrong answer loud, so a caller is no longer told `false` and then left without an edge. The transparent fix, a deferred add performed by the removing thread, needs a record that survives the removal window, which is PR #412's machinery. Follow-up. |
+| #411 | **Update, keep open.** Narrowed the same way as #402 defect 1 and for the same reason, and closed by the same follow-up. An earlier version of this design added a loud rejection for it; that was part of the protocol option B removes, and serialising the two operations closes it properly rather than turning it into an exception the caller must handle. |
 | #384 | Update, narrowed. The attach-tail case loses route 2 with #412's deferred handoff; route 1 is pre-existing. The detach-half case still raises on a cyclic chain, but such a chain now requires a consumer to have built one deliberately. Its stated blocker is removed. See section 11. |
 | #412 | Close unmerged, referencing this design. |
 
