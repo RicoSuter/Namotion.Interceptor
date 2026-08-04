@@ -392,7 +392,8 @@ public static void DetachFromContext(this IInterceptorSubject subject, IIntercep
     // Pre-flight, before anything is cleared: a subject that is also a child must be removed from its
     // parents first. The check belongs to whoever owns the reference count, so it is asked for.
     foreach (var interceptor in interceptors)
-        interceptor.EnsureCanDetachSubjectFromContext(subject);
+        if (interceptor is ILifecycleDetachGuard guard)
+            guard.EnsureCanDetachSubjectFromContext(subject);
 
     if (!subject.Context.TryClearAttachContext(context))    // under _mutationLock; exactly one winner
         return;
@@ -429,15 +430,28 @@ strands core-only consumers: `ILifecycleInterceptor` and `AttachToContext` are b
 attaches and detaches a root with it (`:100-101`), and after migration `RemoveFallbackContext` throws for
 that attach edge, leaving no core API to undo it.
 
-So `ILifecycleInterceptor` gains a third member with a default implementation,
-`EnsureCanDetachSubjectFromContext`, which does nothing unless an implementation says otherwise.
-`LifecycleInterceptor` overrides it to throw when the subject still holds property references, checked
-under its own monitor where the count lives: detaching such a subject here would remove its
-`_attachedSubjects` entry (`LifecycleInterceptor.cs:172`) while reading the count rather than
-decrementing it (`:186`), so the count and the ownership would strand and the parent's later removal
-would no-op at `:206-210`. A default interface implementation keeps this source- and binary-compatible
-for existing implementors, and it is the pattern `IPropertyLifecycleHandler.RefreshCollectionProperty`
-already uses.
+So core gains a small optional capability interface:
+
+```csharp
+public interface ILifecycleDetachGuard
+{
+    void EnsureCanDetachSubjectFromContext(IInterceptorSubject subject);
+}
+```
+
+`LifecycleInterceptor` implements it alongside `ILifecycleInterceptor` and throws when the subject still
+holds property references, checked under its own monitor where the count lives: detaching such a subject
+would remove its `_attachedSubjects` entry (`LifecycleInterceptor.cs:172`) while reading the count rather
+than decrementing it (`:186`), so the count and the ownership would strand and the parent's later removal
+would no-op at `:206-210`.
+
+A separate interface rather than a third member on `ILifecycleInterceptor` with a default
+implementation, because **core targets `netstandard2.0`**
+(`src/Namotion.Interceptor/Namotion.Interceptor.csproj:4`), which does not support default interface
+implementations. An earlier version proposed the default-member form and cited
+`IPropertyLifecycleHandler.RefreshCollectionProperty` as precedent; that interface lives in
+`Namotion.Interceptor.Tracking`, which targets `net9.0`, so the precedent does not transfer. The optional
+interface is equally non-breaking for existing implementors and compiles where it has to.
 
 The pre-flight runs before the record is cleared, so a rejection leaves the subject exactly as it was.
 It is still a check followed by a transition, so it does not close the property-attach race that "What is
@@ -646,7 +660,7 @@ sits on the hot write path and per-property data storage is what #222 is trying 
 |---|---|
 | `AddFallbackContext` / `RemoveFallbackContext` keep signatures, lose the attach side effect | behavioural |
 | `IInterceptorSubject.AttachToContext` and `DetachFromContext`, both in core | additive; the generated constructor must reach the first without a Tracking reference, and a core-only consumer with its own `ILifecycleInterceptor` must be able to reach the second |
-| `ILifecycleInterceptor` gains `EnsureCanDetachSubjectFromContext` with a default implementation | additive, source- and binary-compatible; appears in the core snapshot |
+| New `ILifecycleDetachGuard` in core, implemented by `LifecycleInterceptor` | additive and optional; `netstandard2.0` rules out a default interface member on `ILifecycleInterceptor` |
 | `InterceptorExecutor`'s method overrides become `protected virtual` guard hooks called inside the base's critical section | snapshot change, no source break |
 | `ContextInheritanceHandler` and `WithContextInheritance()` keep their names, body changes | none |
 
@@ -897,10 +911,12 @@ Eight are ordering oracles. Any movement is a signal to stop, not a snapshot to 
 `WhenRemovingInterceptors_ThenAllChildrenAreDetached` and its array counterpart are the two the detach
 ordering bug would have moved.
 
-Six `PublicApi.verified.txt` files exist repo-wide. Two change: `Namotion.Interceptor.Tests` (the executor overrides, the new
-extensions and the guard hooks, which are public surface on `InterceptorSubjectContext`) and
-`Namotion.Interceptor.Tracking.Tests`, which moves for `DetachFromContext` alone and again for change 8,
-since `LifecycleInterceptor`'s interface list is snapshotted there at `:147`.
+Six `PublicApi.verified.txt` files exist repo-wide. Two change: `Namotion.Interceptor.Tests`, for the executor overrides, both new
+extensions, the guard hooks on `InterceptorSubjectContext` and the new `ILifecycleDetachGuard`, all of
+which are core public surface; and `Namotion.Interceptor.Tracking.Tests`, because
+`LifecycleInterceptor`'s interface list is snapshotted there at `:147` and gains both
+`ILifecycleDetachGuard` and, for change 8, `IPropertyLifecycleHandler`. `DetachFromContext` no longer
+moves the Tracking snapshot, since it is a core extension.
 
 `ContextConcurrencyFuzzTests` needs its model extended with parent links, a third mutable edge kind under
 the same lock and the same R4 discipline.
