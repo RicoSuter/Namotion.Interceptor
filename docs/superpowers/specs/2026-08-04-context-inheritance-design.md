@@ -186,29 +186,34 @@ unchanged. Core already grants `InternalsVisibleTo` to `Namotion.Interceptor.Tra
 `ContextState.IsEmpty` must be extended to account for `Parent`. Today a parent-only state is only
 non-empty by virtue of having a `DelegationTarget`, and that coupling is invisible.
 
-### The cycle argument, corrected
+### The cycle argument
 
-The first version of this design claimed parent links can never produce a pure delegation cycle. Both
-reviewers refuted it, with different counterexamples, and both ran through the repoint-on-partial-detach
-rule. The claim is therefore split: the link has two write sites and each needs its own argument.
+The link has exactly one write site, the `count == 1` gate, and that is what makes the argument short.
+A link cycle formed there needs two subjects each of which acquired its first property reference from the
+other. Reaching that requires one of them to be a root, and a root carries an attach edge as well as its
+link, so it has two outgoing edges and is not a pure delegator. The pure delegation cycle exception is
+therefore unreachable through inheritance, and the service walk's visited set handles the rest, as it
+already does for cycles containing a context that owns services. Verified: the shape gives
+`a fallbacks=2, b fallbacks=1`, both resolving four write interceptors.
 
-**The `count == 1` gate.** A link cycle formed here needs two subjects each of which acquired its first
-property reference from the other. Reaching that requires one of them to be a root, and a root carries an
-attach edge as well as its link, so it has two outgoing edges and is not a pure delegator. Unreachable.
+Note the claim is about *pure delegation* cycles, the ones that raise. Ordinary fallback cycles remain
+reachable and silent, and one consequence predates this design: with `a.Child = b; b.Other = a;` a
+subject inherits its own descendant's subtree-scoped service, which contradicts what
+`ContextSubtreeServiceTests` documents. Measured, not introduced here, and not fixed here.
 
-**The repoint.** This one writes outside the gate and the argument above does not cover it. Both
-counterexamples needed the surviving parent to be a *descendant* of the subject being repointed, which
-only arises in a back-reference graph, so the repoint carries an explicit guard: skip when the
-candidate's delegation chain reaches this context. That guard is what makes the write safe, not the gate,
-and a concurrent rewiring can still slip past it. Section 5 records why the trade is worth taking.
+That argument is load-bearing on three guards holding at once: the attach edge surviving while the
+subject is referenced, `RemoveFallbackContext` rejecting the attach edge, and `DetachFromContext`
+rejecting a non-zero reference count. Relax any one and a root can become a pure delegator while holding
+a link, at which point the single write site becomes cycle-capable. That coupling belongs in a comment at
+the write site, not only here.
 
-Two further rules are load-bearing and are stated rather than left implicit:
+Two further rules are load-bearing and stated rather than left implicit:
 
 - **The link is never set to the subject's own context.** `a.Mother = a` is legal and reaches
   `AttachToProperty` with the parent being the subject itself, which would otherwise self-delegate and
   make every access on that subject throw. Verified reachable during review.
-- **The only two write sites are the `count == 1` gate and the guarded repoint.** Any third one needs its
-  own cycle argument.
+- **`count == 1` is the only write site.** Any second one needs its own cycle argument, and three
+  attempts to add one have now failed. See section 5.
 
 This design does not claim to fix #410 symptom 1. That issue's own comment argues it may be organically
 unreachable on `master`, because stranding leaves two fallbacks and two fallbacks cannot collapse. The
@@ -477,9 +482,6 @@ The gate drops `IsContextAttach` and keeps `count == 1`:
    finally:
        if the subject is STILL absent from _attachedSubjects:
            TryClearParentContext(); release the attach edge; release ownership
-       else if the parent link names the departing property's subject context:
-           repoint to a surviving reference's subject context, unless that
-           candidate's delegation chain reaches this context
 5. the existing explicit child recursion at :260-268 stays
 ```
 
@@ -513,39 +515,38 @@ Releasing in the `finally` also closes the window in which the subject is unowne
 still mid-detach, during which another graph could claim it and the remaining work would resolve into the
 wrong graph.
 
-**The repoint is guarded, not removed.** An unguarded version was in an earlier revision and both
-reviewers built a pure delegation cycle out of it, one without any root on the loop, using only supported
-back-references (#69). Both counterexamples needed the surviving parent to be a *descendant* of the
-subject being repointed, so the guard is exactly that: skip the repoint when the candidate's delegation
-chain reaches this context. `ResolveDelegationTarget` caches the terminal per state, so that is normally
-a field read, on a path that runs only when a multi-parent subject loses the parent it was linked to.
+**The repoint is dropped, for the third and final time.** Two earlier forms were refuted by reviewers
+who built pure delegation cycles from them. A third, guarded form was proposed and independently judged,
+and it fails for reasons that are worth recording so it is not proposed a fourth time.
 
-The repoint is also a single publish rather than the clear-then-set an earlier version specified, which
-would have left the whole subtree resolving nothing for the duration of the window.
+*It does not fix the case with real users.* On the connector path the item is attached through
+`AttachToContext(parent.Context)` and then assigned into that same parent, so step 3's second guard
+deliberately sets no link and the item's only edge is the attach edge. The repoint's trigger never fires
+there. Measured on `master` with that exact topology, `p1` leaving while `p2` still holds the item gives
+`writers=0` and an observer that sees nothing, identical to the multi-parent case the repoint was
+supposed to solve.
 
-**Why it is worth the risk.** Without it, this is what a multi-parent subject does on `master` when the
-parent it was linked to leaves the graph while another parent still holds it:
+*The failure mode is worse than a stale link, not better.* A link cycle does not produce "a catchable
+exception on resolution", which is what an earlier revision of this section claimed. Measured: the
+**detach path** throws, because `InvokeRemovedLifecycleHandlers` resolves through the child's own context
+(`LifecycleInterceptor.cs:278`) and the descent one level down uses `subject.Context` (`:66,70,73`). The
+reference counts, the `_attachedSubjects` entries and the `_lastProcessedValues` entries then strand
+permanently, with the backing store already written because `WriteProperty` calls `next` first (`:294`).
+And it is unrecoverable from consumer code: a consumer-built fallback cycle is undone with
+`RemoveFallbackContext`, but a link is internal and the only path that clears it is the detach that just
+threw. So the trade is not silent loss against a loud error; it is a rare silent read-side loss against a
+rare permanent leak plus a wedged subtree, which trades toward #207's shape.
 
-```
-after p1 adopts child:      child writers=4
-after p2 also adopts child: child writers=4
-after p1 leaves the graph:  child writers=0   p1 writers=0
-write child.LastName ->     observer saw []
-```
+*The guard was not expressible as proposed.* `ResolveDelegationTarget` returns the chain's **terminal**
+(`InterceptorSubjectContext.cs:286-303`), not path membership, so it cannot answer "is `this` on the
+candidate's chain", and whenever `this` is a pure delegator, which is exactly the case the repoint
+addresses, it returns a false safe. A hop-limited manual walk was the fallback, but the walk length is
+the candidate's depth: a 200-level graph yields a 201-hop chain, so any small limit refuses the repoint
+on every deep graph, which is precisely where multi-parent sharing is most likely.
 
-The child is still attached through `p2` and has silently lost every interceptor. Writes land in the
-backing field and nothing observes them: no tracking, no timestamps, no change notifications, no source
-propagation. That is #410 symptom 2 reached by a route the issue does not describe. The issue blames a
-detach that leaves property values set, which the unconditional clear at `count == 0` closes; the
-multi-parent route produces the identical shape while the removal condition is behaving correctly,
-because the subject genuinely is still attached, just to a parent that has gone. Without the repoint,
-symptom 2 is half closed. The issue also predicts the subject "keeps resolving services through it"; the
-measurement says it resolves nothing, because the departed parent's own edge is gone too.
-
-A concurrent rewiring can still slip a cycle past the guard, and the consequence is a catchable exception
-on resolution, which is what any consumer-built cycle already does. Against silent total loss of
-interception on a live subject, a loud failure in a rare race is the better outcome. Which surviving
-parent is chosen when several remain is unspecified, exactly as "first attach wins" is unspecified today.
+So #410 symptom 2 closes on the stranded-edge route, which is the mechanism the issue describes, and
+stays open on the two routes where a subject is still legitimately attached: multi-parent, and the
+connector shape. Both measurements go on the issue.
 
 ### The reconciliation ledger, and #210
 
@@ -672,7 +673,8 @@ p2.Children = [];        // count 0, removes P2.Context, which the child never h
 
 Also reproduced: `p1.Context._usedByContexts` grows 1, 2, 3. A single field cleared at `count == 0`
 releases whatever it points at regardless of which property the change names, so this path closes on the
-count-zero clear alone, independently of the repoint. Both paths get their own reproduction test, since they diverge before they converge.
+count-zero clear alone. Both paths get their own reproduction test, since they diverge before they
+converge.
 
 ### What throws
 
@@ -710,7 +712,7 @@ Unchanged. A throwing `ILifecycleHandler` still propagates and still leaves part
 
 ## 8. Behaviour changes
 
-The complete list. Anything discovered beyond these thirteen is escalated, not absorbed.
+The complete list. Anything discovered beyond these twelve is escalated, not absorbed.
 
 1. `AddFallbackContext` stops attaching.
 2. `RemoveFallbackContext` stops detaching a root, and throws when aimed at the attach edge.
@@ -730,10 +732,7 @@ The complete list. Anything discovered beyond these thirteen is escalated, not a
 11. Removing an edge unregisters the reverse `_usedByContexts` entry only when no remaining edge on that
     context targets the same context. Unreachable on `master`, where two edges to one target cannot
     exist.
-12. The parent link is repointed at a surviving parent when the one it names leaves the graph, guarded
-    against the candidate's chain reaching this context. Without it a multi-parent subject silently
-    loses every interceptor while still attached, measured on `master`.
-13. A constructor-attached subject stops being an exception to a rule that already exists. An ordinary
+12. A constructor-attached subject stops being an exception to a rule that already exists. An ordinary
     child already loses all interception on full detach today, because `ContextInheritanceHandler.cs:23-26`
     removes the inherited fallback at reference count zero and the subject then has no edges at all. A
     constructor-attached subject keeps its constructor edge and goes on resolving its write interceptors,
@@ -790,8 +789,7 @@ gates are verifiable by checking it out and running the suite.
 | 11 | two edges to one target in either order, remove one, assert the surviving edge still receives invalidation |
 | the #207 path | a constructor-attached subject reaching count zero by the property route releases its attach edge, state and ownership |
 | plain contexts | `new Person(InterceptorSubjectContext.Create())` attaches, has no owner, and is unaffected by the cross-graph rule |
-| 12 | two parents, remove the one the link names, assert the child still resolves its interceptors; plus a back-reference graph where the guard must refuse and leave the link stale |
-| 13 | a constructor-attached subject stops resolving interceptors after a full detach |
+| 12 | a constructor-attached subject stops resolving interceptors after a full detach |
 
 ### Oracles that must not move
 
@@ -829,7 +827,7 @@ the link and release the attach edge instead of skipping the link; trust the cap
 detach `finally` instead of re-reading `_attachedSubjects`; release `_owner` from a place that reads the
 reference count without holding `_attachedSubjects`; make the reverse-entry unregistration unconditional
 again; route the detach cleanup through the public `RemoveFallbackContext`; drop the reference-count
-guard on `DetachFromContext`; drop the last-property-detach release of the attach edge; drop the repoint, or drop its chain-reaches-this guard; make the
+guard on `DetachFromContext`; drop the last-property-detach release of the attach edge; make the
 lifecycle-bearing guard test "attach state is null" instead of "not lifecycle-attached".
 
 Each must fail its corresponding test. Everything from "set the link and release the attach edge" onward is a mutant
@@ -928,7 +926,7 @@ comments, not only its body.
 |---|---|
 | #402 | **Update, keep open on defect 1 only.** Defects 3, 4 and 5 follow from there being no callbacks inside the edge mutation. Defect 2 is closed by change 7, the single clear-under-lock that makes detach run exactly once. Defect 1, a remove racing an add, stays at `master`'s behaviour, because `AttachToContext` and `DetachFromContext` are two-step operations and are not atomic against each other. It is narrowed from every child detach to an explicit concurrent root operation, since `ContextInheritanceHandler` no longer calls the public mutators. Follow-up 1 closes it. Its first comment concluded that "the complete fix needs a decision about where lifecycle callbacks run, not just a reordering", which is what this design decides. |
 | #207 | Close, citing both reproductions, both verified during review. |
-| #410 | Close symptom 2 on both of its routes, the stranded edge and the multi-parent repoint, and the retention with it. Record that the issue's predicted consequence is wrong: the subject resolves nothing rather than continuing to resolve through the departed context. Symptom 1 only if the reproduction attempt succeeds; if it cannot be built, strike it with the reasoning recorded. |
+| #410 | **Update, keep open.** Symptom 2 closes on the route the issue describes, a detach that leaves property values set, via the unconditional clear at reference count zero. It stays open on the two routes where the subject is still legitimately attached: a multi-parent subject whose linked parent leaves, and the connector shape where the item's only edge is its attach edge. Post both measurements, and the correction that the subject resolves *nothing* rather than continuing to resolve through the departed context, which is a more severe consequence than the issue predicts. Symptom 1 only if the reproduction attempt succeeds; if it cannot be built, strike it with the reasoning recorded. |
 | #210 | Close as not reachable, noting that commit 8 makes it structurally impossible if a removal API lands later. |
 | #411 | **Update, keep open.** Narrowed the same way as #402 defect 1 and for the same reason, and closed by the same follow-up. An earlier version of this design added a loud rejection for it; that was part of the protocol option B removes, and serialising the two operations closes it properly rather than turning it into an exception the caller must handle. |
 | #384 | Update, narrowed. The attach-tail case loses route 2 with #412's deferred handoff; route 1 is pre-existing. The detach-half case still raises on a cyclic chain, but such a chain now requires a consumer to have built one deliberately. Its stated blocker is removed. See section 11. |
@@ -950,6 +948,11 @@ change 5, and the resolved-position ordering dependency, preserved deliberately.
 - **#403, #404, #406**, the `TryAddService` factory under the mutation lock and service equality. Same
   class of problem, different call site. #404's lock edge is documented here but not fixed.
 - **#409**, measuring the copy-on-write memory trade-offs.
+- **A still-attached subject whose resolution target leaves the graph.** Two shapes: a multi-parent
+  subject linked to the parent that departs, and a connector item whose only edge is its attach edge.
+  Both go dark, resolving no interceptors at all while still attached, measured on `master`. This is
+  #410 symptom 2 on routes the issue does not describe. Three attempts to fix it inside this design all
+  failed; section 5 records why, and the issue carries both measurements.
 - **Fixing the traversal order to top-down.** See section 8.
 - **Multi-graph support.** See section 12.
 - **Moving the reference count off `subject.Data`.** `IncrementReferenceCount` and
@@ -979,8 +982,11 @@ above rather than treated as an unrelated optimisation.
 repository this one does not control, for coverage of behaviours nobody has written down. The one
 requirement it protected is characterization test 5.
 
-**The unguarded repoint on partial detach.** Both reviewers built a pure delegation cycle from it. The
-guarded form is in the design; see section 5.
+**The repoint on partial detach, in three forms.** Unguarded, both reviewers built a pure delegation
+cycle from it. Guarded by `ResolveDelegationTarget`, the guard cannot express the question, since that
+returns the chain's terminal rather than path membership. Guarded by a hop-limited walk, the limit
+refuses the repoint at any realistic graph depth. And none of the three fires on the connector shape,
+which is where the failure has real users. See section 5.
 
 **`AddTemporaryFallbackContext`.** Removed once section 2 established that its only intended callers need
 the attach rather than the services.
