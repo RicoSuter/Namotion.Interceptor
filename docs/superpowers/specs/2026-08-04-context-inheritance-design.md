@@ -230,9 +230,27 @@ and `TryUpdate`. And both guards that read these records live inside `AddFallbac
 `RemoveFallbackContext`, which are methods on the context, so a subject-side record means a cross-object
 lookup on a path that is otherwise a field read.
 
-On the executor they are plain fields, so `Interlocked.CompareExchange` is available and is the primitive
-the transitions need. The cost is 16 bytes on an object that already exists per subject, rather than two
-allocations per attach.
+On the executor they are plain fields, 16 bytes on an object that already exists per subject rather than
+two allocations per attach. The stated reason in an earlier version, that `ConcurrentDictionary` has no
+compare-exchange, was wrong: `TryUpdate(key, newValue, comparisonValue)` is one. The conclusion stands on
+cost alone.
+
+**They are governed by different rules, and the difference is load-bearing.**
+
+`_attachContext` is read and written **under `_mutationLock`**, the same lock `AddFallbackContext` and
+`RemoveFallbackContext` already take. That is what makes the guards sound. The third review found that a
+guard which merely *reads* the field and then calls `base` is check-then-act across a lock boundary: a
+thread reads a non-`Detaching` record, is preempted, the detach completes including its edge removal, and
+the guard's caller then publishes an edge into a detached subject. No read barrier closes that. Taking the
+same lock for the transition and the guarded mutation does. `ClaimAttachContext`, `TryBeginDetach` and
+`EndDetach` are all cold-path root operations, so the lock costs nothing.
+
+`_owner` cannot use that lock, because the race it guards is between two graphs holding two different
+`_attachedSubjects` monitors, and neither holds the other's `_mutationLock`. It is an
+`Interlocked.CompareExchange` from null, read with `Volatile.Read`. Every other cross-thread field in this
+class already uses `Volatile.Read` (`InterceptorSubjectContext.cs:108, 124, 151, 160, 172, 801, 812, 891`)
+and these must not be the exception; moving off `subject.Data` also gave up `ConcurrentDictionary`'s own
+read barriers, so the discipline has to be restated rather than inherited.
 
 The base class was the first choice and is wrong. All three guards that read these records are
 executor-only semantics: on a plain `InterceptorSubjectContext.Create()` context, adding a
@@ -285,7 +303,7 @@ Detaching  a detach is in progress
 ```csharp
 public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
 {
-    subject.Context.ClaimAttachContext(context);   // null -> context. Throws on Detaching.
+    subject.Context.ClaimAttachContext(context);   // null -> context, under _mutationLock
 
     if (!subject.Context.AddFallbackContext(context))
         return;                                    // already present: no descent, mirrors master
@@ -296,20 +314,42 @@ public static void AttachToContext(this IInterceptorSubject subject, IIntercepto
 
 public static void DetachFromContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
 {
-    if (!subject.Context.TryBeginDetach(context)) return;   // context -> Detaching, one winner
+    // Resolved first, so a cyclic chain throws before anything has changed.
+    var interceptors = context.GetServices<ILifecycleInterceptor>();
+
+    switch (subject.Context.TryBeginDetach(context))   // context -> Detaching, under _mutationLock
+    {
+        case DetachOutcome.NotAttachedThroughThisContext:
+            throw new InvalidOperationException(/* names AttachToContext and TryGetAttachContext */);
+        case DetachOutcome.AlreadyDetaching:
+            return;                                    // another caller won, exactly one pass runs
+    }
 
     try
     {
-        foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
+        foreach (var interceptor in interceptors)
             interceptor.DetachSubjectFromContext(subject);
     }
     finally
     {
-        subject.Context.RemoveFallbackContext(context);
-        subject.Context.EndDetach();                        // Detaching -> null, after the edge is gone
+        try { subject.Context.RemoveFallbackContext(context); }
+        finally { subject.Context.EndDetach(); }        // Detaching -> null, unconditionally
     }
 }
 ```
+
+Three details of that shape are corrections from review and each removes a failure the earlier version
+had. Resolving the interceptors **before** the state transition means a cyclic chain throws with nothing
+changed, where the earlier version transitioned first and left the subject in `_attachedSubjects` with no
+interceptors and no way to retry, which was strictly worse than `master`. Returning a three-valued
+outcome rather than a bool separates "not attached through this context", which section 7 says throws,
+from "another detach is already running", which returns. And nesting the two cleanup calls guarantees the
+`Detaching -> null` transition even if the edge removal throws; a single `finally` with both statements
+would leave the record absorbing, so the subject could never be attached or detached again.
+
+There is no restore-the-record-on-failure rule. The earlier version had one and it was unimplementable as
+written, since the sentinel has erased the context identity by then, and it contradicted the stranded-claim
+row below.
 
 The `if (!AddFallbackContext(...)) return` guard is not cosmetic. Without it a second
 `AttachToContext` with the same context re-runs `AttachSubjectToContext`, whose
@@ -349,38 +389,63 @@ detect an in-flight attach and negotiate with it, which is PR #412's record and 
 | Failure | Result |
 |---|---|
 | `ClaimAttachContext` throws (owned elsewhere, or `Detaching`) | no edge added, no state changed |
-| `AddFallbackContext` throws after a successful claim | the claim is stranded: attached by record, no edge. A later `DetachFromContext` runs interceptors that find nothing in `_attachedSubjects` and return early. Benign, not worth a rollback |
-| The detach resolve throws (cyclic chain on `context`) | the `finally` still removes the edge, leaving the subject in `_attachedSubjects` with no interceptors and no way to retry, because the record is already `Detaching` then null. **Strictly worse than `master`**, and it is why `EndDetach` restores the record to `context` rather than null when the edge removal did not happen |
-| An interceptor throws | the edge is removed (change 6), the record is restored, and a retry works |
-| `RemoveFallbackContext` throws inside the `finally` | it replaces any in-flight exception. Accepted, and the `finally` orders the removal before `EndDetach` so change 2's throw-on-the-attach-edge rule cannot fire against our own cleanup |
+| `AddFallbackContext` throws after a successful claim | the claim is stranded: attached by record, no edge. A later `DetachFromContext` wins the transition, runs interceptors that find nothing in `_attachedSubjects`, removes an edge that is not there, and clears the record. Recoverable |
+| The detach resolve throws (cyclic chain on `context`) | nothing has changed yet, because the resolve precedes the transition |
+| An interceptor throws | the edge is removed (change 6) and the record is cleared, so the subject can be re-attached |
+| `RemoveFallbackContext` throws inside the `finally` | it replaces any in-flight exception, and the nested `finally` still clears the record |
 
 ### Child attach, inside `LifecycleInterceptor.AttachToProperty`
 
 ```
-0. WriteProperty, under the lock, before any attach in the batch:
-     reject the whole batch if any subject in it is owned by another graph
-1. _attachedSubjects[subject].Add(property); count = IncrementReferenceCount()
-2. if (count == 1 && parentContext is not subject.Context) TrySetParentContext(parentContext)
-     and release the attach edge if it names the same context as the link
-3. InvokeAddedLifecycleHandlers(subject, parentContext, change)   // position unchanged
+1. claim ownership: Interlocked.CompareExchange on _owner, null -> this.
+     If another graph owns it, throw. The check and the claim are one operation.
+2. _attachedSubjects[subject].Add(property); count = IncrementReferenceCount()
+3. if (count == 1
+       && parentContext is not subject.Context               // self-context guard
+       && parentContext is not the recorded attach context)  // the attach edge already provides it
+     TrySetParentContext(parentContext)
+4. InvokeAddedLifecycleHandlers(subject, parentContext, change)   // position unchanged
        ContextInheritanceHandler -> interceptor.AttachSubjectToContext(subject) -> next level
-4. if (isFirstAttach) SubjectAttached; AttachSubjectProperty per property
+5. if (isFirstAttach) SubjectAttached; AttachSubjectProperty per property
 ```
 
-Step 0 is a correction from review. The owner check cannot claim to run "before any mutation" if it sits
-inside `AttachToProperty`, because `WriteProperty` calls `next(ref context)` before taking the lock
-(`LifecycleInterceptor.cs:294`), so the backing store already holds the new value. Hoisting it to the
-batch level means no lifecycle bookkeeping is mutated and no item in the batch is half-attached, which is
-the part this design can guarantee. The property value is written and the outer interceptors' post-`next`
-work is skipped; that is stated, not claimed away.
+**Step 1 is the check and the claim in one interlocked operation, per subject.** An earlier version
+hoisted a batch-level check into `WriteProperty` so it could claim to run "before any mutation". Review
+refuted that: hoisting the *check* separates it from the *claim*, and since two graphs hold different
+`_attachedSubjects` monitors, A-checks, B-checks, A-claims, B-throws is reachable, which is exactly what
+the hoist existed to prevent. A single compare-exchange per subject cannot be beaten by that
+interleaving.
 
-Step 2 is the whole change, and it carries two guards. The self-context guard prevents `a.Mother = a`
-from self-delegating. The attach-edge release keeps the subject a pure delegator when the link supersedes
-an attach edge to the same context, which is exactly the three connector sites: without it those subjects
-gain a second edge, `DelegationTarget` becomes null, and each one starts allocating its own service cache
-and compiled chains. Releasing only when the contexts match makes it lossless: a
-`new Person(specialContext)` adopted under an unrelated parent keeps both edges and both sets of
-services.
+The honest cost is stated rather than engineered away. `WriteProperty` calls `next(ref context)` before
+taking the lock (`LifecycleInterceptor.cs:294`), so the backing store already holds the new value when a
+cross-graph rejection throws, and earlier items of the same batch are already attached. That is a
+partially applied batch, it is #384's shape, and it is out of scope here.
+
+**Step 3 carries two guards, and the second one is inverted from the earlier version.** The self-context
+guard prevents `a.Mother = a` from self-delegating, which would make every access on that subject throw.
+The second guard skips setting the link when the attach edge already names that context, which is the
+case for all three connector sites, since they call `AttachToContext(parent.Context)` and then assign
+into a property of that same parent.
+
+The earlier version did the opposite: it set the link and then released the attach edge. Review took that
+apart. Releasing the edge leaves the attach-context record describing an edge that no longer exists, and
+there is no good answer to what it should then hold: keep it and `DetachFromContext` becomes callable on
+a live child, which removes the subject from `_attachedSubjects` while its parent still references it;
+clear it and `IsAttached` reports false for an attached subject while a legitimate `DetachFromContext`
+silently no-ops. Worse, once the edge is gone a re-attach makes `AddFallbackContext` return `true`, so
+the seed runs again and clobbers `_lastProcessedValues`, which is the hazard the guard in the root path
+exists to prevent.
+
+Not setting the link achieves the same thing with none of that: one outgoing edge, so the subject stays a
+pure delegator, one record instead of two, and no state the three-state machine cannot express. The
+motivation is real and was measured during review: on `master` a connector item ends with exactly one
+fallback and a live `DelegationTarget`, because the inheritance handler's duplicate `AddFallbackContext`
+returns `false`. Doing nothing here would be a regression, not a neutral choice.
+
+One case escapes the guard, and it is harmless: the OPC UA dedup cache hit at
+`OpcUaSubjectLoader.cs:263-269` assigns an already-seeded subject into a *different* parent's property,
+so the contexts differ, the link is set, and that subject carries two edges. So "all three connector
+sites" describes the common path, not every path through them.
 
 Steps 3 and 4 keep their positions, so every ordering measured in section 2 is preserved. What is not
 preserved is what those handlers can *see*: the link now exists before they run, where today the edge
@@ -397,6 +462,7 @@ The gate drops `IsContextAttach` and keeps `count == 1`:
 | Constructor-attached root, then placed under a parent | 1 | false | no | **fires** |
 | Root in graph A, then child in graph B | 1 | true | fires | **throws**, owner check |
 | `a.Mother = a` on a constructor-attached root | 1 | false | no | **no**, self-context guard |
+| Connector item, `AttachToContext(parent.Context)` then assigned under that parent | 1 | false | no | **no**, the attach edge already names that context |
 
 ### Detach, inside `DetachFromProperty`
 
@@ -409,19 +475,36 @@ The gate drops `IsContextAttach` and keeps `count == 1`:
        if (isLastDetach) SubjectDetaching
        InvokeRemovedLifecycleHandlers        // descent happens here
    finally:
-       if (count == 0) TryClearParentContext(); release the attach edge; release ownership
+       if the subject is STILL absent from _attachedSubjects:
+           TryClearParentContext(); release the attach edge; release ownership
 5. the existing explicit child recursion at :260-268 stays
 ```
+
+The `finally` re-reads `_attachedSubjects` rather than trusting the `count == 0` captured at step 3. That
+is a correction from the third review, which found a hole the `finally` itself introduced: a handler
+running in step 4 can re-attach the subject, since `_attachedSubjects.Remove` at
+`LifecycleInterceptor.cs:218` has already run. `AttachToProperty` then sees `existed == false`, the count
+goes 0 to 1, and step 3 sets a fresh link. A `finally` firing on the captured count would wipe all of it,
+with no way to re-establish the link because the `count == 1` gate is spent. On `master` the equivalent
+removal happens inside the handler chain (`ContextInheritanceHandler.cs:23-26`), so a later handler's
+re-attach survives, and the re-read preserves that.
 
 **The `finally` is the correction that matters most.** The first version released at step 2, before the
 handlers. Both reviewers refuted it: `DetachSubjectFromContext` passes `subject.Context` down as the
 handler-resolution context for the next level (`LifecycleInterceptor.cs:70,73`), and a property-attached
 subject has no other edge, so clearing the link first makes `child.Context` resolve nothing. Grandchildren
-would get bookkeeping but no `SubjectRegistry` deregistration, no `SubjectDetaching`, and no descent into
-their own children, and the explicit recursion at `:260-268` cannot rescue it because the set entry is
-already gone. This is the same invariant the root path states and the first version violated here.
-`master` is correct only because `InterceptorExecutor.RemoveFallbackContext` removes the edge after the
-callbacks (`InterceptorExecutor.cs:78-85`).
+would get bookkeeping but no `ILifecycleHandler` invocation, so no `SubjectRegistry` deregistration and no
+descent into their own children, and the explicit recursion at `:260-268` cannot rescue it because the
+handler-driven descent ran first and consumed the set entry, so it no-ops at `:206-210`. This is the same
+invariant the root path states and the first version violated here. `master` is correct only because
+`InterceptorExecutor.RemoveFallbackContext` removes the edge after the callbacks
+(`InterceptorExecutor.cs:78-85`).
+
+Two precisions from the third review. `SubjectDetaching` is **not** lost: it is raised on the interceptor
+instance at `:194` and `:255`, so it does not depend on context resolution. And the damage is wider than
+descendants: `DetachSubjectProperty` at `:238` resolves `IPropertyLifecycleHandler` through
+`subject.Context` (`LifecycleInterceptorExtensions.cs:60-73`), so an early release also loses the
+subject's own per-property deregistration.
 
 Releasing in the `finally` also closes the window in which the subject is unowned while its graph is
 still mid-detach, during which another graph could claim it and the remaining work would resolve into the
@@ -511,7 +594,7 @@ item and leaves assignment to its caller, which the removed scoped API could not
 
 | Kind | Created by | Released by | Owner |
 |---|---|---|---|
-| Attach edge | `AttachToContext` | `DetachFromContext`, the last detach, or superseded by a same-context parent link | lifecycle |
+| Attach edge | `AttachToContext` | `DetachFromContext` or the last detach | lifecycle |
 | Parent link | `LifecycleInterceptor` at `count == 1` | last detach | lifecycle |
 | Explicit fallback | `AddFallbackContext` | the caller, never the library | consumer |
 
@@ -550,7 +633,7 @@ repoint. Both paths get their own reproduction test, since they diverge before t
 |---|---|
 | Attaching a subject owned by another graph | `InvalidOperationException`, before any lifecycle mutation, batch-level |
 | `AttachToContext` while a detach of the same subject is in progress | `InvalidOperationException`, before any mutation; retry after the detach |
-| `AddFallbackContext` targeting a context whose detach is in progress on that executor | `InvalidOperationException`; this is #411's loud failure |
+| `AddFallbackContext` while a detach is in progress on that executor | `InvalidOperationException`; this is #411's loud failure. The sentinel erases the context identity, so any add during the window throws |
 | `AddFallbackContext` adding a lifecycle-bearing context to an unattached subject | `InvalidOperationException` naming `AttachToContext` |
 | `RemoveFallbackContext` targeting the attach edge | `InvalidOperationException` naming `DetachFromContext` |
 | Delegation cycle on resolution | unchanged |
@@ -571,7 +654,9 @@ public static IInterceptorSubjectContext? TryGetAttachContext(this IInterceptorS
 
 And `DetachFromContext` aimed at a context that is not the attach context throws rather than silently
 returning, which is the same class of mistake as `RemoveFallbackContext` aimed at the attach edge and
-deserves the same treatment.
+deserves the same treatment. That is why `TryBeginDetach` returns a three-valued outcome rather than a
+bool: "not attached through this context" throws, "another detach is already running" returns, and a
+single bool would conflate them.
 
 ### Handler exceptions
 
@@ -591,8 +676,11 @@ The complete list. Anything discovered beyond these twelve is escalated, not abs
 6. A throwing detach interceptor no longer prevents the attach edge from being removed.
 7. Concurrent `DetachFromContext` calls run the detach interceptors exactly once (#402 defect 2).
 8. `AttachToContext` throws while a detach of the same subject is in progress (#402 defect 1).
-9. `AddFallbackContext` throws when it targets a context whose detach is in progress on that executor.
-   This is #411's silent wrong answer made loud; the issue stays open for the transparent fix.
+9. `AddFallbackContext` throws while a detach is in progress on that executor. The guard and the state
+   transition share `_mutationLock`, so this is a guarantee rather than best effort. Note the sentinel
+   erases the context identity, so every add during the window throws, not only one naming the context
+   being detached. This is #411's silent wrong answer made loud; the issue stays open for the
+   transparent fix.
 10. `LifecycleInterceptor` appears in `GetServices<IPropertyLifecycleHandler>()`.
 11. Handlers resolved ahead of `ContextInheritanceHandler`, which today includes `SubjectRegistry` and
     `ParentTrackingHandler`, now see a child whose context resolves the graph. Today it resolves nothing.
