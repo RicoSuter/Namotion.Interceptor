@@ -212,21 +212,36 @@ reproduction attempt is a deliverable; if the shape cannot be built, symptom 1 i
 
 ### The owner
 
-Each subject records the `ILifecycleInterceptor` that owns it, alongside the reference count in its data.
-Claimed on the first attach of any kind, released on the last detach, checked before any attach.
+Two records are needed: which lifecycle graph owns the subject, and which context it was attached
+through. **Both live on `InterceptorSubjectContext` as plain reference fields**, not in `subject.Data`.
+
+```csharp
+private ILifecycleInterceptor? _owner;
+private object? _attachContext;   // null, an IInterceptorSubjectContext, or the Detaching sentinel
+```
+
+The alternative, putting them in `subject.Data` alongside the reference count, was in the first revision
+of this design and is worse on every axis. `Data` is a `ConcurrentDictionary`, so each record costs a node
+allocation of roughly 50 to 60 bytes plus table pressure, one per attached subject, which alone outweighs
+everything the parent link saves. It also has no compare-exchange: the claim would have to be `GetOrAdd`
+and `TryUpdate`. And both guards that read these records live inside `AddFallbackContext` and
+`RemoveFallbackContext`, which are methods on the context, so a subject-side record means a cross-object
+lookup on a path that is otherwise a field read.
+
+On the context they are plain fields, so `Interlocked.CompareExchange` is available and is the primitive
+the transitions need. The cost is 16 bytes on every `InterceptorSubjectContext`, which is an object that
+already exists per subject, rather than two allocations per attach.
+
+The claim must be a single atomic operation. A read-then-claim implementation loses the cross-graph race
+and only the directed test in section 9 would catch it.
 
 Inferring ownership from topology is not sufficient: `IsContextAttach && ReferenceCount > 1` misses
 `new Person(contextA)` followed by `rootB.Children = [person]`, where the subject is a root in A with
 reference count 0, so B's attach looks like an ordinary first attach.
 
-The claim must be a single atomic operation. `subject.Data` is a `ConcurrentDictionary`, so this is
-`GetOrAdd` and `TryUpdate`, not `Interlocked.CompareExchange`. A read-then-claim implementation loses the
-cross-graph race and only the directed test in section 9 would catch it.
-
-Two limits, recorded rather than absorbed. The owner is an `ILifecycleInterceptor` reference, so two root
-contexts sharing one tracking context as a fallback count as one graph while having two registries; the
-two-graph finding in section 2 is not closed in that configuration. And each record is a
-`ConcurrentDictionary` entry, which section 10 accounts for in the performance budget.
+One limit, recorded rather than absorbed: the owner is an `ILifecycleInterceptor` reference, so two root
+contexts sharing one tracking context as a fallback count as one graph while having two registries, and
+the two-graph finding in section 2 is not closed in that configuration.
 
 ## 5. Sequences
 
@@ -554,9 +569,12 @@ The complete list. Anything discovered beyond these twelve is escalated, not abs
 10. `LifecycleInterceptor` appears in `GetServices<IPropertyLifecycleHandler>()`.
 11. Handlers resolved ahead of `ContextInheritanceHandler`, which today includes `SubjectRegistry` and
     `ParentTrackingHandler`, now see a child whose context resolves the graph. Today it resolves nothing.
-12. A subject fully detached from the graph loses its attach edge, so it stops being intercepted. On
-    `master` a constructor-attached subject keeps resolving its four write interceptors after a full
-    detach. This is the flip side of change 3 and the reason the leak closes.
+12. A constructor-attached subject stops being an exception to a rule that already exists. An ordinary
+    child already loses all interception on full detach today, because `ContextInheritanceHandler.cs:23-26`
+    removes the inherited fallback at reference count zero and the subject then has no edges at all. A
+    constructor-attached subject keeps its constructor edge and goes on resolving its write interceptors,
+    which is exactly #207's leak. After the change both behave the same way. This is the flip side of
+    change 3 and the reason the leak closes.
 
 Traversal order is deliberately **not** on this list. Fixing it to top-down was considered and rejected:
 the handler-preserving design keeps every order bit-identical for free, so there is no reason to spend the
@@ -670,7 +688,7 @@ behaviour-neutral for existing callers.
 | After | Benchmarks | Why |
 |---|---|---|
 | Commit 4 | `RegistryBenchmark`, `ContextDelegationDepthBenchmark` | The `ImmutableArray`-to-field trade predicts one fewer allocation and 24 fewer bytes per attached subject. Also a correctness signal: if allocations do not drop, the link is not replacing the edge. The depth benchmark guards the delegation fast path, which changes shape from one fallback to one parent. |
-| Commit 6 | `RegistryBenchmark` | The owner and attach-context records are `ConcurrentDictionary` entries in `subject.Data`, roughly 50 to 60 bytes each plus table pressure. One per attached subject already outweighs the 24-byte saving, so this commit can plausibly come out negative and the number must be known rather than assumed. |
+| Commit 6 | `RegistryBenchmark` | The owner and attach-context records are two reference fields on `InterceptorSubjectContext`, so 16 bytes on an object that already exists per subject and no new allocation. Expected neutral. Measured because it is the only commit that adds work to the attach path, in the form of two interlocked operations. |
 | Branch head | Both, against `master` | The numbers for the pull request description. |
 
 Run through `scripts/benchmark.ps1` with multiple launches: #412 recorded a single launch on a busy
