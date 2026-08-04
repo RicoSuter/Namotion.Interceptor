@@ -19,7 +19,7 @@ Whether a given call does job 2 or 3 is decided by the contents of the context b
 call site, because `InterceptorExecutor` resolves `ILifecycleInterceptor` from it. The same line
 therefore means different things depending on what somebody registered elsewhere.
 
-Nine open issues live in this area. Six are the same shape: the library runs user-supplied code in the
+Eight open issues live in this area, plus #210 alongside them. Six are the same shape: the library runs user-supplied code in the
 middle of a multi-step state transition. `TryAddService` runs a factory under the mutation lock (#403,
 #404, #406), `LifecycleInterceptor` runs handlers mid-reconciliation (#384), and `InterceptorExecutor`
 runs lifecycle interceptors between publishing an edge and owning it (#402, with #411 as the window
@@ -95,7 +95,7 @@ that requires registry membership, which only a lifecycle attach provides:
 |---|---|---|
 | `OpcUaSubjectLoader.cs:280` | `LoadSubjectAsync`, whose first act is `TryGetRegisteredSubject() ?? return` (`:61-65`) | the entire subtree below every new node is silently never browsed |
 | `SubjectUpdateApplier.cs:145` | `ApplyPropertyUpdates` → `TryGetRegisteredProperty` → `if (null) return` (`:77-79`) | every property update on the new item is silently dropped |
-| `SubjectItemsUpdateApplier.cs:229` | the same, via `SubjectUpdateApplier` at `:231` | the same |
+| `SubjectItemsUpdateApplier.cs:229` | the same, via `SubjectUpdateApplier` at `:232` | the same |
 
 All three are covered only by integration-tagged tests, which `AGENTS.md`'s default command excludes, so
 this would have shipped green.
@@ -590,7 +590,7 @@ The two explicit removes then delete; the `WriteProperty` rollback stays, becaus
 than a property leaving.
 
 Costs, all recorded: `LifecycleInterceptor` joins `GetServices<IPropertyLifecycleHandler>()` and needs
-no-op `AttachProperty` and `RefreshCollectionProperty`; it joins the per-property loop in
+a no-op `AttachProperty`, `RefreshCollectionProperty` having a default interface implementation; it joins the per-property loop in
 `AttachSubjectProperty`/`DetachSubjectProperty` (`LifecycleInterceptorExtensions.cs:45-73`), once per
 property per attach and detach; and it joins the `RefreshCollectionProperty` fan-out at
 `LifecycleInterceptor.cs:378-382`, calling itself re-entrantly under a lock it already holds.
@@ -752,8 +752,9 @@ The complete list. Anything discovered beyond these fourteen is escalated, not a
 6. A throwing detach interceptor no longer prevents the attach edge from being removed.
 7. Concurrent `DetachFromContext` calls run the detach interceptors exactly once (#402 defect 2).
 8. `LifecycleInterceptor` appears in `GetServices<IPropertyLifecycleHandler>()`.
-9. Handlers resolved ahead of `ContextInheritanceHandler`, which today includes `SubjectRegistry` and
-    `ParentTrackingHandler`, now see a child whose context resolves the graph. Today it resolves nothing.
+9. Handlers resolved ahead of `ContextInheritanceHandler` now see a child whose context resolves the
+    graph, where today it resolves nothing. `ParentTrackingHandler` is always ahead of it through its
+    `[RunsBefore]`; whether `SubjectRegistry` is depends on registration order.
 10. `DetachFromContext` throws when the subject still holds property references, instead of removing its
     `_attachedSubjects` entry without decrementing the count and stranding both the count and the
     ownership. The underlying behaviour predates this design; making the operation a documented API is
@@ -796,13 +797,18 @@ gates are verifiable by checking it out and running the suite.
 ### Characterization tests
 
 1. Attach and detach event sequences for a three-level graph, capturing both channels.
-2. The resolved-position ordering dependency, including the `[RunsBefore]` tie-break that pulls
-   `SubjectRegistry` to position 0.
+2. The resolved-position ordering dependency. The `[RunsBefore]` edge pulls `ParentTrackingHandler`
+   ahead, never `SubjectRegistry`; where `SubjectRegistry` lands is its registration index, so the test
+   must cover more than one configuration. Measured: `WithRegistry()` first gives
+   `SubjectRegistry, ParentTrackingHandler, ContextInheritanceHandler`, `WithRegistry()` last gives
+   `ParentTrackingHandler, ContextInheritanceHandler, SubjectRegistry`.
 3. The root's own attach fires last.
-4. Grandchildren do not attach under `WithLifecycle()` alone.
+4. Grandchildren do not attach under `WithLifecycle()` alone. This already exists as
+   `RecursiveAttachTests.WhenUsingLifecycleWithoutContextInheritance_ThenOnlyDirectChildrenAreAttached`.
 5. A child's and a grandchild's own context resolve the parent's services, via
    `TryGetService<ISubjectRegistry>()` and `TryGetLifecycleInterceptor()`, asserted after the graph
-   settles. This is the audited consumer's one hard requirement and nothing currently tests it.
+   settles. This is the audited consumer's one hard requirement. `PerPropertySubscriptionLifecycleTests`
+   (`:363-383`) already covers part of it for a child; the grandchild depth is what is new.
 6. Multi-parent attach-once and detach-once counts.
 7. `IPropertyLifecycleHandler` invocation order on property attach and detach.
 8. What a handler resolved ahead of `ContextInheritanceHandler` can see from the child's context, which
@@ -816,7 +822,7 @@ gates are verifiable by checking it out and running the suite.
 |---|---|
 | 1 | root attach through `AttachToContext` only |
 | 2 | rewritten `SubjectDetaching_FiresForRootSubject_WhenContextRemoved` |
-| 3 | both of the issue's repros, each with a weak-reference probe on `_usedByContexts` |
+| 3 | both of the issue's repros, each with a weak-reference probe on `_usedByContexts`. That field is private with no internal accessor, so the probe needs reflection in the style of `Tests/Context/ContextStateReflection.cs`, and `Namotion.Interceptor.Tracking.Tests` has no `InternalsVisibleTo` grant, so it lives in `Namotion.Interceptor.Tests` |
 | 4 | detach that leaves property values set |
 | 5 | both shapes: parent-to-parent, and root-in-A-then-child-in-B |
 | 6 | throwing detach interceptor, assert the edge is gone and a retry works |
@@ -939,7 +945,8 @@ Design-facing, `docs/design/tracking-lifecycle.md`:
 - the parent link, its ownership, the `count == 1` gate and both guards
 - that `_lastProcessedValues` entries live exactly as long as their property is attached, replacing the
   now-stale "Removed on detach" table of three locations
-- the lock ordering section, which states two locks and after this change must state
+- the lock ordering section (`:168-177`), which names `_attachedSubjects` and
+  `SubjectRegistry._knownSubjects`. It must keep that pair and add the second chain,
   `_attachedSubjects -> _mutationLock -> _usedByContexts`, with `_mutationLock -> user code ->
   _attachedSubjects` as the edge that closes the cycle (#404, pre-existing, not made worse here)
 - the resolved-position ordering dependency from section 2, which this design preserves and no issue
@@ -977,7 +984,7 @@ comments, not only its body.
 |---|---|
 | #402 | **Update, keep open on defect 1 only.** Defects 3, 4 and 5 follow from there being no callbacks inside the edge mutation. Defect 2 is closed by change 7, the single clear-under-lock that makes detach run exactly once. Defect 1, a remove racing an add, stays at `master`'s behaviour, because `AttachToContext` and `DetachFromContext` are two-step operations and are not atomic against each other. It is narrowed from every child detach to an explicit concurrent root operation, since `ContextInheritanceHandler` no longer calls the public mutators. Follow-up 1 closes it. Its first comment concluded that "the complete fix needs a decision about where lifecycle callbacks run, not just a reordering", which is what this design decides. |
 | #207 | Close, citing both reproductions, both verified during review. |
-| #410 | **Update, keep open.** Symptom 2 closes on the route the issue describes, a detach that leaves property values set, via the unconditional clear at reference count zero. It stays open on the two routes where the subject is still legitimately attached: a multi-parent subject whose linked parent leaves, and the connector shape where the item's only edge is its attach edge. Post both measurements, and the correction that the subject resolves *nothing* rather than continuing to resolve through the departed context, which is a more severe consequence than the issue predicts. Symptom 1 only if the reproduction attempt succeeds; if it cannot be built, strike it with the reasoning recorded. |
+| #410 | **Update, keep open.** Symptom 2 is not closed. The route the issue names, a detach that leaves property values set, strands nothing when measured; stranding requires the subject to hold another reference, which is the multi-parent shape, and the connector shape fails the same way through its attach edge. Post all three measurements, and the correction that the subject resolves *nothing* rather than continuing to resolve through the departed context, which is more severe than the issue predicts. Symptom 1 only if the reproduction attempt succeeds; if it cannot be built, strike it with the reasoning recorded. |
 | #210 | Close as not reachable, noting that commit 8 makes it structurally impossible if a removal API lands later. |
 | #411 | **Update, keep open.** Narrowed the same way as #402 defect 1 and for the same reason, and closed by the same follow-up. An earlier version of this design added a loud rejection for it; that was part of the protocol option B removes, and serialising the two operations closes it properly rather than turning it into an exception the caller must handle. |
 | #384 | Update, narrowed. The attach-tail case loses route 2 with #412's deferred handoff; route 1 is pre-existing. The detach-half case still raises on a cyclic chain, but such a chain now requires a consumer to have built one deliberately. Its stated blocker is removed. See section 11. |
@@ -1001,9 +1008,10 @@ change 5, and the resolved-position ordering dependency, preserved deliberately.
 - **#409**, measuring the copy-on-write memory trade-offs.
 - **A still-attached subject whose resolution target leaves the graph.** Two shapes: a multi-parent
   subject linked to the parent that departs, and a connector item whose only edge is its attach edge.
-  Both go dark, resolving no interceptors at all while still attached, measured on `master`. This is
-  #410 symptom 2 on routes the issue does not describe. Three attempts to fix it inside this design all
-  failed; section 5 records why, and the issue carries both measurements.
+  Both go dark, resolving no interceptors at all while still attached, measured on `master`. That is
+  #410 symptom 2 in its entirety: there is no separate stranded-edge route, because a single-parent
+  detach that leaves property values set strands nothing. Three attempts to fix it inside this design all
+  failed; section 5 records why, and the issue carries all three measurements.
 - **Fixing the traversal order to top-down.** See section 8.
 - **Multi-graph support.** See section 12.
 - **Moving the reference count off `subject.Data`.** `IncrementReferenceCount` and
