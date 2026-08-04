@@ -52,6 +52,11 @@ internal class SubscriptionManager : IAsyncDisposable
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
     /// <summary>
+    /// Exposes the shutdown flag so tests can assert that it stays set once disposal has run.
+    /// </summary>
+    internal bool AreCallbacksSuppressedForTesting => _shuttingDown;
+
+    /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
     /// </summary>
     public IReadOnlyCollection<Subscription> Subscriptions => (IReadOnlyCollection<Subscription>)_subscriptions.Keys;
@@ -113,10 +118,6 @@ internal class SubscriptionManager : IAsyncDisposable
         // On reconnect, re-attempt every owned property as a real subscription; failed nodes are
         // re-added to polling. Prevents double delivery of an escalated item that later recovers.
         _pollingManager?.Clear();
-
-        // Reset shutdown flag AFTER clearing collections - prevents old callbacks from processing
-        // during the window between flag reset and collection clearing (defense-in-depth).
-        _shuttingDown = false;
 
         var itemCount = monitoredItems.Count;
         var maxItemsPerSubscription = _configuration.MaxItemsPerSubscription;
