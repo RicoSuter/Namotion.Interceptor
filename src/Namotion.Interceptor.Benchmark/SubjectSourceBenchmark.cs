@@ -27,7 +27,6 @@ public class SubjectSourceBenchmark
     private readonly AutoResetEvent _signal = new(false);
     private Action<object?>[] _updates;
     private SubjectPropertyWriter _propertyWriter;
-    private long _stubRevision;
 
     [GlobalSetup]
     public async Task Setup()
@@ -102,15 +101,8 @@ public class SubjectSourceBenchmark
                 0,
                 i);
 
-            // The stub next models the terminal, which sets IsWritten and stamps a commit revision when
-            // the value is stored. Stamping matters: a change carrying revision 0 short-circuits the
-            // delivered-revision filter, so leaving it unstamped would measure the merge while skipping
-            // the per-survivor supersession check that production always pays.
-            queue.WriteProperty(ref context, (ref PropertyWriteContext<int> c) =>
-            {
-                c.IsWritten = true;
-                c.Revision = ++_stubRevision;
-            });
+            // The stub next models the terminal, which sets IsWritten when the value is stored.
+            queue.WriteProperty(ref context, (ref PropertyWriteContext<int> c) => c.IsWritten = true);
         }
 
         _source.Wait();

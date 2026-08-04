@@ -1,23 +1,24 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
-/// Processes property changes from a queue, buffering and merging them before writing.
+/// Processes property changes from a queue, buffering and deduplicating them before writing.
 /// Used by both client sources and server background services.
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
 {
+    private const int FlushDedupedBufferMinSize = 256;
+    private const int FlushDedupedBufferMaxSize = 1024;
+
     private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
-    private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
 
@@ -34,14 +35,13 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
 
-    // Scratch state used only while holding the flush gate (single-threaded access)
+    // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
-    private readonly ChangeMerger _flushMerger = new();
+    private readonly Dictionary<PropertyReference, int> _flushPropertyIndices = new(PropertyReference.Comparer);
 
-    // Spans flushes, unlike the merger's per-batch state: merging fixes inversions inside one flush,
-    // this fixes the ones that straddle a flush boundary. Holds no collection of its own; the state it
-    // consults lives on each subject, so it needs no locking, no eviction and no size bound.
-    private readonly DeliveredRevisionFilter _deliveredRevisions;
+    // Reusable buffer for deduped changes (rented from ArrayPool to avoid allocations on resize)
+    private SubjectPropertyChange[] _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
+    private int _flushDedupedCount;
 
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
@@ -77,8 +77,6 @@ public class ChangeQueueProcessor : IDisposable
         ILogger logger)
     {
         _source = source;
-        _context = context;
-        _deliveredRevisions = new DeliveredRevisionFilter(source);
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
@@ -91,27 +89,10 @@ public class ChangeQueueProcessor : IDisposable
         }
         catch
         {
-            _flushMerger.Dispose();
+            ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+            _flushDedupedBuffer = null!;
             throw;
         }
-    }
-
-    /// <summary>
-    /// Whether a change this processor would normally skip has to be sent out after all.
-    ///
-    /// A transaction writes its value to the source itself and then applies it locally, and that local
-    /// apply arrives here as a confirmation. Normally there is nothing to send: the source already has
-    /// it. But a write of ours can land on the source between those two steps, leaving the source
-    /// holding an older commit while the subject holds the confirmed one, and nothing would ever
-    /// correct it. Sending the confirmation out repairs that.
-    ///
-    /// Only when this processor actually wrote the property since, so a property that is only ever
-    /// written through transactions never pays for it.
-    /// </summary>
-    private bool NeedsWriteBack(in SubjectPropertyChange change)
-    {
-        return change.Origin.Kind == ChangeOriginKind.Confirmed
-               && _deliveredRevisions.WasWrittenOut(change.Property);
     }
 
     /// <summary>
@@ -150,9 +131,9 @@ public class ChangeQueueProcessor : IDisposable
         {
             _logger.LogWarning(
                 "Change queue processor is running without buffering (bufferTime <= 0). " +
-                "Each property change will be processed individually without merging, " +
+                "Each property change will be processed individually without deduplication, " +
                 "which can cause high CPU usage under load. " +
-                "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and merging.");
+                "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and deduplication.");
         }
 
         try
@@ -161,14 +142,8 @@ public class ChangeQueueProcessor : IDisposable
 
             while (_subscription.TryDequeue(out var change, linkedTokenSource.Token))
             {
-                if (ReferenceEquals(change.Origin.Source, _source) && !NeedsWriteBack(in change))
+                if (ReferenceEquals(change.Origin.Source, _source))
                 {
-                    // Load bearing, despite this change not being written anywhere. The source already
-                    // holds this value at this revision, and recording that is what lets a local commit
-                    // that predates the echo be suppressed afterwards instead of overwriting the newer
-                    // value the source just sent. Removing this call passes every other test in the
-                    // repository; WhenAnEchoIsDequeued_ThenAnOlderStragglerIsNotWritten is what fails.
-                    _deliveredRevisions.RecordDelivered(in change);
                     continue;
                 }
 
@@ -179,13 +154,6 @@ public class ChangeQueueProcessor : IDisposable
 
                 if (periodicTimer is null)
                 {
-                    // The buffered path applies this inside the merger, where it can compact the
-                    // batch in place; here there is no batch, so it gates the single write.
-                    if (!_deliveredRevisions.TryAdmit(in change))
-                    {
-                        continue;
-                    }
-
                     // Immediate path: send a single change without buffering (zero allocation)
                     _immediateBuffer[0] = change;
                     try
@@ -257,13 +225,47 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            var mergedChanges = _flushMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), _deliveredRevisions);
+            _flushPropertyIndices.Clear();
+            _flushDedupedCount = 0;
 
-            if (mergedChanges.Length > 0)
+            // Pre-size to avoid resizes under bursts
+            _flushPropertyIndices.EnsureCapacity(_flushChanges.Count);
+
+            // Ensure the buffer is large enough (rent from pool to avoid allocations)
+            if (_flushDedupedBuffer.Length < _flushChanges.Count)
+            {
+                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+                _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(_flushChanges.Count);
+            }
+
+            // Deduplicate by Property: keep oldest old value, use newest new value.
+            // Backward iteration finds last occurrences first, preserving last-occurrence order.
+            for (var i = _flushChanges.Count - 1; i >= 0; i--)
+            {
+                var change = _flushChanges[i];
+                if (!_flushPropertyIndices.TryGetValue(change.Property, out var existingIndex))
+                {
+                    _flushPropertyIndices[change.Property] = _flushDedupedCount;
+                    _flushDedupedBuffer[_flushDedupedCount++] = change;
+                }
+                else
+                {
+                    // Earlier occurrence: merge its old value into the kept (later) change
+                    _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(_flushDedupedBuffer[existingIndex]);
+                }
+            }
+
+            // Reverse to restore chronological order of last occurrences
+            if (_flushDedupedCount > 1)
+            {
+                Array.Reverse(_flushDedupedBuffer, 0, _flushDedupedCount);
+            }
+
+            if (_flushDedupedCount > 0)
             {
                 try
                 {
-                    await _writeHandler(mergedChanges, cancellationToken).ConfigureAwait(false);
+                    await _writeHandler(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, _flushDedupedCount), cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -279,15 +281,24 @@ public class ChangeQueueProcessor : IDisposable
         {
             // Clear buffers to allow GC of SubjectPropertyChange objects
             _flushChanges.Clear();
+            _flushPropertyIndices.Clear();
+
+            // Clear entire rented array before potential return to pool.
+            // SubjectPropertyChange contains object references (Source, boxed values) that must be released.
+            Array.Clear(_flushDedupedBuffer, 0, _flushDedupedBuffer.Length);
 
             if (Volatile.Read(ref _disposed) == 1)
             {
                 // Disposed while flushing - return buffer to pool now
-                _flushMerger.Dispose();
+                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+                _flushDedupedBuffer = null!;
             }
-            else
+            else if (_flushDedupedBuffer.Length >= FlushDedupedBufferMaxSize &&
+                     _flushDedupedCount < _flushDedupedBuffer.Length / 4)
             {
-                _flushMerger.Reset();
+                // Shrink buffer if it grew too large (return to pool and rent smaller)
+                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+                _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
             }
 
             Volatile.Write(ref _flushGate, 0);
@@ -307,19 +318,15 @@ public class ChangeQueueProcessor : IDisposable
 
         _subscription.Dispose();
 
-        // Takes this processor's slots off the subjects it delivered to. Not optional: those slots hold
-        // the source, so skipping this leaves a dead connector reachable from a live graph. The walk
-        // covers the registry's attached subjects, which are exactly the ones that outlive the processor;
-        // without a registry there is nothing to walk and the slots stay until their subjects die.
-        _deliveredRevisions.Release(_context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys);
-
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
         if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)
         {
             try
             {
                 // Clear and return the buffer to the pool
-                _flushMerger.Dispose();
+                Array.Clear(_flushDedupedBuffer, 0, _flushDedupedBuffer.Length);
+                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+                _flushDedupedBuffer = null!;
             }
             finally
             {
