@@ -213,9 +213,11 @@ reproduction attempt is a deliverable; if the shape cannot be built, symptom 1 i
 ### The owner
 
 Two records are needed: which lifecycle graph owns the subject, and which context it was attached
-through. **Both live on `InterceptorSubjectContext` as plain reference fields**, not in `subject.Data`.
+through. **Both live on `InterceptorExecutor` as plain reference fields**, not in `subject.Data` and not
+on the base `InterceptorSubjectContext`.
 
 ```csharp
+// on InterceptorExecutor, which is the only context that has a subject
 private ILifecycleInterceptor? _owner;
 private object? _attachContext;   // null, an IInterceptorSubjectContext, or the Detaching sentinel
 ```
@@ -228,9 +230,34 @@ and `TryUpdate`. And both guards that read these records live inside `AddFallbac
 `RemoveFallbackContext`, which are methods on the context, so a subject-side record means a cross-object
 lookup on a path that is otherwise a field read.
 
-On the context they are plain fields, so `Interlocked.CompareExchange` is available and is the primitive
-the transitions need. The cost is 16 bytes on every `InterceptorSubjectContext`, which is an object that
-already exists per subject, rather than two allocations per attach.
+On the executor they are plain fields, so `Interlocked.CompareExchange` is available and is the primitive
+the transitions need. The cost is 16 bytes on an object that already exists per subject, rather than two
+allocations per attach.
+
+The base class was the first choice and is wrong. All three guards that read these records are
+executor-only semantics: on a plain `InterceptorSubjectContext.Create()` context, adding a
+lifecycle-bearing context is exactly how services are composed and must not throw. Putting the fields on
+the base gives every standalone context state that can never mean anything and puts subject-lifecycle
+semantics into a class with no subject. So `InterceptorExecutor` keeps its two overrides, reduced to
+guards that delegate:
+
+```csharp
+public override bool AddFallbackContext(IInterceptorSubjectContext context)
+{
+    RejectIfDetaching(context);
+    RejectIfLifecycleBearingAndUnattached(context);
+    return base.AddFallbackContext(context);
+}
+```
+
+What this design removes from those overrides is the user code, not the overrides. Nothing supplied by a
+consumer runs between publishing an edge and owning it, which is the substantive change; the guards run
+before the base call and mutate nothing.
+
+The guards also fix their own ordering. `AttachToContext` claims the attach context before calling
+`AddFallbackContext`, so the record is set by the time the guard runs and the guard passes. A bare
+`AddFallbackContext` naming a lifecycle-bearing context on a subject with a null record throws. That is
+exactly the discrimination the design needs, and it holds only because the claim precedes the add.
 
 The claim must be a single atomic operation. A read-then-claim implementation loses the cross-graph race
 and only the directed test in section 9 would catch it.
@@ -446,7 +473,7 @@ sits on the hot write path and per-property data storage is what #222 is trying 
 |---|---|
 | `AddFallbackContext` / `RemoveFallbackContext` keep signatures, lose the attach side effect | behavioural |
 | `IInterceptorSubject.AttachToContext` / `DetachFromContext` extensions in core | additive |
-| `InterceptorExecutor` loses both overrides | snapshot change (`Namotion.Interceptor.Tests/VerifyChecksTests.PublicApi.verified.txt:198,201`), no source break |
+| `InterceptorExecutor` keeps both overrides, reduced to guards that run no user code | no API change |
 | `ContextInheritanceHandler` and `WithContextInheritance()` keep their names, body changes | none |
 
 The parent link, its setters, the owner and the attach-context record are all internal.
@@ -759,6 +786,26 @@ multi-parent stale-link case left behind by removing the repoint.
 - **Multi-graph support.** See section 12.
 - **The multi-parent stale link.** With the repoint removed, a subject whose first parent leaves keeps a
   link to it until full detach. Distinct from #410's mechanism, milder, and recorded as a follow-up.
+- **Moving the reference count off `subject.Data`.** `IncrementReferenceCount` and
+  `DecrementReferenceCount` do a `ConcurrentDictionary.AddOrUpdate` with a `(string?, string)` tuple key
+  on every attach and every detach (`LifecycleInterceptorExtensions.cs:20-43`), for what is a per-subject
+  integer. By the placement rule below it belongs on the executor, and on the attach-heavy benchmarks it
+  is plausibly a larger win than anything this design does. Out of scope because, unlike the owner, the
+  reference count is a Tracking concept and hosting it on a core object needs its own argument. Named
+  here so the reasoning is not lost.
+
+### Placement rule
+
+Recorded because the executor is the path of least resistance for per-subject state, being the only typed
+store an `IInterceptorSubject` implementation does not have to provide, and without a rule the next three
+additions land there by default:
+
+> Per-subject state belongs on `InterceptorExecutor` only when it is both about the subject's position in
+> the context or lifecycle graph, and read on a path where a `subject.Data` lookup would show. Everything
+> else goes in `subject.Data`.
+
+The owner and the attach context pass both tests. So would the reference count, which is why it is named
+above rather than treated as an unrelated optimisation.
 
 ## 12. Rejected alternatives
 
