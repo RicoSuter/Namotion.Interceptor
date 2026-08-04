@@ -113,7 +113,7 @@ Provenance-aware validators receive the origin via `PropertyValidationContext` a
 
 A write's origin moves through a lifecycle: it starts as a pending stamp set by the apply call (`SetValueFromSource`, `ApplySubjectUpdate`), becomes the attempted origin carried by the write while interceptors and validators run (this is what `PropertyValidationContext.Origin` exposes), and is finalized at the actual write, where a stamped origin whose stored value does not equal the sent value is demoted to `Local`; published changes always carry the finalized origin.
 
-### Change Batching and Deduplication
+### Change Batching and Merging
 
 A source with a `bufferTime` above zero batches outbound changes and collapses each flush to one change per property, so `WriteChangesAsync` sees at most one entry per property per flush.
 
