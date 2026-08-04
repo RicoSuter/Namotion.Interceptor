@@ -780,3 +780,34 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 **Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
 
 **Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. It allocates `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers on demand to avoid exposing internal types.
+
+### Known Limitations
+
+**Rollback of a failed load is not fully transactional.** When a load fails partway, the staged
+subjects it created are detached so the registry sheds them and the next load starts clean. Property
+assignments made during the load are not reverted, because prior values were not captured.
+
+Collections and dictionaries are therefore bound to their parent property only after their children
+have loaded (`OpcUaSubjectLoader.BatchLoadCollectionsAndDictionariesAsync`), matching the order
+`LoadPendingSubjectReferencesAsync` uses. That closes the widest window, since the children's load is
+usually where most of the browse IO happens.
+
+It does not close every window. The phases that run afterwards (`LoadPendingSubjectReferencesAsync`,
+`LoadAttributesAsync`, and any outer recursion level) also browse and can fail after those bindings
+have applied. A failure there can leave a child referenced by its parent property but already
+detached from the registry. Such a subject is reused by the next load without being re-staged, so it
+is never re-attached, and its subtree stays unmonitored.
+
+Retrying the load does not recover it, and neither does a structure change that keeps the child. The
+container is reassigned on every load, but the attach is skipped because the subject appears in both
+the old and the new value. What does end the state is removing the child from the parent value, or
+detaching and re-attaching the parent subtree, which re-walks the backing store and re-registers it.
+Collection children are also matched by index, so a later index shift can rebind the affected
+subject to a different node rather than healing it.
+
+Closing this completely requires recording and reverting property assignments during rollback, which
+is a larger design change than the ordering fix. Applications that need a guaranteed-complete load
+should rebuild the affected subject graph, by detaching and re-attaching the parent subtree or by
+removing and re-adding the parent value. Recreating the client does not help: the affected state
+lives in the subject graph and the registry, not in the client, so a new client runs the same loader
+over the same graph and takes the same reuse path.
