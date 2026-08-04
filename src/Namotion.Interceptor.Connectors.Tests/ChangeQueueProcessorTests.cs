@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
@@ -43,7 +44,7 @@ public class ChangeQueueProcessorTests
 
         processor.Dispose();
 
-        // Assert - only the last value should be written (deduplication)
+        // Assert - only the last value should be written (merged)
         // Merged change keeps oldest old value ("Value1") and newest new value ("Value4")
         Assert.Single(writtenChanges);
         Assert.Equal("Value1", writtenChanges[0].GetOldValue<string>());
@@ -90,7 +91,7 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
-    public async Task WhenDeduplicating_ThenOrderOfLastOccurrencesIsPreservedAndValuesAreMerged()
+    public async Task WhenMerging_ThenOrderOfLastOccurrencesIsPreservedAndValuesAreMerged()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
@@ -329,11 +330,297 @@ public class ChangeQueueProcessorTests
         await processing;
     }
 
+    [Fact]
+    public async Task WhenTheNewerCommitIsEnqueuedFirst_ThenTheFlushedSurvivorTakesItsNewValue()
+    {
+        // Arrange - a change is enqueued after its commit and outside the subject lock, so two writers to
+        // one property can enqueue in the opposite order they committed. The flush must resolve that by
+        // revision, not by queue position.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writtenChanges = new List<SubjectPropertyChange>();
+
+        var processor = new ChangeQueueProcessor(
+            source: null,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                writtenChanges.AddRange(changes.ToArray());
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMilliseconds(50),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        // Act
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        EnqueueChange(processor, property, "Committed1", "Committed2", revision: 2);
+        EnqueueChange(processor, property, "Committed0", "Committed1", revision: 1);
+
+        await TriggerFlushAsync(processor);
+
+        processor.Dispose();
+
+        // Assert - the survivor spans the batch: the lowest revision's old value and the highest
+        // revision's new value, even though the highest arrived first
+        var change = Assert.Single(writtenChanges);
+        Assert.Equal("Committed0", change.GetOldValue<string>());
+        Assert.Equal("Committed2", change.GetNewValue<string>());
+        Assert.Equal(2, change.Revision);
+    }
+
+    /// <summary>
+    /// The immediate path (no buffer time) has no batch to merge, so it consults the delivered-revision
+    /// filter directly. Without that call it would write a commit the source has already moved past,
+    /// and nothing else in the suite covers it.
+    /// </summary>
+    [Fact]
+    public async Task WhenBufferTimeIsZero_ThenASupersededCommitIsNotWritten()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writtenValues = new List<string?>();
+        var source = new object();
+
+        using var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenValues.Add(change.GetNewValue<string>());
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        // The source is already past every revision this subject can reach in this test, so every
+        // change the immediate path sees is superseded.
+        SeedDeliveredRevision(processor, new PropertyReference(subject, nameof(Person.FirstName)), long.MaxValue);
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act
+        subject.FirstName = "Suppressed";
+        subject.LastName = "Delivered";
+
+        // Assert: LastName has no baseline, so it arrives and proves the loop is running, while
+        // FirstName is suppressed rather than merely slow.
+        await AsyncTestHelpers.WaitUntilAsync(() => writtenValues.Contains("Delivered"));
+        Assert.DoesNotContain("Suppressed", writtenValues);
+
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    [Fact]
+    public async Task WhenAnEchoIsDequeued_ThenAnOlderStragglerIsNotWritten()
+    {
+        // Arrange: the echo is skipped rather than written, so nothing downstream proves it was seen.
+        // Recording it is what suppresses a local commit that predates it. Nothing is delivered for
+        // FirstName beforehand on purpose: a delivered change records its own revision, which would
+        // suppress the straggler by itself and make this test pass with the bookkeeping removed.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var source = new object();
+        var written = new ConcurrentQueue<string?>();
+
+        var firstName = new PropertyReference(subject, nameof(Person.FirstName));
+        var lastName = new PropertyReference(subject, nameof(Person.LastName));
+
+        long echoRevision = 0;
+        using var observed = firstName.Subscribe((in SubjectPropertyChange change) =>
+        {
+            if (change.GetNewValue<string>() == "FromSource")
+            {
+                echoRevision = change.Revision;
+            }
+        });
+
+        using var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.GetNewValue<string>());
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMilliseconds(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Advances the subject's counter so the echo does not land on revision 1, which would leave no
+        // usable revision below it (0 orders against nothing and is never suppressed).
+        subject.LastName = "Warmup";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Warmup"));
+
+        // Act: the source pushes a value for FirstName, which this processor skips without writing.
+        using (PendingOrigin.Set(firstName, ChangeOrigin.FromSource(source), "FromSource"))
+        {
+            subject.FirstName = "FromSource";
+        }
+
+        // The dequeue loop is FIFO, so seeing this proves the echo ahead of it was already handled.
+        subject.LastName = "Fence";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Fence"));
+        Assert.True(echoRevision > 1, "the echo needs a revision with room below it");
+
+        // A commit that predates the echo, arriving late because enqueuing happens after the commit and
+        // outside the subject lock. Only the echo's recorded revision can suppress it.
+        EnqueueChange(processor, firstName, "Old", "Straggler", echoRevision - 1);
+        EnqueueChange(processor, lastName, "Fence", "SecondFence", long.MaxValue);
+
+        // Assert: the second fence shares the straggler's flush, so its arrival means the straggler was
+        // considered and dropped rather than merely still in flight.
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("SecondFence"));
+        Assert.DoesNotContain("Straggler", written);
+
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    /// <summary>
+    /// A transaction writes to the source itself and then applies locally, and that apply arrives as a
+    /// confirmation. If a write of ours landed on the source in between, the source is left holding the
+    /// older commit while the subject holds the confirmed one, and nothing would ever correct it.
+    /// </summary>
+    [Fact]
+    public async Task WhenAConfirmationFollowsOurOwnWrite_ThenItIsSentBackToRepairTheSource()
+    {
+        // Arrange
+        var (context, subject, written, source, processor) = CreateImmediateProcessor();
+        using var _ = processor;
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act: our own write reaches the source first, so the source may since have been overwritten.
+        subject.FirstName = "Ours";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Ours"));
+
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        using (PendingOrigin.Set(property, ChangeOrigin.Confirmed(source), "Confirmed"))
+        {
+            subject.FirstName = "Confirmed";
+        }
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Confirmed"));
+
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    [Fact]
+    public async Task WhenAConfirmationDoesNotFollowOurOwnWrite_ThenItIsNotSentBack()
+    {
+        // Arrange: nothing of ours reached the source for this property, so the source still holds what
+        // the transaction wrote and sending it again would be a redundant round trip.
+        var (context, subject, written, source, processor) = CreateImmediateProcessor();
+        using var _ = processor;
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        using (PendingOrigin.Set(property, ChangeOrigin.Confirmed(source), "Confirmed"))
+        {
+            subject.FirstName = "Confirmed";
+        }
+
+        // A change on another property proves the loop ran past the confirmation rather than stalling.
+        subject.LastName = "Other";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Other"));
+        Assert.DoesNotContain("Confirmed", written);
+
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    private static (IInterceptorSubjectContext Context, Person Subject, List<string?> Written, object Source, ChangeQueueProcessor Processor)
+        CreateImmediateProcessor()
+    {
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var written = new List<string?>();
+        var source = new object();
+
+        var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Add(change.GetNewValue<string>());
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        return (context, subject, written, source, processor);
+    }
+
+    private static void SeedDeliveredRevision(ChangeQueueProcessor processor, PropertyReference property, long revision)
+    {
+        var field = typeof(ChangeQueueProcessor)
+            .GetField("_deliveredRevisions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.True(field is not null, "_deliveredRevisions was renamed, this test needs updating.");
+
+        var filter = field!.GetValue(processor)!;
+        var record = filter.GetType()
+            .GetMethod("RecordDelivered", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        Assert.True(record is not null, "RecordDelivered was renamed, this test needs updating.");
+
+        var change = SubjectPropertyChange.Create(
+            property, ChangeOrigin.Local, DateTimeOffset.UnixEpoch, null, "old", "new", revision);
+        record!.Invoke(filter, [change]);
+    }
+
     private static void EnqueueChange(
         ChangeQueueProcessor processor,
         PropertyReference property,
         string? oldValue,
-        string? newValue)
+        string? newValue,
+        long revision = 0)
     {
         // Use reflection to access the private _changes queue
         var changesField = typeof(ChangeQueueProcessor)
@@ -347,7 +634,8 @@ public class ChangeQueueProcessorTests
             DateTimeOffset.UtcNow,
             null,
             oldValue,
-            newValue);
+            newValue,
+            revision);
 
         queue.Enqueue(change);
     }
