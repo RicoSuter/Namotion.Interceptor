@@ -586,6 +586,92 @@ public class OpcUaSubjectLoaderFailureTests
     }
 
     [Fact]
+    public async Task WhenADictionaryEntryLoadFailsUnderANonRootParent_ThenALaterLoadStillRegistersTheEntry()
+    {
+        // Arrange: identical in shape to the collection case above, but through the dictionary
+        // branch of BatchLoadCollectionsAndDictionariesAsync, which binds its container separately
+        // and so needs its own regression pin. Bracketed browse names carry the dictionary keys.
+        var parentId = new NodeId(4101, 2);
+        var entriesId = new NodeId(4102, 2);
+        var firstEntryId = new NodeId(4103, 2);
+        var secondEntryId = new NodeId(4104, 2);
+        var firstValueId = new NodeId(4105, 2);
+        var secondValueId = new NodeId(4106, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [RootId] = [MakeReference("Parent", parentId, NodeClass.Object)],
+            [parentId] = [MakeReference("Entries", entriesId, NodeClass.Object)],
+            [entriesId] =
+            [
+                MakeReference("Entries[KeyA]", firstEntryId, NodeClass.Object),
+                MakeReference("Entries[KeyB]", secondEntryId, NodeClass.Object)
+            ],
+            [firstEntryId] = [MakeReference("Value", firstValueId, NodeClass.Variable)],
+            [secondEntryId] = [MakeReference("Value", secondValueId, NodeClass.Variable)]
+        };
+
+        var modelContext = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
+        var root = new RollbackDictionaryRoot(modelContext);
+        root.Parent = new RollbackDictionaryParent(modelContext);
+
+        var (loader, source) = CreateSourceAndLoaderFor(root, shouldAddDynamicProperties: false);
+
+        var failSecondEntryBrowse = true;
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection descriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var description in descriptions)
+                {
+                    if (failSecondEntryBrowse && description.NodeId == secondEntryId)
+                    {
+                        results.Add(new BrowseResult { StatusCode = StatusCodes.BadServerHalted, References = [] });
+                        continue;
+                    }
+
+                    var children = new ReferenceDescriptionCollection();
+                    if (browseTree.TryGetValue(description.NodeId, out var references))
+                    {
+                        children.AddRange(references);
+                    }
+                    results.Add(new BrowseResult { References = children });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        var rootNode = MakeReference("Root", RootId, NodeClass.Object);
+
+        // Act: the first load rolls back, the second runs against a healthy server.
+        await Assert.ThrowsAsync<OpcUaTransientServiceException>(
+            () => loader.LoadSubjectAsync(root, rootNode, mockSession.Object, CancellationToken.None));
+
+        failSecondEntryBrowse = false;
+        var monitoredItems = await loader.LoadSubjectAsync(
+            root, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: both entries are back in the registry and monitored. An entry left over from the
+        // rolled-back load is reused without being re-staged, so it is never re-attached and its
+        // subtree is dropped for good.
+        var entries = Assert.IsAssignableFrom<IReadOnlyDictionary<string, RollbackCollectionItem>>(root.Parent!.Entries);
+        Assert.Equal(2, entries.Count);
+        Assert.All(entries.Values, entry => Assert.NotNull(entry.TryGetRegisteredSubject()));
+
+        var monitoredNodeIds = monitoredItems.Select(item => item.StartNodeId).ToHashSet();
+        Assert.Equal(2, monitoredItems.Count);
+        Assert.Contains(firstValueId, monitoredNodeIds);
+        Assert.Contains(secondValueId, monitoredNodeIds);
+        Assert.Equal(2, source.Ownership.Properties.Count);
+    }
+
+    [Fact]
     public async Task WhenALoadFailsWhileHoldingTheStructureLock_ThenRollbackDoesNotDeadlock()
     {
         // Arrange: Root has a Sensor child whose own child fails with a transient browse status,
@@ -842,4 +928,18 @@ public partial class RollbackCollectionItem
 {
     [OpcUaNode("Value")]
     public partial double Value { get; set; }
+}
+
+[InterceptorSubject]
+public partial class RollbackDictionaryRoot
+{
+    [OpcUaNode("Parent")]
+    public partial RollbackDictionaryParent? Parent { get; set; }
+}
+
+[InterceptorSubject]
+public partial class RollbackDictionaryParent
+{
+    [OpcUaNode("Entries")]
+    public partial IReadOnlyDictionary<string, RollbackCollectionItem>? Entries { get; set; }
 }

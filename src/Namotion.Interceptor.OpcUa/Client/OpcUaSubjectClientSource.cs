@@ -711,14 +711,20 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
-        // Lock-free by design: this runs from the synchronous subject-detach callback, which can
-        // fire on the same thread that already holds _structureLock during a load or reconnect
-        // (a failed load's rollback detaches its staged subjects inline, and replacing existing
-        // structure detaches the old subjects inline). _structureLock is a non-reentrant
-        // SemaphoreSlim, so taking it here would deadlock that thread forever, and it would block
-        // while holding LifecycleInterceptor's attached-subject lock, stalling every attach and
-        // detach in the process. The underlying removals operate on concurrent collections and are
-        // idempotent, so no outer lock is needed.
+        // Lock-free by design. This runs from the synchronous subject-detach callback, which the
+        // lifecycle interceptor raises while holding its attached-subject lock. Taking
+        // _structureLock here deadlocks two different ways. Same-thread: the initial load holds it
+        // across the whole load and a failed load's rollback detaches its staged subjects inline,
+        // re-entering a non-reentrant SemaphoreSlim. Cross-thread: an external detach holds the
+        // lifecycle lock while waiting on _structureLock, inverting against the load thread, which
+        // holds _structureLock and needs the lifecycle lock to write properties. Either way the
+        // block happens while holding the lifecycle lock, so it stalls every attach and detach in
+        // the process, not just this connector.
+        //
+        // The removals themselves are safe unsynchronised: both dictionaries are concurrent,
+        // TryRemove is idempotent, and nothing requires the two removals to be atomic together.
+        // Ordering against a concurrent subscription setup is not this method's job either: it is
+        // covered by the sweep in CompleteSetup and by reconnect rebuilding from owned properties.
         _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
         _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
     }

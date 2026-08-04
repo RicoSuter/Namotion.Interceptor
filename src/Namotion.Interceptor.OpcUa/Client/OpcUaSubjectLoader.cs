@@ -566,11 +566,16 @@ internal sealed class OpcUaSubjectLoader
         var allChildrenToLoad = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>();
 
         // Containers are bound to their property only after their children have loaded, which is
-        // what keeps rollback complete. Binding first would leave a staged child referenced by the
-        // parent property while Dispose detaches it from the registry, and nothing removes the
-        // parent's reference, so the subject would survive as an unregistered zombie that later
-        // loads reuse (skipping re-staging) and then drop. Same order as
-        // LoadPendingSubjectReferencesAsync.
+        // what keeps rollback complete for a failure during that load. Binding first would leave a
+        // staged child referenced by the parent property while Dispose detaches it from the
+        // registry, and nothing removes the parent's reference, so the subject would survive as an
+        // unregistered zombie that later loads reuse (skipping re-staging) and then drop. Same
+        // order as LoadPendingSubjectReferencesAsync.
+        //
+        // This closes the dominant window, not every one: the sibling phases that follow
+        // (LoadPendingSubjectReferencesAsync, LoadAttributesAsync, and any outer level) also browse
+        // and can throw after these bindings have applied. The children's load is where the bulk of
+        // the browse IO is, so it is where the exposure was.
         var pendingContainerAssignments = new List<(RegisteredSubjectProperty Property, object Container)>();
 
         foreach (var (property, nodeId) in pendingCollections)
