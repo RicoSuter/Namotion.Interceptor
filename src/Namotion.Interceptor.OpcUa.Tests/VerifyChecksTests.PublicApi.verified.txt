@@ -161,6 +161,13 @@ namespace Namotion.Interceptor.OpcUa.Client
         public Opc.Ua.Client.ISession? CurrentSession { get; }
         public Opc.Ua.Client.ISession? PreviousSession { get; }
     }
+    public sealed class OpcUaTransientServiceException : System.Exception
+    {
+        public OpcUaTransientServiceException(string operation, Opc.Ua.NodeId? nodeId, Opc.Ua.StatusCode statusCode) { }
+        public Opc.Ua.NodeId? NodeId { get; }
+        public string Operation { get; }
+        public Opc.Ua.StatusCode StatusCode { get; }
+    }
     public class OpcUaTypeResolver
     {
         public OpcUaTypeResolver(Microsoft.Extensions.Logging.ILogger logger) { }
