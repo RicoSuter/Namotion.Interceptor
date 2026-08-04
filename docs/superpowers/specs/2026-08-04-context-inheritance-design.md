@@ -232,9 +232,20 @@ on the base `InterceptorSubjectContext`.
 // on InterceptorExecutor, which is the only context that has a subject
 private ILifecycleInterceptor? _owner;
 private IInterceptorSubjectContext? _attachContext;   // null, or the context attached through
+private int _referenceCount;                          // moved off subject.Data
 ```
 
-`subject.Data` was the first choice and is worse on every axis. It is a `ConcurrentDictionary`, so each
+The reference count moves here too. It is a per-subject integer that `LifecycleInterceptor` increments
+and decrements on every attach and every detach, and on `master` each of those is a
+`ConcurrentDictionary.AddOrUpdate` with a `(string?, string)` tuple key (`LifecycleInterceptorExtensions.cs:32-43`).
+It also has to be readable from core, because `DetachFromContext` lives there and needs it. Both reasons
+point the same way, and the placement rule in section 11 admits it on both counts.
+
+It is mutated by `LifecycleInterceptor` under `_attachedSubjects` with `_mutationLock` nested, the same
+discipline as `_owner`, which lets the owner claim and the count increment share one acquisition. The
+public `GetReferenceCount()` reads it without a lock and is a snapshot, exactly as it is today.
+
+`subject.Data` was the first choice for the other two and is worse on every axis. It is a `ConcurrentDictionary`, so each
 record costs a node allocation of roughly 50 to 60 bytes plus table pressure, one per attached subject,
 which alone outweighs everything the parent link saves. And the guard that reads `_attachContext` lives
 inside `AddFallbackContext`, a method on the context, so a subject-side record means a cross-object
@@ -389,11 +400,10 @@ public static void DetachFromContext(this IInterceptorSubject subject, IIntercep
     // Resolved first, so a cyclic chain throws before anything has changed.
     var interceptors = context.GetServices<ILifecycleInterceptor>();
 
-    // Pre-flight, before anything is cleared: a subject that is also a child must be removed from its
-    // parents first. The check belongs to whoever owns the reference count, so it is asked for.
-    foreach (var interceptor in interceptors)
-        if (interceptor is ILifecycleDetachGuard guard)
-            guard.EnsureCanDetachSubjectFromContext(subject);
+    // Pre-flight, before anything is cleared: a subject that is also a child must be removed from
+    // its parents first.
+    if (subject.GetReferenceCount() != 0)
+        throw new InvalidOperationException(/* names the parents still holding it */);
 
     if (!subject.Context.TryClearAttachContext(context))    // under _mutationLock; exactly one winner
         return;
@@ -430,28 +440,19 @@ strands core-only consumers: `ILifecycleInterceptor` and `AttachToContext` are b
 attaches and detaches a root with it (`:100-101`), and after migration `RemoveFallbackContext` throws for
 that attach edge, leaving no core API to undo it.
 
-So core gains a small optional capability interface:
+The guard reads the reference count directly, which it can because that field moved to the executor.
+Detaching a still-referenced subject would remove its `_attachedSubjects` entry
+(`LifecycleInterceptor.cs:172`) while reading the count rather than decrementing it (`:186`), so the
+count and the ownership would strand and the parent's later removal would no-op at `:206-210`.
 
-```csharp
-public interface ILifecycleDetachGuard
-{
-    void EnsureCanDetachSubjectFromContext(IInterceptorSubject subject);
-}
-```
-
-`LifecycleInterceptor` implements it alongside `ILifecycleInterceptor` and throws when the subject still
-holds property references, checked under its own monitor where the count lives: detaching such a subject
-would remove its `_attachedSubjects` entry (`LifecycleInterceptor.cs:172`) while reading the count rather
-than decrementing it (`:186`), so the count and the ownership would strand and the parent's later removal
-would no-op at `:206-210`.
-
-A separate interface rather than a third member on `ILifecycleInterceptor` with a default
-implementation, because **core targets `netstandard2.0`**
-(`src/Namotion.Interceptor/Namotion.Interceptor.csproj:4`), which does not support default interface
-implementations. An earlier version proposed the default-member form and cited
-`IPropertyLifecycleHandler.RefreshCollectionProperty` as precedent; that interface lives in
-`Namotion.Interceptor.Tracking`, which targets `net9.0`, so the precedent does not transfer. The optional
-interface is equally non-breaking for existing implementors and compiles where it has to.
+Two earlier attempts at this guard are worth recording, because both were structural dead ends. Putting
+`DetachFromContext` in `Namotion.Interceptor.Tracking` so it could reach the count strands core-only
+consumers. Adding a third member to `ILifecycleInterceptor` with a default implementation does not
+compile: core targets `netstandard2.0`
+(`src/Namotion.Interceptor/Namotion.Interceptor.csproj:4`), and the precedent cited for it,
+`IPropertyLifecycleHandler.RefreshCollectionProperty`, lives in Tracking at `net9.0`. A separate optional
+capability interface would have worked but is a public interface with one implementation existing purely
+to carry one question across a project reference. Moving the count removes the question instead.
 
 The pre-flight runs before the record is cleared, so a rejection leaves the subject exactly as it was.
 It is still a check followed by a transition, so it does not close the property-attach race that "What is
@@ -660,7 +661,7 @@ sits on the hot write path and per-property data storage is what #222 is trying 
 |---|---|
 | `AddFallbackContext` / `RemoveFallbackContext` keep signatures, lose the attach side effect | behavioural |
 | `IInterceptorSubject.AttachToContext` and `DetachFromContext`, both in core | additive; the generated constructor must reach the first without a Tracking reference, and a core-only consumer with its own `ILifecycleInterceptor` must be able to reach the second |
-| New `ILifecycleDetachGuard` in core, implemented by `LifecycleInterceptor` | additive and optional; `netstandard2.0` rules out a default interface member on `ILifecycleInterceptor` |
+| The reference count moves from `subject.Data` to `InterceptorExecutor` | no signature change; `GetReferenceCount()` and `SubjectLifecycleChange.ReferenceCount` are unaffected |
 | `InterceptorExecutor`'s method overrides become `protected virtual` guard hooks called inside the base's critical section | snapshot change, no source break |
 | `ContextInheritanceHandler` and `WithContextInheritance()` keep their names, body changes | none |
 
@@ -803,7 +804,7 @@ Unchanged. A throwing `ILifecycleHandler` still propagates and still leaves part
 
 ## 8. Behaviour changes
 
-The complete list. Anything discovered beyond these fourteen is escalated, not absorbed.
+The complete list. Anything discovered beyond these fifteen is escalated, not absorbed.
 
 1. `AddFallbackContext` stops attaching.
 2. `RemoveFallbackContext` stops detaching a root, and throws when aimed at the attach edge.
@@ -831,6 +832,9 @@ The complete list. Anything discovered beyond these fourteen is escalated, not a
     to a not-yet-attached parent suppresses discovery of everything below that child. Measured: the
     grandchild is absent from the registry, has reference count 0 and resolves no interceptors. Under
     this design it attaches.
+15. The reference count no longer occupies an entry in `subject.Data`. `GetReferenceCount()` and
+    `SubjectLifecycleChange.ReferenceCount` are unchanged, but the dictionary is public and enumerable,
+    so its contents are technically observable.
 14. A constructor-attached subject placed under a parent now inherits that parent's subtree-scoped
     services, including any `IReadInterceptor` or `IWriteInterceptor` registered on the parent's own
     executor. This is the attach-side twin of change 12 and it is what `ContextSubtreeServiceTests`
@@ -899,6 +903,7 @@ gates are verifiable by checking it out and running the suite.
 | 12 | a constructor-attached subject stops resolving interceptors after a full detach |
 | 13 | pre-wire a child's context to a not-yet-attached parent, then attach; assert the grandchild is registered and resolves interceptors |
 | 14 | register a service on a parent's own executor, then place a constructor-attached child under it; assert the child now resolves it |
+| 15 | reference counts still behave identically across attach, multi-parent and detach, and `subject.Data` no longer carries the entry |
 
 ### Oracles that must not move
 
@@ -960,7 +965,7 @@ One pull request on `design/context-inheritance-parent-link`, built from commits
 |---|---|---|
 | 1 | Characterization tests only | green with `master`'s production code |
 | 2 | Reproduction tests for the issues this design closes: #207 both paths, #402 defects 3, 4 and 5 | **red**, each for its issue's stated reason |
-| 3 | `_attachContext` and `_owner` on `InterceptorExecutor`, the guard hooks, `IsAttached` / `TryGetAttachContext` | fields and guards land together; nothing else can be built before them |
+| 3 | `_attachContext`, `_owner` and the reference count on `InterceptorExecutor`, the guard hooks, `IsAttached` / `TryGetAttachContext` | fields and guards land together; nothing else can be built before them. The count move is the one commit expected to *improve* the attach benchmarks |
 | 4 | `AttachToContext` / `DetachFromContext`, migrate the six production attach sites and the two benchmark sites, rewrite the fourteen test call sites that attach or detach a root | the generator snapshots move here; `master`'s snapshot content must be preserved |
 | 5 | `ContextState.Parent`, internal setters, `LifecycleInterceptor` sets and clears it with both guards, handler body becomes the descent trigger, conditional reverse-entry unregistration | ordering snapshots must not move; #207 turns green |
 | 6 | Remove the executor's method overrides, so `AddFallbackContext` stops attaching | the breaking one |
@@ -985,7 +990,7 @@ cut line before commit 6.
 
 | After | Benchmarks | Why |
 |---|---|---|
-| Commit 3 | `RegistryBenchmark` | The owner and attach state are two reference fields on `InterceptorExecutor`, so 16 bytes on an object that already exists per subject and no new allocation. Expected neutral. Measured because it is the only commit that adds work to the attach path, in the form of one extra `_mutationLock` acquisition per attach and detach. |
+| Commit 3 | `RegistryBenchmark` | Three fields on an object that already exists per subject, so no new allocation, against one `ConcurrentDictionary.AddOrUpdate` with a tuple key removed from every attach and every detach (`LifecycleInterceptorExtensions.cs:32-43`). Expected to improve. The offsetting cost is one `_mutationLock` acquisition per attach and detach, shared between the owner claim and the count. |
 | Commit 5 | `RegistryBenchmark`, plus a new subject-graph variant of `ContextDelegationDepthBenchmark` | The `ImmutableArray`-to-field trade predicts one fewer allocation and 24 fewer bytes per attached subject. Also a correctness signal: if allocations do not drop, the link is not replacing the edge. The existing depth benchmark **cannot** observe this: its setup builds the chain from plain `InterceptorSubjectContext.Create()` proxies (`ContextDelegationDepthBenchmark.cs:31-40`), which still hold one fallback each afterwards and never receive a parent link. Guarding the fast path needs a subject-graph variant, which this commit adds. |
 | Branch head | Both, against `master` | The numbers for the pull request description. |
 
@@ -1081,14 +1086,6 @@ change 5, and the resolved-position ordering dependency, preserved deliberately.
   failed; section 5 records why, and the issue carries all three measurements.
 - **Fixing the traversal order to top-down.** See section 8.
 - **Multi-graph support.** See section 12.
-- **Moving the reference count off `subject.Data`.** `IncrementReferenceCount` and
-  `DecrementReferenceCount` do a `ConcurrentDictionary.AddOrUpdate` with a `(string?, string)` tuple key
-  on every attach and every detach (`LifecycleInterceptorExtensions.cs:20-43`), for what is a per-subject
-  integer. By the placement rule below it belongs on the executor, and on the attach-heavy benchmarks it
-  is plausibly a larger win than anything this design does. Out of scope because, unlike the owner, the
-  reference count is a Tracking concept and hosting it on a core object needs its own argument. Named
-  here so the reasoning is not lost.
-
 ### Placement rule
 
 Recorded because the executor is the path of least resistance for per-subject state, being the only typed
@@ -1099,8 +1096,8 @@ additions land there by default:
 > the context or lifecycle graph, and read on a path where a `subject.Data` lookup would show. Everything
 > else goes in `subject.Data`.
 
-The owner and the attach context pass both tests. So would the reference count, which is why it is named
-above rather than treated as an unrelated optimisation.
+The owner, the attach context and the reference count pass both tests, which is why all three live
+there. Nothing else currently does.
 
 ## 12. Rejected alternatives
 
