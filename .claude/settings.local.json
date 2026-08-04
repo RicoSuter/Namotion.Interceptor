@@ -2,17 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(dotnet build:*)",
-      "Bash(dotnet test:*)",
-      "Bash(bc)",
-      "Bash(dotnet run *)"
+      "Bash(dotnet test:*)"
     ],
     "deny": [],
     "ask": [],
     "additionalDirectories": [
       "C:\\Users\\rsute\\GitHub\\HomeBlaze"
     ]
-  },
-  "enabledMcpjsonServers": [
-    "homeblaze"
-  ]
+  }
 }
