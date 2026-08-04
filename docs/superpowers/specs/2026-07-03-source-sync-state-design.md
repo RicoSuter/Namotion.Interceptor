@@ -242,20 +242,31 @@ await host.WaitForShutdownAsync();
 
 #### The attach-driven start queue
 
-`HostedServiceHandler.AttachHostedService` posts the start onto a channel drained by the handler's own loop and returns, so a source attached through the automatic lifecycle path is queued to start rather than started. When a loader that builds the tree returns, its sources may therefore be attached but not yet registered, and signalling at that point still races them.
+The lifecycle callback that starts an attached hosted service is synchronous, runs on the graph-mutating thread under the lifecycle lock, and cannot await. `HostedServiceHandler.AttachHostedService` therefore posts the start onto a `BufferBlock` drained sequentially by the handler's own loop and returns. A source attached through the automatic lifecycle path is queued to start, not started. When a loader that builds the tree returns, its sources are attached but not yet registered, and signalling at that point races them.
 
-`HostedServiceHandler` gains `WaitForPendingActionsAsync(CancellationToken)`, which completes when the queued actions posted so far have run. Attach-driven applications await it before signalling:
+This is not a narrow race. `PostStartService` awaits `Task.Delay(50)` before calling `StartAsync` (a deliberate delay carrying a TODO in the source), and the drain is strictly one action at a time, so twenty attached sources take at least a second to all register. Signalling immediately after the tree is built is close to guaranteed to be wrong rather than occasionally wrong.
+
+`HostedServiceHandler` gains `WaitForPendingActionsAsync(CancellationToken)`. Because the drain is FIFO and sequential, a marker action posted after the queued starts is a barrier: when it runs, everything queued before it has completed. `SubjectSourceBase.StartAsync` registers with its monitors before launching the pump, so completion of the barrier implies registration.
+
+The handler is `internal`, so applications reach the barrier through a public extension in `Namotion.Interceptor.Hosting`, resolving the handler that `WithHostedServices` already registered as a context service. It returns a completed task when no handler is configured, since the absence means nothing was ever queued:
+
+```csharp
+public static Task WaitForPendingHostedServiceActionsAsync(
+    this IInterceptorSubjectContext context, CancellationToken cancellationToken = default);
+```
+
+Attach-driven applications await it before signalling:
 
 ```csharp
 protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 {
-    await LoadAsync(stoppingToken);                                   // builds the tree, attaches sources
-    await _hostedServices.WaitForPendingActionsAsync(stoppingToken);  // their StartAsync has run
+    await LoadAsync(stoppingToken);                                        // builds the tree, attaches sources
+    await _context.WaitForPendingHostedServiceActionsAsync(stoppingToken); // their StartAsync has run
     _context.CompleteSourceRegistration();
 }
 ```
 
-This is the one part of the design that lands in `Namotion.Interceptor.Hosting`. It is one member, it sits in the package that owns the queue, and it keeps the layering intact: Hosting does not learn about Connectors.
+This is the one part of the design that lands in `Namotion.Interceptor.Hosting`. It is one internal member plus one extension, it sits in the package that owns the queue, and it keeps the layering intact: Hosting does not learn about Connectors. It is a barrier for work **already queued**; subjects attaching afterwards post new actions it does not cover, which is the right semantics for a loader that has finished building its tree. If the handler's drain loop is not running, the marker never executes and the await does not complete; in practice the handler starts during host startup, before any tree building happens in `ExecuteAsync`, but the contract is documented rather than left as a trap.
 
 ### Branch-scoped waits
 
@@ -395,7 +406,7 @@ The PR also adds `SubjectPropertyChange.GetCurrentValue<T>()` next to `GetOldVal
 - `Namotion.Interceptor` (core): `PropertyReference.TryAddPropertyData(key, value)`, the atomic add-if-absent counterpart to `TryRemovePropertyData`; the core public API snapshot updates accordingly.
 - `Namotion.Interceptor.Connectors`: `SourceState`, `SourceEventKind`, `SourceEvent` (including `CurrentState`), `ISubjectSource` members (`State`, `LastSynchronizedAt`, `PendingWriteCount`, `StateChanged`), `SubjectSourceBase` transitions (pump entry, catch, finally, disposal fallback) and `StartAsync` registration, `SourceMonitor` and `SourceSubscription` (including the lifecycle attach and detach catch-up, per-subscriber delivery queues, the registration count, and internal wait bookkeeping), the `WithSourceMonitoring()` and `WithSourceMonitoring(IServiceCollection)` context extensions and the hosted registration-hold service, the `GetSourceMonitor()`, `CompleteSourceRegistration()` and `DeferWaitCompletion()` context extensions, the `WaitForSynchronizationAsync` subject extension and its branch-scope helper, `GetSourceState` property extension, emission logic in `SetSource`/`RemoveSource` (built on `TryAddPropertyData`).
 - `Namotion.Interceptor.Tracking`: `SubjectPropertyChange.GetCurrentValue<T>()`, the property-change mirror of `SourceEvent.CurrentState`; the Tracking public API snapshot updates accordingly.
-- `Namotion.Interceptor.Hosting`: `HostedServiceHandler.WaitForPendingActionsAsync(CancellationToken)`.
+- `Namotion.Interceptor.Hosting`: `HostedServiceHandler.WaitForPendingActionsAsync(CancellationToken)` (internal, a marker action posted onto the existing `BufferBlock`) and the public `WaitForPendingHostedServiceActionsAsync` context extension that reaches it; the Hosting public API snapshot updates accordingly.
 - Built-in connectors (OPC UA, MQTT, WebSocket): no source changes expected; they inherit from `SubjectSourceBase` and claim through the existing paths.
 - Test doubles that implement `ISubjectSource` directly (for example `ConcurrentTestSource` and `BlockingTestSource` in `Namotion.Interceptor.Connectors.Tests`) gain the four new members.
 - Public API snapshot tests: `ISubjectSource` changes will fail `VerifyChecksTests.PublicApi` in affected projects; the new `.verified.txt` snapshots are accepted as part of the change.
@@ -422,7 +433,7 @@ In `Namotion.Interceptor.Connectors.Tests`, following the `When<Condition>_Then<
 
 In `Namotion.Interceptor.Tracking.Tests`: `GetCurrentValue<T>()` returns the property's present value, equals `GetNewValue<T>()` when nothing has been written since the change, and reflects a later write rather than the captured one.
 
-In `Namotion.Interceptor.Hosting.Tests`: `WaitForPendingActionsAsync` completes after queued attach actions have run, and completes immediately when the queue is empty.
+In `Namotion.Interceptor.Hosting.Tests`: `WaitForPendingHostedServiceActionsAsync` completes only after the attach actions queued before it have run, including their `Task.Delay(50)`; completes promptly when the queue is empty; completes immediately on a context without a `HostedServiceHandler`; and does not wait for actions queued after it was called.
 
 ## Alternatives Considered
 
