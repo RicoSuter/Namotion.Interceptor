@@ -649,23 +649,44 @@ faces block only their own consumer thread, and every wait is cancellable (secti
     contexts unarmed and the queue channel cheap); `bufferTime = 0` rides `Ordered` and arms the
     context, an explicit trade for zero-buffer deployments.
 
-## Delivery structure: two stacked PRs
+## Delivery structure: three stacked PRs
 
-Phase 1 (additive, zero breaking changes): per-subject `Revision` in both terminals,
-`SubjectPropertyChange.Revision`, the `ChangeQueueProcessor` dedup fix, `FinalValueIsNewValue`,
-the `docs/tracking.md` matrix, benchmark gates 1, 8, 9.
+Superseded plan, kept for context: this section originally described two PRs and argued that the
+first must not merge before the second validated it. Both parts changed once the work was reviewed.
 
-Phase 2 (breaking): the ordered channel (marker, registries, per-property index, reservation
-record, slot buffers, publish, drain, required enum, `bufferTime = 0` riding `Ordered`), remaining
-gates.
+The label and its consumer were split apart, because six independent review dimensions found no
+correctness or thread-safety defect in the revision mechanism and every defect they did find in the
+connector layer consuming it. The consumer went through three retention designs and two write-back
+attempts; the label went through none. Holding the stable half hostage to the volatile one bought
+nothing.
 
-**PR 2 is stacked on PR 1, not merged sequentially.** Phase 2's benchmarks are the first real
-measurement of Phase 1's always-on cost under load (gate 1 measures it in isolation; gates 2-7
-measure it in context), and a regression there may require changing Phase 1 decisions: where the
-revision counter lives, whether the context stamp is needed at all, or the struct-size trade of
-`SubjectPropertyChange.Revision`. Keeping PR 1 open and stacked lets both be corrected together
-before either merges, instead of shipping a label whose storage the ordered channel then proves
-wrong.
+- **PR 1 (#399, additive plus one declared binary break):** per-subject `Revision` in both
+  terminals, `SubjectPropertyChange.Revision`, `FinalValueIsNewValue`, the compare-and-swap executor
+  publication, the `docs/tracking.md` matrix, benchmark gate 1.
+- **PR 2 (#420, additive):** the `ChangeQueueProcessor` merge fix, cross-flush convergence, the
+  transaction write-back, `docs/connectors.md`, the CI path filters.
+- **PR 3 (#422, breaking):** the ordered channel (marker, registries, per-property index,
+  reservation record, slot buffers, publish, drain, required enum, `bufferTime = 0` riding
+  `Ordered`), remaining gates.
+
+**PR 1 may merge before the later two.** The original argument was that Phase 2's benchmarks are the
+first measurement of Phase 1's always-on cost under load, so a regression could force Phase 1
+decisions to change: where the revision counter lives, whether the context stamp is needed, or the
+struct-size trade. That still holds, but all three of those live behind `internal` members
+(`InterceptorExecutor.Revision`, and `Revision`/`Executor`/`FinalValueIsNewValue` on
+`PropertyWriteContext`), so correcting them later is a follow-up rather than a public break. Gate 1
+measured clean in isolation, and this repository accepts justified breaking changes with approval,
+so even a public correction is a decision rather than a wall.
+
+The residual risk, named so it is not discovered later: the executor threaded through
+`PropertyWriteContext` is the load-bearing internal decision, it is what makes the increment a plain
+field increment under a lock the caller already holds, and it is already in tension with the
+`TODO: Get rid of the executor completely` on `IInterceptorExecutor`. If the in-context gates argue
+against it, that correction touches the always-on write path.
+
+`bufferTime = 0` riding `Ordered` makes PR 2's supersession gate on the immediate path dead code,
+since an ordered channel cannot deliver an older commit after a newer one. PR 3 deletes it
+deliberately rather than leaving it.
 
 ### `SubjectPropertyChange.Create` and revision propagation
 
