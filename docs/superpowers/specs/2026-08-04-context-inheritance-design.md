@@ -1031,27 +1031,26 @@ One pull request on `design/context-inheritance-parent-link`, built from commits
 | Commit | Content | Gate |
 |---|---|---|
 | 1 | Characterization tests only | green with `master`'s production code |
-| 2 | Reproduction tests for the issues this design closes: #207 both paths, #402 defects 3, 4 and 5 | **red**, each for its issue's stated reason |
-| 3 | `_attachContext`, `_owner` and the reference count on `InterceptorExecutor`, the guard hooks, `IsAttached` / `TryGetAttachContext` | fields and guards land together; nothing else can be built before them. The count move is the one commit expected to *improve* the attach benchmarks |
-| 4 | `AttachToContext` / `DetachFromContext`, migrate the six production attach sites and the two benchmark sites, rewrite the fourteen test call sites that attach or detach a root | the generator snapshots move here; `master`'s snapshot content must be preserved |
-| 5 | `ContextState.Parent`, internal setters, `LifecycleInterceptor` sets and clears it with both guards, handler body becomes the descent trigger, conditional reverse-entry unregistration | ordering snapshots must not move; #207 turns green |
-| 6 | Remove the executor's method overrides, so `AddFallbackContext` stops attaching | the breaking one |
-| 7 | Reproduction tests for the shapes that need the new API (two-graph, exactly-once detach) | red at commit 6, green at 7 |
-| 8 | The #210 fix | characterization test 7 records the new handler entry |
-| 9 | Consumer and design docs | see below |
+| 2 | Reproduction tests expressible against `master`'s API: #207 both paths, #402 defects 3, 4 and 5 | **red**, each for its issue's stated reason |
+| 3 | **The whole production change**: the three executor fields, the guard hooks, `AttachToContext` / `DetachFromContext` / `IsAttached` / `TryGetAttachContext`, `ContextState.Parent` and its internal setters, the handler body, conditional reverse-entry unregistration, removal of the executor's method overrides, and every migrated call site | commits 1 and 2 flip together; the ordering snapshots must not move; the generator snapshots do |
+| 4 | Reproduction tests that need the new API: two-graph rejection, exactly-once detach, re-attach during detach | written and green here, since no earlier commit can express them |
+| 5 | The #210 fix | characterization test 7 records the new handler entry |
+| 6 | Consumer and design docs | see below |
 
-Both reviewers refuted the previous ordering, and the corrections are worth recording so it is not
-reproposed. The guards were specified before the fields they read, so that commit could not be built.
-The link gate needs `_attachContext` to know when the attach edge already names the parent's context, so
-it cannot precede the fields either. And commit 2 previously carried a reproduction for #402 defect 1,
-which option B does not close, so that test would have been red at the branch head, violating the rule
-that reproductions are one per closed issue.
+**The production change cannot be split, and three reviews were needed to establish it.** Every ordering
+tried leaves a window where the code does not work:
 
-Commit 4 is **not** behaviour-neutral, which an earlier version claimed. It edits
-`SubjectCodeGenerator.cs:246`, and all sixteen `Namotion.Interceptor.Generator.Tests` snapshots contain
-the emitted `AddFallbackContext` line, so every one of them moves. Their content is mechanical, but the
-claim that everything up to the breaking commit leaves oracles untouched was false and there is no clean
-cut line before commit 6.
+- Landing the guards before the fields they read does not build.
+- Landing the guards before the callers are migrated makes every lifecycle construction throw, including
+  the scheduled benchmark run.
+- Landing `AttachToContext` before the executor's overrides are removed invokes the lifecycle callbacks
+  twice, once explicitly and once from the override.
+- Landing the parent link before `AddFallbackContext` stops attaching leaves both mechanisms live.
+- Landing `AddFallbackContext`'s change before the handler body means children stop inheriting *and*
+  stop being discovered.
+
+So commit 3 is large and there is no cut line inside it. What keeps it reviewable is that commits 1 and 2
+pin the behaviour first, and that its own gate is the unchanged ordering snapshots.
 
 ### Required integration suites
 
@@ -1059,15 +1058,14 @@ The three migrated connector paths are covered only by integration-tagged tests,
 default command excludes, so the whole branch can be green while the OPC UA client silently browses
 nothing. `dotnet test src/Namotion.Interceptor.OpcUa.Tests` and
 `dotnet test src/Namotion.Interceptor.Connectors.Tests`, both including integration tests, are required
-gates on commit 4 and at the branch head. Note `reference_opcua_test_port_4840`: those tests need port
+gates on commit 3 and at the branch head. Note `reference_opcua_test_port_4840`: those tests need port
 4840 free.
 
 ### Benchmark gates
 
 | After | Benchmarks | Why |
 |---|---|---|
-| Commit 3 | `RegistryBenchmark` | Three fields on an object that already exists per subject, so no new allocation, against one `ConcurrentDictionary.AddOrUpdate` with a tuple key removed from every attach and every detach (`LifecycleInterceptorExtensions.cs:32-43`). Expected to improve. The offsetting cost is one `_mutationLock` acquisition per attach and detach, shared between the owner claim and the count. |
-| Commit 5 | `RegistryBenchmark`, plus a new subject-graph variant of `ContextDelegationDepthBenchmark` | The `ImmutableArray`-to-field trade predicts one fewer allocation and 24 fewer bytes per attached subject. Also a correctness signal: if allocations do not drop, the link is not replacing the edge. The existing depth benchmark **cannot** observe this: its setup builds the chain from plain `InterceptorSubjectContext.Create()` proxies (`ContextDelegationDepthBenchmark.cs:31-40`), which still hold one fallback each afterwards and never receive a parent link. Guarding the fast path needs a subject-graph variant, which this commit adds. |
+| Commit 3 | `RegistryBenchmark`, plus a subject-graph variant of `ContextDelegationDepthBenchmark` | Three fields on an object that already exists per subject, so no new allocation, against one `ConcurrentDictionary.AddOrUpdate` with a tuple key removed from every attach and every detach (`LifecycleInterceptorExtensions.cs:32-43`). Expected to improve. The offsetting cost is one `_mutationLock` acquisition per attach and detach, shared between the owner claim and the count. |
 | Branch head | Both, against `master` | The numbers for the pull request description. |
 
 Run through `scripts/benchmark.ps1` with multiple launches: #412 recorded a single launch on a busy
