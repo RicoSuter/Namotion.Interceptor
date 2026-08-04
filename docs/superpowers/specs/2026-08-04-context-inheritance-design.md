@@ -736,7 +736,7 @@ gates are verifiable by checking it out and running the suite.
 | 6 | throwing detach interceptor, assert the edge is gone and a retry works |
 | 7 | two threads calling `DetachFromContext`, assert exactly one interceptor pass |
 | 8 | rendezvous: pause a detach inside its interceptor loop, call `AttachToContext`, assert it throws |
-| 9 | the same rendezvous, calling `AddFallbackContext` |
+| 9 | the same rendezvous, calling `AddFallbackContext`, plus a directed test that the guard and the transition are serialised on `_mutationLock` |
 | 10 | characterization test 7 |
 | 11 | characterization test 8 |
 | 12 | a constructor-attached subject stops resolving interceptors after a full detach |
@@ -760,16 +760,24 @@ the same lock and the same R4 discipline.
 
 Parent link set and clear reuse `AddFallbackContext`'s publish and `_usedByContexts` protocol, so the
 fuzz extension covers them. The owner claim is serialized by `lock (_attachedSubjects)` within a graph but
-not across graphs: two threads attaching the same subject to two graphs, exactly one wins, the loser
-throws, no partial state on either side. Plus the two rendezvous tests for changes 8 and 9.
+not across graphs: two threads attaching the same subject to two graphs, exactly one wins, and the loser
+throws leaving earlier items of its batch attached, which is asserted rather than assumed. Plus the two
+rendezvous tests for changes 8 and 9, a directed test that the `AddFallbackContext` guard and the
+`Detaching` transition are serialised on `_mutationLock`, and a test that a handler which re-attaches a
+subject during its own detach survives the `finally`.
 
 ### Mutants that must die
 
 Restore `IsContextAttach` to the link gate; release the parent link before the handlers instead of in the
 `finally`; delete the owner check; delete the `finally` on the detach edge removal; delete the
-self-context guard; delete the `if (!AddFallbackContext(...)) return` guard; reintroduce the repoint.
-Each must fail its corresponding test. The last two are mutants specifically because review found them,
-and a test that does not catch them is not testing what we think.
+self-context guard; delete the `if (!AddFallbackContext(...)) return` guard; reintroduce the repoint; set
+the link and release the attach edge instead of skipping the link; trust the captured `count == 0` in the
+detach `finally` instead of re-reading `_attachedSubjects`; move the `_attachContext` read outside
+`_mutationLock`; collapse `TryBeginDetach`'s three-valued outcome to a bool.
+
+Each must fail its corresponding test. Everything from "reintroduce the repoint" onward is a mutant
+precisely because a review found it and an earlier version of this design did not, so a test that does
+not catch it is not testing what we think it is.
 
 ## 10. Staging
 
