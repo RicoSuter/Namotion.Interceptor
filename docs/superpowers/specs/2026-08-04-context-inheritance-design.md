@@ -917,11 +917,10 @@ Eight are ordering oracles. Any movement is a signal to stop, not a snapshot to 
 ordering bug would have moved.
 
 Six `PublicApi.verified.txt` files exist repo-wide. Two change: `Namotion.Interceptor.Tests`, for the executor overrides, both new
-extensions, the guard hooks on `InterceptorSubjectContext` and the new `ILifecycleDetachGuard`, all of
-which are core public surface; and `Namotion.Interceptor.Tracking.Tests`, because
-`LifecycleInterceptor`'s interface list is snapshotted there at `:147` and gains both
-`ILifecycleDetachGuard` and, for change 8, `IPropertyLifecycleHandler`. `DetachFromContext` no longer
-moves the Tracking snapshot, since it is a core extension.
+extensions and the guard hooks on `InterceptorSubjectContext`, all of which are core public surface; and
+`Namotion.Interceptor.Tracking.Tests`, because `LifecycleInterceptor`'s interface list is snapshotted
+there at `:147` and gains `IPropertyLifecycleHandler` for change 8. `DetachFromContext` does not move the
+Tracking snapshot, since it is a core extension.
 
 `ContextConcurrencyFuzzTests` needs its model extended with parent links, a third mutable edge kind under
 the same lock and the same R4 discipline.
