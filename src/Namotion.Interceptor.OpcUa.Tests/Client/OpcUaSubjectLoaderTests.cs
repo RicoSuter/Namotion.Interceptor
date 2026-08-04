@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client;
 public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
 {
     [Fact]
-    public async Task LoadSubjectAsync_WithNullRegisteredSubject_ShouldReturnEmptyList()
+    public async Task WhenSubjectIsNotRegistered_ThenNoMonitoredItemsAreCreated()
     {
         // Arrange
         var (loader, _) = CreateLoader();
@@ -27,7 +27,7 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
-    public async Task LoadSubjectAsync_WithNoChildNodes_ShouldReturnEmptyList()
+    public async Task WhenTheNodeHasNoChildren_ThenNoMonitoredItemsAreCreated()
     {
         // Arrange
         var (loader, _) = CreateLoader();
@@ -43,7 +43,7 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
-    public async Task LoadSubjectAsync_WithMatchingProperty_ShouldCreateMonitoredItem()
+    public async Task WhenAChildNodeMatchesAProperty_ThenOneMonitoredItemIsCreatedForThatProperty()
     {
         // Arrange
         var (loader, _) = CreateLoader();
@@ -77,7 +77,7 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
-    public async Task LoadSubjectAsync_WithDynamicPropertiesEnabled_ShouldAddDynamicProperties()
+    public async Task WhenDynamicPropertiesAreEnabled_ThenUnmatchedChildNodesBecomeDynamicProperties()
     {
         // Arrange
         var (loader, _) = CreateLoader(
@@ -105,7 +105,7 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
-    public async Task LoadSubjectAsync_WithDuplicatePropertyName_ShouldSkipDuplicate()
+    public async Task WhenTwoChildNodesShareAPropertyName_ThenTheDuplicateIsNotMonitored()
     {
         // Arrange
         var (loader, _) = CreateLoader();
@@ -129,7 +129,7 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
-    public async Task LoadSubjectAsync_WithObjectType_ShouldNotAddProperty()
+    public async Task WhenAChildNodeTypeCannotBeResolved_ThenNoPropertyIsAdded()
     {
         // Arrange: ReadAsync returns a bad status code so the type cannot be resolved
         var (loader, _) = CreateLoader(
@@ -154,7 +154,7 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
-    public async Task LoadSubjectAsync_TracksPropertiesWithOpcData()
+    public async Task WhenAPropertyIsMonitored_ThenItsNodeIdIsTrackedAgainstThePropertyReference()
     {
         // Arrange
         var (loader, propertyTracker) = CreateLoader();
