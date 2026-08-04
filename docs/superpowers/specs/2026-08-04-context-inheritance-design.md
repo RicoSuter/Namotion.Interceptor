@@ -329,10 +329,15 @@ Each row is one critical section on `_mutationLock`. No user code runs inside an
 | Attaching(ctx) | null | `AbortAttach()` | unpublishes the edge; releases `_owner` if the subject holds no property references |
 | Attached(ctx) | Detaching(ctx) | `TryBeginDetach(ctx)` | |
 | Detaching(ctx) | null | `CompleteDetach()` | unpublishes the edge; releases `_owner` if the subject holds no property references |
+| Attached(ctx) | null | last property detach, from `DetachFromProperty`'s `finally` | unpublishes the attach edge and releases `_owner`, in the same critical section |
 
-The property path adds two transitions of its own, on `_owner` alone: `AttachToProperty` claims it when
-the subject has none, and the detach `finally` releases it when the subject is neither referenced nor in
-a non-null attach state.
+The last row is the #207 path and it is not optional. A subject attached through its constructor and then
+placed under a parent reaches reference count zero by the property route, never through
+`DetachFromContext`, so that is where its attach edge, its state and its ownership have to be released.
+An earlier version of this table said the property path touches `_owner` only, which would have left the
+edge published and the state `Attached` forever, reopening the leak this design exists to close.
+
+The property path also claims `_owner` in `AttachToProperty` when the subject has none.
 
 #### What each public entry point does, by state
 
@@ -352,8 +357,13 @@ cleanup.
 These are what a reviewer can check mechanically, and what narrative reasoning kept failing to hold.
 
 1. A non-null attach state implies the attach edge is published, except transiently inside a transition.
-2. `Attached(ctx)` implies `_owner` is the lifecycle interceptor resolved from `ctx`.
-3. `_owner` is null if and only if the subject holds no property references and the attach state is null.
+2. `Attached(ctx)` implies `_owner` is the lifecycle interceptor resolved from `ctx`, **or null when
+   `ctx` carries none**. A generated constructor is routinely handed a plain
+   `InterceptorSubjectContext.Create()` context with no lifecycle at all, which is how most of
+   `Namotion.Interceptor.Tests` is written, and that must keep working. Such a subject has an attach
+   state and an attach edge but no owner, and the cross-graph rejection simply never applies to it.
+3. `_owner` is non-null only while the subject holds property references or a non-null attach state
+   through a lifecycle-bearing context. It is released as soon as neither holds.
 4. `Parent` is never the executor's own context, and never equal to the attach context.
 5. A context appears at most once as a target across `FallbackContexts` and `Parent` combined, or its
    reverse `_usedByContexts` entry is retained until the last of them goes. See "Aliased targets" below.
@@ -388,11 +398,14 @@ public static void DetachFromContext(this IInterceptorSubject subject, IIntercep
     // Resolved first, so a cyclic chain throws before anything has changed.
     var interceptors = context.GetServices<ILifecycleInterceptor>();
 
-    if (subject.GetReferenceCount() != 0)
-        throw new InvalidOperationException(/* detach it from its parents first */);
-
-    switch (subject.Context.TryBeginDetach(context))
+    // The reference-count check and the Attached -> Detaching transition are ONE critical section
+    // under the owning lifecycle monitor, with _mutationLock nested inside it. Checking the count
+    // first and transitioning afterwards is a time-of-check race: a property attach lands between
+    // them, and the root detach then removes the _attachedSubjects entry of a live child.
+    switch (subject.Context.TryBeginDetach(context, requireNoReferences: true))
     {
+        case DetachOutcome.StillReferenced:
+            throw new InvalidOperationException(/* detach it from its parents first */);
         case DetachOutcome.NotAttachedThroughThisContext:
             throw new InvalidOperationException(/* names AttachToContext and TryGetAttachContext */);
         case DetachOutcome.AlreadyDetaching:
@@ -419,7 +432,12 @@ and left the subject reported attached but absent from `_attachedSubjects` and e
 split also meant the root path never claimed `_owner` at all, so graph A attaching a root and graph B
 property-attaching it concurrently would both succeed, contradicting the rejection this design promises.
 
-**The reference-count guard** rejects `DetachFromContext` on a subject that is also a child. Without it,
+**The reference-count guard runs inside the transition, not before it.** It rejects `DetachFromContext`
+on a subject that is also a child, and it has to observe the count and move the state in one critical
+section under `LifecycleInterceptor`'s monitor, with `_mutationLock` nested inside in the established
+order. A check followed by a separate transition is a time-of-check race: a property attach increments
+the count in the gap and the root detach proceeds anyway. For the same reason a property attach arriving
+while the state is `Detaching` is rejected rather than interleaved. Without the guard,
 `DetachSubjectFromContext` removes the `_attachedSubjects` entry (`LifecycleInterceptor.cs:172`) while
 reading the count rather than decrementing it (`:186`), so the count strands at a positive value, the
 parent's later removal no-ops at `:206-210`, and ownership is never released. That behaviour predates this
@@ -439,7 +457,7 @@ it makes the `finally` fail.
 | Failure | Result |
 |---|---|
 | `TryBeginAttach` throws (owned elsewhere, or a transition is in flight) | nothing changed |
-| An attach interceptor throws | `AbortAttach` unpublishes the edge and releases ownership, then the exception propagates. No stranded state |
+| An attach interceptor throws | `AbortAttach` unpublishes the edge, clears the state and releases ownership, then the exception propagates. **The context's own state is clean; the lifecycle system's is not.** If `AttachSubjectToContext` had already added the subject to `_attachedSubjects` and registered it before a handler threw, those entries survive, and a retry then finds the subject already present and skips the callbacks it missed. That is #384's rollback problem, it is out of scope, and `AbortAttach` must not be read as fixing it |
 | The detach resolve throws (cyclic chain on `context`) | nothing changed, because the resolve precedes the transition |
 | A detach interceptor throws | `CompleteDetach` still runs, so the edge is removed and the state cleared (change 6), and the subject can be re-attached |
 | `CompleteDetach` itself throws | it replaces any in-flight exception. Its edge unpublish and its state transition are one critical section, so the state cannot be left `Detaching` |
@@ -605,7 +623,7 @@ sits on the hot write path and per-property data storage is what #222 is trying 
 | Change | Kind |
 |---|---|
 | `AddFallbackContext` / `RemoveFallbackContext` keep signatures, lose the attach side effect | behavioural |
-| `IInterceptorSubject.AttachToContext` / `DetachFromContext` extensions in core | additive |
+| `IInterceptorSubject.AttachToContext` in core, `DetachFromContext` in `Namotion.Interceptor.Tracking` | additive; the generated constructor must reach the first without a Tracking reference, and the second needs the reference count |
 | `InterceptorExecutor`'s method overrides become `protected virtual` guard hooks called inside the base's critical section | snapshot change, no source break |
 | `ContextInheritanceHandler` and `WithContextInheritance()` keep their names, body changes | none |
 
@@ -817,6 +835,8 @@ gates are verifiable by checking it out and running the suite.
 | 11 | characterization test 8 |
 | 12 | `DetachFromContext` on a subject that is also a child throws, and the reference count is intact afterwards |
 | 13 | two edges to one target, remove one, assert the surviving edge still receives invalidation |
+| the #207 path | a constructor-attached subject reaching count zero by the property route releases its attach edge, state and ownership |
+| plain contexts | `new Person(InterceptorSubjectContext.Create())` attaches, has no owner, and is unaffected by the cross-graph rule |
 | 14 | a constructor-attached subject stops resolving interceptors after a full detach |
 
 ### Oracles that must not move
@@ -855,7 +875,9 @@ Restore `IsContextAttach` to the link gate; release the parent link before the h
 self-context guard; delete the `if (!AddFallbackContext(...)) return` guard; reintroduce the repoint; set
 the link and release the attach edge instead of skipping the link; trust the captured `count == 0` in the
 detach `finally` instead of re-reading `_attachedSubjects`; move the `_attachContext` read outside
-`_mutationLock`; collapse `TryBeginDetach`'s three-valued outcome to a bool; split `TryBeginAttach` into a claim followed
+`_mutationLock`; collapse `TryBeginDetach`'s outcome to a bool; hoist the reference-count check out of the detach
+transition; drop the last-property-detach row so the attach edge is never released on the #207 path;
+require a non-null owner for `Attached`; split `TryBeginAttach` into a claim followed
 by a separate edge publish; drop the reference-count guard on `DetachFromContext`; make the reverse-entry
 unregistration unconditional again; route `CompleteDetach`'s unpublish through the public
 `RemoveFallbackContext`.
@@ -896,7 +918,7 @@ behaviour-neutral for existing callers.
 | After | Benchmarks | Why |
 |---|---|---|
 | Commit 4 | `RegistryBenchmark`, `ContextDelegationDepthBenchmark` | The `ImmutableArray`-to-field trade predicts one fewer allocation and 24 fewer bytes per attached subject. Also a correctness signal: if allocations do not drop, the link is not replacing the edge. The depth benchmark guards the delegation fast path, which changes shape from one fallback to one parent. |
-| Commit 6 | `RegistryBenchmark` | The owner and attach-context records are two reference fields on `InterceptorSubjectContext`, so 16 bytes on an object that already exists per subject and no new allocation. Expected neutral. Measured because it is the only commit that adds work to the attach path, in the form of two interlocked operations. |
+| Commit 6 | `RegistryBenchmark` | The owner and attach state are two reference fields on `InterceptorExecutor`, so 16 bytes on an object that already exists per subject and no new allocation. Expected neutral. Measured because it is the only commit that adds work to the attach path, in the form of one extra `_mutationLock` acquisition per attach and detach. |
 | Branch head | Both, against `master` | The numbers for the pull request description. |
 
 Run through `scripts/benchmark.ps1` with multiple launches: #412 recorded a single launch on a busy
