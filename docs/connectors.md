@@ -121,11 +121,13 @@ Per property, the surviving old value comes from the change with the *lowest* `S
 
 Revisions are monotonic per subject and are not comparable across subjects; see [Delivery Guarantees](tracking.md#delivery-guarantees) for the full contract, including what the old value does and does not promise.
 
-Delivery converges across flushes as well as within one. A change is enqueued after its commit and outside the subject lock, so a writer preempted between the two can land an older commit in a later batch than a newer one. The processor remembers the newest commit already delivered per property and drops anything that commit has superseded, so `WriteChangesAsync` does not have to compare revisions itself. Nothing bounds how long that preemption lasts, which is why buffering longer would not have closed it. Values the source itself pushed in count as delivered, since the source already holds them.
+Delivery converges across flushes as well as within one. A change is enqueued after its commit and outside the subject lock, so a writer preempted between the two can land an older commit in a later batch than a newer one. The processor remembers the newest commit already delivered per property and drops anything that commit has superseded, so `WriteChangesAsync` does not have to compare revisions itself. Values the source itself pushed in count as delivered, since the source already holds them.
 
 That memory ages out, so the guarantee covers properties written within a recent window rather than forever. A property that has been quiet for thousands of writes cannot have a straggler in flight anyway, which is the case the window is sized for.
 
 [Source transactions](tracking-transactions.md) write to the source themselves and then apply locally, and that local apply arrives here as a confirmation. Normally it is not sent on, because the source already has it. The exception is when this processor wrote to the same property in between: that write can reach the source after the transaction's and leave it holding an older commit than the subject, so the confirmation is sent out to restore it. A property written only through transactions therefore costs nothing extra, while one written both ways pays a redundant write per transaction to stay converged.
+
+If that repair write fails it follows the same path as any other failed write: with a [write retry queue](#write-retry-queue) it is queued and retried, and without one it is logged and dropped, leaving the source on the older value until the property is written again. A delivered revision is recorded before the write is attempted, so after a failure the recorded baseline is ahead of what the source actually holds. A newer commit still gets through and repairs it; only an older straggler is suppressed, which would have been the wrong value to send anyway.
 
 ### Write Retry Queue
 
