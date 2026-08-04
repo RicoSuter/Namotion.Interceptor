@@ -29,7 +29,7 @@ public class OpcUaClientConfigurationTests
     }
 
     [Fact]
-    public void Validate_WithMaxReconnectDurationLessThan5Seconds_ThrowsArgumentException()
+    public void WhenMaxReconnectDurationIsLessThanFiveSeconds_ThenValidateThrows()
     {
         // Arrange
         var config = CreateValidConfiguration(TimeSpan.FromSeconds(4));
@@ -41,7 +41,7 @@ public class OpcUaClientConfigurationTests
     }
 
     [Fact]
-    public void Validate_WithMaxReconnectDurationExactly5Seconds_DoesNotThrow()
+    public void WhenMaxReconnectDurationIsExactlyFiveSeconds_ThenValidateSucceeds()
     {
         // Arrange
         var config = CreateValidConfiguration(TimeSpan.FromSeconds(5));
@@ -51,7 +51,7 @@ public class OpcUaClientConfigurationTests
     }
 
     [Fact]
-    public void Validate_WithMaxReconnectDurationDefault30Seconds_DoesNotThrow()
+    public void WhenMaxReconnectDurationIsDefault_ThenValidateSucceeds()
     {
         // Arrange
         var config = CreateValidConfiguration();
@@ -66,7 +66,7 @@ public class OpcUaClientConfigurationTests
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(4.9)]
-    public void Validate_WithMaxReconnectDurationBelowMinimum_ThrowsArgumentException(double seconds)
+    public void WhenMaxReconnectDurationIsBelowMinimum_ThenValidateThrows(double seconds)
     {
         // Arrange
         var config = CreateValidConfiguration(TimeSpan.FromSeconds(seconds));
@@ -81,7 +81,7 @@ public class OpcUaClientConfigurationTests
     [InlineData(30)]
     [InlineData(60)]
     [InlineData(300)]
-    public void Validate_WithMaxReconnectDurationAtOrAboveMinimum_DoesNotThrow(double seconds)
+    public void WhenMaxReconnectDurationIsAtOrAboveMinimum_ThenValidateSucceeds(double seconds)
     {
         // Arrange
         var config = CreateValidConfiguration(TimeSpan.FromSeconds(seconds));
@@ -91,7 +91,7 @@ public class OpcUaClientConfigurationTests
     }
 
     [Fact]
-    public void Validate_WithNegativeReadAfterWriteBuffer_ThrowsArgumentException()
+    public void WhenReadAfterWriteBufferIsNegative_ThenValidateThrows()
     {
         // Arrange
         var config = new OpcUaClientConfiguration
@@ -109,7 +109,7 @@ public class OpcUaClientConfigurationTests
     }
 
     [Fact]
-    public void Validate_WithZeroReadAfterWriteBuffer_Succeeds()
+    public void WhenReadAfterWriteBufferIsZero_ThenValidateSucceeds()
     {
         // Arrange - Zero is valid (no buffer)
         var config = new OpcUaClientConfiguration
@@ -126,7 +126,7 @@ public class OpcUaClientConfigurationTests
     }
 
     [Fact]
-    public void Validate_WithValidReadAfterWriteSettings_Succeeds()
+    public void WhenReadAfterWriteSettingsAreValid_ThenValidateSucceeds()
     {
         // Arrange
         var config = new OpcUaClientConfiguration
