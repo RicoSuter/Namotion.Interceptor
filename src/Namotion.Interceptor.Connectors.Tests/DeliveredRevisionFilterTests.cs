@@ -208,4 +208,151 @@ public class DeliveredRevisionFilterTests
 
     private static SubjectPropertyChange CreateChange(PropertyReference property, long revision) =>
         SubjectPropertyChange.Create(property, ChangeOrigin.Local, DateTimeOffset.UnixEpoch, null, "old", "new", revision);
+
+    [Fact]
+    public void WhenEchoAndFlushTouchTheFilterConcurrently_ThenItStaysConsistent()
+    {
+        // Arrange: the two real callers. A buffered processor records echoes and answers write-back
+        // questions on its dequeue thread while its flush task suppresses an outbound batch, so both
+        // reach this map at once. Fresh properties per iteration on purpose: value overwrites of
+        // existing entries do not restructure the bucket chains, so only inserts (and the Clear inside
+        // rotation) expose the corruption. The count clears RotationThreshold so rotation is covered.
+        const int iterations = 20_000;
+        var filter = new DeliveredRevisionFilter();
+        var echoProperties = new PropertyReference[iterations];
+        var flushProperties = new PropertyReference[iterations];
+        for (var index = 0; index < iterations; index++)
+        {
+            echoProperties[index] = new PropertyReference(new Person(), nameof(Person.FirstName));
+            flushProperties[index] = new PropertyReference(new Person(), nameof(Person.LastName));
+        }
+
+        var barrier = new Barrier(2);
+        Exception? dequeueFailure = null;
+        Exception? flushFailure = null;
+
+        var dequeueThread = new Thread(() =>
+        {
+            try
+            {
+                barrier.SignalAndWait();
+                for (var index = 0; index < iterations; index++)
+                {
+                    filter.WasWrittenOut(echoProperties[index]);
+                    filter.RecordDelivered(CreateChange(echoProperties[index], revision: 100));
+                }
+            }
+            catch (Exception exception)
+            {
+                dequeueFailure = exception;
+            }
+        });
+
+        var flushThread = new Thread(() =>
+        {
+            try
+            {
+                barrier.SignalAndWait();
+                var batch = new SubjectPropertyChange[1];
+                for (var index = 0; index < iterations; index++)
+                {
+                    batch[0] = CreateChange(flushProperties[index], revision: 100);
+                    filter.SuppressDelivered(batch.AsSpan());
+                }
+            }
+            catch (Exception exception)
+            {
+                flushFailure = exception;
+            }
+        });
+
+        // Act
+        dequeueThread.Start();
+        flushThread.Start();
+        dequeueThread.Join();
+        flushThread.Join();
+
+        // Assert: the map is structurally intact. Unsynchronized inserts corrupt the bucket chains,
+        // which Dictionary detects and reports by throwing out of whichever thread touches it next.
+        // Lost updates are covered separately below, because rotation makes them unobservable here.
+        Assert.Null(dequeueFailure);
+        Assert.Null(flushFailure);
+    }
+
+    [Fact]
+    public void WhenEchoAndFlushRecordConcurrently_ThenNoBaselineIsLost()
+    {
+        // Arrange: the same two callers, but deliberately kept under RotationThreshold so nothing is
+        // retired and every baseline recorded must still be observable at the end. That makes a lost
+        // update assertable, which the rotating test above cannot do. The two threads own disjoint
+        // property sets, so a missing baseline is a lost write rather than a legitimate overwrite.
+        const int propertiesPerThread = 1_500;
+        var filter = new DeliveredRevisionFilter();
+        var echoProperties = new PropertyReference[propertiesPerThread];
+        var flushProperties = new PropertyReference[propertiesPerThread];
+        for (var index = 0; index < propertiesPerThread; index++)
+        {
+            echoProperties[index] = new PropertyReference(new Person(), nameof(Person.FirstName));
+            flushProperties[index] = new PropertyReference(new Person(), nameof(Person.LastName));
+        }
+
+        var barrier = new Barrier(2);
+        Exception? dequeueFailure = null;
+        Exception? flushFailure = null;
+
+        // Captured rather than left to propagate: an unhandled exception on a raw thread takes down the
+        // test host, which aborts the run instead of failing this test.
+        var dequeueThread = new Thread(() =>
+        {
+            try
+            {
+                barrier.SignalAndWait();
+                for (var index = 0; index < propertiesPerThread; index++)
+                {
+                    filter.RecordDelivered(CreateChange(echoProperties[index], revision: 100));
+                }
+            }
+            catch (Exception exception)
+            {
+                dequeueFailure = exception;
+            }
+        });
+
+        var flushThread = new Thread(() =>
+        {
+            try
+            {
+                barrier.SignalAndWait();
+                var batch = new SubjectPropertyChange[1];
+                for (var index = 0; index < propertiesPerThread; index++)
+                {
+                    batch[0] = CreateChange(flushProperties[index], revision: 100);
+                    filter.SuppressDelivered(batch.AsSpan());
+                }
+            }
+            catch (Exception exception)
+            {
+                flushFailure = exception;
+            }
+        });
+
+        // Act
+        dequeueThread.Start();
+        flushThread.Start();
+        dequeueThread.Join();
+        flushThread.Join();
+
+        // Assert: every baseline from both threads still suppresses an older commit. Probing with an
+        // older revision does not record, so the check does not disturb what it measures.
+        Assert.Null(dequeueFailure);
+        Assert.Null(flushFailure);
+
+        for (var index = 0; index < propertiesPerThread; index++)
+        {
+            Assert.False(filter.TryAdmit(CreateChange(echoProperties[index], revision: 99)),
+                $"echo baseline {index} was lost");
+            Assert.False(filter.TryAdmit(CreateChange(flushProperties[index], revision: 99)),
+                $"flush baseline {index} was lost");
+        }
+    }
 }

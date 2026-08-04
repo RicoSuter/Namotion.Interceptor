@@ -183,22 +183,9 @@ internal sealed class ChangeMerger : IDisposable
     /// </summary>
     private void SuppressAlreadyDeliveredCommits(DeliveredRevisionFilter deliveredRevisions)
     {
-        var kept = 0;
-        for (var index = 0; index < _count; index++)
-        {
-            ref readonly var survivor = ref _buffer[index];
-            if (!deliveredRevisions.TryAdmit(in survivor))
-            {
-                continue;
-            }
-
-            if (kept != index)
-            {
-                _buffer[kept] = survivor;
-            }
-
-            kept++;
-        }
+        // One acquisition for the batch rather than one per survivor, so the whole batch is decided
+        // against a single snapshot of the delivered state.
+        var kept = deliveredRevisions.SuppressDelivered(_buffer.AsSpan(0, _count));
 
         if (kept == _count)
         {

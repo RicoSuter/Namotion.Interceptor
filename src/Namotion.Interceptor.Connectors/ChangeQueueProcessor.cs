@@ -37,9 +37,10 @@ public class ChangeQueueProcessor : IDisposable
     private readonly ChangeMerger _flushMerger = new();
 
     // Spans flushes, unlike the merger's per-batch state: merging fixes inversions inside one flush,
-    // this fixes the ones that straddle a flush boundary. Single-threaded because the two modes are
-    // mutually exclusive: with a buffer only the flush task reaches it, without one only the dequeue
-    // loop does.
+    // this fixes the ones that straddle a flush boundary. Synchronized internally, because a buffered
+    // processor reaches it from both threads at once: the echo and write-back bookkeeping below runs
+    // ahead of the buffered/immediate split and therefore on the dequeue thread in both modes, while
+    // batch suppression runs on the flush task.
     private readonly DeliveredRevisionFilter _deliveredRevisions;
 
     // Reusable single-item buffer for the no-buffer (immediate) path
