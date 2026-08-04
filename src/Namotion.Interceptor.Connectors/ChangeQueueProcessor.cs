@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -16,6 +17,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
+    private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
 
@@ -75,6 +77,7 @@ public class ChangeQueueProcessor : IDisposable
         ILogger logger)
     {
         _source = source;
+        _context = context;
         _deliveredRevisions = new DeliveredRevisionFilter(source);
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
@@ -305,8 +308,10 @@ public class ChangeQueueProcessor : IDisposable
         _subscription.Dispose();
 
         // Takes this processor's slots off the subjects it delivered to. Not optional: those slots hold
-        // the source, so skipping this leaves a dead connector reachable from a live graph.
-        _deliveredRevisions.Release();
+        // the source, so skipping this leaves a dead connector reachable from a live graph. The walk
+        // covers the registry's attached subjects, which are exactly the ones that outlive the processor;
+        // without a registry there is nothing to walk and the slots stay until their subjects die.
+        _deliveredRevisions.Release(_context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys);
 
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
         if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)

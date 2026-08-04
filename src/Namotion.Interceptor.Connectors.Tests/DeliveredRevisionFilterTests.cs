@@ -138,10 +138,13 @@ public class DeliveredRevisionFilterTests
     }
 
     [Fact]
-    public void WhenAConfirmationIsWrittenBack_ThenItDoesNotAskForAnotherWriteBack()
+    public void WhenAConfirmationIsWrittenBack_ThenTheNextConfirmationIsAlsoWrittenBack()
     {
-        // Arrange: writing a confirmation out leaves the source holding that same confirmed value, so
-        // it is not an overwrite the next confirmation would need to repair.
+        // Arrange: a written-back confirmation is an ordinary write on the wire and can itself land on
+        // the source after a later transaction's direct write, so it must keep asking for the next
+        // repair. Clearing here is the chain that loses a committed transaction: repair for T1 delayed,
+        // T2 writes the source, T1's repair lands last, T2's confirmation sees no write-out and is
+        // skipped, and the source keeps T1's value for good.
         var filter = new DeliveredRevisionFilter();
         var subject = new Person();
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -155,7 +158,25 @@ public class DeliveredRevisionFilterTests
         Assert.True(filter.TryAdmit(confirmation));
 
         // Assert
-        Assert.False(filter.WasWrittenOut(property));
+        Assert.True(filter.WasWrittenOut(property));
+    }
+
+    [Fact]
+    public void WhenAnEchoFollowsOurOwnWrite_ThenAConfirmationIsStillWrittenBack()
+    {
+        // Arrange: an echo proves the source emitted a value, not that our write has landed. A write
+        // still in flight can overtake a transaction's direct write, so the written-out bit must survive
+        // the echo or the confirmation that would repair the overwrite is skipped.
+        var filter = new DeliveredRevisionFilter();
+        var property = new PropertyReference(new Person(), nameof(Person.FirstName));
+
+        Assert.True(filter.TryAdmit(CreateChange(property, revision: 10)));
+
+        // Act: the source pushes a value while our write may still be in flight.
+        filter.RecordDelivered(CreateChange(property, revision: 11));
+
+        // Assert
+        Assert.True(filter.WasWrittenOut(property));
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -172,14 +193,6 @@ public class DeliveredRevisionFilterTests
         return abandoned;
     }
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void Churn(DeliveredRevisionFilter filter, int count)
-    {
-        for (var index = 0; index < count; index++)
-        {
-            filter.TryAdmit(CreateChange(new PropertyReference(new Person(), nameof(Person.LastName)), index + 1));
-        }
-    }
 
     [Fact]
     public void WhenTwoSourcesServeOneProperty_ThenTheirBaselinesAreIndependent()
@@ -334,7 +347,8 @@ public class DeliveredRevisionFilterTests
     {
         // Arrange: release must take out this source's slot only, or a connector still running would
         // start admitting the commits it had already delivered.
-        var property = new PropertyReference(new Person(), nameof(Person.FirstName));
+        var subject = new Person();
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
         var leaving = new DeliveredRevisionFilter(new object());
         var staying = new DeliveredRevisionFilter(new object());
 
@@ -342,10 +356,63 @@ public class DeliveredRevisionFilterTests
         Assert.True(staying.TryAdmit(CreateChange(property, revision: 10)));
 
         // Act
-        leaving.Release();
+        leaving.Release([subject]);
 
         // Assert
         Assert.False(staying.TryAdmit(CreateChange(property, revision: 9)));
+    }
+
+    [Fact]
+    public void WhenReleaseRacesAFirstTouch_ThenNoSlotIsStranded()
+    {
+        // Arrange: TryAdvance checks the released flag and then publishes a slot. A release running
+        // entirely inside that window sweeps before the slot exists, and nothing later removes it: a
+        // new processor for the same source finds the slot pre-existing and never learns it owns the
+        // leak. The publication is fenced against the flag, so either the sweep sees the slot or the
+        // touching thread sees the release and takes its own slot back out.
+        const int rounds = 200;
+        const int propertiesPerRound = 200;
+
+        for (var round = 0; round < rounds; round++)
+        {
+            var source = new object();
+            var filter = new DeliveredRevisionFilter(source);
+            var subjects = new IInterceptorSubject[propertiesPerRound];
+            var properties = new PropertyReference[propertiesPerRound];
+            for (var index = 0; index < propertiesPerRound; index++)
+            {
+                var subject = new Person();
+                subjects[index] = subject;
+                properties[index] = new PropertyReference(subject, nameof(Person.FirstName));
+            }
+
+            using var barrier = new Barrier(2);
+            var toucher = new Thread(() =>
+            {
+                // ReSharper disable once AccessToDisposedClosure
+                barrier.SignalAndWait();
+                for (var index = 0; index < propertiesPerRound; index++)
+                {
+                    filter.TryAdmit(CreateChange(properties[index], revision: 1));
+                }
+            });
+
+            toucher.Start();
+            barrier.SignalAndWait();
+            filter.Release(subjects);
+            toucher.Join();
+
+            // Assert: no property still holds a slot for the released source.
+            for (var index = 0; index < propertiesPerRound; index++)
+            {
+                if (properties[index].TryGetPropertyData("ni.drev", out var value)
+                    && value is DeliveredRevisionSlots slots)
+                {
+                    Assert.False(slots.TryGetPacked(source, out _),
+                        $"round {round}: property {index} kept a slot for the released source");
+                }
+            }
+        }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -362,7 +429,7 @@ public class DeliveredRevisionFilterTests
 
             if (release)
             {
-                filter.Release();
+                filter.Release([property.Subject]);
             }
         }
 

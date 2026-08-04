@@ -44,7 +44,7 @@ public class ChangeQueueProcessorTests
 
         processor.Dispose();
 
-        // Assert - only the last value should be written (deduplication)
+        // Assert - only the last value should be written (merged)
         // Merged change keeps oldest old value ("Value1") and newest new value ("Value4")
         Assert.Single(writtenChanges);
         Assert.Equal("Value1", writtenChanges[0].GetOldValue<string>());
@@ -91,7 +91,7 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
-    public async Task WhenDeduplicating_ThenOrderOfLastOccurrencesIsPreservedAndValuesAreMerged()
+    public async Task WhenMerging_ThenOrderOfLastOccurrencesIsPreservedAndValuesAreMerged()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();

@@ -198,9 +198,9 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     /// <summary>
     /// Merges this (earlier) change with a newer change to the same property.
     /// Keeps this change's old value and takes the newer change's new value,
-    /// origin, and timestamps. Used during deduplication to preserve the correct
+    /// origin, and timestamps. Used during flush merging to preserve the correct
     /// diff baseline while reflecting the latest state. Copies the newer change's full
-    /// <see cref="Origin"/> so a deduplicated change keeps its kind and source. The newer change's
+    /// <see cref="Origin"/> so a merged change keeps its kind and source. The newer change's
     /// <see cref="Revision"/> carries over as well, so a merged survivor stays comparable against
     /// further changes to the same subject.
     /// </summary>

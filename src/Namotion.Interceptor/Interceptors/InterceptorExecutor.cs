@@ -19,7 +19,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     ///
     /// It records commit order, it does not establish it: the lock is what serializes the commits, and
     /// this counter labels them afterwards. Consumers do order changes by comparing it (see the flush
-    /// deduplication in docs/tracking.md), but nothing in the write path depends on its value.
+    /// merging in docs/tracking.md), but nothing in the write path depends on its value.
     ///
     /// Consumes a revision exactly when the terminal write runs. A vetoed write and a write stopped
     /// by the equality check never reach the terminal and consume nothing, but a derived property's

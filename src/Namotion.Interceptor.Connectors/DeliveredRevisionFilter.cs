@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -20,9 +19,12 @@ namespace Namotion.Interceptor.Connectors;
 ///
 /// The retention is therefore reversed rather than removed: a slot holds its source, so a subject holds
 /// the connector that delivers it. That is why <see cref="Release"/> exists and why the processor calls
-/// it on disposal. It is not optional. A connector can be recreated against a live graph, for example a
-/// HomeBlaze OPC UA server rebuilt on every configuration save, and without release each rebuild would
-/// strand a dead connector reachable from the graph and add an entry to the per-property slot scan.
+/// it on disposal with the registry's known subjects. It is not optional. A connector can be recreated
+/// against a live graph, for example a HomeBlaze OPC UA server rebuilt on every configuration save, and
+/// without release each rebuild would strand a dead connector reachable from the graph and add an entry
+/// to the per-property slot scan. The filter itself retains nothing between writes: disposal walks the
+/// live graph instead of a filter-side list, so subjects that died took their slots with them and cost
+/// the walk nothing, and subjects still alive are exactly the ones the walk visits.
 ///
 /// The price is a property data lookup per consulted change rather than a dictionary probe, and one
 /// small object per property this connector delivers. That is deliberate: the core library stays unaware
@@ -50,12 +52,10 @@ internal sealed class DeliveredRevisionFilter
 
     private readonly object _source;
 
-    // The slot holders this filter has put a slot into, so disposal can take them back out. Holding
-    // these retains no graph: a holder has no reference to its subject, only the subject's property data
-    // has a reference to the holder. One entry per property this connector has delivered, added on first
-    // touch rather than per change.
-    private readonly ConcurrentDictionary<DeliveredRevisionSlots, byte> _touchedSlots = new();
-    private volatile bool _released;
+    // Interlocked rather than volatile: Release must fence its store against the slot reads of the
+    // sweep that follows it, and TryAdvance must fence its slot publication against this read, so the
+    // pair either sees the release (and undoes its own slot) or is seen by the sweep (which removes it).
+    private int _released;
 
     public DeliveredRevisionFilter(object? source = null)
     {
@@ -80,10 +80,10 @@ internal sealed class DeliveredRevisionFilter
             return true;
         }
 
-        // A confirmation being written back leaves the source holding that same confirmed value, so it
-        // is not an overwrite that a later confirmation would need to repair.
-        return TryAdvance(change.Property, change.Revision,
-            writtenOut: change.Origin.Kind != ChangeOriginKind.Confirmed);
+        // Every admitted change is written to the wire, confirmations included: a written-back
+        // confirmation is an ordinary write and can itself land on the source after a later
+        // transaction's direct write, so it must keep asking for the next repair.
+        return TryAdvance(change.Property, change.Revision, writtenOut: true);
     }
 
     /// <summary>
@@ -117,23 +117,25 @@ internal sealed class DeliveredRevisionFilter
     /// Advances the baseline for a change the processor handles without writing it out, which means an
     /// echo of the source's own value. The source already holds that value at that revision, so leaving
     /// the baseline behind would let a local commit that predates the echo be admitted after it and
-    /// overwrite the newer value the source just sent.
+    /// overwrite the newer value the source just sent. Never clears the written-out bit: an echo proves
+    /// the source emitted a value, not that every write this processor sent has landed, so a write still
+    /// in flight could yet overtake a transaction's direct write.
     /// </summary>
     public void RecordDelivered(in SubjectPropertyChange change)
     {
         if (change.Revision > 0)
         {
-            // Not written out by us: the source already holds this value, having sent or confirmed it.
             TryAdvance(change.Property, change.Revision, writtenOut: false);
         }
     }
 
     /// <summary>
-    /// Whether the newest commit delivered for this property was written out by this processor. A
-    /// transaction confirmation uses it to decide whether the source still holds what the transaction
-    /// wrote: if this processor wrote to the property since, that write may have reached the source
-    /// after the transaction's and left an older value behind, which only sending the confirmation
-    /// out can repair.
+    /// Whether this processor has ever written this property out. A transaction confirmation uses it to
+    /// decide whether the source still holds what the transaction wrote: any write this processor sent
+    /// may have reached the source after the transaction's and left an older value behind, which only
+    /// sending the confirmation out can repair. Sticky by design: no client-side event can prove that
+    /// no such write remains, so the bit never resets within a processor's lifetime, and a property
+    /// written only through transactions never sets it and never pays for a repair.
     /// </summary>
     public bool WasWrittenOut(in PropertyReference property)
     {
@@ -149,7 +151,7 @@ internal sealed class DeliveredRevisionFilter
     /// </summary>
     private bool TryAdvance(in PropertyReference property, long revision, bool writtenOut)
     {
-        if (_released)
+        if (Volatile.Read(ref _released) == 1)
         {
             // Disposed while a flush was still in flight. Recording now would put back a slot nothing
             // will ever remove, so deliver without recording rather than leak.
@@ -173,30 +175,48 @@ internal sealed class DeliveredRevisionFilter
             slots = existing;
         }
 
-        // Sign carries the written-out flag; see DeliveredRevisionSlots for why it is not a shift.
-        var admitted = slots.TryAdvance(_source, revision, writtenOut ? -revision : revision, out var slotCreated);
-        if (slotCreated)
+        var admitted = slots.TryAdvance(_source, revision, writtenOut, out var slotCreated);
+        if (slotCreated && Volatile.Read(ref _released) == 1)
         {
-            _touchedSlots.TryAdd(slots, 0);
+            // Release ran between the entry check and the slot publication, so its sweep may have missed
+            // this slot. The publication was an interlocked exchange (a full fence), so this read either
+            // sees the release and undoes the slot here, or precedes it and the sweep sees the slot.
+            // Both may remove; RemoveSource is idempotent.
+            slots.RemoveSource(_source);
         }
 
         return admitted;
     }
 
     /// <summary>
-    /// Takes this source's slots back out of every property it recorded against, releasing the source.
-    /// Called from <see cref="ChangeQueueProcessor.Dispose"/>; without it a connector rebuilt against a
-    /// live graph stays reachable from that graph for the lifetime of its subjects.
+    /// Takes this source's slots back out of every property of the given subjects, releasing the source.
+    /// Called from <see cref="ChangeQueueProcessor.Dispose"/> with the registry's known subjects; without
+    /// it a connector rebuilt against a live graph stays reachable from that graph for the lifetime of
+    /// its subjects. Live attached subjects are exactly the ones that can pin the connector: dead
+    /// subjects took their slots with them. A subject detached but still referenced elsewhere keeps its
+    /// slot (its baseline must survive re-attachment), which retains this source until that subject
+    /// dies; that is the accepted residual of walking the graph instead of retaining a per-property list.
     /// </summary>
-    public void Release()
+    public void Release(IEnumerable<IInterceptorSubject>? knownSubjects = null)
     {
-        _released = true;
+        // Full fence, not a volatile store: the sweep's reads below must not start before this store is
+        // visible, or a concurrent TryAdvance could publish a slot that neither side takes back out.
+        Interlocked.Exchange(ref _released, 1);
 
-        foreach (var slots in _touchedSlots.Keys)
+        if (knownSubjects is null)
         {
-            slots.RemoveSource(_source);
+            return;
         }
 
-        _touchedSlots.Clear();
+        foreach (var subject in knownSubjects)
+        {
+            foreach (var entry in subject.Data)
+            {
+                if (entry.Key.key == DeliveredRevisionKey && entry.Value is DeliveredRevisionSlots slots)
+                {
+                    slots.RemoveSource(_source);
+                }
+            }
+        }
     }
 }
