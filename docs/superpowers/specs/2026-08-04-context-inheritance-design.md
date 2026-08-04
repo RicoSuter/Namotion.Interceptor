@@ -932,8 +932,7 @@ comments, not only its body.
 
 Two findings from section 2 have no issue and none is being filed: the two-graph half-support, closed by
 change 5, and the resolved-position ordering dependency, preserved deliberately. Both live here and in
-`docs/design/tracking-lifecycle.md`, and the pull request description records them, along with the
-multi-parent stale-link case left behind by removing the repoint.
+`docs/design/tracking-lifecycle.md`, and the pull request description records them.
 
 ## 11. Out of scope
 
