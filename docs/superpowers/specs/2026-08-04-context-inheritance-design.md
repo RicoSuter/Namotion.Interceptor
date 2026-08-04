@@ -324,12 +324,17 @@ is unreachable on `master` because one edge kind plus dedup means two edges to o
 // core, because the generated constructor emits a call to it
 public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
 {
+    // Resolved before the edge is published, so a cyclic chain throws with nothing committed.
+    // This is #402 defect 4: on master the executor publishes first and resolves after, so a
+    // failing resolve leaves the edge registered with no attach callback ever having run.
+    var interceptors = context.GetServices<ILifecycleInterceptor>();
+
     if (!subject.Context.TryRecordAttachContext(context))   // under _mutationLock; false if already this context
         return;
 
     subject.Context.AddFallbackContext(context);
 
-    foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
+    foreach (var interceptor in interceptors)
         interceptor.AttachSubjectToContext(subject);        // claims _owner, under _attachedSubjects
 }
 
@@ -378,6 +383,7 @@ cannot distinguish the design's own cleanup from a consumer's call and either an
 
 | Failure | Result |
 |---|---|
+| The attach resolve throws (cyclic chain on `context`) | nothing changed, because the resolve precedes the record and the edge |
 | `TryRecordAttachContext` throws (another context already recorded) | nothing changed |
 | An attach interceptor throws | the edge and the record remain, and the subject is partly attached. This is #384's rollback problem and it is out of scope; a retry finds the record already set and returns, so the missed callbacks are not re-run |
 | The detach resolve throws (cyclic chain on `context`) | nothing changed, because the resolve precedes the guard and the transition |
