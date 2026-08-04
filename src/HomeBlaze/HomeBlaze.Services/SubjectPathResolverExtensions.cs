@@ -19,7 +19,7 @@ public static class SubjectPathResolverExtensions
             .WithService(() =>
             {
                 var rootManager = context.GetService<RootManager>();
-                return new SubjectPathResolver(rootManager, context);
+                return new SubjectPathResolver(rootManager);
             }, _ => true);
     }
 

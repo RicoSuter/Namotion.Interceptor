@@ -13,9 +13,9 @@ public class ChangeQueueProcessorTests
     public async Task WhenMultipleChangesToSameProperty_ThenOnlyLastValueIsWritten()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -54,9 +54,9 @@ public class ChangeQueueProcessorTests
     public async Task WhenChangesToDifferentProperties_ThenAllAreWritten()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -93,9 +93,9 @@ public class ChangeQueueProcessorTests
     public async Task WhenDeduplicating_ThenOrderOfLastOccurrencesIsPreservedAndValuesAreMerged()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -138,9 +138,9 @@ public class ChangeQueueProcessorTests
     public async Task WhenEmptyQueue_ThenNoWriteHandlerCalled()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var writeHandlerCalled = false;
 
@@ -170,9 +170,9 @@ public class ChangeQueueProcessorTests
     public void WhenDisposed_ThenResourcesAreCleaned()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var processor = new ChangeQueueProcessor(
             source: null,
@@ -192,9 +192,9 @@ public class ChangeQueueProcessorTests
     public async Task WhenFlushInProgress_ThenConcurrentFlushSkipsToAvoidContention()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
         var flushCount = 0;
@@ -242,9 +242,9 @@ public class ChangeQueueProcessorTests
     public async Task WhenBoundedQueueOverflows_ThenOldestChangesAreDropped()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
 
@@ -285,9 +285,9 @@ public class ChangeQueueProcessorTests
     public async Task WhenUnbounded_ThenNoChangesAreDropped()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
-        context.WithPropertyChangeQueue();
+        context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
 
@@ -333,8 +333,7 @@ public class ChangeQueueProcessorTests
         ChangeQueueProcessor processor,
         PropertyReference property,
         string? oldValue,
-        string? newValue,
-        object? source = null)
+        string? newValue)
     {
         // Use reflection to access the private _changes queue
         var changesField = typeof(ChangeQueueProcessor)
@@ -344,7 +343,7 @@ public class ChangeQueueProcessorTests
 
         var change = SubjectPropertyChange.Create(
             property,
-            source,
+            ChangeOrigin.Local,
             DateTimeOffset.UtcNow,
             null,
             oldValue,

@@ -63,7 +63,7 @@ This codebase prioritizes allocation reduction over micro-CPU optimization. In r
 - Do NOT commit. Do NOT push branches. Do NOT switch branches. The caller handles git plumbing.
 - Do NOT open PRs. Do NOT create issues or comments.
 - Do NOT run benchmarks. The orchestrator runs `pwsh scripts/benchmark.ps1` after you return; agents have been observed hanging or being sandbox-blocked on the benchmark step.
-- Do NOT touch CLAUDE.md, README.md, or design docs. The caller owns docs.
+- Do NOT touch AGENTS.md, CLAUDE.md, README.md, or design docs. The caller owns docs.
 - Do NOT use `git add` or `git commit`. Leave changes in the working tree.
 - Stay within the Namotion.Interceptor repository. Do not work in HomeBlaze.
 - Output in commit messages and report text: no em dashes, no AI attribution, no "Generated with..." footer.

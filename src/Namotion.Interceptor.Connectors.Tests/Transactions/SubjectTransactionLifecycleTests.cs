@@ -1,5 +1,7 @@
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Transactions;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Connectors.Tests.Transactions;
@@ -113,9 +115,9 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     }
 
     [Fact]
-    public void WhenContextCreated_ThenTransactionInterceptorPrecedesObservable()
+    public void WhenTransactionsRegisteredBeforeNotifications_ThenTransactionInterceptorPrecedesInterceptor()
     {
-        // Arrange
+        // Arrange (CreateContext registers transactions before full property tracking)
         var context = CreateContext();
 
         // Act
@@ -127,8 +129,37 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
 
         var types = writeInterceptors.Select(i => i.GetType().Name).ToList();
         var transactionIndex = types.IndexOf("SubjectTransactionInterceptor");
-        var observableIndex = types.IndexOf("PropertyChangeObservable");
-        Assert.True(transactionIndex < observableIndex,
-            $"Transaction interceptor should be before PropertyChangeObservable. Order: {string.Join(" -> ", types)}");
+        var interceptorIndex = types.IndexOf("PropertyChangeInterceptor");
+        Assert.True(transactionIndex >= 0 && interceptorIndex >= 0);
+        Assert.True(transactionIndex < interceptorIndex,
+            $"Transaction interceptor should be before PropertyChangeInterceptor. Order: {string.Join(" -> ", types)}");
+    }
+
+    [Fact]
+    public void WhenNotificationsRegisteredBeforeTransactions_ThenTransactionInterceptorStillPrecedesInterceptor()
+    {
+        // Arrange (reverse registration order: full property tracking before transactions).
+        // The ordering edge is target-side [RunsAfter(SubjectTransactionInterceptor)] on
+        // PropertyChangeInterceptor, so it must hold regardless of registration order.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking()
+            .WithTransactions()
+            .WithSourceTransactions();
+
+        // Act
+        var writeInterceptors = context.GetServices<Interceptors.IWriteInterceptor>().ToList();
+        var transactionInterceptor = writeInterceptors.OfType<SubjectTransactionInterceptor>().FirstOrDefault();
+
+        // Assert
+        Assert.NotNull(transactionInterceptor);
+
+        var types = writeInterceptors.Select(i => i.GetType().Name).ToList();
+        var transactionIndex = types.IndexOf("SubjectTransactionInterceptor");
+        var interceptorIndex = types.IndexOf("PropertyChangeInterceptor");
+        Assert.True(transactionIndex >= 0 && interceptorIndex >= 0);
+        Assert.True(transactionIndex < interceptorIndex,
+            $"Transaction interceptor should be before PropertyChangeInterceptor regardless of registration order. Order: {string.Join(" -> ", types)}");
     }
 }

@@ -23,7 +23,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
     public ReadAfterWriteManagerTests()
     {
-        _testSubject = new TestPerson(new InterceptorSubjectContext());
+        _testSubject = new TestPerson(InterceptorSubjectContext.Create());
         var configuration = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",

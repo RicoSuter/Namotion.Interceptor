@@ -142,7 +142,7 @@ public class ChangeQueueProcessor : IDisposable
 
             while (_subscription.TryDequeue(out var change, linkedTokenSource.Token))
             {
-                if (change.Source == _source)
+                if (ReferenceEquals(change.Origin.Source, _source))
                 {
                     continue;
                 }

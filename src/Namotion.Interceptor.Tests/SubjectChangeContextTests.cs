@@ -40,46 +40,52 @@ public class SubjectChangeContextTests
     }
 
     [Fact]
-    public void Source_WithSourceScope_ReturnsProvidedSource()
+    public void WithTimestamps_SetsChangedAndReceived()
     {
         // Arrange
-        var source = new object();
-
-        // Act & Assert
-        using (SubjectChangeContext.WithSource(source))
-        {
-            Assert.Same(source, SubjectChangeContext.Current.Source);
-        }
-    }
-
-    [Fact]
-    public void Source_WithNoScope_ReturnsNull()
-    {
-        Assert.Null(SubjectChangeContext.Current.Source);
-    }
-
-    [Fact]
-    public void WithState_SetsAllFields()
-    {
-        // Arrange
-        var source = new object();
         var changed = new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero);
         var received = new DateTimeOffset(2025, 6, 15, 12, 0, 1, TimeSpan.Zero);
 
         // Act & Assert
-        using (SubjectChangeContext.WithState(source, changed, received))
+        using (SubjectChangeContext.WithTimestamps(changed, received))
         {
-            Assert.Same(source, SubjectChangeContext.Current.Source);
             Assert.Equal(changed.UtcTicks, SubjectChangeContext.Current.ResolveChangedTimestamp());
             Assert.Equal(received, SubjectChangeContext.Current.ReceivedTimestamp);
         }
     }
 
     [Fact]
-    public void WithState_NullChanged_ReturnsZeroTicks()
+    public void WithTimestamps_NullReceived_PreservesAmbientReceived()
+    {
+        // Arrange
+        var received = new DateTimeOffset(2025, 6, 15, 12, 0, 1, TimeSpan.Zero);
+        var changed = new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero);
+
+        // Act & Assert - a null received argument preserves the ambient received timestamp
+        using (SubjectChangeContext.WithTimestamps(changed, received))
+        {
+            using (SubjectChangeContext.WithTimestamps(changed, null))
+            {
+                Assert.Equal(received, SubjectChangeContext.Current.ReceivedTimestamp);
+            }
+        }
+    }
+
+    [Fact]
+    public void WithTimestamps_NoScope_ReceivedIsNull()
     {
         // Act & Assert
-        using (SubjectChangeContext.WithState(null, null, null))
+        using (SubjectChangeContext.WithTimestamps(null, null))
+        {
+            Assert.Null(SubjectChangeContext.Current.ReceivedTimestamp);
+        }
+    }
+
+    [Fact]
+    public void WithTimestamps_NullChanged_ReturnsZeroTicks()
+    {
+        // Act & Assert
+        using (SubjectChangeContext.WithTimestamps(null, null))
         {
             Assert.Equal(0, SubjectChangeContext.Current.ResolveChangedTimestamp());
         }
@@ -118,19 +124,17 @@ public class SubjectChangeContextTests
     }
 
     [Fact]
-    public void WithChangedTimestamp_PreservesExistingSourceAndReceivedTimestamp()
+    public void WithChangedTimestamp_PreservesExistingReceivedTimestamp()
     {
         // Arrange
-        var source = new object();
         var received = new DateTimeOffset(2025, 6, 15, 12, 0, 1, TimeSpan.Zero);
         var changed = new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero);
 
         // Act & Assert
-        using (SubjectChangeContext.WithState(source, null, received))
+        using (SubjectChangeContext.WithTimestamps(null, received))
         {
             using (SubjectChangeContext.WithChangedTimestamp(changed))
             {
-                Assert.Same(source, SubjectChangeContext.Current.Source);
                 Assert.Equal(received, SubjectChangeContext.Current.ReceivedTimestamp);
                 Assert.Equal(changed.UtcTicks, SubjectChangeContext.Current.ResolveChangedTimestamp());
             }
@@ -138,18 +142,16 @@ public class SubjectChangeContextTests
     }
 
     [Fact]
-    public void WithSource_PreservesExistingTimestamps()
+    public void WithTimestamps_PreservesExistingChangedTimestamp_WhenChangedProvided()
     {
         // Arrange
         var changed = new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero);
-        var source = new object();
 
         // Act & Assert
         using (SubjectChangeContext.WithChangedTimestamp(changed))
         {
-            using (SubjectChangeContext.WithSource(source))
+            using (SubjectChangeContext.WithTimestamps(changed, null))
             {
-                Assert.Same(source, SubjectChangeContext.Current.Source);
                 Assert.Equal(changed.UtcTicks, SubjectChangeContext.Current.ResolveChangedTimestamp());
             }
         }

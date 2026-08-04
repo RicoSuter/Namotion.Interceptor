@@ -37,7 +37,7 @@ public class DefaultSubjectFactoryTests
         var serviceCollection = new ServiceCollection();
         serviceCollection.AddSingleton<object>(42);
 
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.AddService(serviceCollection.BuildServiceProvider());
 
         var person = new Person(context);
@@ -60,7 +60,7 @@ public class DefaultSubjectFactoryTests
     public void WhenCreatingSubjectCollection_ThenItWorks()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
 
         var person = new Person(context);
         var property = new RegisteredSubjectProperty(

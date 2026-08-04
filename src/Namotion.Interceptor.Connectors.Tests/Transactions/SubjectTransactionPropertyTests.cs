@@ -102,14 +102,12 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 
-        using (SubjectChangeContext.WithState(mockSource, changedTime, receivedTime))
-        {
-            person.FirstName = "John";
-        }
+        new PropertyReference(person, nameof(Person.FirstName))
+            .SetValueFromSource(mockSource, changedTime, receivedTime, "John");
 
         // Assert
         var change = transaction.GetPendingChanges().First();
-        Assert.Same(mockSource, change.Source);
+        Assert.Same(mockSource, change.Origin.Source);
         Assert.Equal(changedTime, change.ChangedTimestamp);
         Assert.Equal(receivedTime, change.ReceivedTimestamp);
     }
@@ -131,17 +129,15 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         // Act
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
-            using (SubjectChangeContext.WithState(mockSource, changedTime, receivedTime))
-            {
-                person.FirstName = "John";
-            }
+            new PropertyReference(person, nameof(Person.FirstName))
+                .SetValueFromSource(mockSource, changedTime, receivedTime, "John");
 
             await transaction.CommitAsync(CancellationToken.None);
         }
 
         // Assert
         var change = notifications.Single(n => n.Property.Metadata.Name == nameof(Person.FirstName));
-        Assert.Same(mockSource, change.Source);
+        Assert.Same(mockSource, change.Origin.Source);
         Assert.Equal(changedTime, change.ChangedTimestamp);
         Assert.Equal(receivedTime, change.ReceivedTimestamp);
         Assert.Equal(changedTime, person.GetPropertyReference(nameof(Person.FirstName)).TryGetWriteTimestamp());
@@ -448,10 +444,11 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     /// </summary>
     private class MotorSpeedValidator : IPropertyValidator
     {
-        public IEnumerable<ValidationResult> Validate<TProperty>(PropertyReference property, TProperty value)
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
         {
+            var property = context.Property;
             if (property.Metadata.Name == nameof(Motor.MotorSpeed) &&
-                value is int speed &&
+                context.Value is int speed &&
                 property.Subject is Motor motor)
             {
                 // Reading MaxAllowedSpeed goes through the interceptor chain,
@@ -459,10 +456,12 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
                 var maxAllowedSpeed = motor.MaxAllowedSpeed;
                 if (speed > maxAllowedSpeed)
                 {
-                    yield return new ValidationResult(
-                        $"MotorSpeed {speed} exceeds MaxAllowedSpeed {maxAllowedSpeed}.");
+                    return [new ValidationResult(
+                        $"MotorSpeed {speed} exceeds MaxAllowedSpeed {maxAllowedSpeed}.")];
                 }
             }
+
+            return [];
         }
     }
 }

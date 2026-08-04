@@ -301,6 +301,6 @@ namespace Namotion.Interceptor.Connectors.Updates
     }
     public static class SubjectUpdateExtensions
     {
-        public static void ApplySubjectUpdate(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory, System.Action<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? transformValueBeforeApply = null) { }
+        public static void ApplySubjectUpdate(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory, Namotion.Interceptor.ChangeOrigin origin, System.Action<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? transformValueBeforeApply = null) { }
     }
 }

@@ -11,6 +11,7 @@
     <File Path="../.gitignore" />
     <File Path="../features.png" />
     <File Path="../README.md" />
+    <File Path="../AGENTS.md" />
     <File Path="../CLAUDE.md" />
     <File Path="Directory.Build.props" />
   </Folder>

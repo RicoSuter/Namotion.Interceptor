@@ -586,7 +586,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
             {
                 var foreignChange = SubjectPropertyChange.Create<string?>(
                     new PropertyReference(person, nameof(Person.LastName)),
-                    source: null,
+                    origin: ChangeOrigin.Local,
                     changedTimestamp: DateTimeOffset.UtcNow,
                     receivedTimestamp: null,
                     oldValue: null,
