@@ -24,6 +24,16 @@
 - Unit tests: `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`
 - Integration tests are per-project and only for Task 12: `dotnet test src/Namotion.Interceptor.OpcUa.Tests`
 - OPC UA integration tests need port 4840 free. Stop any local Demo.Host app first.
+- **Using directives.** The code blocks below show file bodies, not their using lists. There are no relevant global usings, and types in *child* namespaces of a file's own namespace are not found by name lookup. Add per file as needed:
+  - `Namotion.Interceptor.<Project>.Tests.Models` for the `Person` test model (it lives in a `Models` child namespace in the Tracking and Connectors test projects). The **core** test project has no `Models` namespace and no `Person`; its model is `Car` with an `int Speed`, in the same namespace as the tests, so it needs no using.
+  - `Namotion.Interceptor.Tracking` for `WithFullPropertyTracking` and `WithLifecycle`.
+  - `Namotion.Interceptor.Registry` for `WithRegistry`.
+  - `Namotion.Interceptor.Tracking.Lifecycle` for `ILifecycleHandler` and `SubjectLifecycleChange`.
+  - `Namotion.Interceptor.Tracking.Change` for `SubjectPropertyChange`.
+  - `Namotion.Interceptor.Testing` for `AsyncTestHelpers`.
+  - `Microsoft.Extensions.Logging.Abstractions` for `NullLogger`.
+  - `Microsoft.Extensions.DependencyInjection` and `Microsoft.Extensions.Hosting` in `SourceMonitoringExtensions.cs`.
+  - `System.Collections.Immutable` in `SubjectSourceBase.cs`, which currently lacks it.
 - Priority order when requirements conflict: correctness (thread safety, quiescent consistency, documented semantics) first, then performance (allocations usually outweigh CPU), then idiom.
 
 ## File Structure
@@ -77,8 +87,6 @@
 Create `src/Namotion.Interceptor.Tests/PropertyDataTests.cs`:
 
 ```csharp
-using Namotion.Interceptor.Tests.Models;
-
 namespace Namotion.Interceptor.Tests;
 
 public class PropertyDataTests
@@ -87,38 +95,38 @@ public class PropertyDataTests
     public void WhenKeyIsAbsent_ThenTryAddPropertyDataStoresValueAndReturnsTrue()
     {
         // Arrange
-        var person = new Person();
-        var property = new PropertyReference(person, nameof(Person.FirstName));
+        var car = new Car();
+        var property = new PropertyReference(car, nameof(Car.Speed));
 
         // Act
-        var added = property.TryAddPropertyData("test.key", "first");
+        var added = property.TryAddPropertyData("test.key", 1);
 
         // Assert
         Assert.True(added);
         Assert.True(property.TryGetPropertyData("test.key", out var value));
-        Assert.Equal("first", value);
+        Assert.Equal(1, value);
     }
 
     [Fact]
     public void WhenKeyIsPresent_ThenTryAddPropertyDataLeavesValueAndReturnsFalse()
     {
         // Arrange
-        var person = new Person();
-        var property = new PropertyReference(person, nameof(Person.FirstName));
-        property.TryAddPropertyData("test.key", "first");
+        var car = new Car();
+        var property = new PropertyReference(car, nameof(Car.Speed));
+        property.TryAddPropertyData("test.key", 1);
 
         // Act
-        var added = property.TryAddPropertyData("test.key", "second");
+        var added = property.TryAddPropertyData("test.key", 2);
 
         // Assert
         Assert.False(added);
         Assert.True(property.TryGetPropertyData("test.key", out var value));
-        Assert.Equal("first", value);
+        Assert.Equal(1, value);
     }
 }
 ```
 
-If `Namotion.Interceptor.Tests.Models.Person` does not exist or lacks `FirstName`, use any existing `[InterceptorSubject]` model in that test project instead. Do not create a new model.
+`Car` is the existing `[InterceptorSubject]` model in that project (`src/Namotion.Interceptor.Tests/Car.cs`), in the same namespace as the test, so no using directive is needed. Its `Speed` is an `int`, which is why the values are ints.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -409,7 +417,8 @@ git commit -m "Add SourceState enum"
 - Modify: `src/Namotion.Interceptor.Connectors/ISubjectSource.cs`
 - Modify: `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs`
 - Modify: `src/Namotion.Interceptor.Connectors/SourceMonitoringExtensions.cs` (create, `GetSourceState` only)
-- Modify: test doubles `ConcurrentTestSource`, `BlockingTestSource` in `src/Namotion.Interceptor.Connectors.Tests/`
+- Modify: `src/Namotion.Interceptor.Connectors.Tests/SubjectSourceExtensionsTests.cs` (the `ConcurrentTestSource` and `BlockingTestSource` doubles at lines 497 and 509)
+- Modify: `src/Namotion.Interceptor.Benchmark/SubjectTransactionBenchmark.cs:108` (`BenchmarkSource`, which also implements `ISubjectSource` directly and is in the solution, so missing it fails the build)
 - Test: `src/Namotion.Interceptor.Connectors.Tests/SourceStateTests.cs`
 - Modify: `src/Namotion.Interceptor.Connectors.Tests/VerifyChecksTests.PublicApi.verified.txt` if that project has one
 
@@ -568,11 +577,11 @@ internal class TestStateSource : SubjectSourceBase
 
     public override ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-        => new(WriteResult.Success(changes));
+        => new(WriteResult.Success);
 }
 ```
 
-If `WriteResult.Success` has a different factory shape, match the shape already used by `ConcurrentTestSource` in that project rather than inventing one.
+`WriteResult.Success` is a static **property** (`src/Namotion.Interceptor.Connectors/WriteResult.cs:45`), not a factory method, so it is not invoked. The precedent is `BlockingTestSource` (`SubjectSourceExtensionsTests.cs:521`), not `ConcurrentTestSource`, which never touches it.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -823,7 +832,7 @@ public static class SourceMonitoringExtensions
 
 - [ ] **Step 8: Update the test doubles**
 
-`ConcurrentTestSource` and `BlockingTestSource` implement `ISubjectSource` directly and will not compile. Add to each:
+Three classes implement `ISubjectSource` directly and none will compile: `ConcurrentTestSource` and `BlockingTestSource` in `SubjectSourceExtensionsTests.cs`, and **`BenchmarkSource` in `src/Namotion.Interceptor.Benchmark/SubjectTransactionBenchmark.cs:108`**. The benchmark is in `src/Namotion.Interceptor.slnx`, so missing it breaks the solution build with warnings-as-errors, not just the tests. Add to each of the three:
 
 ```csharp
     public SourceState State { get; private set; } = SourceState.Connecting;
@@ -1120,6 +1129,7 @@ loss before they buffer."
 - Create: `src/Namotion.Interceptor.Connectors/SourceSubscription.cs`
 - Modify: `src/Namotion.Interceptor.Connectors/SourceMonitoringExtensions.cs`
 - Modify: `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs`
+- Modify: `src/Namotion.Interceptor.Connectors.Tests/SubjectSourceBaseTests.cs` (its mocked context needs `GetServices<SourceMonitor>()` stubbed, see Step 7)
 - Test: `src/Namotion.Interceptor.Connectors.Tests/SourceMonitorTests.cs` (create)
 
 **Interfaces:**
@@ -1372,9 +1382,12 @@ public class SourceMonitorTests
     }
 
     [Fact]
-    public async Task WhenNoLifecycleTrackingIsConfigured_ThenTheMonitorStillWorks()
+    public async Task WhenNoSubjectEverAttaches_ThenTheMonitorStillWorks()
     {
         // Arrange
+        // Note: a monitor-bearing context ALWAYS has the lifecycle interceptor, because
+        // WithSourceMonitoring implies WithParents and WithParents returns WithLifecycle. So the
+        // reachable robustness case is a tree where nothing attaches, not one with no interceptor.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithSourceMonitoring();
         var monitor = context.GetSourceMonitor();
         var received = new ConcurrentQueue<SourceEvent>();
@@ -1654,7 +1667,7 @@ Add `using System.Collections.Immutable;` and `using Namotion.Interceptor.Tracki
 
 - [ ] **Step 6: Register from the source lifecycle**
 
-In `SubjectSourceBase.cs`:
+In `SubjectSourceBase.cs`. `Dispose` **already exists** as `public override void Dispose()` at the end of the file: replace that member rather than adding a second one, and keep its existing `WriteRetryQueue?.Dispose(); base.Dispose();` as shown. Add `using System.Collections.Immutable;`, which the file currently lacks.
 
 ```csharp
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
@@ -1701,16 +1714,28 @@ In `SubjectSourceBase.cs`:
     }
 ```
 
-- [ ] **Step 7: Run the tests**
+- [ ] **Step 7: Fix the existing mocked-context test**
+
+`SubjectSourceBaseTests.WhenStartingSourceAndPushingChanges_ThenUpdatesAreInCorrectOrder` (`SubjectSourceBaseTests.cs:20-47`) builds its source over a `Mock<IInterceptorSubjectContext>` that stubs only `TryGetService<ISubjectRegistry>`. The new `StartAsync` calls `GetServices<SourceMonitor>()`, which Moq answers with `default(ImmutableArray<SourceMonitor>)`, and iterating a default `ImmutableArray<T>` throws `NullReferenceException`. Stub it:
+
+```csharp
+        subjectContextMock
+            .Setup(context => context.GetServices<SourceMonitor>())
+            .Returns(ImmutableArray<SourceMonitor>.Empty);
+```
+
+Do not "fix" this by making `StartAsync` tolerate a default array. A default `ImmutableArray` means the mock is incomplete, and swallowing it would hide the same gap the next time.
+
+- [ ] **Step 8: Run the tests**
 
 ```bash
 dotnet build src/Namotion.Interceptor.slnx
-dotnet test src/Namotion.Interceptor.Connectors.Tests --filter "FullyQualifiedName~SourceMonitorTests"
+dotnet test src/Namotion.Interceptor.Connectors.Tests
 ```
 
-Expected: 13 passed.
+Expected: build clean, all Connectors tests pass including the 13 in `SourceMonitorTests`. Run the whole project, not a filter: this task changes `StartAsync` for every source, so a filtered run would hide exactly the breakage above.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.Connectors/ src/Namotion.Interceptor.Connectors.Tests/
@@ -1728,6 +1753,7 @@ subscription existed, which removes the need for sequence stamping."
 **Files:**
 - Modify: `src/Namotion.Interceptor.Connectors/SourcePropertyExtensions.cs`
 - Modify: `src/Namotion.Interceptor.Connectors/SourceEvent.cs`
+- Modify: `src/Namotion.Interceptor.Connectors.Tests/SourceOwnershipManagerTests.cs:237-242` (its mocked subject returns a null `Context`, see Step 5)
 - Test: `src/Namotion.Interceptor.Connectors.Tests/SourceEventEmissionTests.cs` (create)
 
 **Interfaces:**
@@ -1799,8 +1825,12 @@ public class SourceEventEmissionTests
 
         // Assert
         Assert.True(claimed);
-        await Task.Yield();
-        Assert.Empty(received);
+        // Delivery is asynchronous, so an empty queue proves nothing on its own: a wrongly published
+        // event may simply not have arrived. Publish a known event afterwards and wait for it; once
+        // that has been delivered, anything enqueued before it would have been delivered too.
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Property?.Name == nameof(Person.LastName)));
+        Assert.DoesNotContain(received, e => e.Property?.Name == nameof(Person.FirstName));
     }
 
     [Fact]
@@ -1820,8 +1850,11 @@ public class SourceEventEmissionTests
 
         // Assert
         Assert.False(claimed);
-        await Task.Yield();
-        Assert.Empty(received);
+        // Same marker technique as above: an asynchronous absence needs a delivered successor.
+        var marker = new TestStateSource(person);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(marker);
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Property?.Name == nameof(Person.LastName)));
+        Assert.DoesNotContain(received, e => e.Property?.Name == nameof(Person.FirstName));
     }
 
     [Fact]
@@ -1983,16 +2016,26 @@ Rewrite `SetSource` and `RemoveSource` in `SourcePropertyExtensions.cs`:
 
 Add `using Namotion.Interceptor.Connectors;` if needed and keep `SourceKey` unchanged.
 
-- [ ] **Step 5: Run the tests**
+- [ ] **Step 5: Fix the existing mocked-subject test**
+
+`SourceOwnershipManagerTests.CreatePropertyReference` (`SourceOwnershipManagerTests.cs:237-242`) builds a `PropertyReference` over a `Mock<IInterceptorSubject>` that stubs only `Data`, so `Subject.Context` is **null**. Every claim and release in that class now reaches `PublishOwnershipChange`, which dereferences it, and throws `NullReferenceException`. Stub the context:
+
+```csharp
+        subjectMock.Setup(subject => subject.Context).Returns(InterceptorSubjectContext.Create());
+```
+
+A real empty context is better than a mocked one here: it resolves no monitors, which is exactly the "no monitoring configured" path this task must leave working, and it exercises the real resolution code rather than a stub of it.
+
+- [ ] **Step 6: Run the tests**
 
 ```bash
 dotnet build src/Namotion.Interceptor.slnx
 dotnet test src/Namotion.Interceptor.Connectors.Tests
 ```
 
-Expected: all pass, including the existing `SourceOwnershipManagerTests`, whose releases now go through the publishing `RemoveSource`.
+Expected: all pass, including `SourceOwnershipManagerTests`, whose releases now go through the publishing `RemoveSource`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.Connectors/ src/Namotion.Interceptor.Connectors.Tests/
@@ -2153,18 +2196,38 @@ In `WithSourceMonitoring`, register the same instance as an `ILifecycleHandler`:
 ```csharp
     public static IInterceptorSubjectContext WithSourceMonitoring(this IInterceptorSubjectContext context)
     {
+        // WithParents FIRST, so ParentTrackingHandler is registered before the monitor. Ordering
+        // among lifecycle handlers is a stable topological sort, and registration order breaks ties.
+        context.WithParents();
+
         context.TryAddService<SourceMonitor>(() =>
         {
-            var monitor = new SourceMonitor();
+            // Lazy logger: the context is configured before any logging provider exists. This is the
+            // same Func<ILogger?> idiom HostedServiceHandler uses. Without it every warning the wait
+            // engine emits is a silent no-op, and those warnings are the only thing distinguishing a
+            // vacuous completion from a live tree.
+            var monitor = new SourceMonitor(() =>
+                context.TryGetService<ILoggerFactory>()?.CreateLogger<SourceMonitor>());
             context.AddService<ILifecycleHandler>(monitor);
             return monitor;
         }, _ => true);
 
-        return context.WithParents();
+        return context;
     }
 ```
 
-If `TryAddService`'s documented restriction against mutating a different context from the factory applies, register the handler after `TryAddService` returns instead, resolving the monitor first.
+`TryAddService` runs its factory eagerly and its documentation explicitly permits mutating **this** context from the factory, so registering the handler inside it is legal.
+
+Change `SourceMonitor`'s constructor from `ILogger? logger = null` to `Func<ILogger?>? loggerResolver = null`, resolving on first use and caching, again matching `HostedServiceHandler`.
+
+Declare the ordering on the class, do not rely on registration order:
+
+```csharp
+[RunsAfter(typeof(ContextInheritanceHandler), typeof(ParentTrackingHandler))]
+public class SourceMonitor : ILifecycleHandler
+```
+
+Both constraints are load-bearing and neither is cosmetic. `ContextInheritanceHandler` adds and removes the parent fallback that the topology-aware `CurrentState` reads, so a monitor running first would enqueue `PropertyEnteredView` before the fallback exists and `PropertyLeftView` after it is gone, and since delivery is on another thread the handler can observe the wrong value as the *last* event for that property, diverging permanently. `ParentTrackingHandler` updates the parents that the wait's topology trigger reads, so a monitor running first would re-evaluate a pending wait against stale parents, conclude a reparent had not made it satisfiable, and never look again. `RunsAfterAttribute` takes `params Type[]` and allows multiples (`src/Namotion.Interceptor/Attributes/RunsAfterAttribute.cs`).
 
 - [ ] **Step 5: Run the tests and commit**
 
@@ -2425,7 +2488,8 @@ Append to `SourceMonitoringExtensions.cs`:
         this IInterceptorSubjectContext context, IServiceCollection services)
     {
         context.WithSourceMonitoring();
-        services.AddHostedService(_ => new SourceRegistrationGate(context));
+        services.AddHostedService(serviceProvider => new SourceRegistrationGate(
+            context, serviceProvider.GetRequiredService<IHostApplicationLifetime>()));
         return context;
     }
 ```
@@ -2989,6 +3053,77 @@ Append to `SourceWaitTests.cs`:
     }
 
     [Fact]
+    public async Task WhenTheAnchorIsReparentedWithinTheTree_ThenAPendingWaitIsReEvaluated()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var left = new Person(context);
+        var right = new Person(context);
+        var moving = new Person();
+        left.Mother = moving;
+        var source = new TestStateSource(right);
+        monitor.Register(source);
+        monitor.CompleteSourceRegistration();
+        source.ReportSynchronized();
+        var wait = moving.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        // Act
+        left.Mother = null;
+        right.Mother = moving;
+
+        // Assert
+        // This is the test that catches handler-ordering defects. A reparent within one tree fires
+        // neither IsContextAttach nor IsContextDetach, and if the monitor runs before
+        // ParentTrackingHandler it re-evaluates against stale parents, decides nothing changed, and
+        // never looks again. The wait would then hang forever.
+        await wait;
+    }
+
+    [Fact]
+    public async Task WhenASourceIsDisposedWithoutBeingStopped_ThenStoppedPrecedesUnregistered()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var source = new TestStateSource(new Person(context));
+        await source.StartAsync(CancellationToken.None);
+        var received = new System.Collections.Concurrent.ConcurrentQueue<SourceEvent>();
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+
+        // Act
+        source.Dispose();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.SourceUnregistered));
+        var kinds = received.Select(e => e.Kind).ToList();
+        var stoppedIndex = kinds.FindIndex(k => k == SourceEventKind.StateChanged);
+        var unregisteredIndex = kinds.FindIndex(k => k == SourceEventKind.SourceUnregistered);
+        Assert.True(stoppedIndex >= 0 && stoppedIndex < unregisteredIndex);
+    }
+
+    [Fact]
+    public async Task WhenASourceIsConstructedButNeverStarted_ThenItDoesNotAffectAWait()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var started = new TestStateSource(root);
+        var neverStarted = new TestStateSource(root);
+        monitor.Register(started);
+        monitor.CompleteSourceRegistration();
+
+        // Act
+        started.ReportSynchronized();
+
+        // Assert
+        await root.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.DoesNotContain(neverStarted, monitor.Sources);
+    }
+
+    [Fact]
     public async Task WhenNoMonitorIsReachable_ThenTheWaitThrowsWithGuidance()
     {
         // Arrange
@@ -3040,7 +3175,7 @@ In `SourceMonitor.cs`:
         });
     }
 
-    private bool IsSatisfied(IInterceptorSubject anchor)
+    private bool IsSatisfied(IInterceptorSubject anchor, bool anchorWarned = true)
     {
         if (!IsRegistrationComplete)
         {
@@ -3065,6 +3200,17 @@ In `SourceMonitor.cs`:
 
         if (!matched)
         {
+            // Registration is complete and still nothing claims this branch. That is very likely a
+            // misconfiguration, and blocking forever in silence reads as a hang rather than a
+            // diagnosis, so say it once per wait rather than on every re-evaluation.
+            if (!anchorWarned)
+            {
+                _logger?.LogWarning(
+                    "A synchronization wait on {Subject} has no in-scope source, and source registration is complete. " +
+                    "The wait will block until cancelled. Check that a source is configured for this branch.",
+                    anchor.GetType().Name);
+            }
+
             return false;
         }
 
@@ -3093,7 +3239,7 @@ In `SourceMonitor.cs`:
             bool satisfied;
             lock (_lock)
             {
-                satisfied = IsSatisfied(wait.Anchor);
+                satisfied = IsSatisfied(wait.Anchor, wait.MarkWarned());
             }
 
             if (satisfied)
@@ -3107,7 +3253,12 @@ In `SourceMonitor.cs`:
     {
         private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        private int _warned;
+
         public IInterceptorSubject Anchor { get; } = anchor;
+
+        /// <summary>True once this wait has already logged its empty-scope warning.</summary>
+        public bool MarkWarned() => Interlocked.Exchange(ref _warned, 1) == 1;
 
         public void Complete() => _completion.TrySetResult();
 
@@ -3217,7 +3368,7 @@ same-tree reparent changes scope while firing neither context attach nor detach.
 
 Create `src/Namotion.Interceptor.OpcUa.Tests/Client/OutageStateTests.cs`, following the existing integration-test setup in that project (server fixture, client source construction, `Category=Integration` trait):
 
-First open the nearest existing OPC UA client integration test and copy its fixture verbatim: the server start, the context recipe, and the `OpcUaSubjectClientSource` construction. Do not invent setup. Add `.WithSourceMonitoring()` to the copied context recipe, and bind the constructed source to a local named `source`. Then the test body is:
+First open the nearest existing OPC UA client integration test and copy its fixture verbatim: the server start, the context recipe, and the `OpcUaSubjectClientSource` construction. Do not invent setup. Add `.WithSourceMonitoring()` to the copied context recipe, and bind the constructed source to a local named `source`. It must be typed as the **concrete** `OpcUaSubjectClientSource`, or cast to `ISubjectSource`: `IOpcUaSubjectClientSource` does not extend `ISubjectSource` (`Client/IOpcUaSubjectClientSource.cs:12`), so `source.State` will not compile through the interface. `OpcUaCurrentSessionChangedTests.cs:19-32` shows the concrete binding, which `InternalsVisibleTo` permits. Note also that no existing connector test uses `IFaultInjectable`, so there is no precedent to copy for the fault-injection call itself; the hook does exist on all three client sources. Then the test body is:
 
 ```csharp
 [Trait("Category", "Integration")]
