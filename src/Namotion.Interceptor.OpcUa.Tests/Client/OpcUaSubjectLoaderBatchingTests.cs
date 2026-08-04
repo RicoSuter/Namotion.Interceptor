@@ -50,6 +50,7 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
         });
 
         var browseCallCount = 0;
+        var nodesPerBrowseCall = new List<int>();
         mockSession
             .Setup(s => s.BrowseAsync(
                 It.IsAny<RequestHeader>(),
@@ -60,6 +61,10 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
             .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
             {
                 Interlocked.Increment(ref browseCallCount);
+                lock (nodesPerBrowseCall)
+                {
+                    nodesPerBrowseCall.Add(browseDescriptions.Count);
+                }
                 var results = new BrowseResultCollection();
                 foreach (var desc in browseDescriptions)
                 {
@@ -96,12 +101,18 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
         // Assert: all properties are owned by the source
         Assert.Equal(4, ownership.Properties.Count());
 
-        // Assert: BrowseAsync was called more than once, proving chunking occurred.
-        // Call 1: root node browse (BrowseNodeAsync, single node).
-        // Calls 2+: Phase 5 batch-browses the 4 variable nodes in chunks of 2
-        //           (BrowseManyNodesAsync splits 4 nodes into 2 calls of 2).
-        Assert.True(browseCallCount >= 3,
-            $"Expected at least 3 BrowseAsync calls (1 root + 2 chunked attribute batches), but got {browseCallCount}.");
+        // Assert: exactly one BrowseAsync call per tree level, chunked by MaxNodesPerBrowse.
+        // Call 1: the root node (1 node).
+        // Calls 2 and 3: Phase 5 batch-browses the 4 variable nodes for attribute discovery,
+        //                split into 2 calls of 2 by the MaxNodesPerBrowse = 2 limit.
+        // An exact count is what pins the batching: a loader that browsed node by node would
+        // need 5 calls here and would still satisfy any lower bound.
+        Assert.Equal(3, browseCallCount);
+
+        // Assert: at least one call carried more than one NodeId. This is what actually separates
+        // a batched loader from a per-node one. The call count alone could be met by a per-node
+        // loader on a smaller tree, but only batching puts several nodes in one request.
+        Assert.Contains(nodesPerBrowseCall, nodeCount => nodeCount > 1);
     }
 
     /// <summary>

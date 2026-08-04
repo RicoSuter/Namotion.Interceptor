@@ -565,6 +565,14 @@ internal sealed class OpcUaSubjectLoader
         var browseResults = await context.BrowseAsync(allNodeIds).ConfigureAwait(false);
         var allChildrenToLoad = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>();
 
+        // Containers are bound to their property only after their children have loaded, which is
+        // what keeps rollback complete. Binding first would leave a staged child referenced by the
+        // parent property while Dispose detaches it from the registry, and nothing removes the
+        // parent's reference, so the subject would survive as an unregistered zombie that later
+        // loads reuse (skipping re-staging) and then drop. Same order as
+        // LoadPendingSubjectReferencesAsync.
+        var pendingContainerAssignments = new List<(RegisteredSubjectProperty Property, object Container)>();
+
         foreach (var (property, nodeId) in pendingCollections)
         {
             if (!browseResults.TryGetValue(nodeId, out var rawChildren))
@@ -583,7 +591,7 @@ internal sealed class OpcUaSubjectLoader
             var children = await ResolveChildSubjectsAsync(property, childNodes, isDictionary: false, context).ConfigureAwait(false);
 
             var collection = DefaultSubjectFactory.Instance.CreateSubjectCollection(property.Type, children.Select(c => c.Subject));
-            context.QueueOrApplySetValue(_source, property, collection);
+            pendingContainerAssignments.Add((property, collection));
             allChildrenToLoad.AddRange(children);
         }
 
@@ -630,11 +638,18 @@ internal sealed class OpcUaSubjectLoader
             }
 
             var dictionary = DefaultSubjectFactory.Instance.CreateSubjectDictionary(property.Type, entries);
-            context.QueueOrApplySetValue(_source, property, dictionary);
+            pendingContainerAssignments.Add((property, dictionary));
             allChildrenToLoad.AddRange(children);
         }
 
         await LoadSubjectsAsync(allChildrenToLoad, context).ConfigureAwait(false);
+
+        // Staged children stay reachable for the load above through the fallback context that
+        // RegisterStagedSubject added, so they do not need to be bound to reach this point.
+        foreach (var (property, container) in pendingContainerAssignments)
+        {
+            context.QueueOrApplySetValue(_source, property, container);
+        }
     }
 
     // Reuses existing children when possible: dictionaries match by browse name,

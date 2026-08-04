@@ -711,16 +711,16 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
-        _structureLock.Wait();
-        try
-        {
-            _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
-            _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
-        }
-        finally
-        {
-            _structureLock.Release();
-        }
+        // Lock-free by design: this runs from the synchronous subject-detach callback, which can
+        // fire on the same thread that already holds _structureLock during a load or reconnect
+        // (a failed load's rollback detaches its staged subjects inline, and replacing existing
+        // structure detaches the old subjects inline). _structureLock is a non-reentrant
+        // SemaphoreSlim, so taking it here would deadlock that thread forever, and it would block
+        // while holding LifecycleInterceptor's attached-subject lock, stalling every attach and
+        // detach in the process. The underlying removals operate on concurrent collections and are
+        // idempotent, so no outer lock is needed.
+        _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
+        _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
     }
 
     public async ValueTask DisposeAsync()
