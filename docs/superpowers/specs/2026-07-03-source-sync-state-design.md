@@ -410,7 +410,21 @@ The PR also adds `SubjectPropertyChange.GetCurrentValue<T>()` next to `GetOldVal
 - Built-in connectors (OPC UA, MQTT, WebSocket): no source changes expected; they inherit from `SubjectSourceBase` and claim through the existing paths.
 - Test doubles that implement `ISubjectSource` directly (for example `ConcurrentTestSource` and `BlockingTestSource` in `Namotion.Interceptor.Connectors.Tests`) gain the four new members.
 - Public API snapshot tests: `ISubjectSource` changes will fail `VerifyChecksTests.PublicApi` in affected projects; the new `.verified.txt` snapshots are accepted as part of the change.
-- Documentation: a new `docs/connectors-source-monitoring.md` page covering the state model, the stream and its delivery contract, the `CurrentState` versus `NewState` rule, branch-scoped waits, the registration signal in both its hosted and explicit forms, the breaking-change note for custom `ISubjectSource` implementers, and the availability-attributes worked sample; `docs/connectors.md` gains a short linking section and its context recipe gains `WithSourceMonitoring()`.
+Documentation spans four files, because the API spans four packages:
+
+- **`docs/connectors-source-monitoring.md`** (new): the feature page, named to match `WithSourceMonitoring` and `SourceMonitor` and following the existing `connectors-<topic>.md` convention. Section order is deliberately usage first, mechanism second, so a reader who only wants to wait for a live tree stops after the first two sections:
+  1. *Getting started (DI)*: the smallest complete example. Context recipe with `WithSourceMonitoring(builder.Services)`, a source registration, and a worker that awaits `root.WaitForSynchronizationAsync(ct)`. No `SourceMonitor` object appears anywhere in it, and no registration signalling, because the overload handles it.
+  2. *Waiting on part of the tree*: one line changing the anchor from `root` to `root.Plants["LineA"]`, plus a short paragraph on what "in scope" means and that a sibling branch's failing source does not block.
+  3. *Reading per-property state*: `GetSourceState()` and what each value means after the wait.
+  4. *Applications that create sources at runtime*: the advanced scenario. Parameterless `WithSourceMonitoring()`, then the three-line `ExecuteAsync` (load, await `WaitForPendingHostedServiceActionsAsync`, `CompleteSourceRegistration`), with a short explanation of why the barrier is there. `DeferWaitCompletion()` for later batches.
+  5. *Observing changes*: `ISubjectSource.StateChanged` for a held source, the monitor stream for aggregate consumers, and the `CurrentState` versus `NewState` rule stated as a rule with a one-line reason.
+  6. *The state model and transitions*, *delivery contract*, and the breaking-change note for custom `ISubjectSource` implementers.
+  7. *Worked sample*: the availability attributes (`ConnectionState`, derived `IsAvailable`, updater with its per-source index writing `CurrentState`).
+
+  Both examples stay minimal. The simple one is two code blocks and shows no infrastructure type; the advanced one is three statements. Anything longer belongs in the worked sample at the end.
+- **`docs/connectors.md`**: a short linking section under Sources, and `WithSourceMonitoring()` added to the context recipe.
+- **`docs/hosting.md`**: `WaitForPendingHostedServiceActionsAsync`, documented as a barrier over the attach queue in the package that owns that queue, cross-linked from the source monitoring page rather than duplicated.
+- **`docs/tracking.md`**: `GetCurrentValue<T>()`, placed next to the existing advice in Delivery Guarantees that tells consumers to re-read the property, since it is the API that advice has been missing.
 
 ## Testing
 
