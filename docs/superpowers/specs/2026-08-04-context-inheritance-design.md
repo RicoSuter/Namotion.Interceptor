@@ -709,7 +709,7 @@ converge.
 | Condition | Result |
 |---|---|
 | Attaching a subject owned by another graph | `InvalidOperationException`; earlier items of the same batch stay attached |
-| `AddFallbackContext` adding a lifecycle-bearing context to a subject that is not lifecycle-attached | `InvalidOperationException` naming `AttachToContext` |
+| `AddFallbackContext` adding a lifecycle-bearing context to a subject with a null attach record | `InvalidOperationException` naming `AttachToContext` |
 | `RemoveFallbackContext` targeting the attach edge | `InvalidOperationException` naming `DetachFromContext` |
 | Delegation cycle on resolution | unchanged |
 
