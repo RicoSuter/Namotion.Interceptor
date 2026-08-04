@@ -219,134 +219,29 @@ on the base `InterceptorSubjectContext`.
 ```csharp
 // on InterceptorExecutor, which is the only context that has a subject
 private ILifecycleInterceptor? _owner;
-private AttachState _attachContext;   // null | Attaching(ctx) | Attached(ctx) | Detaching(ctx)
+private IInterceptorSubjectContext? _attachContext;   // null, or the context attached through
 ```
 
-The alternative, putting them in `subject.Data` alongside the reference count, was in the first revision
-of this design and is worse on every axis. `Data` is a `ConcurrentDictionary`, so each record costs a node
-allocation of roughly 50 to 60 bytes plus table pressure, one per attached subject, which alone outweighs
-everything the parent link saves. It also has no compare-exchange: the claim would have to be `GetOrAdd`
-and `TryUpdate`. And both guards that read these records live inside `AddFallbackContext` and
-`RemoveFallbackContext`, which are methods on the context, so a subject-side record means a cross-object
-lookup on a path that is otherwise a field read.
+`subject.Data` was the first choice and is worse on every axis. It is a `ConcurrentDictionary`, so each
+record costs a node allocation of roughly 50 to 60 bytes plus table pressure, one per attached subject,
+which alone outweighs everything the parent link saves. And the guard that reads `_attachContext` lives
+inside `AddFallbackContext`, a method on the context, so a subject-side record means a cross-object
+lookup on a path that is otherwise a field read. On the executor they are two reference fields, 16 bytes
+on an object that already exists per subject.
 
-On the executor they are plain fields, 16 bytes on an object that already exists per subject rather than
-two allocations per attach. The stated reason in an earlier version, that `ConcurrentDictionary` has no
-compare-exchange, was wrong: `TryUpdate(key, newValue, comparisonValue)` is one. The conclusion stands on
-cost alone.
+The base class was the second choice and is also wrong. Both guards are executor-only semantics: on a
+plain `InterceptorSubjectContext.Create()` context, adding a lifecycle-bearing context is exactly how
+services are composed and must not throw. Fields on the base would give every standalone context state
+that can never mean anything.
 
-**Both are governed by one rule: they are read and written only under `_mutationLock`**, the same lock
-that publishes the edge set. Section 5 specifies the state machine they form. Nothing here needs
-`Interlocked` or `Volatile`, because nothing here is read outside that lock, and the cross-graph owner
-race is serialised for free: two graphs attaching the same subject hold two different `_attachedSubjects`
-monitors but contend for the same executor's `_mutationLock`.
+The guards are `protected virtual` hooks called from inside the base's critical section, not method
+overrides wrapping it. Section 5 specifies the lock discipline and the guards; this subsection only fixes
+where the fields live.
 
-Earlier versions of this design put `_owner` behind a compare-exchange and `_attachContext` behind
-guards that read the field and then called `base`. The second is check-then-act across a lock boundary
-and closes nothing, and the first is unnecessary once both live under the lock that already orders the
-edge they describe.
-
-The base class was the first choice and is wrong. All three guards that read these records are
-executor-only semantics: on a plain `InterceptorSubjectContext.Create()` context, adding a
-lifecycle-bearing context is exactly how services are composed and must not throw. Putting the fields on
-the base gives every standalone context state that can never mean anything and puts subject-lifecycle
-semantics into a class with no subject.
-
-The guards themselves are `protected virtual` hooks called from inside the base's critical section, not
-method overrides wrapping it. Section 5 specifies the lock discipline and the guards; this section only
-fixes where the fields live.
-
-### The cycle argument, corrected
-
-The first version of this design claimed parent links can never produce a pure delegation cycle. Both
-reviewers refuted it, with different counterexamples, and both counterexamples ran through the
-repoint-on-partial-detach rule. **That rule is removed** (see section 5), and with it the counterexamples.
-
-What remains true is narrower. The link is set only at `count == 1`, so a link cycle needs two subjects
-each of which acquired its first property reference from the other. Reaching that requires one of them to
-be a root, and a root carries an attach edge as well as its link, so it has two outgoing edges and is not
-a pure delegator. The pure delegation cycle exception is therefore unreachable through inheritance, and
-the service walk's visited set handles the rest, as it already does for cycles containing a context that
-owns services.
-
-Two guards are load-bearing for that argument and are stated as rules rather than left implicit:
-
-- **The link is never set to the subject's own context.** `a.Mother = a` is legal and reaches
-  `AttachToProperty` with the parent being the subject itself, which would otherwise self-delegate and
-  make every access on that subject throw. Verified reachable during review.
-- **No link is set outside the `count == 1` gate.** This is what the removed repoint violated.
-
-This design does not claim to fix #410 symptom 1. That issue's own comment argues it may be organically
-unreachable on `master`, because stranding leaves two fallbacks and two fallbacks cannot collapse. The
-reproduction attempt is a deliverable; if the shape cannot be built, symptom 1 is struck.
-
-### The owner
-
-Two records are needed: which lifecycle graph owns the subject, and which context it was attached
-through. **Both live on `InterceptorExecutor` as plain reference fields**, not in `subject.Data` and not
-on the base `InterceptorSubjectContext`.
-
-```csharp
-// on InterceptorExecutor, which is the only context that has a subject
-private ILifecycleInterceptor? _owner;
-private AttachState _attachContext;   // null | Attaching(ctx) | Attached(ctx) | Detaching(ctx)
-```
-
-The alternative, putting them in `subject.Data` alongside the reference count, was in the first revision
-of this design and is worse on every axis. `Data` is a `ConcurrentDictionary`, so each record costs a node
-allocation of roughly 50 to 60 bytes plus table pressure, one per attached subject, which alone outweighs
-everything the parent link saves. It also has no compare-exchange: the claim would have to be `GetOrAdd`
-and `TryUpdate`. And both guards that read these records live inside `AddFallbackContext` and
-`RemoveFallbackContext`, which are methods on the context, so a subject-side record means a cross-object
-lookup on a path that is otherwise a field read.
-
-On the executor they are plain fields, 16 bytes on an object that already exists per subject rather than
-two allocations per attach. The stated reason in an earlier version, that `ConcurrentDictionary` has no
-compare-exchange, was wrong: `TryUpdate(key, newValue, comparisonValue)` is one. The conclusion stands on
-cost alone.
-
-**Both are governed by one rule: they are read and written only under `_mutationLock`**, the same lock
-that publishes the edge set. Section 5 specifies the state machine they form. Nothing here needs
-`Interlocked` or `Volatile`, because nothing here is read outside that lock, and the cross-graph owner
-race is serialised for free: two graphs attaching the same subject hold two different `_attachedSubjects`
-monitors but contend for the same executor's `_mutationLock`.
-
-Earlier versions of this design put `_owner` behind a compare-exchange and `_attachContext` behind
-guards that read the field and then called `base`. The second is check-then-act across a lock boundary
-and closes nothing, and the first is unnecessary once both live under the lock that already orders the
-edge they describe.
-
-The base class was the first choice and is wrong. All three guards that read these records are
-executor-only semantics: on a plain `InterceptorSubjectContext.Create()` context, adding a
-lifecycle-bearing context is exactly how services are composed and must not throw. Putting the fields on
-the base gives every standalone context state that can never mean anything and puts subject-lifecycle
-semantics into a class with no subject. So `InterceptorExecutor` keeps its two overrides, reduced to
-guards that delegate:
-
-```csharp
-public override bool AddFallbackContext(IInterceptorSubjectContext context)
-{
-    RejectIfDetaching(context);
-    RejectIfLifecycleBearingAndUnattached(context);
-    return base.AddFallbackContext(context);
-}
-```
-
-What this design removes from those overrides is the user code, not the overrides. Nothing supplied by a
-consumer runs between publishing an edge and owning it, which is the substantive change; the guards run
-before the base call and mutate nothing.
-
-The guards also fix their own ordering. `AttachToContext` claims the attach context before calling
-`AddFallbackContext`, so the record is set by the time the guard runs and the guard passes. A bare
-`AddFallbackContext` naming a lifecycle-bearing context on a subject with a null record throws. That is
-exactly the discrimination the design needs, and it holds only because the claim precedes the add.
-
-The claim must be a single atomic operation. A read-then-claim implementation loses the cross-graph race
-and only the directed test in section 9 would catch it.
-
-Inferring ownership from topology is not sufficient: `IsContextAttach && ReferenceCount > 1` misses
-`new Person(contextA)` followed by `rootB.Children = [person]`, where the subject is a root in A with
-reference count 0, so B's attach looks like an ordinary first attach.
+Inferring ownership from topology instead of recording it is not sufficient:
+`IsContextAttach && ReferenceCount > 1` misses `new Person(contextA)` followed by
+`rootB.Children = [person]`, where the subject is a root in A with reference count 0, so B's attach looks
+like an ordinary first attach.
 
 One limit, recorded rather than absorbed: the owner is an `ILifecycleInterceptor` reference, so two root
 contexts sharing one tracking context as a fallback count as one graph while having two registries, and
@@ -766,9 +661,9 @@ public static IInterceptorSubjectContext? TryGetAttachContext(this IInterceptorS
 
 And `DetachFromContext` aimed at a context that is not the attach context throws rather than silently
 returning, which is the same class of mistake as `RemoveFallbackContext` aimed at the attach edge and
-deserves the same treatment. That is why `TryBeginDetach` returns a three-valued outcome rather than a
-bool: "not attached through this context" throws, "another detach is already running" returns, and a
-single bool would conflate them.
+deserves the same treatment. `DetachFromContext` distinguishes the two cases before it acts: a subject
+attached through a different context throws, and a second concurrent caller returns having called
+nothing.
 
 ### Handler exceptions
 
@@ -875,12 +770,10 @@ the same lock and the same R4 discipline.
 
 Parent link set and clear reuse `AddFallbackContext`'s publish and `_usedByContexts` protocol, so the
 fuzz extension covers them. The owner claim is serialized by `lock (_attachedSubjects)` within a graph but
-not across graphs, so the owner claim rides on the executor's `_mutationLock` inside `TryBeginAttach` and
-`AttachToProperty`: two threads attaching the same subject to two graphs, exactly one wins, and when the
-loser is a property attach it throws leaving earlier items of its batch attached, which is asserted rather
-than assumed. Plus a rendezvous that runs a bare `AddFallbackContext` while another thread sits between
-`TryBeginAttach` and its first interceptor, asserting the add is rejected rather than publishing an edge
-the attaching thread then mistakes for its own. Plus the two
+not across graphs, so the owner claim nests the executor's `_mutationLock` inside `_attachedSubjects`:
+two threads attaching the same subject to two graphs, exactly one wins, and the loser throws leaving
+earlier items of its batch attached, which is asserted rather than assumed. Plus a directed test that two
+concurrent `DetachFromContext` calls run the interceptors exactly once. Plus the two
 rendezvous tests for changes 8 and 9, a directed test that the `AddFallbackContext` guard and the
 `Detaching` transition are serialised on `_mutationLock`, and a test that a handler which re-attaches a
 subject during its own detach survives the `finally`.
