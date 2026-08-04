@@ -585,7 +585,7 @@ and every one of those calls is genuinely unaffected. 29 calls across 16 files a
 
 The three connector sites therefore keep working exactly as they do today: the item is attached as a root
 in the parent's graph, populated while registry-visible, then assigned, at which point the parent link
-supersedes the attach edge and releases it. `SubjectItemsUpdateApplier.CreateAndApplyItem` returns the
+already names that context so no link is set. `SubjectItemsUpdateApplier.CreateAndApplyItem` returns the
 item and leaves assignment to its caller, which the removed scoped API could not have expressed.
 
 ## 7. Edge ownership and errors
@@ -631,7 +631,7 @@ repoint. Both paths get their own reproduction test, since they diverge before t
 
 | Condition | Result |
 |---|---|
-| Attaching a subject owned by another graph | `InvalidOperationException`, before any lifecycle mutation, batch-level |
+| Attaching a subject owned by another graph | `InvalidOperationException` from a single compare-exchange per subject; earlier items of the same batch stay attached |
 | `AttachToContext` while a detach of the same subject is in progress | `InvalidOperationException`, before any mutation; retry after the detach |
 | `AddFallbackContext` while a detach is in progress on that executor | `InvalidOperationException`; this is #411's loud failure. The sentinel erases the context identity, so any add during the window throws |
 | `AddFallbackContext` adding a lifecycle-bearing context to an unattached subject | `InvalidOperationException` naming `AttachToContext` |
@@ -790,7 +790,7 @@ One pull request on `design/context-inheritance-parent-link`, built from commits
 | 3 | `AttachToContext` / `DetachFromContext`, migrate the seven production call sites | behaviour-neutral |
 | 4 | `ContextState.Parent`, internal setters, `LifecycleInterceptor` sets and clears it with both guards, handler body becomes the descent trigger | snapshots must not move; #410 turns green |
 | 5 | Remove the executor overrides, add the loud errors and the observability accessors | the breaking one |
-| 6 | Owner, three-state attach context, batch-level owner check, attach-edge release, `finally` | #207 and #402 turn green |
+| 6 | Owner claim, three-state attach context under `_mutationLock`, the state-re-reading `finally` | #207 and #402 turn green |
 | 7 | Reproduction tests for the shapes that need the new API (two-graph, rendezvous) | red before their commit, green after |
 | 8 | The #210 fix | characterization test 7 records the new handler entry |
 | 9 | Consumer and design docs | see below |
@@ -871,10 +871,11 @@ multi-parent stale-link case left behind by removing the repoint.
 
 - **#384**, handler exception recovery. Its stated blocker dissolves, since inheritance is no longer a
   handler, and the remaining fix is rollback on throw inside `AttachToProperty`. One caveat found in
-  review: change 5 makes `AttachToProperty` throw where it previously could not, so the batch-level owner
-  check in step 0 exists specifically to keep that throw from leaving a half-applied batch. Beyond that,
-  a rejected cross-graph attach leaves the property value written and the outer interceptors' post-`next`
-  work skipped, which is stated rather than fixed.
+  review: change 5 makes `AttachToProperty` throw where it previously could not. A rejected cross-graph
+  attach therefore leaves the property value written, the outer interceptors' post-`next` work skipped,
+  and earlier items of the same batch attached. An earlier version tried to prevent the last of those
+  with a batch-level check, which review refuted because hoisting the check separates it from the claim.
+  The partial batch is stated rather than fixed, and it is #384's shape.
 - **#403, #404, #406**, the `TryAddService` factory under the mutation lock and service equality. Same
   class of problem, different call site. #404's lock edge is documented here but not fixed.
 - **#409**, measuring the copy-on-write memory trade-offs.
