@@ -486,12 +486,14 @@ not guaranteed" now states explicitly.
 2. _attachedSubjects[subject].Add(property); count = IncrementReferenceCount()
 3. InvokeAddedLifecycleHandlers(subject, parentContext, change)   // position unchanged
        ContextInheritanceHandler:
-           Debug.Assert(subject.Parent is null)
-           if (count == 1
-               && parentContext is not subject.Context               // self-context guard
-               && parentContext is not the recorded attach context)  // the attach edge provides it
-             TrySetParentContext(parentContext)                      // internal, publishes no callbacks
-           interceptor.AttachSubjectToContext(subject)               // next level
+           if (count == 1)                                           // first reference only
+           {
+               Debug.Assert(subject.Parent is null)
+               if (parentContext is not subject.Context              // self-context guard
+                   && parentContext is not the recorded attach context)
+                 TrySetParentContext(parentContext)                  // internal, no callbacks
+               interceptor.AttachSubjectToContext(subject)           // next level
+           }
 4. if (isFirstAttach) SubjectAttached; AttachSubjectProperty per property
 ```
 
@@ -514,8 +516,16 @@ it does on `master`.
 **Step 0 fails fast on a handler that re-attaches the subject it is being notified about.** Absent from
 `_attachedSubjects` with a non-null `Parent` is exactly and only a detach still unwinding, because
 `DetachFromProperty` removes the entry at `LifecycleInterceptor.cs:218` and the `finally` clears the link
-afterwards. Nothing has been mutated when it fires, so the exception propagates out through the handler
-and the detach's `finally` still completes cleanly.
+afterwards. The same check goes at the top of `LifecycleInterceptor.AttachToContext` (`:86-110`), so a
+root attach in the same window is rejected too.
+
+**No lifecycle bookkeeping is mutated when it fires, but the property write already happened.**
+`WriteProperty` calls `next(ref context)` before taking the lock (`LifecycleInterceptor.cs:294`), so the
+parent property retains the subject while the lifecycle refuses it, leaving a live reference with a
+reference count of zero. That is the same partially applied state the cross-graph rejection produces two
+paragraphs above, it is #384's shape, and it is classified rather than fixed. The test for change 15
+asserts it explicitly: the throw propagates, the backing store keeps the value, the count stays zero, and
+the detach completes.
 
 Without it, the re-attach would set a link on a subject that is currently a link *source* with no attach
 edge, which is precisely the state the cycle argument in section 4 assumes is impossible, and the
@@ -596,19 +606,15 @@ The gate drops `IsContextAttach` and keeps `count == 1`:
        if (isLastDetach) SubjectDetaching
        InvokeRemovedLifecycleHandlers        // descent happens here
    finally:
-       if the subject is STILL absent from _attachedSubjects:
-           TryClearParentContext(); release the attach edge; release ownership
+       if (count == 0) TryClearParentContext(); release the attach edge; release ownership
 5. the existing explicit child recursion at :260-268 stays
 ```
 
-The `finally` re-reads `_attachedSubjects` rather than trusting the `count == 0` captured at step 3. That
-is a correction from the third review, which found a hole the `finally` itself introduced: a handler
-running in step 4 can re-attach the subject, since `_attachedSubjects.Remove` at
-`LifecycleInterceptor.cs:218` has already run. `AttachToProperty` then sees `existed == false`, the count
-goes 0 to 1, and step 3 sets a fresh link. A `finally` firing on the captured count would wipe all of it,
-with no way to re-establish the link because the `count == 1` gate is spent. On `master` the equivalent
-removal happens inside the handler chain (`ContextInheritanceHandler.cs:23-26`), so a later handler's
-re-attach survives, and the re-read preserves that.
+An earlier version had the `finally` re-read `_attachedSubjects` instead of trusting the captured count,
+so that a handler re-attaching the subject during step 4 would not be wiped. That protocol is removed:
+step 0 now rejects such a re-attach outright, through both attach entry points, so there is nothing left
+for the re-read to preserve and keeping both would have required the same handler action to succeed and
+to throw. The captured count is correct precisely because the window it described is now closed.
 
 **The `finally` is the correction that matters most.** The first version released at step 2, before the
 handlers. Both reviewers refuted it: `DetachSubjectFromContext` passes `subject.Context` down as the
@@ -818,7 +824,7 @@ converge.
 | Condition | Result |
 |---|---|
 | Attaching a subject owned by another graph | `InvalidOperationException`; earlier items of the same batch stay attached |
-| `AddFallbackContext` adding a lifecycle-bearing context to a subject with a null attach record | `InvalidOperationException` naming `AttachToContext` |
+| `AddFallbackContext` adding a lifecycle-bearing context that is not the subject's recorded attach context | `InvalidOperationException` naming `AttachToContext` |
 | `RemoveFallbackContext` targeting the attach edge | `InvalidOperationException` naming `DetachFromContext` |
 | Delegation cycle on resolution | unchanged |
 
@@ -836,9 +842,11 @@ public static bool IsAttached(this IInterceptorSubject subject);
 public static IInterceptorSubjectContext? TryGetAttachContext(this IInterceptorSubject subject);
 ```
 
-`IsAttached` is defined as "this subject is tracked by a lifecycle graph", which is `_owner is not null`,
-not the attach record. A property-attached child has a null record and is attached; a subject holding
-only an explicit fallback has neither. `TryGetAttachContext` returns the record, so it is null for a
+`IsAttached` is `_owner is not null || _attachContext is not null`. Neither half is sufficient on its
+own: a property-attached child has a null record but is owned, and a subject root-attached through a
+core-only custom `ILifecycleInterceptor` has a record but no owner, because only Tracking's
+`LifecycleInterceptor` claims ownership. A subject holding nothing but an explicit fallback has neither
+and reports false. `TryGetAttachContext` returns the record, so it is null for a
 child that was never root-attached, and that asymmetry is deliberate and documented: one answers whether
 the subject is in a graph, the other answers which context `DetachFromContext` would accept.
 
@@ -969,12 +977,12 @@ gates are verifiable by checking it out and running the suite.
 | 12 | pre-wire a child's context to a not-yet-attached parent, then attach; assert the grandchild is registered and resolves interceptors |
 | 13 | register a service on a parent's own executor, then place a constructor-attached child under it; assert the child now resolves it |
 | 14 | reference counts still behave identically across attach, multi-parent and detach, and `subject.Data` no longer carries the entry |
-| 15 | a handler that re-attaches the subject it is being notified about throws, nothing is mutated, and the detach still completes |
+| 15 | a handler that re-attaches the subject it is being notified about throws, through both attach entry points; the backing store keeps the written value, the reference count stays zero, and the detach completes |
 
 ### Oracles that must not move
 
 **The oracle inventory was incomplete.** All sixteen `Namotion.Interceptor.Generator.Tests` snapshots
-contain the emitted `AddFallbackContext` line and move at commit 4, and
+contain the emitted `AddFallbackContext` line and move at commit 3, and
 `Namotion.Interceptor.Tests/InterceptorTests.WhenAddingAndRemovingContext_...verified.txt` moves with its
 test. Beyond those, nine `.verified.txt` files live in `Namotion.Interceptor.Tracking.Tests`: seven
 `LifecycleInterceptorTests.*`, one derived-property timestamp snapshot, and the public API snapshot.
@@ -1002,7 +1010,7 @@ concurrent `DetachFromContext` calls run the interceptors exactly once, a direct
 `AddFallbackContext` guard and the
 attach-record write are serialised on `_mutationLock`, one that root-attaching a property-owned subject
 into a second graph publishes no record and no edge, and a test that a handler which re-attaches a
-subject during its own detach survives the `finally`.
+subject during its own detach throws, through both attach entry points.
 
 ### Mutants that must die
 
@@ -1010,8 +1018,8 @@ Restore `IsContextAttach` to the link gate; release the parent link before the h
 `finally`; delete the owner check; delete the `finally` on the detach edge removal; delete the
 self-context guard; delete the rollback in `AttachToContext`'s `catch`; delete the ownership read in
 `TryRecordAttachContext`; set
-the link and release the attach edge instead of skipping the link; trust the captured `count == 0` in the
-detach `finally` instead of re-reading `_attachedSubjects`; release `_owner` from a place that reads the
+the link and release the attach edge instead of skipping the link; put the assertion, the link publication or the descent outside the
+`count == 1` branch, so a second-parent attach re-descends; release `_owner` from a place that reads the
 reference count without holding `_attachedSubjects`; make the reverse-entry unregistration unconditional
 again; route the detach cleanup through the public `RemoveFallbackContext`; drop the reference-count
 guard on `DetachFromContext`; drop the last-property-detach release of the attach edge; make the
@@ -1131,7 +1139,7 @@ comments, not only its body.
 | #402 | **Update, keep open on defect 1 only.** Defects 3, 4 and 5 follow from there being no callbacks inside the edge mutation. Defect 2 is closed by change 7, the single clear-under-lock that makes detach run exactly once. Defect 1, a remove racing an add, stays at `master`'s behaviour, because `AttachToContext` and `DetachFromContext` are two-step operations and are not atomic against each other. It is narrowed from every child detach to an explicit concurrent root operation, since `ContextInheritanceHandler` no longer calls the public mutators. Follow-up 1 closes it. Its first comment concluded that "the complete fix needs a decision about where lifecycle callbacks run, not just a reordering", which is what this design decides. |
 | #207 | Close, citing both reproductions, both verified during review. |
 | #410 | **Update, keep open.** Symptom 2 is not closed. The route the issue names, a detach that leaves property values set, strands nothing when measured; stranding requires the subject to hold another reference, which is the multi-parent shape, and the connector shape fails the same way through its attach edge. Post all three measurements, and the correction that the subject resolves *nothing* rather than continuing to resolve through the departed context, which is more severe than the issue predicts. Symptom 1 only if the reproduction attempt succeeds; if it cannot be built, strike it with the reasoning recorded. |
-| #210 | Close as not reachable, noting that commit 8 makes it structurally impossible if a removal API lands later. |
+| #210 | Close as not reachable, noting that commit 5 makes it structurally impossible if a removal API lands later. |
 | #411 | **Update, keep open.** Narrowed the same way as #402 defect 1 and for the same reason, and closed by the same follow-up. An earlier version of this design added a loud rejection for it; that was part of the protocol option B removes, and serialising the two operations closes it properly rather than turning it into an exception the caller must handle. |
 | #384 | Update, narrowed. The attach-tail case loses route 2 with #412's deferred handoff; route 1 is pre-existing. The detach-half case still raises on a cyclic chain, but such a chain now requires a consumer to have built one deliberately. Its stated blocker is removed. See section 11. |
 | #412 | Close unmerged, referencing this design. |
