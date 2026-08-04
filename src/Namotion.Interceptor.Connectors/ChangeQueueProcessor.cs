@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Connectors;
 
@@ -42,6 +43,10 @@ public class ChangeQueueProcessor : IDisposable
     // ahead of the buffered/immediate split and therefore on the dequeue thread in both modes, while
     // batch suppression runs on the flush task.
     private readonly DeliveredRevisionFilter _deliveredRevisions;
+
+    // Held so the detach subscription can be removed on dispose; an event on the long-lived lifecycle
+    // interceptor would otherwise keep this processor, and everything it holds, alive after disposal.
+    private readonly LifecycleInterceptor? _lifecycle;
 
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
@@ -93,6 +98,21 @@ public class ChangeQueueProcessor : IDisposable
             _flushMerger.Dispose();
             throw;
         }
+
+        // What bounds the delivered-revision state. Without it a detached subject stays rooted by the
+        // PropertyReference keys held for its properties, for as long as this processor lives. Null
+        // when the context has no lifecycle interceptor, which leaves the filter's own cap as the only
+        // bound; see DeliveredRevisionFilter.
+        _lifecycle = context.TryGetLifecycleInterceptor();
+        if (_lifecycle is not null)
+        {
+            _lifecycle.SubjectDetaching += OnSubjectDetaching;
+        }
+    }
+
+    private void OnSubjectDetaching(SubjectLifecycleChange change)
+    {
+        _deliveredRevisions.RemoveSubject(change.Subject);
     }
 
     /// <summary>
@@ -304,6 +324,13 @@ public class ChangeQueueProcessor : IDisposable
         }
 
         _subscription.Dispose();
+
+        // Before anything else: the lifecycle interceptor outlives this processor, so an attached
+        // handler would keep it and its buffers reachable for the context's lifetime.
+        if (_lifecycle is not null)
+        {
+            _lifecycle.SubjectDetaching -= OnSubjectDetaching;
+        }
 
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
         if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)

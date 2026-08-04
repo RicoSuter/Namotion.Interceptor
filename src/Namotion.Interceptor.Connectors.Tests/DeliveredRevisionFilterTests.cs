@@ -73,40 +73,60 @@ public class DeliveredRevisionFilterTests
         Assert.True(tracker.TryAdmit(CreateChange(otherSubject, revision: 8)));
     }
 
-    /// <summary>
-    /// Keys hold their subject strongly, so without ageing the filter would keep every subject the
-    /// connector ever wrote to alive for as long as it runs. Rotation is what releases them, and it
-    /// needs no judgement about whether a property is still live.
-    /// </summary>
     [Fact]
-    public void WhenPropertiesGoQuiet_ThenRotationReleasesTheirSubjects()
+    public void WhenASubjectIsDetached_ThenItsBaselinesReleaseIt()
     {
-        // Arrange
+        // Arrange: the key holds its subject strongly, so a baseline kept for a subject that has left
+        // the graph would root it and everything below it for the processor's lifetime.
         var filter = new DeliveredRevisionFilter();
-        var quiet = RecordAndAbandon(filter);
+        var abandoned = RecordAndAbandon(filter, out var subjects);
 
-        // Act: enough traffic on other subjects to rotate twice, which retires both generations that
-        // held the abandoned ones.
-        Churn(filter, 9000);
+        // Act: exactly what the detach event does. Note the model stays small throughout, which is the
+        // case the previous count-based ageing never triggered on and therefore leaked. Done in a
+        // separate frame so the loop variable holding the last subject is gone before collection.
+        RemoveAll(filter, subjects);
 
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
 
         // Assert
-        Assert.All(quiet, subject => Assert.False(subject.IsAlive,
-            "a subject that stopped being written must not be kept alive by the filter"));
+        Assert.All(abandoned, subject => Assert.False(subject.IsAlive,
+            "a detached subject must not be kept alive by the filter"));
     }
 
     [Fact]
-    public void WhenAPropertyKeepsBeingWritten_ThenRotationDoesNotLoseItsBaseline()
+    public void WhenASubjectIsDetached_ThenOtherSubjectsKeepTheirBaselines()
     {
-        // Arrange: rotation must not drop a property that is still active, or its stragglers would
-        // start being admitted again.
+        // Arrange: eviction must be scoped to the subject that left, or the properties still in the
+        // graph would start admitting their stragglers again.
+        var filter = new DeliveredRevisionFilter();
+        var leaving = new Person();
+        var staying = new Person();
+        var leavingProperty = new PropertyReference(leaving, nameof(Person.FirstName));
+        var stayingProperty = new PropertyReference(staying, nameof(Person.FirstName));
+
+        Assert.True(filter.TryAdmit(CreateChange(leavingProperty, revision: 10)));
+        Assert.True(filter.TryAdmit(CreateChange(stayingProperty, revision: 10)));
+
+        // Act
+        filter.RemoveSubject(leaving);
+
+        // Assert: the survivor still suppresses an older commit, the evicted one no longer does.
+        Assert.False(filter.TryAdmit(CreateChange(stayingProperty, revision: 9)));
+        Assert.True(filter.TryAdmit(CreateChange(leavingProperty, revision: 9)));
+    }
+
+    [Fact]
+    public void WhenOtherPropertiesChurn_ThenALivePropertyKeepsItsBaseline()
+    {
+        // Arrange: a property that is still in the graph must keep its baseline no matter how much
+        // unrelated traffic passes through, or its stragglers would start being admitted again. The
+        // previous ageing scheme could drop it once enough other properties had been recorded.
         var filter = new DeliveredRevisionFilter();
         var property = new PropertyReference(new Person(), nameof(Person.FirstName));
 
-        // Act: keep it written across enough churn to rotate several times.
+        // Act: keep it written across churn far larger than the old rotation threshold.
         for (var round = 0; round < 3; round++)
         {
             Assert.True(filter.TryAdmit(CreateChange(property, revision: 100 + round)));
@@ -184,13 +204,26 @@ public class DeliveredRevisionFilterTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference[] RecordAndAbandon(DeliveredRevisionFilter filter)
+    private static void RemoveAll(DeliveredRevisionFilter filter, List<IInterceptorSubject> subjects)
+    {
+        foreach (var subject in subjects)
+        {
+            filter.RemoveSubject(subject);
+        }
+
+        subjects.Clear();
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference[] RecordAndAbandon(DeliveredRevisionFilter filter, out List<IInterceptorSubject> subjects)
     {
         var abandoned = new WeakReference[500];
+        subjects = new List<IInterceptorSubject>(abandoned.Length);
         for (var index = 0; index < abandoned.Length; index++)
         {
             var subject = new Person();
             abandoned[index] = new WeakReference(subject);
+            subjects.Add(subject);
             filter.TryAdmit(CreateChange(new PropertyReference(subject, nameof(Person.FirstName)), index + 1));
         }
 

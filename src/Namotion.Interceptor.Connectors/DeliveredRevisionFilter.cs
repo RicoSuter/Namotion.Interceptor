@@ -12,41 +12,43 @@ namespace Namotion.Interceptor.Connectors;
 /// long that preemption lasts, so no amount of buffering closes it; remembering what already went out
 /// does.
 ///
-/// State ages out through two generations rather than being evicted per property. Entries move to the
-/// previous generation on rotation and are promoted back on the next hit, so anything still being
-/// written survives while anything that has gone quiet falls out. That bounds memory at twice the
-/// rotation threshold without needing to decide whether a property is still live: the obvious signal,
-/// the processor's own property filter, is documented as transiently false while a subject is
-/// momentarily unregistered during a structural mutation, and treating that as "gone" would drop a
-/// baseline that is still needed.
+/// State is bounded by graph membership: <see cref="RemoveSubject"/> drops a subject's entries when it
+/// leaves the object graph. The key is a <see cref="PropertyReference"/>, which holds its subject
+/// strongly, so without that eviction a detached subject and everything it roots would stay alive for
+/// the processor's lifetime.
 ///
-/// The window is what the guarantee is bounded by, and it matches the shape of the problem: an
-/// inversion comes from a thread preempted between committing and enqueuing, so a straggler is always
-/// recent. A property that has not been written for a whole rotation cannot have one in flight.
+/// Eviction replaced an ageing scheme that retired whole generations once enough distinct properties
+/// had been recorded. That bounded the entry count but not what those entries rooted, and it only
+/// triggered for models with more distinct properties than its threshold, so the fixed-size models
+/// most connectors serve never aged anything out at all. Graph membership is the signal that scheme
+/// was approximating, so using it directly is smaller and exact: a live property keeps its baseline
+/// for as long as it exists, with no window to reason about.
 ///
-/// Every entry point is synchronized, because this is genuinely reached from two threads at once. A
-/// buffered processor records echoes and answers write-back questions on its dequeue thread while its
-/// flush task suppresses an outbound batch, and the two touch the same map. An earlier version of this
-/// class asserted the opposite, that the buffered and immediate modes made the callers mutually
-/// exclusive. That was wrong: the echo bookkeeping sits ahead of the mode check and therefore runs in
-/// both modes, on the dequeue thread, while only the flush path moved to the flush thread.
+/// Every entry point is synchronized, because this is genuinely reached from three threads. A buffered
+/// processor records echoes and answers write-back questions on its dequeue thread while its flush task
+/// suppresses an outbound batch, and detach eviction arrives on whichever thread mutated the graph. An
+/// earlier version asserted the opposite, that the buffered and immediate modes made the callers
+/// mutually exclusive. That was wrong: the echo bookkeeping sits ahead of the mode check and so runs in
+/// both modes on the dequeue thread, while only the flush path moved to the flush thread.
 /// </summary>
 internal sealed class DeliveredRevisionFilter
 {
-    // Two generations of this, so memory is bounded at twice the threshold. Large enough that a
-    // property written even rarely within a busy window survives rotation.
-    private const int RotationThreshold = 4096;
+    // Safety valve, not a policy knob: eviction is what bounds this, and it needs a lifecycle
+    // interceptor in the context to deliver detach events. A context configured without one still
+    // accumulates one entry per distinct property ever written, so this caps that at a size no real
+    // model reaches.
+    private const int MaximumEntries = 100_000;
 
-    // Guards both generations. A leaf lock: nothing below it touches a subject, invokes a callback or
-    // performs I/O, so it cannot participate in a lock cycle. In particular the subject's SyncRoot is
-    // released before a change is ever enqueued, so no caller reaches here holding it.
+    // Guards the map. A leaf lock: nothing under it touches a subject, invokes a callback or performs
+    // I/O, so it cannot participate in a cycle. The subject's SyncRoot is released before a change is
+    // enqueued, and detach eviction takes this while the lifecycle interceptor holds its own lock, so
+    // the order is always lifecycle then this, never the reverse.
     private readonly Lock _gate = new();
 
     // WrittenOut records whether the newest commit for this property was sent to the source by this
     // processor, as opposed to already being there because the source sent or confirmed it. That is
     // what tells a transaction confirmation whether the source may have been overwritten since.
-    private Dictionary<PropertyReference, (long Revision, bool WrittenOut)> _current = new(PropertyReference.Comparer);
-    private Dictionary<PropertyReference, (long Revision, bool WrittenOut)> _previous = new(PropertyReference.Comparer);
+    private readonly Dictionary<PropertyReference, (long Revision, bool WrittenOut)> _entries = new(PropertyReference.Comparer);
 
     /// <summary>
     /// Returns whether the change should be delivered, recording it as the newest delivered commit for
@@ -115,12 +117,7 @@ internal sealed class DeliveredRevisionFilter
     {
         lock (_gate)
         {
-            if (_current.TryGetValue(property, out var entry))
-            {
-                return entry.WrittenOut;
-            }
-
-            return _previous.TryGetValue(property, out entry) && entry.WrittenOut;
+            return _entries.TryGetValue(property, out var entry) && entry.WrittenOut;
         }
     }
 
@@ -167,33 +164,41 @@ internal sealed class DeliveredRevisionFilter
         return true;
     }
 
+    /// <summary>
+    /// Drops every baseline held for a subject that has left the object graph, releasing the subject
+    /// itself along with them. A detached subject can have no straggler in flight worth suppressing,
+    /// because nothing commits to it any more.
+    /// </summary>
+    public void RemoveSubject(IInterceptorSubject subject)
+    {
+        lock (_gate)
+        {
+            // Removing during enumeration is supported since .NET Core 3.0, so this needs no
+            // intermediate list and allocates nothing.
+            foreach (var entry in _entries)
+            {
+                if (ReferenceEquals(entry.Key.Subject, subject))
+                {
+                    _entries.Remove(entry.Key);
+                }
+            }
+        }
+    }
+
     private bool IsSuperseded(in PropertyReference property, long revision)
     {
-        if (_current.TryGetValue(property, out var entry))
-        {
-            return revision <= entry.Revision;
-        }
-
-        return _previous.TryGetValue(property, out entry) && revision <= entry.Revision;
+        return _entries.TryGetValue(property, out var entry) && revision <= entry.Revision;
     }
 
     private void Record(in PropertyReference property, long revision, bool writtenOut)
     {
-        // Always into the current generation, which is also what promotes an entry found in the
-        // previous one and keeps an actively written property from ageing out.
-        _current[property] = (revision, writtenOut);
-
-        if (_current.Count > RotationThreshold)
+        if (_entries.Count >= MaximumEntries && !_entries.ContainsKey(property))
         {
-            Rotate();
+            // Safety valve only; see the constant. Losing every baseline degrades to not filtering,
+            // which is the behaviour before this filter existed, rather than to anything incorrect.
+            _entries.Clear();
         }
-    }
 
-    private void Rotate()
-    {
-        // The retired generation is cleared and reused, so rotation allocates nothing and drops every
-        // reference it held, including subjects that have since been detached.
-        (_previous, _current) = (_current, _previous);
-        _current.Clear();
+        _entries[property] = (revision, writtenOut);
     }
 }
