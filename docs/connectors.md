@@ -66,6 +66,10 @@ This ensures:
 - Updates are applied in the correct order relative to the initial state
 - Stale queued writes don't overwrite newer source values
 
+A source cannot capture anything without a `PropertyChangeInterceptor` in its context, so starting one whose context lacks it fails immediately with an actionable message rather than running inert. Configure the context with `WithPropertyChangeSubscriptions()` or `WithFullPropertyTracking()`.
+
+Local writes made while the source is connecting are captured too, not only inbound updates: the outbound change subscription is created once for the whole source lifetime (before the retry loop), so a connect-window or reconnect-delay write survives instead of falling into a gap. Selection is by change origin (see [Change notification source semantics](#change-notification-source-semantics) below): only `Local` writes to source-owned properties are parked, while the source's own `FromSource` and `Confirmed` applies (inbound updates and initial-state loads via `SetValueFromSource`) are skipped, so an inbound value is never echoed back. When draining starts it reconciles to the model's current value, the same source-wins policy as the retry re-apply above (the last two rows of [Write Consistency Guarantees](#write-consistency-guarantees) below give both outcomes). A same-property write races the initial-state load, so its winner is timing-dependent: write after the connection has settled (post-connect writes are always sent), or use source transactions, when you need a deterministic result.
+
 ### Write Consistency Guarantees
 
 Property writes to sources follow a **local-first** model: the local property is updated immediately, and the change is sent to the source asynchronously. This means the local model and the source can be temporarily out of sync.
@@ -76,6 +80,8 @@ Property writes to sources follow a **local-first** model: the local property is
 | Write fails, retry succeeds | Updated immediately | Updated on retry | Eventually in sync |
 | Disconnect + reconnect, source unchanged | Initial state restores source state, retry re-applies change | Receives change via fresh write | In sync |
 | Disconnect + reconnect, source changed | Initial state applies source's new value, retry dropped | Unchanged (source wins) | In sync |
+| Write during connect, source leaves the property alone | Local write kept | Sent as a fresh write once draining starts | In sync |
+| Write during connect, initial state overwrites the property | Source value kept | Write dropped | In sync (source wins) |
 
 In all cases, the local model and source converge after reconnection. However, in the last scenario the local model temporarily shows a value that the source never accepted. Users may briefly see the local value before it snaps back to the source's value on reconnect.
 
@@ -143,6 +149,7 @@ A delivered revision is recorded before the write is attempted, so after a failu
 
 **Behavior:**
 - Ring buffer semantics: oldest writes dropped when capacity reached
+- Memory while disconnected is bounded per connection attempt: the change subscription is drained into this queue before each attempt and again after the initial state is applied, so repeated failed attempts do not compound. Between those two points, which covers the retry delay and all of `StartListeningAsync` plus `LoadInitialStateAsync`, captured changes accumulate in the subscription without a bound, so peak memory follows the write rate times the length of one attempt
 - Automatic retry when `WriteChangesAsync` fails during normal operation
 - Optimistic re-apply on reconnection: after loading initial state, queued changes are compared against the current (post-reconnection) property values. Only changes where the source hasn't modified the property are re-applied locally and sent to the source as fresh writes. Changes where the source value diverged are dropped (source wins).
 - In-memory only: queued writes are lost on process restart
@@ -175,13 +182,21 @@ The base class handles everything else: retry loop with backoff, buffering durin
 Each iteration of the sealed `ExecuteAsync` runs the following sequence. On failure, the base disposes the listen lifetime, waits `retryTime` (default 10s), and restarts from the top. Only `OperationCanceledException` when the host stopping token is cancelled exits the loop. All other exceptions (including internal protocol timeouts) trigger a retry.
 
 ```
-ExecuteAsync (retry loop)
- ├── StartBuffering()
- ├── StartListeningAsync()        ← your hook: connect + spawn monitor
- ├── LoadInitialStateAndResume()   ← calls your LoadInitialStateAsync, then replays buffer
- ├── ReapplyRetryQueue()           ← optimistic re-apply of queued writes
- └── ProcessAsync()                ← runs ChangeQueueProcessor, calls your WriteChangesAsync
+ExecuteAsync
+ ├── create source-lifetime subscription  ← captures local writes continuously (no gap across reconnects)
+ └── retry loop (per connection attempt)
+      ├── Task.Delay(retryTime)            ← retries only; the subscription keeps capturing during the wait
+      ├── drain owned writes → retry queue ← park writes captured since the last attempt (caps memory)
+      ├── StartBuffering()
+      ├── StartListeningAsync()            ← your hook: connect + spawn monitor
+      ├── LoadInitialStateAndResume()      ← calls your LoadInitialStateAsync, then replays buffer
+      ├── drain owned writes → retry queue ← park connect-window writes
+      ├── ReconcileRetryQueueAsync()       ← restore / send / drop queued writes vs current state
+      ├── new ChangeQueueProcessor()       ← connected phase; reuses the source-lifetime subscription
+      └── ProcessAsync()                   ← drains changes, calls your WriteChangesAsync
 ```
+
+"Owned writes" are `Local`-origin changes to properties bound to this source; the source's own `FromSource` and `Confirmed` applies are skipped at drain and in the connected phase, so inbound values are not echoed back (see [Change notification source semantics](#change-notification-source-semantics)).
 
 #### ISubjectSource Interface
 
@@ -468,7 +483,7 @@ There is no `SubjectServerBase`. Servers are implemented as `BackgroundService` 
 A server implementation typically handles:
 
 - **Starting the protocol server**: bind to a port, accept connections, restart on failure
-- **Publishing property changes**: observe changes via `ChangeQueueProcessor` and push them to connected clients using the protocol's wire format
+- **Publishing property changes**: observe changes via `ChangeQueueProcessor` and push them to connected clients using the protocol's wire format. Servers create the processor before the protocol server starts, so changes made during startup are captured; of those, values the model has already moved past are collapsed rather than published in sequence, so clients see the settled value instead of every intermediate one
 - **Handling inbound writes**: receive write requests from external clients and apply them to the local model (typically via `SetValueFromSource()` to prevent echo loops)
 - **Lifecycle cleanup**: release caches and subscriptions when subjects are detached from the object graph
 
@@ -693,3 +708,30 @@ Properties can receive concurrent writes from multiple origins:
 Individual property updates are atomic and thread-safe without requiring additional synchronization.
 
 When overriding `StartListeningAsync`, use the provided `SubjectPropertyWriter` to write inbound updates. This handles buffering during initialization and ensures correct ordering.
+
+## Known Limitations
+
+The cases below are where the local model and the external system can end up disagreeing, or where the outcome depends on timing rather than on the rules above. Everything else about the write path converges and is described in the sections above.
+
+### Writes that are dropped leave a lasting divergence on write-only properties
+
+The reconciliation rules resolve a conflict by letting the source win, which converges as long as the property is also read back from the source. A property the source never reports back (write-only, or one whose value the source does not publish) has nothing to correct it, so the local model keeps a value the source never received and stays that way. Four situations drop a write this way:
+
+- The retry queue overflows during a long outage and discards its oldest entries.
+- The retry queue is disabled (`writeRetryQueueSize: 0`), which removes connect-window and reconnect-window recovery entirely.
+- The write targets a property the source has not claimed yet, which only affects the first connection, since ownership persists across reconnections.
+- Reconciliation classifies the write as diverged because the comparison uses `Equals`, which is reference equality for arrays, mutable collections and plain reference types. A value replaced by an equal-but-distinct instance counts as diverged.
+
+Use [source transactions](tracking-transactions.md) when a write must be confirmed by the source before the local model accepts it.
+
+### A write racing the initial-state load has a timing-dependent winner
+
+Whether the local write or the source's snapshot wins depends on which lands first, which is inherent to the local-first model rather than a property of the reconciliation. Write after the connection has settled, or use source transactions, when the outcome has to be deterministic. See [Write Consistency Guarantees](#write-consistency-guarantees) for the full outcome table.
+
+### Connector-internal reconnects do not run the reconciliation
+
+The reconciliation described above runs in the source pump, which covers the initial connection and its retries. Once a connection has succeeded, the connectors handle session loss internally (the OPC UA health loop, the WebSocket monitor loop, the MQTT connection monitor) by reloading initial state without going through the pump's drain and reconcile. A write that was queued for retry before such a reconnect is therefore flushed as-is afterwards, so it overwrites a value the source changed during the outage. That is the opposite of the source-wins rule the pump applies, and the two paths have always disagreed this way.
+
+### Ordering across different properties is not preserved by reconciliation
+
+Writes reconciled as already-current are flushed before restored writes travel through the change queue, so two properties written in one order locally can reach the source in the other. Ordering of writes to a single property is preserved.

@@ -17,7 +17,6 @@ public class ChangeQueueProcessor : IDisposable
     private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
-    private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
 
@@ -42,6 +41,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
 
     private readonly PropertyChangeQueueSubscription _subscription;
+    private readonly bool _ownsSubscription;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeQueueProcessor"/> class.
@@ -72,7 +72,6 @@ public class ChangeQueueProcessor : IDisposable
         ILogger logger)
     {
         _source = source;
-        _context = context;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
@@ -82,12 +81,37 @@ public class ChangeQueueProcessor : IDisposable
         try
         {
             _subscription = context.CreatePropertyChangeQueueSubscription();
+            _ownsSubscription = true;
         }
         catch
         {
             _flushMerger.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Initializes the processor with an externally owned subscription. The caller keeps ownership:
+    /// <see cref="Dispose"/> does not dispose the subscription. Use this when the subscription must
+    /// outlive the processor, for example a source-lifetime subscription reused across reconnects.
+    /// </summary>
+    internal ChangeQueueProcessor(
+        object? source,
+        PropertyChangeQueueSubscription subscription,
+        Func<PropertyReference, bool> propertyFilter,
+        Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
+        TimeSpan? bufferTime,
+        int? maxQueueDepth,
+        ILogger logger)
+    {
+        _source = source;
+        _propertyFilter = propertyFilter;
+        _writeHandler = writeHandler;
+        _logger = logger;
+        _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+        _maxQueueDepth = maxQueueDepth;
+        _subscription = subscription;
+        _ownsSubscription = false;
     }
 
     /// <summary>
@@ -115,6 +139,17 @@ public class ChangeQueueProcessor : IDisposable
     /// <returns>The task.</returns>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
+        // Snapshot of changes already queued at drain start: these were captured while the source was
+        // still connecting, so one whose value the model has moved past is stale state and is dropped.
+        // Changes arriving after it are steady state, where an intermediate value is data rather than
+        // staleness and must be delivered even though the model has moved on (see
+        // WhenSteadyStateChangesCarryOldTimestamps_ThenEveryChangeIsWritten).
+        //
+        // Sources reach this with most window writes already handled: SubjectSourceBase drains and
+        // reconciles them into the retry queue before ProcessAsync runs. Servers create the processor
+        // before publishing, so their whole startup window arrives here.
+        var queuedBeforeStart = _subscription.Count;
+
         using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -155,6 +190,12 @@ public class ChangeQueueProcessor : IDisposable
 
             while (_subscription.TryDequeue(out var change, linkedTokenSource.Token))
             {
+                var wasQueuedBeforeStart = queuedBeforeStart > 0;
+                if (wasQueuedBeforeStart)
+                {
+                    queuedBeforeStart--;
+                }
+
                 if (ReferenceEquals(change.Origin.Source, _source) && !NeedsWriteBack(in change))
                 {
                     continue;
@@ -165,15 +206,13 @@ public class ChangeQueueProcessor : IDisposable
                     continue;
                 }
 
+                if (wasQueuedBeforeStart && !CurrentValueFilter.IsCurrent(in change))
+                {
+                    continue;
+                }
+
                 if (periodicTimer is null)
                 {
-                    // The buffered path applies this inside the merger, where it can compact the
-                    // batch in place; here there is no batch, so it gates the single write.
-                    if (!CurrentValueFilter.IsCurrent(in change))
-                    {
-                        continue;
-                    }
-
                     CurrentValueFilter.MarkWrittenOut(in change);
 
                     // Immediate path: send a single change without buffering (zero allocation)
@@ -295,7 +334,10 @@ public class ChangeQueueProcessor : IDisposable
             return;
         }
 
-        _subscription.Dispose();
+        if (_ownsSubscription)
+        {
+            _subscription.Dispose();
+        }
 
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
         if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)

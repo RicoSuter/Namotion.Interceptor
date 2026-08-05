@@ -21,6 +21,11 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        // The ChangeQueueProcessor subscription is now created before StartListeningAsync
+        // (capture-early), so the mocked context must provide the change queue upfront.
+        subjectContextMock
+            .Setup(s => s.TryGetService<PropertyChangeInterceptor>())
+            .Returns(new PropertyChangeInterceptor());
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock
@@ -105,6 +110,285 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenPropertyIsWrittenWhileInitialStateLoads_ThenChangeIsStillWrittenToSource()
+    {
+        // Arrange: a property write that happens after connection effects become observable
+        // in the model but before the change pump subscribes must not be lost. The write is
+        // issued inside LoadInitialStateAsync, which runs before the ChangeQueueProcessor
+        // was created prior to the capture-early fix, so the change was silently dropped.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+
+        var receivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = _ =>
+            {
+                subject.FirstName = "written-during-load";
+                return Task.FromResult<Action?>(null);
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedChanges.Enqueue(change);
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.FirstName)),
+            message: "Expected the write made during initial state load to reach the source");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        var received = receivedChanges.First(c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Equal("written-during-load", received.GetNewValue<string?>());
+    }
+
+    /// <summary>
+    /// Rewrites inbound string values, standing in for a hook that transforms what a source sent
+    /// (unit normalization, rounding, clamping).
+    /// </summary>
+    private sealed class UppercasingInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.NewValue is string text)
+            {
+                context.NewValue = (TProperty)(object)text.ToUpperInvariant();
+            }
+
+            next(ref context);
+        }
+    }
+
+    [Fact]
+    public async Task WhenInboundInitialValueIsTransformedByHook_ThenTransformedValueReachesSource()
+    {
+        // Arrange: the source applies its snapshot during the initial state load and a hook rewrites
+        // the value on the way in, so what is stored is not what the source sent. The origin therefore
+        // demotes from FromSource to Local, and the transformed value has to reach the source once the
+        // load completes: the source still holds the untransformed value, and nothing else reconciles
+        // the two. This is the initial-load scenario the typed ChangeOrigin design (#366) delegates to
+        // this capture window, so it must keep working if the drain filter is ever changed.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+        context.AddService<IWriteInterceptor>(new UppercasingInterceptor());
+
+        var subject = new Person(context);
+
+        var receivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        TestSubjectSource source = null!;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = _ => Task.FromResult<Action?>(() =>
+                subject.TryGetRegisteredSubject()!
+                    .TryGetProperty(nameof(Person.FirstName))!
+                    .SetValueFromSource(source, null, null, "server-value")),
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedChanges.Enqueue(change);
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.FirstName)),
+            message: "Expected the hook-transformed initial value to reach the source");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert: the source is told the value the model actually holds, not the one it sent.
+        Assert.Equal("SERVER-VALUE", subject.FirstName);
+        var received = receivedChanges.First(c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Equal("SERVER-VALUE", received.GetNewValue<string?>());
+    }
+
+    [Fact]
+    public async Task WhenTwoWindowWritesToOnePropertyAreSplitByAnInboundApply_ThenTheNewerWriteWins()
+    {
+        // Arrange: two local writes to the same property during the connect window, with an
+        // inbound source apply landing between them so both are captured against the same
+        // baseline. Reconciliation walks captured changes in order against the live value, so
+        // restoring the older one moves the model and makes the newer one look diverged.
+        // Last writer must still win.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context) { FirstName = "A" };
+
+        var receivedValues = new ConcurrentQueue<string?>();
+        TestSubjectSource source = null!;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = _ =>
+            {
+                var property = subject.TryGetRegisteredSubject()!
+                    .TryGetProperty(nameof(Person.FirstName))!;
+
+                subject.FirstName = "B";
+
+                // The source reports the value it still holds, which resets the baseline, so the
+                // next local write is captured against A rather than against B.
+                property.SetValueFromSource(source, null, null, "A");
+
+                subject.FirstName = "C";
+
+                // A second report leaves the model on A at reconcile time, so the older write's
+                // old value matches the live value and the newer write's does not.
+                property.SetValueFromSource(source, null, null, "A");
+
+                return Task.FromResult<Action?>(null);
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedValues.Enqueue(change.GetNewValue<string?>());
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => !receivedValues.IsEmpty,
+            message: "Expected a window write to reach the source");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("C", subject.FirstName);
+        Assert.DoesNotContain("B", receivedValues);
+        Assert.Contains("C", receivedValues);
+    }
+
+    [Fact]
+    public async Task WhenTwoParkedWritesArriveOutOfCommitOrder_ThenTheHigherRevisionWins()
+    {
+        // Arrange: changes are enqueued after their commit and outside the subject lock, so under
+        // concurrent writers a later commit can be parked first. Collapsing two writes to one
+        // property must follow the commit revision, not the order they happened to arrive in.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "A" };
+
+        var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.FirstName))
+                .SetValueFromSource(s, null, null, "A")); // Server didn't change it
+
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "A", "C", revision: 20);
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "A", "B", revision: 10);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("C", subject.FirstName);
+        Assert.Contains(writtenChanges, c => c.GetNewValue<string?>() == "C");
+        Assert.DoesNotContain(writtenChanges, c => c.GetNewValue<string?>() == "B");
+    }
+
+    [Fact]
+    public async Task WhenQueuedWriteIsSupersededByInitialState_ThenStaleWriteIsNotSent()
+    {
+        // Arrange: a write captured while the source is connecting is overwritten by the
+        // initial-state snapshot before the pump flushes. Sending it would push a value
+        // the model no longer holds back to the source, so it must be dropped.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+
+        var receivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        var initialStateApplied = false;
+        TestSubjectSource source = null!;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = _ =>
+            {
+                subject.FirstName = "stale-user-write";
+                return Task.FromResult<Action?>(() =>
+                {
+                    subject.TryGetRegisteredSubject()!
+                        .TryGetProperty(nameof(Person.FirstName))!
+                        .SetValueFromSource(source, null, null, "server-value");
+                    initialStateApplied = true;
+                });
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedChanges.Enqueue(change);
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Volatile.Read(ref initialStateApplied),
+            message: "Expected initial state to be applied");
+
+        // Sentinel write after the snapshot: once it arrives at the source, any earlier
+        // flush containing the stale FirstName write would already have been delivered.
+        subject.LastName = "sentinel";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.LastName)),
+            message: "Expected the sentinel write to reach the source");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert: the superseded write was dropped; the snapshot value is not echoed back.
+        Assert.DoesNotContain(receivedChanges, c => c.Property.Name == nameof(Person.FirstName));
+    }
+
+    [Fact]
+    public async Task WhenContextHasNoPropertyChangeInterceptor_ThenSourceFailsFastWithActionableMessage()
+    {
+        // Arrange: without WithFullPropertyTracking/WithPropertyChangeSubscriptions the source cannot capture
+        // any writes. That is a configuration error, so the pump must fail fast at startup with a
+        // message naming the missing service and the fix, not run silently inert or throw a cryptic
+        // "service not found" from deep in the pump.
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var subject = new Person(context);
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance);
+
+        // Act & Assert - StartAsync surfaces the faulted ExecuteAsync task
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => source.StartAsync(CancellationToken.None));
+        Assert.Contains("PropertyChangeInterceptor", exception.Message);
+        Assert.Contains("WithFullPropertyTracking", exception.Message);
+    }
+
+    [Fact]
     public async Task WhenWriteChangesThrowsException_ThenErrorIsLoggedAndServiceContinues()
     {
         // Arrange
@@ -116,7 +400,7 @@ public class SubjectSourceBaseTests
 
         var subject = new Person(context);
 
-        var tcs = new TaskCompletionSource();
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance)
         {
             WriteChangesOverride = (_, _) =>
@@ -154,7 +438,7 @@ public class SubjectSourceBaseTests
 
         var subject = new Person(context);
 
-        var tcs = new TaskCompletionSource();
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance)
         {
             WriteChangesOverride = (_, _) =>
@@ -194,8 +478,8 @@ public class SubjectSourceBaseTests
 
         // First call fails (simulates queued items failing to flush), second succeeds
         var callCount = 0;
-        var firstCallTcs = new TaskCompletionSource();
-        var secondCallTcs = new TaskCompletionSource();
+        var firstCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance,
             bufferTime: TimeSpan.Zero) // Disable buffering for immediate writes
         {
@@ -246,7 +530,7 @@ public class SubjectSourceBaseTests
 
         var subject = new Person(context);
 
-        var tcs = new TaskCompletionSource();
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance)
         {
             WriteChangesOverride = (_, _) =>
@@ -284,8 +568,8 @@ public class SubjectSourceBaseTests
         var subject = new Person(context);
 
         var callCount = 0;
-        var firstCallTcs = new TaskCompletionSource();
-        var secondCallTcs = new TaskCompletionSource();
+        var firstCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance,
             bufferTime: TimeSpan.Zero) // Disable buffering for immediate writes
         {
@@ -337,8 +621,8 @@ public class SubjectSourceBaseTests
 
         var allWrittenValues = new ConcurrentBag<string?[]>();
         var callCount = 0;
-        var firstCallTcs = new TaskCompletionSource();
-        var thirdCallTcs = new TaskCompletionSource();
+        var firstCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thirdCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance,
             bufferTime: TimeSpan.Zero)
         {
@@ -407,7 +691,8 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { FirstName = "Original" };
 
         var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.FirstName = "Original"; }); // Server didn't change it
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.FirstName))
+                .SetValueFromSource(s, null, null, "Original")); // Server didn't change it
 
         // Pre-fill retry queue: client changed "Original" -> "ClientChange"
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "ClientChange");
@@ -434,7 +719,8 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { FirstName = "Original" };
 
         var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.FirstName = "ServerChanged"; }); // Server DID change it
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.FirstName))
+                .SetValueFromSource(s, null, null, "ServerChanged")); // Server DID change it
 
         // Pre-fill retry queue: client changed "Original" -> "ClientChange"
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "ClientChange");
@@ -442,7 +728,7 @@ public class SubjectSourceBaseTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
-            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+            message: "Expected retry queue to be drained by ReconcileRetryQueueAsync");
         await source.StopAsync(CancellationToken.None);
 
         // Assert - server wins, change was dropped
@@ -462,7 +748,8 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { Father = personA };
 
         var (source, _, writeTcs) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.Father = personA; }); // Server didn't change it
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.Father))
+                .SetValueFromSource(s, null, null, personA)); // Server didn't change it
 
         // Pre-fill retry queue: client changed Father from personA -> personB
         EnqueueRetryChange<Person?>(source, subject, nameof(Person.Father), personA, personB);
@@ -489,7 +776,8 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { Father = personA };
 
         var (source, _, _) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.Father = personC; }); // Server replaced with C
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.Father))
+                .SetValueFromSource(s, null, null, personC)); // Server replaced with C
 
         // Pre-fill retry queue: client changed Father from personA -> personB
         EnqueueRetryChange<Person?>(source, subject, nameof(Person.Father), personA, personB);
@@ -497,7 +785,7 @@ public class SubjectSourceBaseTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
-            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+            message: "Expected retry queue to be drained by ReconcileRetryQueueAsync");
         await source.StopAsync(CancellationToken.None);
 
         // Assert - server wins
@@ -516,7 +804,8 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { Children = listA };
 
         var (source, _, writeTcs) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.Children = listA; }); // Server didn't replace it
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.Children))
+                .SetValueFromSource(s, null, null, listA)); // Server didn't replace it
 
         // Pre-fill retry queue: client replaced collection listA -> listB
         EnqueueRetryChange(source, subject, nameof(Person.Children), listA, listB);
@@ -543,7 +832,8 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { Children = listA };
 
         var (source, _, _) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.Children = listC; }); // Server replaced collection
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.Children))
+                .SetValueFromSource(s, null, null, listC)); // Server replaced collection
 
         // Pre-fill retry queue: client replaced listA -> listB
         EnqueueRetryChange(source, subject, nameof(Person.Children), listA, listB);
@@ -551,7 +841,7 @@ public class SubjectSourceBaseTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
-            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+            message: "Expected retry queue to be drained by ReconcileRetryQueueAsync");
         await source.StopAsync(CancellationToken.None);
 
         // Assert - server wins
@@ -570,8 +860,10 @@ public class SubjectSourceBaseTests
         var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
             initialStateAction: s =>
             {
-                subject.FirstName = "ServerFirst"; // Server changed this -> conflict
-                subject.LastName = "OrigLast";     // Server didn't change this -> no conflict
+                // Server changed this -> conflict
+                new PropertyReference(subject, nameof(Person.FirstName)).SetValueFromSource(s, null, null, "ServerFirst");
+                // Server didn't change this -> no conflict
+                new PropertyReference(subject, nameof(Person.LastName)).SetValueFromSource(s, null, null, "OrigLast");
             });
 
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
@@ -603,8 +895,8 @@ public class SubjectSourceBaseTests
         var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
             initialStateAction: s =>
             {
-                subject.FirstName = "ServerFirst";
-                subject.LastName = "ServerLast";
+                new PropertyReference(subject, nameof(Person.FirstName)).SetValueFromSource(s, null, null, "ServerFirst");
+                new PropertyReference(subject, nameof(Person.LastName)).SetValueFromSource(s, null, null, "ServerLast");
             });
 
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
@@ -613,7 +905,7 @@ public class SubjectSourceBaseTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
-            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+            message: "Expected retry queue to be drained by ReconcileRetryQueueAsync");
         await source.StopAsync(CancellationToken.None);
 
         // Assert - all dropped, server values remain
@@ -659,7 +951,8 @@ public class SubjectSourceBaseTests
         var subject = new Person(context); // FirstName starts as null
 
         var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.FirstName = "ServerValue"; }); // Server set it
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.FirstName))
+                .SetValueFromSource(s, null, null, "ServerValue")); // Server set it
 
         // Pre-fill retry queue: client changed null -> "ClientValue"
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), null, "ClientValue");
@@ -667,7 +960,7 @@ public class SubjectSourceBaseTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
-            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+            message: "Expected retry queue to be drained by ReconcileRetryQueueAsync");
         await source.StopAsync(CancellationToken.None);
 
         // Assert - null != "ServerValue" -> conflict, dropped
@@ -685,7 +978,8 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { FirstName = "Original" };
 
         var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.FirstName = "ServerValue"; });
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.FirstName))
+                .SetValueFromSource(s, null, null, "ServerValue"));
 
         // No retry changes enqueued
 
@@ -768,7 +1062,7 @@ public class SubjectSourceBaseTests
             Action<TestSubjectSource> initialStateAction)
     {
         var writtenChanges = new ConcurrentBag<SubjectPropertyChange>();
-        var writeTcs = new TaskCompletionSource();
+        var writeTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         TestSubjectSource? source = null;
         source = new TestSubjectSource(subject, context, NullLogger.Instance,
@@ -806,7 +1100,8 @@ public class SubjectSourceBaseTests
     }
 
     private static void EnqueueRetryChange<TValue>(TestSubjectSource source,
-        IInterceptorSubject subject, string propertyName, TValue oldValue, TValue newValue)
+        IInterceptorSubject subject, string propertyName, TValue oldValue, TValue newValue,
+        long revision = 0)
     {
         var queue = source.WriteRetryQueue!;
 
@@ -816,9 +1111,38 @@ public class SubjectSourceBaseTests
             DateTimeOffset.UtcNow,
             null,
             oldValue,
-            newValue);
+            newValue,
+            revision);
 
         queue.Enqueue(new[] { change });
+    }
+
+    [Fact]
+    public async Task WhenRetryChangeMatchesCurrentModelValue_ThenItIsSentToSource()
+    {
+        // Arrange: a retry-queued change whose new value is already the current model value
+        // (the write survived the load) must be sent, not dropped. The 2-way re-apply dropped it.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "ClientValue" }; // model already holds the new value
+
+        var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { }); // load leaves FirstName alone
+
+        // Retry queue: Original -> ClientValue (new value already in the model)
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "ClientValue");
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert - the change was sent to the source (flush branch), not dropped
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.FirstName) &&
+            c.GetNewValue<string?>() == "ClientValue");
+        Assert.Equal("ClientValue", subject.FirstName);
     }
 
     [Fact]
@@ -860,6 +1184,57 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenPropertyIsWrittenWhileNotConnected_ThenChangeReachesSourceOnReconnect()
+    {
+        // Arrange: the first connection attempt writes a property and then fails. Under the old
+        // per-connection subscription that write was lost (no subscription across the retry gap).
+        // The source-lifetime subscription must capture it and deliver it on the next attempt.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context);
+
+        var receivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        var attempts = 0;
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            retryTime: TimeSpan.FromMilliseconds(50))
+        {
+            StartListeningOverride = (_, _) =>
+            {
+                var attempt = Interlocked.Increment(ref attempts);
+                if (attempt == 1)
+                {
+                    // Write while connecting, then fail the attempt. Captured, then the pump retries.
+                    subject.FirstName = "written-while-not-connected";
+                    throw new InvalidOperationException("first attempt fails");
+                }
+                return Task.FromResult<IAsyncDisposable?>(null);
+            },
+            LoadInitialStateOverride = _ => Task.FromResult<Action?>(null), // load leaves FirstName alone
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedChanges.Enqueue(change);
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.FirstName)),
+            message: "Expected the write made while not connected to reach the source on reconnect");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        var received = receivedChanges.First(c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Equal("written-while-not-connected", received.GetNewValue<string?>());
+    }
+
+    [Fact]
     public async Task WhenStartListeningOverrideSpawnsTaskAndThrows_ThenSpawnedTaskIsCleanedUpBeforeRethrow()
     {
         // Spec section 11 R2: per-connector StartListeningAsync overrides must own their
@@ -873,6 +1248,11 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        // The ChangeQueueProcessor subscription is now created before StartListeningAsync
+        // (capture-early), so the mocked context must provide the change queue upfront.
+        subjectContextMock
+            .Setup(s => s.TryGetService<PropertyChangeInterceptor>())
+            .Returns(new PropertyChangeInterceptor());
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock

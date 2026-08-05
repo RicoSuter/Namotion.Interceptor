@@ -60,6 +60,15 @@ internal static class CurrentValueFilter
             return true;
         }
 
-        return Equals(metadata.GetValue(property.Subject), change.GetNewValue<object?>());
+        try
+        {
+            return Equals(metadata.GetValue(property.Subject), change.GetNewValue<object?>());
+        }
+        catch
+        {
+            // A user getter that throws says nothing about whether the change is stale, so it is
+            // admitted and the write handler decides, rather than the change being lost here.
+            return true;
+        }
     }
 }
