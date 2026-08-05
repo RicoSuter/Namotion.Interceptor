@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Connectors.Monitoring;
 
 namespace Namotion.Interceptor.Connectors;
 
@@ -46,7 +45,7 @@ public sealed class SubjectPropertyWriter
 
         // Buffering starts exactly when the source has stopped trusting its live feed, on first
         // connect and on every reconnect, including reconnects the base pump never sees.
-        (_source as ISourceStateReporter)?.ReportConnecting();
+        (_source as SubjectSourceBase)?.ReportConnecting();
     }
 
     /// <summary>
@@ -95,7 +94,7 @@ public sealed class SubjectPropertyWriter
 
         // Both paths mean state has been loaded and replayed, by this call or a concurrent one,
         // so both fall through to a single report rather than duplicating the call.
-        (_source as ISourceStateReporter)?.ReportSynchronized();
+        (_source as SubjectSourceBase)?.ReportSynchronized();
     }
 
     /// <summary>

@@ -102,7 +102,6 @@ namespace Namotion.Interceptor.Connectors
         public void ReportConnectionLost() { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
         protected abstract System.Threading.Tasks.Task<System.IAsyncDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
-        protected bool TransitionTo(Namotion.Interceptor.Connectors.Monitoring.SourceState newState) { }
         public abstract System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken);
     }
     public static class SubjectSourceExtensions

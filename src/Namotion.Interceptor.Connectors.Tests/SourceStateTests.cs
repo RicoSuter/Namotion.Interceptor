@@ -225,7 +225,7 @@ public class SourceStateTests
         var person = new Person();
         var source = new TestStateSource(person);
         var writer = new SubjectPropertyWriter(source, NullLogger.Instance);
-        ((ISourceStateReporter)source).ReportSynchronized();
+        source.ReportSynchronized();
 
         // Act
         writer.StartBuffering();
@@ -270,7 +270,7 @@ public class SourceStateTests
     {
         // Arrange
         var source = new TestStateSource(new Person());
-        ((ISourceStateReporter)source).ReportSynchronized();
+        source.ReportSynchronized();
 
         // Act
         source.ReportConnectionLost();
@@ -293,10 +293,6 @@ internal class TestStateSource : SubjectSourceBase
     }
 
     public override IInterceptorSubject RootSubject { get; }
-
-    public void ReportConnecting() => ((ISourceStateReporter)this).ReportConnecting();
-
-    public void ReportSynchronized() => ((ISourceStateReporter)this).ReportSynchronized();
 
     public void ReportStopped() => TransitionTo(SourceState.Stopped);
 

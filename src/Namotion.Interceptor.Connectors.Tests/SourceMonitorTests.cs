@@ -193,58 +193,10 @@ public class SourceMonitorTests
     /// allowed to resume, which is what lets a pre-fix run see the source both in its snapshot and as a
     /// delivered event.
     /// </summary>
-    private static async Task<(bool WasInSnapshot, bool WasDelivered)> RaceRegisterAgainstSubscribeOnceAsync()
-    {
-        var context = CreateContext();
-        var monitor = context.GetSourceMonitor();
-        var received = new ConcurrentQueue<SourceEvent>();
-
-        var reachedStateRead = new ManualResetEventSlim(false);
-        var releaseStateRead = new ManualResetEventSlim(false);
-        var source = new GatedStateSource(new Person(context), reachedStateRead, releaseStateRead);
-
-        var registerTask = Task.Run(() => monitor.Register(source));
-        Assert.True(reachedStateRead.Wait(TimeSpan.FromSeconds(10)),
-            "Register should have reached the State read before the timeout.");
-
-        var subscribeTask = Task.Run(() => monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent)));
-
-        // Give Subscribe every opportunity to fully finish while Register is paused. Against the pre-fix
-        // code the lock is already released at this point, so Subscribe races ahead and completes here;
-        // against the fixed code Register still holds the lock, so Subscribe stays blocked and this times out.
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => subscribeTask.IsCompleted,
-                timeout: TimeSpan.FromMilliseconds(200),
-                pollInterval: TimeSpan.FromMilliseconds(2));
-        }
-        catch (TimeoutException)
-        {
-            // Subscribe is still blocked acquiring the lock Register holds. That is the fixed, race-free outcome.
-        }
-
-        releaseStateRead.Set();
-
-        using var subscription = await subscribeTask.WaitAsync(TimeSpan.FromSeconds(10));
-        await registerTask.WaitAsync(TimeSpan.FromSeconds(10));
-
-        var wasInSnapshot = subscription.Sources.Contains(source);
-
-        // A subscriber's queue is FIFO and single-drained, so once a sentinel registered strictly after
-        // the race above has resolved is observed, any event for `source` that was ever enqueued for this
-        // subscription has already been delivered. This settles delivery without a blind sleep.
-        var sentinel = new TestStateSource(new Person(context));
-        monitor.Register(sentinel);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)),
-            pollInterval: TimeSpan.FromMilliseconds(2));
-
-        var wasDelivered = received.Any(
-            e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, source));
-
-        return (wasInSnapshot, wasDelivered);
-    }
+    private static Task<(bool WasInSnapshot, bool WasDelivered)> RaceRegisterAgainstSubscribeOnceAsync() =>
+        RaceActionAgainstSubscribeOnceAsync(
+            (monitor, source) => monitor.Register(source),
+            SourceEventKind.SourceRegistered);
 
     [Fact]
     public async Task WhenUnregisterAndSubscribeRaceConcurrently_ThenSnapshotPresenceAgreesWithDelivery()
@@ -288,32 +240,55 @@ public class SourceMonitorTests
     /// Subscribe cannot observe or register until after Publish has already run without it, keeping both
     /// facts false and in agreement.
     /// </summary>
-    private static async Task<(bool WasInSnapshot, bool WasDelivered)> RaceUnregisterAgainstSubscribeOnceAsync()
+    private static Task<(bool WasInSnapshot, bool WasDelivered)> RaceUnregisterAgainstSubscribeOnceAsync() =>
+        RaceActionAgainstSubscribeOnceAsync(
+            (monitor, source) => monitor.Unregister(source),
+            SourceEventKind.SourceUnregistered,
+            // Register a source with a gated State property, but keep the gate open so this initial
+            // registration, which is not part of the race, completes immediately without blocking.
+            preArrange: (monitor, source) => monitor.Register(source));
+
+    /// <summary>
+    /// Shared scaffolding for the Register-vs-Subscribe and Unregister-vs-Subscribe races above: builds a
+    /// fresh monitor and a source whose State getter can be paused mid-read, pauses <paramref name="act"/>
+    /// right there, gives a concurrent Subscribe every chance to race ahead before <paramref name="act"/>
+    /// is allowed to resume, then drains with a sentinel so delivery can be settled without a blind sleep.
+    /// </summary>
+    /// <param name="act">The monitor operation to race against Subscribe (Register or Unregister).</param>
+    /// <param name="expectedEventKind">The event kind that would prove delivery for <paramref name="act"/>.</param>
+    /// <param name="preArrange">
+    /// Optional setup that runs before the race's gates are engaged, e.g. pre-registering the source so
+    /// Unregister has something to remove.
+    /// </param>
+    private static async Task<(bool WasInSnapshot, bool WasDelivered)> RaceActionAgainstSubscribeOnceAsync(
+        Action<SourceMonitor, GatedStateSource> act,
+        SourceEventKind expectedEventKind,
+        Action<SourceMonitor, GatedStateSource>? preArrange = null)
     {
         var context = CreateContext();
         var monitor = context.GetSourceMonitor();
         var received = new ConcurrentQueue<SourceEvent>();
 
-        // Register a source with a gated State property, but keep the gate open so this initial
-        // registration, which is not part of the race, completes immediately without blocking.
+        // Keep the gate open for preArrange so any State read it triggers completes immediately
+        // without blocking; reset both gates afterwards so the race below starts from a clean pause point.
         var reachedStateRead = new ManualResetEventSlim(false);
         var releaseStateRead = new ManualResetEventSlim(true);
         var source = new GatedStateSource(new Person(context), reachedStateRead, releaseStateRead);
-        monitor.Register(source);
 
-        // Reset the gates for the Unregister-vs-Subscribe race.
+        preArrange?.Invoke(monitor, source);
+
         reachedStateRead.Reset();
         releaseStateRead.Reset();
 
-        var unregisterTask = Task.Run(() => monitor.Unregister(source));
+        var actTask = Task.Run(() => act(monitor, source));
         Assert.True(reachedStateRead.Wait(TimeSpan.FromSeconds(10)),
-            "Unregister should have reached the State read before the timeout.");
+            "The racing action should have reached the State read before the timeout.");
 
         var subscribeTask = Task.Run(() => monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent)));
 
-        // Give Subscribe every opportunity to fully finish while Unregister is paused. Against the pre-fix
+        // Give Subscribe every opportunity to fully finish while the action is paused. Against the pre-fix
         // code the lock is already released at this point, so Subscribe races ahead and completes here;
-        // against the fixed code Unregister still holds the lock, so Subscribe stays blocked and this times out.
+        // against the fixed code the action still holds the lock, so Subscribe stays blocked and this times out.
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
@@ -323,13 +298,13 @@ public class SourceMonitorTests
         }
         catch (TimeoutException)
         {
-            // Subscribe is still blocked acquiring the lock Unregister holds. That is the fixed, race-free outcome.
+            // Subscribe is still blocked acquiring the lock the action holds. That is the fixed, race-free outcome.
         }
 
         releaseStateRead.Set();
 
         using var subscription = await subscribeTask.WaitAsync(TimeSpan.FromSeconds(10));
-        await unregisterTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await actTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         var wasInSnapshot = subscription.Sources.Contains(source);
 
@@ -343,7 +318,7 @@ public class SourceMonitorTests
             pollInterval: TimeSpan.FromMilliseconds(2));
 
         var wasDelivered = received.Any(
-            e => e.Kind == SourceEventKind.SourceUnregistered && ReferenceEquals(e.Source, source));
+            e => e.Kind == expectedEventKind && ReferenceEquals(e.Source, source));
 
         return (wasInSnapshot, wasDelivered);
     }

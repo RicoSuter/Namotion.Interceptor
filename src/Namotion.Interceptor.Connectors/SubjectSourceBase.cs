@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Connectors;
 /// <see cref="StartListeningAsync"/> (protected), <see cref="LoadInitialStateAsync"/> (public),
 /// and <see cref="WriteChangesAsync"/> (public).
 /// </summary>
-public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISourceStateReporter
+public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 {
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
@@ -51,9 +51,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISo
     /// <inheritdoc />
     public event EventHandler<SourceEvent>? StateChanged;
 
-    void ISourceStateReporter.ReportConnecting() => TransitionTo(SourceState.Connecting);
+    /// <summary>Reports that the source is connecting or reconnecting and its live feed is not trusted.</summary>
+    internal void ReportConnecting() => TransitionTo(SourceState.Connecting);
 
-    void ISourceStateReporter.ReportSynchronized() => TransitionTo(SourceState.Synchronized);
+    /// <summary>Reports that the source completed its initial load procedure.</summary>
+    internal void ReportSynchronized() => TransitionTo(SourceState.Synchronized);
 
     /// <summary>
     /// Reports that the connection was lost, for connectors that detect an outage before they
@@ -77,14 +79,14 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISo
     /// set Stopped and unregister, then resume and publish Synchronized after Stopped. Both
     /// compare-exchanges would have succeeded, so no stickiness rule can prevent it.
     /// </remarks>
-    protected bool TransitionTo(SourceState newState)
+    internal void TransitionTo(SourceState newState)
     {
         lock (_stateLock)
         {
             var oldState = (SourceState)_state;
             if (oldState == newState || oldState == SourceState.Stopped)
             {
-                return false;
+                return;
             }
 
             _state = (int)newState;
@@ -114,8 +116,6 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISo
                     }
                 }
             }
-
-            return true;
         }
     }
 
@@ -317,7 +317,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISo
             try
             {
                 var property = change.Property;
-                var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
+                var currentValue = change.GetCurrentValue<object>();
                 var oldValue = change.GetOldValue<object>();
 
                 if (Equals(currentValue, oldValue))
