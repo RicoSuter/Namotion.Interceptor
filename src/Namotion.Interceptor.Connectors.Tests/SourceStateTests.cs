@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
@@ -105,6 +106,70 @@ public class SourceStateTests
     }
 
     [Fact]
+    public async Task WhenSynchronizedIsHammeredConcurrentlyWithStopped_ThenSynchronizedIsNeverPublishedAfterStoppedAndLastSynchronizedAtFreezes()
+    {
+        // Arrange
+        // TransitionTo serializes the state change, the LastSynchronizedAt write and the event raise
+        // inside one lock (see its own remarks), so this race is deterministic BY CONSTRUCTION given
+        // that lock. There is therefore no way to force the two orderings this test forbids without
+        // weakening the lock itself - this is a stress loop, not a test that hits a narrow timing
+        // window, and its job is to catch a regression that removes or narrows that lock, not to
+        // prove a race exists today. Many iterations and many hammering transitions per iteration
+        // maximize the chance that a weakened lock would show a lost update or an out-of-order event.
+        const int iterations = 200;
+        const int hammerCountPerIteration = 500;
+
+        for (var iteration = 0; iteration < iterations; iteration++)
+        {
+            var source = new TestStateSource(new Person());
+            var events = new ConcurrentQueue<SourceEvent>();
+            DateTimeOffset? lastSynchronizedAtWhenStopped = null;
+            source.StateChanged += (_, sourceEvent) =>
+            {
+                events.Enqueue(sourceEvent);
+                if (sourceEvent.NewState == SourceState.Stopped)
+                {
+                    lastSynchronizedAtWhenStopped = source.LastSynchronizedAt;
+                }
+            };
+
+            using var barrier = new Barrier(2);
+            var hammerTask = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                for (var i = 0; i < hammerCountPerIteration; i++)
+                {
+                    source.ReportConnecting();
+                    source.ReportSynchronized();
+                }
+            });
+            var stopTask = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                source.ReportStopped();
+            });
+
+            // Act
+            await Task.WhenAll(hammerTask, stopTask);
+
+            // Assert
+            Assert.Equal(SourceState.Stopped, source.State);
+            var ordered = events.ToArray();
+            var stoppedIndex = Array.FindIndex(ordered, e => e.NewState == SourceState.Stopped);
+            Assert.True(stoppedIndex >= 0, "Expected a Stopped transition to have been published.");
+            for (var afterStop = stoppedIndex + 1; afterStop < ordered.Length; afterStop++)
+            {
+                Assert.NotEqual(SourceState.Synchronized, ordered[afterStop].NewState);
+            }
+
+            // Stopped is terminal, so LastSynchronizedAt observed synchronously inside the handler at
+            // the moment Stopped was published must equal its value after every racing thread has
+            // finished: nothing can still be updating it once Stopped has been raised.
+            Assert.Equal(lastSynchronizedAtWhenStopped, source.LastSynchronizedAt);
+        }
+    }
+
+    [Fact]
     public void WhenAThrowingHandlerIsSubscribed_ThenTheTransitionStillCompletes()
     {
         // Arrange
@@ -154,7 +219,7 @@ public class SourceStateTests
     }
 
     [Fact]
-    public async Task WhenBufferingStartsOutsideThePump_ThenTheSourceReportsConnecting()
+    public void WhenBufferingStartsOutsideThePump_ThenTheSourceReportsConnecting()
     {
         // Arrange
         var person = new Person();
@@ -167,7 +232,6 @@ public class SourceStateTests
 
         // Assert
         Assert.Equal(SourceState.Connecting, source.State);
-        await Task.CompletedTask;
     }
 
     [Fact]

@@ -67,6 +67,86 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenThePumpFailsAfterReachingSynchronized_ThenTheCatchTransitionsBackToConnecting()
+    {
+        // Arrange
+        // A first-iteration failure can never distinguish ExecuteAsync's catch-block transition
+        // from the entry-line transition that always runs first (both land on Connecting, which is
+        // already the source's default state, so neither publishes an event). To observe the
+        // catch's OWN transition, the pump must first genuinely reach Synchronized and then fail.
+        // The mock context deliberately does not configure GetService<PropertyChangeInterceptor>(),
+        // so constructing the ChangeQueueProcessor - which happens right after LoadInitialStateAsync
+        // has already transitioned the source to Synchronized - throws and lands in the catch.
+        var subjectContextMock = new Mock<IInterceptorSubjectContext>();
+        subjectContextMock
+            .Setup(s => s.TryGetService<ISubjectRegistry>())
+            .Returns(new SubjectRegistry());
+        subjectContextMock
+            .Setup(context => context.GetServices<SourceMonitor>())
+            .Returns(ImmutableArray<SourceMonitor>.Empty);
+
+        var subjectMock = new Mock<IInterceptorSubject>();
+        subjectMock
+            .Setup(s => s.Context)
+            .Returns(subjectContextMock.Object);
+
+        var observedStates = new ConcurrentQueue<SourceState>();
+        var sawConnectingAfterSynchronized = new ManualResetEventSlim(false);
+
+        var source = new TestSubjectSource(subjectMock.Object, subjectContextMock.Object, NullLogger.Instance,
+            retryTime: TimeSpan.FromSeconds(30))
+        {
+            LoadInitialStateOverride = _ => Task.FromResult<Action?>(null),
+        };
+
+        source.StateChanged += (_, sourceEvent) =>
+        {
+            observedStates.Enqueue(sourceEvent.NewState);
+            if (sourceEvent.NewState == SourceState.Connecting && observedStates.Contains(SourceState.Synchronized))
+            {
+                sawConnectingAfterSynchronized.Set();
+            }
+        };
+
+        using var cancellationTokenSource = new CancellationTokenSource();
+
+        // Act
+        await source.StartAsync(cancellationTokenSource.Token);
+        var caughtBackToConnecting = sawConnectingAfterSynchronized.Wait(TimeSpan.FromSeconds(10));
+        await source.StopAsync(cancellationTokenSource.Token);
+        await cancellationTokenSource.CancelAsync();
+
+        // Assert
+        Assert.True(caughtBackToConnecting,
+            "Expected the pump to reach Synchronized and then be caught back to Connecting after the failure.");
+    }
+
+    [Fact]
+    public async Task WhenExecuteAsyncExitsViaCancellation_ThenTheFinallyTransitionsToStopped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithLifecycle();
+        var source = new TestStateSource(new Person(context));
+        var stoppedRaised = new ManualResetEventSlim(false);
+        source.StateChanged += (_, sourceEvent) =>
+        {
+            if (sourceEvent.NewState == SourceState.Stopped)
+            {
+                stoppedRaised.Set();
+            }
+        };
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.ExecuteCount >= 1);
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(stoppedRaised.Wait(TimeSpan.FromSeconds(10)), "Expected the finally block to publish Stopped.");
+        Assert.Equal(SourceState.Stopped, source.State);
+    }
+
+    [Fact]
     public async Task WhenPropertyChangeIsTriggered_ThenWriteToSourceAsyncIsCalled()
     {
         // Arrange

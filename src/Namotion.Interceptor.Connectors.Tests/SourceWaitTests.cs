@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
@@ -74,6 +75,94 @@ public class SourceWaitTests
         Assert.False(monitor.IsRegistrationComplete);
         outer.Dispose();
         Assert.True(monitor.IsRegistrationComplete);
+    }
+
+    [Fact]
+    public void WhenCompleteSourceRegistrationIsCalledConcurrentlyFromManyThreads_ThenTheInitialHoldIsReleasedExactlyOnce()
+    {
+        // Arrange
+        // The idempotency guard (Interlocked.Exchange on _initialHoldReleased) is what must survive
+        // many threads racing into CompleteSourceRegistration at once: if it let more than one
+        // thread through, _registrationHolds would be decremented past zero and IsRegistrationComplete
+        // would get stuck false, since nothing else would ever bring the count back up.
+        var monitor = CreateContext().GetSourceMonitor();
+        const int threadCount = 64;
+        using var barrier = new Barrier(threadCount);
+
+        // Raw threads, not the thread pool: Parallel.For/Task.Run schedule onto the pool, whose
+        // throttled thread-injection heuristic can take many seconds to grow to threadCount
+        // concurrent workers when they all immediately block on the barrier, making the test slow
+        // without exercising any more concurrency than a handful of real threads would.
+        var threads = new Thread[threadCount];
+        for (var i = 0; i < threadCount; i++)
+        {
+            threads[i] = new Thread(() =>
+            {
+                barrier.SignalAndWait();
+                monitor.CompleteSourceRegistration();
+            });
+        }
+
+        // Act
+        foreach (var thread in threads)
+        {
+            thread.Start();
+        }
+        foreach (var thread in threads)
+        {
+            thread.Join();
+        }
+
+        // Assert
+        Assert.True(monitor.IsRegistrationComplete);
+        Assert.Equal(0, GetRegistrationHolds(monitor));
+    }
+
+    [Fact]
+    public void WhenManyDeferWaitCompletionHoldsAreTakenAndDisposedConcurrently_ThenTheCountReturnsToZero()
+    {
+        // Arrange
+        var monitor = CreateContext().GetSourceMonitor();
+        monitor.CompleteSourceRegistration(); // release the initial hold so the baseline is zero
+        const int threadCount = 32;
+        const int perThreadIterations = 500;
+        using var barrier = new Barrier(threadCount);
+
+        // Raw threads: see the comment in the test above for why the thread pool is avoided here.
+        var threads = new Thread[threadCount];
+        for (var i = 0; i < threadCount; i++)
+        {
+            threads[i] = new Thread(() =>
+            {
+                barrier.SignalAndWait();
+                for (var iteration = 0; iteration < perThreadIterations; iteration++)
+                {
+                    using var hold = monitor.DeferWaitCompletion();
+                }
+            });
+        }
+
+        // Act
+        foreach (var thread in threads)
+        {
+            thread.Start();
+        }
+        foreach (var thread in threads)
+        {
+            thread.Join();
+        }
+
+        // Assert
+        // The count must land back at exactly zero: never negative (a lost double-release) and
+        // never stuck positive (a leaked hold that was never disposed).
+        Assert.True(monitor.IsRegistrationComplete);
+        Assert.Equal(0, GetRegistrationHolds(monitor));
+    }
+
+    private static int GetRegistrationHolds(SourceMonitor monitor)
+    {
+        var field = typeof(SourceMonitor).GetField("_registrationHolds", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        return (int)field.GetValue(monitor)!;
     }
 
     [Fact]

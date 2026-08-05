@@ -67,6 +67,11 @@ public sealed class SourceSubscription : IDisposable
             {
                 if (_disposed)
                 {
+                    // Deliberately leaves _draining set rather than resetting it to 0. That is
+                    // harmless, not a leak: Enqueue checks _disposed BEFORE it ever looks at
+                    // _draining, so once disposed no further Enqueue call can reach the
+                    // CompareExchange that would otherwise need _draining back at 0 to schedule a
+                    // new Drain. The flag simply goes dead along with the rest of the subscription.
                     return;
                 }
 
@@ -85,7 +90,19 @@ public sealed class SourceSubscription : IDisposable
         while (!_queue.IsEmpty && Interlocked.CompareExchange(ref _draining, 1, 0) == 0);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Marks the subscription disposed and removes it from the monitor. Does not block on draining.
+    /// </summary>
+    /// <remarks>
+    /// Disposal is asynchronous with respect to delivery, in both directions:
+    /// <list type="bullet">
+    /// <item>A handler invocation already in progress when Dispose is called is not interrupted; it
+    /// runs to completion on its own, even after Dispose has returned.</item>
+    /// <item>Any event still sitting in the queue, dequeued by the drain loop after Dispose has set
+    /// the disposed flag, is dropped rather than delivered. Delivery is therefore best-effort at the
+    /// disposal boundary: an event enqueued shortly before Dispose is not guaranteed to be handled.</item>
+    /// </list>
+    /// </remarks>
     public void Dispose()
     {
         _disposed = true;
