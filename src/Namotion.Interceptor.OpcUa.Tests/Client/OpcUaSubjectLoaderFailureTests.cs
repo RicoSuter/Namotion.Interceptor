@@ -10,6 +10,7 @@ using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -855,6 +856,107 @@ public class OpcUaSubjectLoaderFailureTests
     }
 
     [Fact]
+    public async Task WhenAGraphSharedSubjectIsRolledBack_ThenItsStagingContextIsReleased()
+    {
+        // Arrange: a graph-shaped address space rather than a tree. Root has two Object children,
+        // Holder and Shared, browsed in that order, so both are staged under the root subject's
+        // context in that order. Holder's only child reference resolves to Shared's NodeId, which
+        // hits the per-load SubjectsByNodeId cache and binds the already-staged Shared live under
+        // Holder. It binds live because Holder is not the root subject, so QueueOrApplySetValue
+        // does not defer it, while both of root's own bindings stay deferred to an Apply that a
+        // failed load never reaches. Shared's value property then fails its attribute-phase browse,
+        // which is the last phase of the level, so the load rolls back with Shared already
+        // referenced by Holder.
+        //
+        // The rollback walks the staged subjects in reverse. Shared still holds Holder's reference
+        // so the first pass skips it, then Holder drops to zero and is detached, and that cascade
+        // drops Shared to zero as well. The cascade's own cleanup is keyed to Holder's context,
+        // which is not the context Shared was staged under, so the staging link to the root context
+        // survives unless a second pass re-checks after the detaches have settled.
+        var holderId = new NodeId(4401, 2);
+        var sharedId = new NodeId(4402, 2);
+        var sharedValueId = new NodeId(4403, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            // Holder first: staging order is browse order, and the cascade is only reachable when
+            // the subject that gains the second parent is staged after the parent that gains it.
+            [RootId] =
+            [
+                MakeReference("Holder", holderId, NodeClass.Object),
+                MakeReference("Shared", sharedId, NodeClass.Object)
+            ],
+            [holderId] = [MakeReference("Child", sharedId, NodeClass.Object)],
+            [sharedId] = [MakeReference("Value", sharedValueId, NodeClass.Variable)]
+        };
+
+        var modelContext = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
+        var root = new RollbackGraphRoot(modelContext);
+
+        // The staging link points at the root subject's own context, not at the shared model
+        // context, because RegisterStagedSubject keys the fallback to the parent subject.
+        var rootContext = ((IInterceptorSubject)root).Context;
+
+        // Neither staged subject is ever bound to root, so the model offers no handle on them after
+        // the rollback. The recording factory is how the assertions reach the shared subject.
+        var subjectFactory = new RecordingOpcUaSubjectFactory();
+        var (loader, _) = CreateSourceAndLoaderFor(root, shouldAddDynamicProperties: false, subjectFactory);
+
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection descriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var description in descriptions)
+                {
+                    if (description.NodeId == sharedValueId)
+                    {
+                        results.Add(new BrowseResult { StatusCode = StatusCodes.BadServerHalted, References = [] });
+                        continue;
+                    }
+
+                    var children = new ReferenceDescriptionCollection();
+                    if (browseTree.TryGetValue(description.NodeId, out var references))
+                    {
+                        children.AddRange(references);
+                    }
+                    results.Add(new BrowseResult { References = children });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        var rootNode = MakeReference("Root", RootId, NodeClass.Object);
+
+        // Act
+        await Assert.ThrowsAsync<OpcUaTransientServiceException>(
+            () => loader.LoadSubjectAsync(root, rootNode, mockSession.Object, CancellationToken.None));
+
+        // Assert: the cascade ran, so the shared subject is out of the graph and out of the
+        // registry. Both are preconditions for the leak rather than the leak itself; without them
+        // the fallback check below would pass for the wrong reason.
+        var sharedSubject = subjectFactory.GetCreatedSubject("Shared");
+        Assert.Equal(0, sharedSubject.GetReferenceCount());
+        Assert.Null(sharedSubject.TryGetRegisteredSubject());
+
+        // RemoveFallbackContext reports whether there was a link to remove, so a `true` return here
+        // is the leak: the staging link outlived the subject's presence in the graph. A surviving
+        // link keeps the shared subject's context in the root context's used-by set, which holds a
+        // strong reference to the orphan's executor, and therefore to the orphan, for the process
+        // lifetime. Every failed load of such a graph adds one more across a reconnect or retry loop.
+        Assert.False(sharedSubject.Context.RemoveFallbackContext(rootContext),
+            "The rolled-back shared subject still had the root subject's context as a fallback, so its staging link " +
+            "outlived its presence in the graph. The root context keeps a strong reference to every context that uses " +
+            "it, so the orphan is retained for the process lifetime and every failed load of this address space leaks " +
+            "one more.");
+    }
+
+    [Fact]
     public async Task WhenALoadFailsWhileHoldingTheStructureLock_ThenRollbackDoesNotDeadlock()
     {
         // Arrange: Root has a Sensor child whose own child fails with a transient browse status,
@@ -977,14 +1079,15 @@ public class OpcUaSubjectLoaderFailureTests
     /// </summary>
     private static (OpcUaSubjectLoader Loader, OpcUaSubjectClientSource Source) CreateSourceAndLoaderFor(
         IInterceptorSubject subject,
-        bool shouldAddDynamicProperties)
+        bool shouldAddDynamicProperties,
+        OpcUaSubjectFactory? subjectFactory = null)
     {
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaSubjectClientSource>.Instance),
             ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory()),
+            SubjectFactory = subjectFactory ?? new OpcUaSubjectFactory(new DefaultSubjectFactory()),
             ShouldAddDynamicProperty = (_, _) => Task.FromResult(shouldAddDynamicProperties)
         };
 
@@ -1090,6 +1193,41 @@ public class OpcUaSubjectLoaderFailureTests
             NodeClass = nodeClass
         };
     }
+
+    /// <summary>
+    /// Records every subject the loader materializes for a single subject reference, keyed by the
+    /// browse name it was created for. A staged subject whose binding to the root subject is
+    /// deferred to <c>Apply</c> is unreachable from the model after a failed load, so recording it
+    /// at creation time is the only handle a rollback assertion has on it.
+    /// </summary>
+    private sealed class RecordingOpcUaSubjectFactory : OpcUaSubjectFactory
+    {
+        private readonly Dictionary<string, IInterceptorSubject> _createdSubjectsByBrowseName = new();
+
+        public RecordingOpcUaSubjectFactory()
+            : base(new DefaultSubjectFactory())
+        {
+        }
+
+        public override async Task<IInterceptorSubject> CreateSubjectAsync(
+            RegisteredSubjectProperty property,
+            ReferenceDescription node,
+            ISession session,
+            CancellationToken cancellationToken)
+        {
+            var subject = await base.CreateSubjectAsync(property, node, session, cancellationToken);
+            _createdSubjectsByBrowseName[node.BrowseName.Name] = subject;
+            return subject;
+        }
+
+        public IInterceptorSubject GetCreatedSubject(string browseName)
+        {
+            return _createdSubjectsByBrowseName.TryGetValue(browseName, out var subject)
+                ? subject
+                : throw new InvalidOperationException(
+                    $"The loader never created a subject for the browse name '{browseName}', so the scenario did not stage what the test expects.");
+        }
+    }
 }
 
 [InterceptorSubject]
@@ -1146,6 +1284,35 @@ public partial class RollbackLatePhaseParent
     /// </summary>
     [OpcUaNode("Status")]
     public partial double Status { get; set; }
+}
+
+[InterceptorSubject]
+public partial class RollbackGraphRoot
+{
+    [OpcUaNode("Holder")]
+    public partial RollbackGraphHolder? Holder { get; set; }
+
+    /// <summary>
+    /// Reached both from here and from <see cref="RollbackGraphHolder.Child"/>, which is what makes
+    /// the address space a graph instead of a tree: the subject is staged under the root subject
+    /// but ends up bound under a different parent.
+    /// </summary>
+    [OpcUaNode("Shared")]
+    public partial RollbackGraphShared? Shared { get; set; }
+}
+
+[InterceptorSubject]
+public partial class RollbackGraphHolder
+{
+    [OpcUaNode("Child")]
+    public partial RollbackGraphShared? Child { get; set; }
+}
+
+[InterceptorSubject]
+public partial class RollbackGraphShared
+{
+    [OpcUaNode("Value")]
+    public partial double Value { get; set; }
 }
 
 [InterceptorSubject]

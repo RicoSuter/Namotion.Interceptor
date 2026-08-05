@@ -298,6 +298,36 @@ internal sealed class OpcUaLoadContext : IDisposable
                     staged.GetType().Name);
             }
         }
+        // Second pass, once the detaches above have settled. Removing one staged subject can
+        // cascade into another that was skipped a moment ago for still having a reference, and the
+        // cascade's own removal is keyed to the parent holding the property reference, which is not
+        // necessarily the parent it was staged under: the per-load NodeId cache binds an
+        // already-staged subject under a second parent in graph-shaped address spaces. When those
+        // differ, the handler's removal is a no-op and the staging link survives, keeping the
+        // subject reachable from that parent's context for good. Re-checking here catches it.
+        // Removal only, never an add, so this cannot introduce a delegation cycle, and
+        // RemoveFallbackContext is a no-op when the link is already gone, so it is order
+        // independent and safe to run over entries the first pass already handled.
+        for (var i = _stagedSubjects.Count - 1; i >= 0; i--)
+        {
+            var (staged, parentContext) = _stagedSubjects[i];
+            if (staged.GetReferenceCount() != 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                staged.Context.RemoveFallbackContext(parentContext);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to release the staging context of subject {Subject} during rollback.",
+                    staged.GetType().Name);
+            }
+        }
+
         _stagedSubjects.Clear();
         _queuedClaimIndices.Clear();
         _pendingClaims.Clear();
