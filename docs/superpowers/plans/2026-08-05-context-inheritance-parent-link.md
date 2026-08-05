@@ -473,7 +473,7 @@ Edit `src/Namotion.Interceptor/Namotion.Interceptor.csproj`, inside the existing
     </ItemGroup>
 ```
 
-This is decision 2 from "Decisions surfaced while planning". The probe needs `_usedByContexts`, which is private on `InterceptorSubjectContext`, and the tests need `WithContextInheritance()`, which `Namotion.Interceptor.Tests` cannot reach.
+This is decision 2 from "Decisions surfaced while planning". The grant is **not** what lets the probe read `_usedByContexts`: reflection with `BindingFlags.NonPublic` reaches a private field regardless. It is needed for Task 4's two-edges test, which calls the internal `TrySetParentContext`. These tests live here rather than in `Namotion.Interceptor.Tests` because that project has no reference to `Namotion.Interceptor.Tracking` and so cannot reach `WithContextInheritance()`.
 
 - [ ] **Step 2: Write the reverse-entry probe**
 
@@ -830,12 +830,13 @@ public class RootAttachContractTests
 dotnet test src/Namotion.Interceptor.Tracking.Tests --filter "FullyQualifiedName~RootAttachContractTests"
 ```
 
-Expected: **FAIL**, 4 of 4, and the project must still **compile**. Every test here is written against `master`'s API on purpose, so that commit 2 builds and fails only on assertions. Task 3 step 11d migrates them to the new API along with every other subject-facing call site.
+Expected: **FAIL**, 5 of 5, and the project must still **compile**. Every test here is written against `master`'s API on purpose, so that commit 2 builds and fails only on assertions. Task 3 step 11d migrates them to the new API along with every other subject-facing call site.
 
 Each must fail for its own reason. Confirm each individually rather than trusting the count:
 - `WhenAttachResolveThrows_...` fails because master publishes the edge before resolving, so `loopA`'s reverse-entry count grew by one.
 - `WhenChainTurnedCyclicAfterAttach_...` fails because master's `RemoveFallbackContext` re-resolves and raises before removing, so the count did not drop.
 - `WhenSubjectOwnedByOneGraphIsAttachedToAnother_...` fails because no exception is thrown; registry B does contain the subject.
+- `WhenRootAttachedSubjectIsReferencedFromAnotherGraph_...` fails for the same reason on the other shape: no exception, and the subject picks up a second graph's reference.
 - `WhenHandlerReAttachesSubjectDuringItsOwnDetach_...` fails because `caught` is null; master accepts the re-attach.
 
 If any fails with an exception type other than the assertion failure, the arrange is wrong, not the production code. Record all four observations in the commit message.
