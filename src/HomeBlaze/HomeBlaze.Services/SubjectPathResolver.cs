@@ -25,10 +25,18 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     // (path, style) → Subject resolve cache (absolute paths only)
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> _resolveCache = new();
 
-    public SubjectPathResolver(RootManager rootManager, IInterceptorSubjectContext context)
+    /// <summary>
+    /// Initializes a new subject path resolver.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SubjectPathResolverExtensions.WithPathResolver"/> registers the factory result
+    /// after construction; keeping registration out of the constructor adds the resolver exactly
+    /// once.
+    /// </remarks>
+    /// <param name="rootManager">The root manager.</param>
+    public SubjectPathResolver(RootManager rootManager)
     {
         _rootManager = rootManager;
-        context.AddService(this);
     }
 
     /// <summary>

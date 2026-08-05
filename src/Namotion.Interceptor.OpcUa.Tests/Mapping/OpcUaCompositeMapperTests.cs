@@ -15,7 +15,7 @@ public class OpcUaCompositeMapperTests
     {
         // Arrange
         var composite = new OpcUaCompositeMapper();
-        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var subject = new TestNodeMapperModel(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
@@ -29,7 +29,7 @@ public class OpcUaCompositeMapperTests
         // Arrange
         var attributeMapper = new OpcUaAttributeMapper();
         var composite = new OpcUaCompositeMapper(attributeMapper);
-        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var subject = new TestNodeMapperModel(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
@@ -51,7 +51,7 @@ public class OpcUaCompositeMapperTests
 
         // Attribute mapper is second, so it wins for overlapping fields
         var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
-        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var subject = new TestNodeMapperModel(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("MonitoredProp")!;
 
@@ -73,7 +73,7 @@ public class OpcUaCompositeMapperTests
         var attributeMapper = new OpcUaAttributeMapper();
 
         var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
-        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var subject = new TestNodeMapperModel(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
@@ -95,7 +95,7 @@ public class OpcUaCompositeMapperTests
         var pathMapper = new OpcUaPathProviderMapper(pathProvider);
 
         var composite = new OpcUaCompositeMapper(attributeMapper, pathMapper);
-        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var subject = new TestNodeMapperModel(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         // PlainProp has no Path or OpcUaNode attributes, so both return null
         var property = registeredSubject.TryGetProperty("PlainProp")!;
@@ -114,7 +114,7 @@ public class OpcUaCompositeMapperTests
 
         // PathMapper first, then AttributeMapper (AttributeMapper wins for overlapping)
         var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
-        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var subject = new TestNodeMapperModel(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         // MonitoredProp has both OpcUaNode with sampling settings
         var property = registeredSubject.TryGetProperty("MonitoredProp")!;
@@ -142,7 +142,7 @@ public class OpcUaCompositeMapperTests
 
         // Three mappers: pathMapper1, pathMapper2, attributeMapper (last wins)
         var composite = new OpcUaCompositeMapper(pathMapper1, pathMapper2, attributeMapper);
-        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var subject = new TestNodeMapperModel(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         // FilteredProp has OpcUaNode with filter settings
         var property = registeredSubject.TryGetProperty("FilteredProp")!;
@@ -172,7 +172,7 @@ public class OpcUaCompositeMapperTests
             new OpcUaAttributeMapper(),
             fluent.Build('.'));
 
-        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var subject = new TestNodeMapperModel(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
@@ -196,7 +196,7 @@ public class OpcUaCompositeMapperTests
         var attributeMapper = new OpcUaAttributeMapper();
 
         var composite = new OpcUaCompositeMapper(pathMapper1, pathMapper2, attributeMapper);
-        var subject = new TestRoot(new InterceptorSubjectContext());
+        var subject = new TestRoot(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
 
         var namespaceUris = new NamespaceTable();
@@ -229,7 +229,7 @@ public class OpcUaCompositeMapperTests
 
         // AttributeMapper is last, so it wins
         var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
-        var subject = new TestRoot(new InterceptorSubjectContext());
+        var subject = new TestRoot(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
 
         var namespaceUris = new NamespaceTable();
@@ -261,7 +261,7 @@ public class OpcUaCompositeMapperTests
         var attributeMapper = new OpcUaAttributeMapper();
 
         var composite = new OpcUaCompositeMapper(pathMapper, attributeMapper);
-        var subject = new TestRoot(new InterceptorSubjectContext());
+        var subject = new TestRoot(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
 
         var namespaceUris = new NamespaceTable();

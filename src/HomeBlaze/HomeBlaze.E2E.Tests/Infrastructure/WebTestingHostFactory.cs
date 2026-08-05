@@ -59,6 +59,10 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
+        // Set CWD to the test output directory so relative paths in test configuration
+        // (testRoot.json, ./TestData) resolve correctly regardless of where dotnet test is run from.
+        Environment.CurrentDirectory = AppContext.BaseDirectory;
+
         // Create the standard TestServer host (required by base class)
         var testHost = builder.Build();
 

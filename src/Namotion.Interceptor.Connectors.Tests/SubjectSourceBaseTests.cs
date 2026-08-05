@@ -72,7 +72,7 @@ public class SubjectSourceBaseTests
         // Arrange
         var propertyChangedChannel = new PropertyChangeInterceptor();
 
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.AddService(propertyChangedChannel);
 
@@ -240,7 +240,7 @@ public class SubjectSourceBaseTests
         // Arrange
         var propertyChangedChannel = new PropertyChangeInterceptor();
 
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.AddService(propertyChangedChannel);
 
@@ -280,7 +280,7 @@ public class SubjectSourceBaseTests
         // Arrange
         var propertyChangedChannel = new PropertyChangeInterceptor();
 
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.AddService(propertyChangedChannel);
 
@@ -320,7 +320,7 @@ public class SubjectSourceBaseTests
         // Arrange
         var propertyChangedChannel = new PropertyChangeInterceptor();
 
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.AddService(propertyChangedChannel);
 
@@ -378,7 +378,7 @@ public class SubjectSourceBaseTests
         // Arrange
         var propertyChangedChannel = new PropertyChangeInterceptor();
 
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.AddService(propertyChangedChannel);
 
@@ -417,7 +417,7 @@ public class SubjectSourceBaseTests
         // Arrange
         var propertyChangedChannel = new PropertyChangeInterceptor();
 
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.AddService(propertyChangedChannel);
 
@@ -473,7 +473,7 @@ public class SubjectSourceBaseTests
         // Arrange
         var propertyChangedChannel = new PropertyChangeInterceptor();
 
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.AddService(propertyChangedChannel);
 

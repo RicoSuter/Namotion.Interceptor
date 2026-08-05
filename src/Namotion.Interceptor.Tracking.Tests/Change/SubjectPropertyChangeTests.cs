@@ -1,3 +1,6 @@
+using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -20,7 +23,7 @@ public class SubjectPropertyChangeTests
     [InlineData("OldName", "NewName")]
     [InlineData("", "NewName")]
     [InlineData("Test", "")]
-    public void Create_WithString_StoresAndRetrievesCorrectly(string oldValue, string newValue)
+    public void WhenCreatedWithString_ThenStoresAndRetrievesCorrectly(string oldValue, string newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -33,7 +36,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullString_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullString_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         string? oldValue = null;
@@ -50,7 +53,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithBothStringsNull_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithBothStringsNull_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         string? oldValue = null;
@@ -70,7 +73,7 @@ public class SubjectPropertyChangeTests
     [InlineData(42, 100)]
     [InlineData(int.MinValue, int.MaxValue)]
     [InlineData(0, -1)]
-    public void Create_WithInt_StoresAndRetrievesCorrectly(int oldValue, int newValue)
+    public void WhenCreatedWithInt_ThenStoresAndRetrievesCorrectly(int oldValue, int newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -85,7 +88,7 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(123456789012345L, 987654321098765L)]
     [InlineData(long.MinValue, long.MaxValue)]
-    public void Create_WithLong_StoresAndRetrievesCorrectly(long oldValue, long newValue)
+    public void WhenCreatedWithLong_ThenStoresAndRetrievesCorrectly(long oldValue, long newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -100,7 +103,7 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(3.14159265358979, 2.71828182845904)]
     [InlineData(double.MinValue, double.MaxValue)]
-    public void Create_WithDouble_StoresAndRetrievesCorrectly(double oldValue, double newValue)
+    public void WhenCreatedWithDouble_ThenStoresAndRetrievesCorrectly(double oldValue, double newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -115,7 +118,7 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(3.14f, 2.71f)]
     [InlineData(float.MinValue, float.MaxValue)]
-    public void Create_WithFloat_StoresAndRetrievesCorrectly(float oldValue, float newValue)
+    public void WhenCreatedWithFloat_ThenStoresAndRetrievesCorrectly(float oldValue, float newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -130,7 +133,7 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(false, true)]
     [InlineData(true, false)]
-    public void Create_WithBool_StoresAndRetrievesCorrectly(bool oldValue, bool newValue)
+    public void WhenCreatedWithBool_ThenStoresAndRetrievesCorrectly(bool oldValue, bool newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -145,7 +148,7 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData((byte)0, (byte)255)]
     [InlineData((byte)128, (byte)64)]
-    public void Create_WithByte_StoresAndRetrievesCorrectly(byte oldValue, byte newValue)
+    public void WhenCreatedWithByte_ThenStoresAndRetrievesCorrectly(byte oldValue, byte newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -160,7 +163,7 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData('A', 'Z')]
     [InlineData('0', '9')]
-    public void Create_WithChar_StoresAndRetrievesCorrectly(char oldValue, char newValue)
+    public void WhenCreatedWithChar_ThenStoresAndRetrievesCorrectly(char oldValue, char newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -183,7 +186,7 @@ public class SubjectPropertyChangeTests
 
     [Theory]
     [MemberData(nameof(LargerValueTypeTestData))]
-    public void Create_WithLargerValueTypes_StoresAndRetrievesCorrectly(object oldValue, object newValue)
+    public void WhenCreatedWithLargerValueTypes_ThenStoresAndRetrievesCorrectly(object oldValue, object newValue)
     {
         // Arrange
         var method = typeof(SubjectPropertyChange)
@@ -209,7 +212,7 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(42, 100)]
     [InlineData(0, int.MaxValue)]
-    public void Create_WithNullableInt_WithValue_StoresAndRetrievesCorrectly(int oldVal, int newVal)
+    public void WhenCreatedWithNullableIntWithValue_ThenStoresAndRetrievesCorrectly(int oldVal, int newVal)
     {
         // Arrange
         int? oldValue = oldVal;
@@ -226,7 +229,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullableInt_WithNull_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullableIntWithNull_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         int? oldValue = null;
@@ -243,7 +246,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullableInt_BothNull_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullableIntBothNull_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         int? oldValue = null;
@@ -260,7 +263,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullableDecimal_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullableDecimal_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         decimal? oldValue = 123.456m;
@@ -296,7 +299,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithSmallCustomStruct_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithSmallCustomStruct_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         var oldValue = new SmallCustomStruct { Value1 = 1, Value2 = 2 };
@@ -317,7 +320,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithLargeCustomStruct_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithLargeCustomStruct_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         var oldValue = new LargeCustomStruct { Value1 = 111111111111L, Value2 = 222222222222L };
@@ -338,7 +341,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithOversizedCustomStruct_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithOversizedCustomStruct_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         var oldValue = new OversizedCustomStruct { Value1 = 1L, Value2 = 2L, Value3 = 3L };
@@ -361,7 +364,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void GetOldValue_WithCustomStructAsObject_ReturnsBoxedStruct()
+    public void WhenGettingOldValueOfCustomStructAsObject_ThenReturnsBoxedStruct()
     {
         // Arrange
         var oldValue = new SmallCustomStruct { Value1 = 42, Value2 = 84 };
@@ -380,7 +383,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void GetOldValue_WithOversizedStructAsObject_ReturnsBoxedStruct()
+    public void WhenGettingOldValueOfOversizedStructAsObject_ThenReturnsBoxedStruct()
     {
         // Arrange
         var oldValue = new OversizedCustomStruct { Value1 = 1L, Value2 = 2L, Value3 = 3L };
@@ -406,7 +409,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithReferenceType_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithReferenceType_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         var oldValue = new CustomClass { Id = 1, Name = "Old" };
@@ -423,7 +426,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullReferenceType_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullReferenceType_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         CustomClass? oldValue = null;
@@ -440,7 +443,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithIntArray_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithIntArray_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         int[] oldValue = [1, 2, 3];
@@ -457,7 +460,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullArray_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullArray_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         int[]? oldValue = null;
@@ -476,7 +479,7 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(42)]
     [InlineData("test")]
-    public void GetOldValue_AsObject_ReturnsValue(object oldValue)
+    public void WhenGettingOldValueAsObject_ThenReturnsValue(object oldValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -489,7 +492,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void TryGetOldValue_WithWrongType_ReturnsFalse()
+    public void WhenTryGettingOldValueWithWrongType_ThenReturnsFalse()
     {
         // Arrange
         var change = SubjectPropertyChange.Create(
@@ -505,7 +508,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void TryGetNewValue_WithCorrectType_ReturnsTrue()
+    public void WhenTryGettingNewValueWithCorrectType_ThenReturnsTrue()
     {
         // Arrange
         var newValue = 42.5;
@@ -522,7 +525,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_PreservesPropertyReference()
+    public void WhenCreated_ThenPreservesPropertyReference()
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -534,7 +537,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_PreservesSource()
+    public void WhenCreated_ThenPreservesSource()
     {
         // Arrange
         var source = new object();
@@ -549,7 +552,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_PreservesTimestamps()
+    public void WhenCreated_ThenPreservesTimestamps()
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -562,7 +565,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullReceivedTimestamp_PreservesNull()
+    public void WhenCreatedWithNullReceivedTimestamp_ThenPreservesNull()
     {
         // Act
         var change = SubjectPropertyChange.Create(
@@ -574,7 +577,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWithNewer_WithInlineValues_KeepsOldFromEarlierAndNewFromLater()
+    public void WhenMergingWithNewerWithInlineValues_ThenKeepsOldFromEarlierAndNewFromLater()
     {
         // Arrange
         var earlierSource = new object();
@@ -600,7 +603,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWithNewer_WithStrings_KeepsOldFromEarlierAndNewFromLater()
+    public void WhenMergingWithNewerWithStrings_ThenKeepsOldFromEarlierAndNewFromLater()
     {
         // Arrange
         var earlier = SubjectPropertyChange.Create(
@@ -619,7 +622,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWithNewer_WithNullStringOldValue_PreservesNull()
+    public void WhenMergingWithNewerWithNullStringOldValue_ThenPreservesNull()
     {
         // Arrange
         var earlier = SubjectPropertyChange.Create(
@@ -638,7 +641,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWithNewer_WithBoxedReferenceTypes_KeepsOldFromEarlierAndNewFromLater()
+    public void WhenMergingWithNewerWithBoxedReferenceTypes_ThenKeepsOldFromEarlierAndNewFromLater()
     {
         // Arrange
         var oldObj = new CustomClass { Id = 1, Name = "Old" };
@@ -661,7 +664,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWithNewer_WithFromSourceOrigins_PreservesKindAndSource()
+    public void WhenMergingWithNewerWithFromSourceOrigins_ThenPreservesKindAndSource()
     {
         // Arrange
         var source = new object();
@@ -679,6 +682,70 @@ public class SubjectPropertyChangeTests
         Assert.Equal(ChangeOriginKind.FromSource, merged.Origin.Kind);
         Assert.Same(source, merged.Origin.Source);
     }
+
+    [Fact]
+    public void WhenCreatedWithSmallStructContainingReference_ThenKeepsReferenceAliveForGc()
+    {
+        // Arrange: a small ref-carrying struct; the non-inlined helper leaves the retained change
+        // as the value's only possible GC root.
+        var (change, weakReference) = CreateChangeWithReferenceStruct(_property, _changedTimestamp, _receivedTimestamp);
+
+        // Act
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+        // Assert
+        Assert.True(weakReference.IsAlive,
+            "SubjectPropertyChange must keep references inside stored values alive for the GC.");
+        Assert.Same(weakReference.Target, change.GetOldValue<SmallStructWithReference>().Reference);
+        GC.KeepAlive(change);
+    }
+
+    [Fact]
+    public void WhenCreatedWithImmutableArray_ThenKeepsBackingArrayAliveAcrossGc()
+    {
+        // Arrange: ImmutableArray<T> wraps a T[] reference; the change may be the backing array's only GC root.
+        var (change, weakBackingArray) = CreateChangeWithImmutableArray(_property, _changedTimestamp, _receivedTimestamp);
+
+        // Act
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+        // Assert - the backing array survives and the value round-trips intact through the
+        // boxed object read (the path collection diffing uses)
+        Assert.True(weakBackingArray.IsAlive,
+            "SubjectPropertyChange must keep the ImmutableArray's backing array alive for the GC.");
+        var oldValue = Assert.IsType<ImmutableArray<string>>(change.GetOldValue<object?>());
+        Assert.Equal(new[] { "a", "b" }, oldValue);
+        GC.KeepAlive(change);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (SubjectPropertyChange Change, WeakReference WeakReference) CreateChangeWithReferenceStruct(
+        PropertyReference property, DateTimeOffset changedTimestamp, DateTimeOffset receivedTimestamp)
+    {
+        var referenced = new object();
+        var change = SubjectPropertyChange.Create(
+            property, origin: ChangeOrigin.Local, changedTimestamp, receivedTimestamp,
+            new SmallStructWithReference(referenced), new SmallStructWithReference(null));
+        return (change, new WeakReference(referenced));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (SubjectPropertyChange Change, WeakReference WeakBackingArray) CreateChangeWithImmutableArray(
+        PropertyReference property, DateTimeOffset changedTimestamp, DateTimeOffset receivedTimestamp)
+    {
+        var oldValue = ImmutableArray.Create("a", "b");
+        var backingArray = ImmutableCollectionsMarshal.AsArray(oldValue)!;
+        var change = SubjectPropertyChange.Create(
+            property, origin: ChangeOrigin.Local, changedTimestamp, receivedTimestamp,
+            oldValue, ImmutableArray.Create("a", "b", "c"));
+        return (change, new WeakReference(backingArray));
+    }
+
+    private readonly record struct SmallStructWithReference(object? Reference);
 
     [Fact]
     public void WhenMeasuringSubjectPropertyChange_ThenSizeStaysWithinOneAlignmentSlotOfMaster()

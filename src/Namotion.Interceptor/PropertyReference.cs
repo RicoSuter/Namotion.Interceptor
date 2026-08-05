@@ -2,11 +2,9 @@
 
 namespace Namotion.Interceptor;
 
-public struct PropertyReference : IEquatable<PropertyReference>
+public readonly struct PropertyReference : IEquatable<PropertyReference>
 {
     public static readonly PropertyReferenceComparer Comparer = new();
-
-    private SubjectPropertyMetadata? _metadata = null;
 
     public PropertyReference(IInterceptorSubject subject, string name)
     {
@@ -18,24 +16,17 @@ public struct PropertyReference : IEquatable<PropertyReference>
 
     public string Name { get; }
 
-    public SubjectPropertyMetadata Metadata
-    {
-        get
-        {
-            if (_metadata is not null)
-            {
-                return _metadata.Value;
-            }
-
-            _metadata = Subject.Properties
-                .TryGetValue(Name, out var metadata) ? metadata :
-                throw new InvalidOperationException(
-                    $"No metadata found for property '{Name}' on {Subject.GetType().Name}. " +
-                    $"Available properties ({Subject.Properties.Count}): [{string.Join(", ", Subject.Properties.Keys)}]");
-
-            return _metadata!.Value;
-        }
-    }
+    /// <summary>
+    /// Looks up the property metadata in the subject's property table on each access; the result is not
+    /// cached, because PropertyReference is a value type copied throughout the codebase and an embedded
+    /// cache would bloat every copy and force the struct to be mutable (see the readonly-struct
+    /// declaration). The lookup is cheap, but hoist it to a local if you read it more than once in a hot path.
+    /// </summary>
+    public SubjectPropertyMetadata Metadata =>
+        Subject.Properties.TryGetValue(Name, out var metadata) ? metadata :
+            throw new InvalidOperationException(
+                $"No metadata found for property '{Name}' on {Subject.GetType().Name}. " +
+                $"Available properties ({Subject.Properties.Count}): [{string.Join(", ", Subject.Properties.Keys)}]");
 
     public void SetPropertyData(string key, object? value)
     {

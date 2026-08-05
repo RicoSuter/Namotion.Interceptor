@@ -14,7 +14,7 @@ public class ChangeQueueProcessorTests
     public async Task WhenMultipleChangesToSameProperty_ThenOnlyLastValueIsWritten()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
@@ -55,7 +55,7 @@ public class ChangeQueueProcessorTests
     public async Task WhenChangesToDifferentProperties_ThenAllAreWritten()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
@@ -94,7 +94,7 @@ public class ChangeQueueProcessorTests
     public async Task WhenDeduplicating_ThenOrderOfLastOccurrencesIsPreservedAndValuesAreMerged()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
@@ -139,7 +139,7 @@ public class ChangeQueueProcessorTests
     public async Task WhenEmptyQueue_ThenNoWriteHandlerCalled()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
@@ -171,7 +171,7 @@ public class ChangeQueueProcessorTests
     public void WhenDisposed_ThenResourcesAreCleaned()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
@@ -193,7 +193,7 @@ public class ChangeQueueProcessorTests
     public async Task WhenFlushInProgress_ThenConcurrentFlushSkipsToAvoidContention()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
@@ -243,7 +243,7 @@ public class ChangeQueueProcessorTests
     public async Task WhenBoundedQueueOverflows_ThenOldestChangesAreDropped()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
@@ -286,7 +286,7 @@ public class ChangeQueueProcessorTests
     public async Task WhenUnbounded_ThenNoChangesAreDropped()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 

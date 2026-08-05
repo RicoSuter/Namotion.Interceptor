@@ -293,7 +293,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         next(ref context);
 
-        if (!context.Property.Metadata.Type.CanContainSubjects<TProperty>())
+        var metadata = context.Property.Metadata;
+        if (!metadata.Type.CanContainSubjects<TProperty>())
         {
             return;
         }
@@ -305,7 +306,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             // Read the actual backing store value to handle concurrent writes correctly.
             // context.NewValue may differ from the backing store if another thread
             // overwrote the property between our next() call and lock acquisition.
-            var getValue = context.Property.Metadata.GetValue;
+            var getValue = metadata.GetValue;
             var newValue = getValue is not null
                 ? getValue(context.Property.Subject)
                 : context.NewValue;
