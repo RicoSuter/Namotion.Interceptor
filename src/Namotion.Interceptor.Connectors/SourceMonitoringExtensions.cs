@@ -10,6 +10,8 @@ namespace Namotion.Interceptor.Connectors;
 /// <summary>Consumer-facing entry points for source monitoring.</summary>
 public static class SourceMonitoringExtensions
 {
+    private const string NoMonitorMessage =
+        "No SourceMonitor is reachable from this context. Call WithSourceMonitoring() on the tree root context.";
     /// <summary>
     /// Gets the property's synchronization state, derived from its owning source with no per-property storage.
     /// </summary>
@@ -61,8 +63,7 @@ public static class SourceMonitoringExtensions
         return monitors.Length switch
         {
             1 => monitors[0],
-            0 => throw new InvalidOperationException(
-                "No SourceMonitor is reachable from this context. Call WithSourceMonitoring() on the tree root context."),
+            0 => throw new InvalidOperationException(NoMonitorMessage),
             _ => throw new InvalidOperationException(
                 $"{monitors.Length} SourceMonitor instances are reachable from this context. " +
                 "Combining them is a decision for the call site: use GetServices<SourceMonitor>() and choose explicitly.")
@@ -81,9 +82,28 @@ public static class SourceMonitoringExtensions
     public static void CompleteSourceRegistration(this IInterceptorSubjectContext context)
     {
         var monitors = ResolveMonitorsOrThrow(context);
+        var exceptions = new List<Exception>();
+
         foreach (var monitor in monitors)
         {
-            monitor.CompleteSourceRegistration();
+            try
+            {
+                monitor.CompleteSourceRegistration();
+            }
+            catch (Exception ex)
+            {
+                exceptions.Add(ex);
+            }
+        }
+
+        if (exceptions.Count == 1)
+        {
+            throw exceptions[0];
+        }
+
+        if (exceptions.Count > 1)
+        {
+            throw new AggregateException(exceptions);
         }
     }
 
@@ -103,8 +123,7 @@ public static class SourceMonitoringExtensions
         var monitors = context.GetSourceMonitors();
         if (monitors.IsEmpty)
         {
-            throw new InvalidOperationException(
-                "No SourceMonitor is reachable from this context. Call WithSourceMonitoring() on the tree root context.");
+            throw new InvalidOperationException(NoMonitorMessage);
         }
 
         return monitors;
@@ -114,9 +133,28 @@ public static class SourceMonitoringExtensions
     {
         public void Dispose()
         {
+            var exceptions = new List<Exception>();
+
             foreach (var disposable in disposables)
             {
-                disposable.Dispose();
+                try
+                {
+                    disposable.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Add(ex);
+                }
+            }
+
+            if (exceptions.Count == 1)
+            {
+                throw exceptions[0];
+            }
+
+            if (exceptions.Count > 1)
+            {
+                throw new AggregateException(exceptions);
             }
         }
     }

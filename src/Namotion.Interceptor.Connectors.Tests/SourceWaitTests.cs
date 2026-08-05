@@ -83,4 +83,58 @@ public class SourceWaitTests
         // Assert
         Assert.True(context.GetSourceMonitor().IsRegistrationComplete);
     }
+
+    [Fact]
+    public void WhenTwoMonitorsAreReachable_ThenCompleteSourceRegistrationSignalsAll()
+    {
+        // Arrange
+        var parent = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithLifecycle()
+            .WithSourceMonitoring();
+        var child = InterceptorSubjectContext.Create().WithSourceMonitoring();
+        child.AddFallbackContext(parent);
+
+        var parentMonitor = parent.GetSourceMonitor();
+        var childMonitor = child.GetServices<SourceMonitor>()[0];
+
+        // Act
+        child.CompleteSourceRegistration();
+
+        // Assert
+        Assert.True(parentMonitor.IsRegistrationComplete);
+        Assert.True(childMonitor.IsRegistrationComplete);
+    }
+
+    [Fact]
+    public void WhenDeferWaitCompletionIsCalledWithTwoMonitors_ThenBothHoldsAreReleased()
+    {
+        // Arrange
+        var parent = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithLifecycle()
+            .WithSourceMonitoring();
+        var child = InterceptorSubjectContext.Create().WithSourceMonitoring();
+        child.AddFallbackContext(parent);
+
+        var parentMonitor = parent.GetSourceMonitor();
+        var childMonitor = child.GetServices<SourceMonitor>()[0];
+
+        parentMonitor.CompleteSourceRegistration();
+        childMonitor.CompleteSourceRegistration();
+
+        // Act
+        var hold = child.DeferWaitCompletion();
+
+        // Assert - both should be incomplete while holds are out
+        Assert.False(parentMonitor.IsRegistrationComplete);
+        Assert.False(childMonitor.IsRegistrationComplete);
+
+        // Act - release the holds
+        hold.Dispose();
+
+        // Assert - both should be complete
+        Assert.True(parentMonitor.IsRegistrationComplete);
+        Assert.True(childMonitor.IsRegistrationComplete);
+    }
 }
