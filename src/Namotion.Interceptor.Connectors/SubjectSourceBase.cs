@@ -81,15 +81,22 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISo
             var sourceEvent = new SourceEvent(
                 SourceEventKind.StateChanged, this, null, oldState, newState, DateTimeOffset.UtcNow);
 
-            try
+            var handlers = StateChanged;
+            if (handlers is not null)
             {
-                StateChanged?.Invoke(this, sourceEvent);
-            }
-            catch (Exception exception)
-            {
-                // A buggy Synchronized handler must not be mistaken for a source failure, or the
-                // source would be flipped back to Connecting and loop forever.
-                _logger.LogError(exception, "A StateChanged handler threw and was ignored.");
+                foreach (var handler in handlers.GetInvocationList())
+                {
+                    try
+                    {
+                        ((EventHandler<SourceEvent>)handler)(this, sourceEvent);
+                    }
+                    catch (Exception exception)
+                    {
+                        // A buggy handler must not be mistaken for a source failure, and must not
+                        // prevent the remaining subscribers from observing the transition.
+                        _logger.LogError(exception, "A StateChanged handler threw and was ignored.");
+                    }
+                }
             }
 
             return true;

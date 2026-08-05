@@ -45,4 +45,65 @@ public class CurrentValueTests
         Assert.Equal("Rico", captured.GetNewValue<string>());
         Assert.Equal("Suter", captured.GetCurrentValue<string>());
     }
+
+    [Fact]
+    public void WhenCurrentValueIsNullAndTValueIsNullable_ThenGetCurrentValueReturnsNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context);
+        SubjectPropertyChange captured = default;
+        using var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange change) =>
+            {
+                if (captured.Property.Subject is null) captured = change;
+            });
+        person.FirstName = "Rico";
+
+        // Act
+        person.FirstName = null;
+
+        // Assert
+        Assert.Null(captured.GetCurrentValue<string>());
+    }
+
+    [Fact]
+    public void WhenCurrentValueIsNullAndTValueIsNonNullableValueType_ThenGetCurrentValueThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context);
+        SubjectPropertyChange captured = default;
+        using var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange change) =>
+            {
+                if (captured.Property.Subject is null) captured = change;
+            });
+        person.FirstName = "Rico";
+        person.FirstName = null;
+
+        // Act & Assert
+        Assert.Throws<InvalidCastException>(() => captured.GetCurrentValue<int>());
+    }
+
+    [Fact]
+    public void WhenCurrentValueTypeMismatchesTValue_ThenGetCurrentValueThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context);
+        SubjectPropertyChange captured = default;
+        using var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange change) =>
+            {
+                if (captured.Property.Subject is null) captured = change;
+            });
+        person.FirstName = "Rico";
+
+        // Act
+        person.FirstName = "Suter";
+
+        // Assert
+        Assert.Throws<InvalidCastException>(() => captured.GetCurrentValue<int>());
+    }
 }

@@ -121,7 +121,13 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
 
         if (value is null)
         {
-            return default!;
+            if (default(TValue) is null)
+            {
+                return default!;
+            }
+
+            throw new InvalidCastException(
+                $"Current value of property '{Property.Name}' is null and cannot be cast to non-nullable '{typeof(TValue).FullName}'.");
         }
 
         throw new InvalidCastException(

@@ -116,6 +116,41 @@ public class SourceStateTests
         // Assert
         Assert.Equal(SourceState.Synchronized, source.State);
     }
+
+    [Fact]
+    public void WhenAThrowingHandlerIsSubscribedBeforeAnotherHandler_ThenTheOtherHandlerStillObservesTheTransition()
+    {
+        // Arrange
+        var source = new TestStateSource(new Person());
+        var laterHandlerRaised = 0;
+        source.StateChanged += (_, _) => throw new InvalidOperationException("handler is buggy");
+        source.StateChanged += (_, _) => Interlocked.Increment(ref laterHandlerRaised);
+
+        // Act
+        source.ReportSynchronized();
+
+        // Assert
+        Assert.Equal(SourceState.Synchronized, source.State);
+        Assert.Equal(1, laterHandlerRaised);
+    }
+
+    [Fact]
+    public void WhenSourceTransitionsAgainAfterEventCapture_ThenCurrentStateReflectsTheLatestStateWhileNewStateStaysFrozen()
+    {
+        // Arrange
+        var source = new TestStateSource(new Person());
+        SourceEvent? capturedEvent = null;
+        source.StateChanged += (_, sourceEvent) => capturedEvent ??= sourceEvent;
+        source.ReportSynchronized();
+
+        // Act
+        source.ReportStopped();
+
+        // Assert
+        Assert.NotNull(capturedEvent);
+        Assert.Equal(SourceState.Synchronized, capturedEvent.Value.NewState);
+        Assert.Equal(SourceState.Stopped, capturedEvent.Value.CurrentState);
+    }
 }
 
 /// <summary>
