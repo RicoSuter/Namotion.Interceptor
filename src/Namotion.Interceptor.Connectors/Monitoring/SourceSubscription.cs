@@ -94,7 +94,11 @@ public sealed class SourceSubscription : IDisposable
             // reordered read observes an empty queue and exits the loop - the event is then stranded
             // forever, since nothing else is scheduled to look at it. Interlocked.Exchange is a full
             // fence, so the write is visible to every other thread before this read runs, making the
-            // two misses mutually exclusive. Do not "simplify" this back to Volatile.Write.
+            // two misses mutually exclusive. Do not "simplify" this back to Volatile.Write. The
+            // reordering itself reproduces roughly once in 500 million aligned attempts, too rare for
+            // any dynamic test to catch reliably (see SourceSubscriptionTests' stress test); a
+            // companion test there instead pins the literal API used on this line, so at least the
+            // "simplification" itself fails the build even though the race it would reopen does not.
             Interlocked.Exchange(ref _draining, 0);
         }
         while (!_queue.IsEmpty && Interlocked.CompareExchange(ref _draining, 1, 0) == 0);

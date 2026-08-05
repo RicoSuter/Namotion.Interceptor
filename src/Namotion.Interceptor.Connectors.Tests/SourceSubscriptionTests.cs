@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Testing;
@@ -140,6 +141,35 @@ public class SourceSubscriptionTests
             "an event was stranded.");
 
         subscription.Dispose();
+    }
+
+    [Fact]
+    public void WhenTheDrainLoopClearsTheDrainingFlag_ThenItUsesInterlockedExchangeNotVolatileWrite()
+    {
+        // Arrange
+        // The reordering the fence guards against (see Drain's comment on the Interlocked.Exchange
+        // line) reproduces roughly once in 500 million aligned attempts, which is why the stress
+        // test above states plainly that it cannot force that exact hardware race either: no
+        // dynamic test in this suite can turn a regression to Volatile.Write into a reliable
+        // failure within a feasible run time. What can be pinned instead is the API actually used
+        // at that call site, so a "simplification" back to Volatile.Write is at least caught here,
+        // even though the reordering it would reintroduce is not independently exercised by any test.
+        var sourceFilePath = GetSourceSubscriptionFilePath();
+        var source = File.ReadAllText(sourceFilePath);
+
+        // Act & Assert
+        Assert.Contains("Interlocked.Exchange(ref _draining, 0)", source);
+        Assert.DoesNotContain("Volatile.Write(ref _draining", source);
+    }
+
+    private static string GetSourceSubscriptionFilePath([CallerFilePath] string testFilePath = "")
+    {
+        // CallerFilePath is resolved at this call's compile time, from this test file's own path -
+        // resilient to whatever the test runner's current directory happens to be (bin/Debug/...),
+        // unlike a path built from Environment.CurrentDirectory or the test assembly's location.
+        var testDirectory = Path.GetDirectoryName(testFilePath)!;
+        return Path.GetFullPath(Path.Combine(
+            testDirectory, "..", "Namotion.Interceptor.Connectors", "Monitoring", "SourceSubscription.cs"));
     }
 
     private static bool IsInternalQueueEmpty(SourceSubscription subscription)
