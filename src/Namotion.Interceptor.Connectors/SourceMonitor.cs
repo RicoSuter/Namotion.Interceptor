@@ -46,6 +46,15 @@ public class SourceMonitor : ILifecycleHandler
     /// </remarks>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
+        // Branch scope reads mutable parent data, so a reparent changes the answer with no
+        // registration or state transition. A same-tree reparent fires neither IsContextAttach nor
+        // IsContextDetach, so gate on reference mutation, and never on the subscriber count: a wait
+        // is exactly the consumer that has no subscription.
+        if (change.IsPropertyReferenceAdded || change.IsPropertyReferenceRemoved)
+        {
+            OnWaitConditionChanged();
+        }
+
         if (!HasSubscribers)
         {
             return;
@@ -121,6 +130,8 @@ public class SourceMonitor : ILifecycleHandler
             Publish(new SourceEvent(
                 SourceEventKind.SourceRegistered, source, null, source.State, source.State, DateTimeOffset.UtcNow));
         }
+
+        OnWaitConditionChanged();
     }
 
     /// <summary>Unregisters a source. A no-op for a source that was never registered.</summary>
@@ -141,9 +152,15 @@ public class SourceMonitor : ILifecycleHandler
             Publish(new SourceEvent(
                 SourceEventKind.SourceUnregistered, source, null, source.State, source.State, DateTimeOffset.UtcNow));
         }
+
+        OnWaitConditionChanged();
     }
 
-    private void OnSourceStateChanged(object? sender, SourceEvent sourceEvent) => Publish(sourceEvent);
+    private void OnSourceStateChanged(object? sender, SourceEvent sourceEvent)
+    {
+        Publish(sourceEvent);
+        OnWaitConditionChanged();
+    }
 
     /// <summary>Enqueues an event onto every subscriber's own queue.</summary>
     internal void Publish(in SourceEvent sourceEvent)
@@ -186,6 +203,7 @@ public class SourceMonitor : ILifecycleHandler
     public IDisposable DeferWaitCompletion()
     {
         Interlocked.Increment(ref _registrationHolds);
+        OnWaitConditionChanged();
         return new RegistrationHold(this);
     }
 
@@ -197,9 +215,138 @@ public class SourceMonitor : ILifecycleHandler
         }
     }
 
-    /// <summary>Re-evaluates every pending wait. Task 11 gives this a body; it is a deliberate no-op until then.</summary>
+    private ImmutableArray<PendingWait> _waits = [];
+
+    /// <summary>
+    /// Completes when the branch containing <paramref name="subject"/> is synchronized: registration
+    /// is complete, at least one in-scope source is registered, and every registered non-Stopped
+    /// in-scope source is Synchronized.
+    /// </summary>
+    public Task WaitForSynchronizationAsync(
+        IInterceptorSubject subject, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+
+        PendingWait wait;
+        lock (_lock)
+        {
+            if (IsSatisfied(subject))
+            {
+                return Task.CompletedTask;
+            }
+
+            wait = new PendingWait(subject);
+            _waits = _waits.Add(wait);
+        }
+
+        return wait.AwaitAsync(cancellationToken, () =>
+        {
+            lock (_lock)
+            {
+                _waits = _waits.Remove(wait);
+            }
+        });
+    }
+
+    private bool IsSatisfied(IInterceptorSubject anchor, bool anchorWarned = true)
+    {
+        if (!IsRegistrationComplete)
+        {
+            return false;
+        }
+
+        var matched = false;
+        foreach (var source in _sources)
+        {
+            if (!SourceScope.IsInScope(source, anchor))
+            {
+                continue;
+            }
+
+            matched = true;
+            var state = source.State;
+            if (state != SourceState.Stopped && state != SourceState.Synchronized)
+            {
+                return false;
+            }
+        }
+
+        if (!matched)
+        {
+            // Registration is complete and still nothing claims this branch. That is very likely a
+            // misconfiguration, and blocking forever in silence reads as a hang rather than a
+            // diagnosis, so say it once per wait rather than on every re-evaluation.
+            if (!anchorWarned)
+            {
+                _logger?.LogWarning(
+                    "A synchronization wait on {Subject} has no in-scope source, and source registration is complete. " +
+                    "The wait will block until cancelled. Check that a source is configured for this branch.",
+                    anchor.GetType().Name);
+            }
+
+            return false;
+        }
+
+        if (_sources.All(source => !SourceScope.IsInScope(source, anchor) || source.State == SourceState.Stopped))
+        {
+            // Stopped is terminal, so this branch will never become live. Completing is more useful
+            // than hanging, but silence would read as success, so say it out loud.
+            _logger?.LogWarning(
+                "A synchronization wait completed with every in-scope source stopped. " +
+                "Stopped is terminal, so this branch will not synchronize again.");
+        }
+
+        return true;
+    }
+
+    /// <summary>Re-evaluates every pending wait.</summary>
     private void OnWaitConditionChanged()
     {
+        ImmutableArray<PendingWait> waits;
+        lock (_lock)
+        {
+            waits = _waits;
+        }
+
+        foreach (var wait in waits)
+        {
+            bool satisfied;
+            lock (_lock)
+            {
+                satisfied = IsSatisfied(wait.Anchor, wait.MarkWarned());
+            }
+
+            if (satisfied)
+            {
+                wait.Complete();
+            }
+        }
+    }
+
+    private sealed class PendingWait(IInterceptorSubject anchor)
+    {
+        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private int _warned;
+
+        public IInterceptorSubject Anchor { get; } = anchor;
+
+        /// <summary>True once this wait has already logged its empty-scope warning.</summary>
+        public bool MarkWarned() => Interlocked.Exchange(ref _warned, 1) == 1;
+
+        public void Complete() => _completion.TrySetResult();
+
+        public async Task AwaitAsync(CancellationToken cancellationToken, Action onFinished)
+        {
+            try
+            {
+                await _completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                onFinished();
+            }
+        }
     }
 
     private sealed class RegistrationHold(SourceMonitor monitor) : IDisposable

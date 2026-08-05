@@ -173,4 +173,24 @@ public static class SourceMonitoringExtensions
             context, serviceProvider.GetRequiredService<IHostApplicationLifetime>()));
         return context;
     }
+
+    /// <summary>
+    /// Waits until every source that can claim into this subject's branch has completed its initial
+    /// load. The subject IS the scope, so waiting on the tree root means the whole tree.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No monitor is reachable from the subject's context.</exception>
+    public static Task WaitForSynchronizationAsync(
+        this IInterceptorSubject subject, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+
+        var monitors = ResolveMonitorsOrThrow(subject.Context);
+        if (monitors.Length == 1)
+        {
+            return monitors[0].WaitForSynchronizationAsync(subject, cancellationToken);
+        }
+
+        return Task.WhenAll(monitors.Select(
+            monitor => monitor.WaitForSynchronizationAsync(subject, cancellationToken)));
+    }
 }

@@ -96,6 +96,7 @@ namespace Namotion.Interceptor.Connectors
         public void Register(Namotion.Interceptor.Connectors.ISubjectSource source) { }
         public Namotion.Interceptor.Connectors.SourceSubscription Subscribe(System.Action<Namotion.Interceptor.Connectors.SourceEvent> handler) { }
         public void Unregister(Namotion.Interceptor.Connectors.ISubjectSource source) { }
+        public System.Threading.Tasks.Task WaitForSynchronizationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
     }
     public static class SourceMonitoringExtensions
     {
@@ -103,6 +104,7 @@ namespace Namotion.Interceptor.Connectors
         public static System.IDisposable DeferWaitCompletion(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.Connectors.SourceMonitor GetSourceMonitor(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.Connectors.SourceState GetSourceState(this Namotion.Interceptor.PropertyReference property) { }
+        public static System.Threading.Tasks.Task WaitForSynchronizationAsync(this Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithSourceMonitoring(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithSourceMonitoring(this Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
     }

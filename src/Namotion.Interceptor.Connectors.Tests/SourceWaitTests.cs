@@ -1,5 +1,8 @@
+using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -137,4 +140,277 @@ public class SourceWaitTests
         Assert.True(parentMonitor.IsRegistrationComplete);
         Assert.True(childMonitor.IsRegistrationComplete);
     }
+
+    [Fact]
+    public async Task WhenRegistrationIsIncomplete_ThenTheWaitDoesNotComplete()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var source = new TestStateSource(root);
+        monitor.Register(source);
+        source.ReportSynchronized();
+
+        // Act
+        var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(wait.IsCompleted);
+        monitor.CompleteSourceRegistration();
+        await wait;
+    }
+
+    [Fact]
+    public async Task WhenAnInScopeSourceIsConnecting_ThenTheWaitBlocksUntilItSynchronizes()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var source = new TestStateSource(root);
+        monitor.Register(source);
+        monitor.CompleteSourceRegistration();
+
+        // Act
+        var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+        source.ReportSynchronized();
+
+        // Assert
+        await wait;
+    }
+
+    [Fact]
+    public async Task WhenASiblingBranchSourceNeverSynchronizes_ThenAScopedWaitStillCompletes()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var left = new Person();
+        var right = new Person();
+        root.Mother = left;
+        root.Father = right;
+        var healthy = new TestStateSource(left);
+        var broken = new TestStateSource(right);
+        monitor.Register(healthy);
+        monitor.Register(broken);
+        monitor.CompleteSourceRegistration();
+        healthy.ReportSynchronized();
+
+        // Act
+        await left.WaitForSynchronizationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(SourceState.Connecting, broken.State);
+    }
+
+    [Fact]
+    public async Task WhenNoInScopeSourceIsRegistered_ThenTheWaitBlocks()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        monitor.CompleteSourceRegistration();
+
+        // Act
+        var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+
+        // Assert
+        await Task.Yield();
+        Assert.False(wait.IsCompleted);
+    }
+
+    [Fact]
+    public async Task WhenASourceIsRegisteredMidWait_ThenItIsIncludedAndReBlocksTheWait()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var first = new TestStateSource(root);
+        monitor.Register(first);
+        monitor.CompleteSourceRegistration();
+        first.ReportSynchronized();
+        var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+        await wait;
+
+        // Act
+        var second = new TestStateSource(root);
+        monitor.Register(second);
+        var secondWait = root.WaitForSynchronizationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(secondWait.IsCompleted);
+        second.ReportSynchronized();
+        await secondWait;
+    }
+
+    [Fact]
+    public async Task WhenEveryInScopeSourceIsStopped_ThenTheWaitCompletesVacuously()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var source = new TestStateSource(root);
+        monitor.Register(source);
+        monitor.CompleteSourceRegistration();
+
+        // Act
+        source.ReportStopped();
+
+        // Assert
+        await root.WaitForSynchronizationAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task WhenCancelled_ThenTheWaitPropagatesCancellation()
+    {
+        // Arrange
+        var context = CreateContext();
+        context.GetSourceMonitor().CompleteSourceRegistration();
+        var root = new Person(context);
+        using var cancellation = new CancellationTokenSource();
+
+        // Act
+        var wait = root.WaitForSynchronizationAsync(cancellation.Token);
+        await cancellation.CancelAsync();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait);
+    }
+
+    [Fact]
+    public async Task WhenTheAnchorIsReparentedWithinTheTree_ThenAPendingWaitIsReEvaluated()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var left = new Person(context);
+        var right = new Person(context);
+        var moving = new Person();
+        left.Mother = moving;
+        var source = new TestStateSource(right);
+        monitor.Register(source);
+        monitor.CompleteSourceRegistration();
+        source.ReportSynchronized();
+        var wait = moving.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        // Act
+        left.Mother = null;
+        right.Mother = moving;
+
+        // Assert
+        // This is the test that catches handler-ordering defects. A reparent within one tree fires
+        // neither IsContextAttach nor IsContextDetach, and if the monitor runs before
+        // ParentTrackingHandler it re-evaluates against stale parents, decides nothing changed, and
+        // never looks again. The wait would then hang forever.
+        await wait;
+    }
+
+    [Fact]
+    public async Task WhenASourceIsDisposedWithoutBeingStopped_ThenStoppedPrecedesUnregistered()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var source = new TestStateSource(new Person(context));
+        await source.StartAsync(CancellationToken.None);
+        var received = new System.Collections.Concurrent.ConcurrentQueue<SourceEvent>();
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+
+        // Act
+        source.Dispose();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.SourceUnregistered));
+        var kinds = received.Select(e => e.Kind).ToList();
+        var stoppedIndex = kinds.FindIndex(k => k == SourceEventKind.StateChanged);
+        var unregisteredIndex = kinds.FindIndex(k => k == SourceEventKind.SourceUnregistered);
+        Assert.True(stoppedIndex >= 0 && stoppedIndex < unregisteredIndex);
+    }
+
+    [Fact]
+    public async Task WhenASourceIsConstructedButNeverStarted_ThenItDoesNotAffectAWait()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var started = new TestStateSource(root);
+        var neverStarted = new TestStateSource(root);
+        monitor.Register(started);
+        monitor.CompleteSourceRegistration();
+
+        // Act
+        started.ReportSynchronized();
+
+        // Assert
+        await root.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.DoesNotContain(neverStarted, monitor.Sources);
+    }
+
+    [Fact]
+    public async Task WhenNoMonitorIsReachable_ThenTheWaitThrowsWithGuidance()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var root = new Person(context);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => root.WaitForSynchronizationAsync(CancellationToken.None));
+        Assert.Contains("WithSourceMonitoring", exception.Message);
+    }
+
+    [Fact]
+    public void WhenOneMonitorsReleaseThrows_ThenTheOtherMonitorIsStillReleased()
+    {
+        // Arrange
+        var parent = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithLifecycle()
+            .WithSourceMonitoring();
+        var child = InterceptorSubjectContext.Create().WithSourceMonitoring();
+        child.AddFallbackContext(parent);
+
+        var parentMonitor = parent.GetSourceMonitor();
+        var childMonitor = child.GetServices<SourceMonitor>()[0];
+
+        parentMonitor.CompleteSourceRegistration();
+        childMonitor.CompleteSourceRegistration();
+
+        var root = new Person(child);
+        var throwing = new ThrowingScopeSource(root);
+        childMonitor.Register(throwing);
+
+        // Re-arms both monitors and gives each a pending wait, so the release below has something
+        // to re-evaluate: it is that re-evaluation, not the release itself, that throws.
+        var hold = child.DeferWaitCompletion();
+        var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        // Act
+        var exception = Assert.Throws<InvalidOperationException>(() => hold.Dispose());
+
+        // Assert - the throwing monitor's own count still dropped, and the other monitor's hold was
+        // not stranded by the first one's exception.
+        Assert.Equal("scope check failed", exception.Message);
+        Assert.True(parentMonitor.IsRegistrationComplete);
+        Assert.True(childMonitor.IsRegistrationComplete);
+    }
+}
+
+/// <summary>A source whose RootSubject getter throws, to exercise exception-safety in wait re-evaluation.</summary>
+internal sealed class ThrowingScopeSource : TestStateSource
+{
+    public ThrowingScopeSource(IInterceptorSubject rootSubject) : base(rootSubject)
+    {
+    }
+
+    public override IInterceptorSubject RootSubject => throw new InvalidOperationException("scope check failed");
 }
