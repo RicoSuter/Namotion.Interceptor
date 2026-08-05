@@ -24,16 +24,18 @@ public class ChangeQueueProcessor : IDisposable
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
-    private readonly int? _maxQueueDepth;
-    private long _dropCount;
+    private readonly OverflowBehavior _overflowBehavior;
+    private readonly int? _maxQueueSize;
+    private readonly Action<ChangeQueueOverflow>? _overflowHandler;
+    private long _droppedChangeCount;
     private int _flushGate; // 0 = free, 1 = flushing
     private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
 
     /// <summary>
     /// Number of buffered changes dropped due to bounded-queue overflow.
-    /// Always zero when <c>maxQueueDepth</c> is null (unbounded).
+    /// Always zero when <see cref="OverflowBehavior.Unbounded"/> (the default).
     /// </summary>
-    public long DropCount => Interlocked.Read(ref _dropCount);
+    public long DroppedChangeCount => Interlocked.Read(ref _droppedChangeCount);
 
     // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
@@ -59,29 +61,30 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="propertyFilter">Filter to determine if a property change should be included.
     /// The <see cref="PropertyReference"/> may not have a registered property (e.g., when the subject
     /// is momentarily unregistered due to a concurrent structural mutation). Callers should handle
-    /// this case explicitly — typically by resolving via <c>TryGetRegisteredProperty()</c> and
+    /// this case explicitly, typically by resolving via <c>TryGetRegisteredProperty()</c> and
     /// returning <c>false</c> when null.</param>
     /// <param name="writeHandler">Handler to write batched changes.</param>
-    /// <param name="bufferTime">Time to buffer changes before flushing.</param>
-    /// <param name="maxQueueDepth">Bound on the buffered change queue, or null for unbounded (existing
-    /// connector behavior). When set, enqueuing past the bound drops the oldest unprocessed change and
-    /// increments <see cref="DropCount"/>, so the newest change is retained.</param>
+    /// <param name="configuration">The processor tuning configuration (buffer time, overflow bound and behavior, overflow handler).</param>
     /// <param name="logger">The logger.</param>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
         Func<PropertyReference, bool> propertyFilter,
         Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
-        TimeSpan? bufferTime,
-        int? maxQueueDepth,
+        ChangeQueueProcessorConfiguration configuration,
         ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(configuration);
+        configuration.Validate();
+
         _source = source;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
-        _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
-        _maxQueueDepth = maxQueueDepth;
+        _bufferTime = configuration.BufferTime;
+        _overflowBehavior = configuration.OverflowBehavior;
+        _maxQueueSize = configuration.MaxQueueSize;
+        _overflowHandler = configuration.OverflowHandler;
 
         try
         {
@@ -169,15 +172,25 @@ public class ChangeQueueProcessor : IDisposable
                         _logger.LogError(ex, "Failed to write changes.");
                     }
                 }
+                else if (_maxQueueSize is int dropNewestBound
+                         && _overflowBehavior == OverflowBehavior.DropNewest
+                         && _changes.Count >= dropNewestBound)
+                {
+                    // DropNewest: reject the incoming change, keep what is already queued.
+                    // Single-producer enqueue makes the pre-check exact.
+                    RecordOverflow(1);
+                }
                 else
                 {
                     // Buffered path: enqueue lock-free; periodic timer handles flushing
                     _changes.Enqueue(change);
 
-                    // Optional bounded-queue backpressure: drop oldest changes on overflow
-                    if (_maxQueueDepth is int maxQueueDepth && _changes.Count > maxQueueDepth)
+                    // DropOldest backpressure: drop oldest changes until back within the bound.
+                    if (_maxQueueSize is int dropOldestBound
+                        && _overflowBehavior == OverflowBehavior.DropOldest
+                        && _changes.Count > dropOldestBound)
                     {
-                        DropOverflow(maxQueueDepth);
+                        DropOldestOverflow(dropOldestBound);
                     }
                 }
             }
@@ -190,16 +203,33 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     /// <summary>
-    /// Drops the oldest buffered changes until the queue is back within <paramref name="maxQueueDepth"/>,
-    /// incrementing <see cref="DropCount"/> for each. Best-effort: a concurrent flush may drain the queue
-    /// below the bound first, in which case fewer drops occur.
+    /// Drops the oldest buffered changes until the queue is back within <paramref name="maxQueueSize"/>,
+    /// then records a single overflow event for the batch. Best-effort: a concurrent flush may drain the
+    /// queue below the bound first, in which case fewer drops occur.
     /// </summary>
-    private void DropOverflow(int maxQueueDepth)
+    private void DropOldestOverflow(int maxQueueSize)
     {
-        while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
+        var dropped = 0;
+        while (_changes.Count > maxQueueSize && _changes.TryDequeue(out _))
         {
-            Interlocked.Increment(ref _dropCount);
+            dropped++;
         }
+
+        if (dropped > 0)
+        {
+            RecordOverflow(dropped);
+        }
+    }
+
+    /// <summary>
+    /// Records an overflow event: adds to <see cref="DroppedChangeCount"/> and invokes the overflow
+    /// handler once for the event. The handler runs synchronously on the producer thread and must be
+    /// non-blocking.
+    /// </summary>
+    private void RecordOverflow(int droppedCount)
+    {
+        Interlocked.Add(ref _droppedChangeCount, droppedCount);
+        _overflowHandler?.Invoke(new ChangeQueueOverflow(droppedCount, _overflowBehavior, _maxQueueSize!.Value));
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
