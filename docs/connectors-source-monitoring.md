@@ -47,6 +47,12 @@ await root.Kitchen.WaitForSynchronizationAsync(stoppingToken);
 
 A source is in scope for an anchor when its root subject and the anchor lie on the same root-to-leaf path, in either direction: the source's root is an ancestor of (or is) the anchor, so it may claim into the awaited branch, or the source's root sits inside the anchor's own subtree. A source on a sibling branch is in neither set, so a source that never connects, or fails, on an unrelated branch never blocks a wait scoped to a branch it cannot claim into.
 
+Two edge cases in that scoping matter before you rely on a wait.
+
+If, once source registration is complete, the anchor's scope matches no source at all (a mistyped root, a device that was never configured), the wait never completes. It blocks until cancelled, and the only sign anything is wrong is a one-time warning logged the first time that empty scope is detected for that wait. If a wait you expected to complete instead sits forever, check the log for that warning before looking anywhere else.
+
+A scope whose sources are all `Stopped` behaves the opposite way: instead of blocking, it completes. `Stopped` is terminal (see [The State Model, Transitions, and Delivery Contract](#the-state-model-transitions-and-delivery-contract)), so it is tempting to assume a fully stopped branch hangs a wait the same way an empty scope does, but it does not: a scope where every in-scope source has stopped is treated as satisfied, and the wait returns successfully. A consumer that treats a completed wait as proof the branch is live can walk straight into a dead one.
+
 ## Reading Per-Property State
 
 `property.GetSourceState()` reads a property's synchronization state, derived from its owning source with no per-property storage:
@@ -113,6 +119,8 @@ A consumer that already holds a reference to a specific source, for example an a
 An aggregate consumer, a wait, a diagnostics dashboard, an index across every source in the tree, subscribes to the monitor stream instead:
 
 ```csharp
+using Namotion.Interceptor.Connectors.Monitoring;
+
 using var subscription = context.GetSourceMonitor().Subscribe(sourceEvent =>
 {
     // handle sourceEvent
@@ -184,6 +192,8 @@ Deriving from `SubjectSourceBase` is recommended instead of implementing `ISubje
 A common pattern: expose an `IsAvailable` flag per device, derived from a stored `ConnectionState` that an updater maintains from the monitor stream.
 
 ```csharp
+using Namotion.Interceptor.Connectors.Monitoring;
+
 [InterceptorSubject]
 public partial class Device
 {
@@ -194,24 +204,27 @@ public partial class Device
 }
 ```
 
-The updater subscribes once and handles every event kind that can occur:
+The updater subscribes once and reacts to every event kind that can change a device's availability. `SourceRegistered` and `SourceUnregistered` carry no property, so nothing needs applying until a property is actually claimed:
 
 ```csharp
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Namotion.Interceptor.Connectors.Monitoring;
 
-public sealed class DeviceAvailabilityUpdater
+public sealed class DeviceAvailabilityUpdater : IDisposable
 {
     // Add-only. A stale entry left behind by a release, or by a subject leaving the tree, is
     // harmless: Apply always re-reads through GetSourceState(), so the index only needs to be a
     // superset of what a source currently owns, never a subset.
     private readonly ConcurrentDictionary<ISubjectSource, ImmutableHashSet<PropertyReference>> _bySource = new();
+    private readonly SourceSubscription _subscription;
 
     public DeviceAvailabilityUpdater(SourceMonitor monitor)
     {
-        monitor.Subscribe(Handle);
+        _subscription = monitor.Subscribe(Handle);
     }
+
+    public void Dispose() => _subscription.Dispose();
 
     private void Handle(SourceEvent sourceEvent)
     {
