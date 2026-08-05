@@ -332,25 +332,16 @@ public class ChangeMergerTests
     }
 
     [Fact]
-    public void WhenAnEarlierFlushAlreadyDeliveredANewerCommit_ThenTheSurvivorIsSuppressed()
+    public void WhenTheModelHasMovedPastAChange_ThenTheSurvivorIsSuppressed()
     {
         // Arrange: collapsing a batch cannot see across flushes, so a change enqueued late enough to
         // land in the next batch would otherwise overwrite the source with an older commit's value.
+        // The model is what settles it: FirstName has moved on, LastName has not.
         using var merger = new ChangeMerger();
-        var deliveredRevisions = new DeliveredRevisionFilter();
 
-        var subject = new Person();
+        var subject = new Person { FirstName = "Newest", LastName = "Newer" };
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
-
-        SubjectPropertyChange[] baseline =
-        [
-            CreateChange(firstName, "Old", "Newest", revision: 10),
-            CreateChange(lastName, "Old", "Newest", revision: 10)
-        ];
-
-        Assert.Equal(2, merger.Merge(baseline, deliveredRevisions).Length);
-        merger.Reset();
 
         SubjectPropertyChange[] straggler =
         [
@@ -359,9 +350,9 @@ public class ChangeMergerTests
         ];
 
         // Act
-        var merged = merger.Merge(straggler, deliveredRevisions).ToArray();
+        var merged = merger.Merge(straggler, suppressSupersededChanges: true).ToArray();
 
-        // Assert: the superseded commit is dropped, the newer one still flows.
+        // Assert: the superseded commit is dropped, the one carrying the current value still flows.
         var survivor = Assert.Single(merged);
         Assert.Equal(nameof(Person.LastName), survivor.Property.Name);
         Assert.Equal("Newer", survivor.GetNewValue<string>());
@@ -377,21 +368,15 @@ public class ChangeMergerTests
     {
         // Arrange
         using var merger = new ChangeMerger();
-        var deliveredRevisions = new DeliveredRevisionFilter();
 
-        var subject = new Person();
+        var subject = new Person { FirstName = "Newest", LastName = "Newer" };
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
-
-        merger.Merge(
-            [CreateChange(firstName, "Old", "Newest", revision: 10), CreateChange(lastName, "Old", "Newest", revision: 10)],
-            deliveredRevisions);
-        merger.Reset();
 
         // Act: the first is superseded and dropped, the second survives.
         var merged = merger.Merge(
             [CreateChange(firstName, "Old", "Stale", revision: 8), CreateChange(lastName, "Newest", "Newer", revision: 12)],
-            deliveredRevisions);
+            suppressSupersededChanges: true);
 
         // Assert
         Assert.Equal(1, merged.Length);

@@ -58,12 +58,12 @@ internal sealed class ChangeMerger : IDisposable
     /// <returns>The merged changes. The memory points into the pooled buffer and stays valid until
     /// the next <see cref="Merge"/>, <see cref="Reset"/> or <see cref="Dispose"/> call, so the caller
     /// can await a write handler on it before resetting. Empty once <see cref="Dispose"/> has run.</returns>
-    /// <param name="deliveredRevisions">When given, drops survivors that an earlier batch already
-    /// superseded, which is what makes delivery converge across flushes rather than only within one.
-    /// Optional so the batch collapse can be exercised on its own.</param>
+    /// <param name="suppressSupersededChanges">When set, drops survivors the model has already moved
+    /// past, which is what makes delivery converge across flushes rather than only within one. Off by
+    /// default so the batch collapse can be exercised on its own.</param>
     public ReadOnlyMemory<SubjectPropertyChange> Merge(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        DeliveredRevisionFilter? deliveredRevisions = null)
+        bool suppressSupersededChanges = false)
     {
         if (_buffer is null)
         {
@@ -170,23 +170,36 @@ internal sealed class ChangeMerger : IDisposable
             Array.Reverse(_buffer, 0, _count);
         }
 
-        if (deliveredRevisions is not null && _count > 0)
+        if (suppressSupersededChanges && _count > 0)
         {
-            SuppressAlreadyDeliveredCommits(deliveredRevisions);
+            SuppressSupersededChanges();
         }
 
         return new ReadOnlyMemory<SubjectPropertyChange>(_buffer, 0, _count);
     }
 
     /// <summary>
-    /// Drops survivors whose commit an earlier batch already superseded, compacting what remains.
+    /// Drops survivors the model has already moved past, compacting what remains.
     /// </summary>
-    private void SuppressAlreadyDeliveredCommits(DeliveredRevisionFilter deliveredRevisions)
+    private void SuppressSupersededChanges()
     {
-        // Per property rather than per batch, which is all this ever needed: the collapse above leaves
-        // one change per property and the delivered state is keyed per property, so no survivor competes
-        // with another for the same slot.
-        var kept = deliveredRevisions.SuppressDelivered(_buffer.AsSpan(0, _count));
+        var kept = 0;
+        for (var i = 0; i < _count; i++)
+        {
+            if (!CurrentValueFilter.IsCurrent(in _buffer[i]))
+            {
+                continue;
+            }
+
+            CurrentValueFilter.MarkWrittenOut(in _buffer[i]);
+
+            if (kept != i)
+            {
+                _buffer[kept] = _buffer[i];
+            }
+
+            kept++;
+        }
 
         if (kept == _count)
         {

@@ -40,6 +40,8 @@ public class ChangeQueueProcessorTests
         EnqueueChange(processor, property, "Value2", "Value3");
         EnqueueChange(processor, property, "Value3", "Value4");
 
+        subject.FirstName = "Value4";
+
         await TriggerFlushAsync(processor);
 
         processor.Dispose();
@@ -82,6 +84,10 @@ public class ChangeQueueProcessorTests
         EnqueueChange(processor, firstNameProperty, null, "John");
         EnqueueChange(processor, lastNameProperty, null, "Doe");
 
+        // Only the current value is delivered, so the model has to hold what the changes carry.
+        subject.FirstName = "John";
+        subject.LastName = "Doe";
+
         await TriggerFlushAsync(processor);
 
         processor.Dispose();
@@ -121,6 +127,9 @@ public class ChangeQueueProcessorTests
         EnqueueChange(processor, firstNameProperty, null, "First1");
         EnqueueChange(processor, lastNameProperty, null, "Last1");
         EnqueueChange(processor, firstNameProperty, "First1", "First2"); // A again
+
+        subject.FirstName = "First2";
+        subject.LastName = "Last1";
 
         await TriggerFlushAsync(processor);
 
@@ -219,6 +228,7 @@ public class ChangeQueueProcessorTests
         // Act - enqueue and start first flush
         var property = new PropertyReference(subject, nameof(Person.FirstName));
         EnqueueChange(processor, property, null, "Value1");
+        subject.FirstName = "Value1";
 
         var firstFlush = TriggerFlushAsync(processor);
         await flushStarted.Task;
@@ -361,6 +371,9 @@ public class ChangeQueueProcessorTests
         EnqueueChange(processor, property, "Committed1", "Committed2", revision: 2);
         EnqueueChange(processor, property, "Committed0", "Committed1", revision: 1);
 
+        // The higher revision is the committed state, whichever order they were enqueued in.
+        subject.FirstName = "Committed2";
+
         await TriggerFlushAsync(processor);
 
         processor.Dispose();
@@ -408,20 +421,18 @@ public class ChangeQueueProcessorTests
             maxQueueDepth: null,
             logger: NullLogger.Instance);
 
-        // The source is already past every revision this subject can reach in this test, so every
-        // change the immediate path sees is superseded.
-        SeedDeliveredRevision(processor, new PropertyReference(subject, nameof(Person.FirstName)), long.MaxValue);
+        // The subscription captures from construction, so both writes commit before the loop starts.
+        // That makes the interleaving deterministic: the loop meets the superseded change with the model
+        // already holding the later one, which is the state the immediate path has to suppress.
+        subject.FirstName = "Suppressed";
+        subject.FirstName = "Current";
 
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var processing = processor.ProcessAsync(cancellation.Token);
 
-        // Act
-        subject.FirstName = "Suppressed";
-        subject.LastName = "Delivered";
-
-        // Assert: LastName has no baseline, so it arrives and proves the loop is running, while
-        // FirstName is suppressed rather than merely slow.
-        await AsyncTestHelpers.WaitUntilAsync(() => writtenValues.Contains("Delivered"));
+        // Assert: the later commit arrives and proves the loop is running, while the superseded one is
+        // suppressed rather than merely slow.
+        await AsyncTestHelpers.WaitUntilAsync(() => writtenValues.Contains("Current"));
         Assert.DoesNotContain("Suppressed", writtenValues);
 
         await cancellation.CancelAsync();
@@ -496,6 +507,7 @@ public class ChangeQueueProcessorTests
         // outside the subject lock. Only the echo's recorded revision can suppress it.
         EnqueueChange(processor, firstName, "Old", "Straggler", echoRevision - 1);
         EnqueueChange(processor, lastName, "Fence", "SecondFence", long.MaxValue);
+        subject.LastName = "SecondFence";
 
         // Assert: the second fence shares the straggler's flush, so its arrival means the straggler was
         // considered and dropped rather than merely still in flight.
@@ -599,21 +611,6 @@ public class ChangeQueueProcessorTests
         return (context, subject, written, source, processor);
     }
 
-    private static void SeedDeliveredRevision(ChangeQueueProcessor processor, PropertyReference property, long revision)
-    {
-        var field = typeof(ChangeQueueProcessor)
-            .GetField("_deliveredRevisions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        Assert.True(field is not null, "_deliveredRevisions was renamed, this test needs updating.");
-
-        var filter = field!.GetValue(processor)!;
-        var record = filter.GetType()
-            .GetMethod("RecordDelivered", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-        Assert.True(record is not null, "RecordDelivered was renamed, this test needs updating.");
-
-        var change = SubjectPropertyChange.Create(
-            property, ChangeOrigin.Local, DateTimeOffset.UnixEpoch, null, "old", "new", revision);
-        record!.Invoke(filter, [change]);
-    }
 
     private static void EnqueueChange(
         ChangeQueueProcessor processor,

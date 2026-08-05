@@ -38,11 +38,6 @@ public class ChangeQueueProcessor : IDisposable
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private readonly ChangeMerger _flushMerger = new();
 
-    // Spans flushes, unlike the merger's per-batch state: merging fixes inversions inside one flush,
-    // this fixes the ones that straddle a flush boundary. Holds no collection of its own; the state it
-    // consults lives on each subject, so it needs no locking, no eviction and no size bound.
-    private readonly DeliveredRevisionFilter _deliveredRevisions;
-
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
 
@@ -78,7 +73,6 @@ public class ChangeQueueProcessor : IDisposable
     {
         _source = source;
         _context = context;
-        _deliveredRevisions = new DeliveredRevisionFilter(source);
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
@@ -105,13 +99,13 @@ public class ChangeQueueProcessor : IDisposable
     /// holding an older commit while the subject holds the confirmed one, and nothing would ever
     /// correct it. Sending the confirmation out repairs that.
     ///
-    /// Only when this processor actually wrote the property since, so a property that is only ever
-    /// written through transactions never pays for it.
+    /// Only when a connector actually wrote the property since, so a property that is only ever written
+    /// through transactions never pays for it.
     /// </summary>
-    private bool NeedsWriteBack(in SubjectPropertyChange change)
+    private static bool NeedsWriteBack(in SubjectPropertyChange change)
     {
         return change.Origin.Kind == ChangeOriginKind.Confirmed
-               && _deliveredRevisions.WasWrittenOut(change.Property);
+               && CurrentValueFilter.WasWrittenOut(change.Property);
     }
 
     /// <summary>
@@ -163,12 +157,6 @@ public class ChangeQueueProcessor : IDisposable
             {
                 if (ReferenceEquals(change.Origin.Source, _source) && !NeedsWriteBack(in change))
                 {
-                    // Load bearing, despite this change not being written anywhere. The source already
-                    // holds this value at this revision, and recording that is what lets a local commit
-                    // that predates the echo be suppressed afterwards instead of overwriting the newer
-                    // value the source just sent. Removing this call passes every other test in the
-                    // repository; WhenAnEchoIsDequeued_ThenAnOlderStragglerIsNotWritten is what fails.
-                    _deliveredRevisions.RecordDelivered(in change);
                     continue;
                 }
 
@@ -181,10 +169,12 @@ public class ChangeQueueProcessor : IDisposable
                 {
                     // The buffered path applies this inside the merger, where it can compact the
                     // batch in place; here there is no batch, so it gates the single write.
-                    if (!_deliveredRevisions.TryAdmit(in change))
+                    if (!CurrentValueFilter.IsCurrent(in change))
                     {
                         continue;
                     }
+
+                    CurrentValueFilter.MarkWrittenOut(in change);
 
                     // Immediate path: send a single change without buffering (zero allocation)
                     _immediateBuffer[0] = change;
@@ -257,7 +247,7 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            var mergedChanges = _flushMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), _deliveredRevisions);
+            var mergedChanges = _flushMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), suppressSupersededChanges: true);
 
             if (mergedChanges.Length > 0)
             {
@@ -306,12 +296,6 @@ public class ChangeQueueProcessor : IDisposable
         }
 
         _subscription.Dispose();
-
-        // Takes this processor's slots off the subjects it delivered to. Not optional: those slots hold
-        // the source, so skipping this leaves a dead connector reachable from a live graph. The walk
-        // covers the registry's attached subjects, which are exactly the ones that outlive the processor;
-        // without a registry there is nothing to walk and the slots stay until their subjects die.
-        _deliveredRevisions.Release(_context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys);
 
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
         if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)
