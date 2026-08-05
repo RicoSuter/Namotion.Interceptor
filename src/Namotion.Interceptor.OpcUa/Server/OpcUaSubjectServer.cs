@@ -35,7 +35,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     // Thread-scoped, not an instance field: a client write on another thread must not be caught by it.
     [ThreadStatic]
-    private static bool _isWritingOwnNodeValues;
+    internal static bool IsWritingOwnNodeValues;
 
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
@@ -135,7 +135,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         var span = changes.Span;
         lock (nodeManagerLock)
         {
-            _isWritingOwnNodeValues = true;
+            IsWritingOwnNodeValues = true;
             try
             {
                 for (var i = 0; i < span.Length; i++)
@@ -157,7 +157,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
             }
             finally
             {
-                _isWritingOwnNodeValues = false;
+                IsWritingOwnNodeValues = false;
             }
         }
 
@@ -369,7 +369,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
     {
-        if (_isWritingOwnNodeValues)
+        if (IsWritingOwnNodeValues)
         {
             // Our own node write, reflected back synchronously by ClearChangeMasks.
             return;

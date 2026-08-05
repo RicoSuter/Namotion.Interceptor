@@ -1,4 +1,3 @@
-using System.Reflection;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
@@ -7,8 +6,8 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
 /// <summary>
-/// Throwaway review test: reproduces the previously demonstrated failure where a detach on
-/// another thread flushed the flush loop's mid-write node state back into the subject.
+/// Regression test for the detach against flush loop race: a detach on another thread must not
+/// flush node state the write loop has set but not yet flushed itself, back into the subject.
 /// </summary>
 [Trait("Category", "Integration")]
 public class SelfEchoReproTests
@@ -49,9 +48,6 @@ public class SelfEchoReproTests
         var nodeManagerLock = standardServer.NodeManagerLock!;
         var systemContext = standardServer.CurrentInstance.DefaultSystemContext;
 
-        var flagField = typeof(OpcUaSubjectServer).GetField(
-            "_isWritingOwnNodeValues", BindingFlags.NonPublic | BindingFlags.Static)!;
-
         using var valueAssigned = new ManualResetEventSlim();
         using var detachRequested = new ManualResetEventSlim();
         Exception? flushError = null;
@@ -75,7 +71,7 @@ public class SelfEchoReproTests
                     // code: the echo has already fired and DeleteNode blocks at RemoveRootNotifier)
                     // or has finished entirely. Both outcomes are terminal for the interleaving, so
                     // proceeding is deterministic in both directions. The only wait on the detach
-                    // thread after detachRequested.Set() is a lock, so WaitSleepJoin is unambiguous.
+                    // thread after detachRequested.Set() is a lock, so WaitSleepJoin is the expected signal.
                     var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
                     while (detachThread!.IsAlive &&
                            (detachThread.ThreadState & System.Threading.ThreadState.WaitSleepJoin) == 0)
@@ -84,14 +80,14 @@ public class SelfEchoReproTests
                         Thread.SpinWait(1000);
                     }
 
-                    flagField.SetValue(null, true);
+                    OpcUaSubjectServer.IsWritingOwnNodeValues = true;
                     try
                     {
                         node.ClearChangeMasks(systemContext, false);
                     }
                     finally
                     {
-                        flagField.SetValue(null, false);
+                        OpcUaSubjectServer.IsWritingOwnNodeValues = false;
                     }
                 }
             }
