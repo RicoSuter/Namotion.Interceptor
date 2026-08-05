@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -23,6 +24,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISo
     private readonly Lock _stateLock = new();
     private int _state = (int)SourceState.Connecting;
     private long _lastSynchronizedTicks;
+
+    private ImmutableArray<SourceMonitor> _registeredMonitors = [];
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
@@ -159,6 +162,31 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISo
     /// <inheritdoc />
     public abstract ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
+
+    /// <inheritdoc />
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        // Stopped is terminal, and the platform will not enforce it: BackgroundService.StartAsync
+        // creates a fresh linked CancellationTokenSource on every call, so a second StartAsync on
+        // the same instance would run ExecuteAsync again against an uncancelled token. Without this
+        // guard such a source would claim, load and apply live values while State stayed Stopped.
+        if (State == SourceState.Stopped)
+        {
+            _logger.LogWarning(
+                "Source {Source} was stopped and cannot be restarted. Create a new instance instead.",
+                GetType().Name);
+            return Task.CompletedTask;
+        }
+
+        // Registration precedes the pump so SourceRegistered precedes any StateChanged of this source.
+        _registeredMonitors = RootSubject.Context.GetSourceMonitors();
+        foreach (var monitor in _registeredMonitors)
+        {
+            monitor.Register(this);
+        }
+
+        return base.StartAsync(cancellationToken);
+    }
 
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -329,6 +357,15 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISo
     /// <inheritdoc />
     public override void Dispose()
     {
+        // Publish the final Stopped while still registered, so a dispose without a stop is not silent.
+        TransitionTo(SourceState.Stopped);
+
+        foreach (var monitor in _registeredMonitors)
+        {
+            monitor.Unregister(this);
+        }
+        _registeredMonitors = [];
+
         WriteRetryQueue?.Dispose();
         base.Dispose();
     }

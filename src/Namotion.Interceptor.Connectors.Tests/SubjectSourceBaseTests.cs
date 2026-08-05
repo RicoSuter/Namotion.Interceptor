@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
@@ -21,6 +22,9 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        subjectContextMock
+            .Setup(context => context.GetServices<SourceMonitor>())
+            .Returns(ImmutableArray<SourceMonitor>.Empty);
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock
@@ -894,6 +898,9 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        subjectContextMock
+            .Setup(context => context.GetServices<SourceMonitor>())
+            .Returns(ImmutableArray<SourceMonitor>.Empty);
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock

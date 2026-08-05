@@ -82,9 +82,19 @@ namespace Namotion.Interceptor.Connectors
         PropertyEnteredView = 5,
         PropertyLeftView = 6,
     }
+    public class SourceMonitor
+    {
+        public SourceMonitor(Microsoft.Extensions.Logging.ILogger? logger = null) { }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Connectors.ISubjectSource> Sources { get; }
+        public void Register(Namotion.Interceptor.Connectors.ISubjectSource source) { }
+        public Namotion.Interceptor.Connectors.SourceSubscription Subscribe(System.Action<Namotion.Interceptor.Connectors.SourceEvent> handler) { }
+        public void Unregister(Namotion.Interceptor.Connectors.ISubjectSource source) { }
+    }
     public static class SourceMonitoringExtensions
     {
+        public static Namotion.Interceptor.Connectors.SourceMonitor GetSourceMonitor(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.Connectors.SourceState GetSourceState(this Namotion.Interceptor.PropertyReference property) { }
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithSourceMonitoring(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
     }
     public class SourceOwnershipManager : System.IDisposable
     {
@@ -106,6 +116,11 @@ namespace Namotion.Interceptor.Connectors
         Connecting = 1,
         Synchronized = 2,
         Stopped = 3,
+    }
+    public sealed class SourceSubscription : System.IDisposable
+    {
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Connectors.ISubjectSource> Sources { get; }
+        public void Dispose() { }
     }
     public static class SubjectFactoryExtensions
     {
@@ -132,6 +147,7 @@ namespace Namotion.Interceptor.Connectors
         protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
         public void ReportConnectionLost() { }
+        public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
         protected abstract System.Threading.Tasks.Task<System.IAsyncDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
         protected bool TransitionTo(Namotion.Interceptor.Connectors.SourceState newState) { }
         public abstract System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken);
