@@ -151,6 +151,68 @@ public class SourceStateTests
         Assert.Equal(SourceState.Synchronized, capturedEvent.Value.NewState);
         Assert.Equal(SourceState.Stopped, capturedEvent.Value.CurrentState);
     }
+
+    [Fact]
+    public async Task WhenBufferingStartsOutsideThePump_ThenTheSourceReportsConnecting()
+    {
+        // Arrange
+        var person = new Person();
+        var source = new TestStateSource(person);
+        var writer = new SubjectPropertyWriter(source, NullLogger.Instance);
+        ((ISourceStateReporter)source).ReportSynchronized();
+
+        // Act
+        writer.StartBuffering();
+
+        // Assert
+        Assert.Equal(SourceState.Connecting, source.State);
+        await Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task WhenTheInitialLoadCompletesOutsideThePump_ThenTheSourceReportsSynchronized()
+    {
+        // Arrange
+        var person = new Person();
+        var source = new TestStateSource(person);
+        var writer = new SubjectPropertyWriter(source, NullLogger.Instance);
+        writer.StartBuffering();
+
+        // Act
+        await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(SourceState.Synchronized, source.State);
+    }
+
+    [Fact]
+    public async Task WhenTheInitialLoadThrows_ThenTheSourceDoesNotReportSynchronized()
+    {
+        // Arrange
+        var person = new Person();
+        var source = new ThrowingLoadSource(person);
+        var writer = new SubjectPropertyWriter(source, NullLogger.Instance);
+        writer.StartBuffering();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.LoadInitialStateAndResumeAsync(CancellationToken.None));
+        Assert.Equal(SourceState.Connecting, source.State);
+    }
+
+    [Fact]
+    public void WhenAConnectorDetectsLossBeforeBuffering_ThenReportConnectionLostTransitions()
+    {
+        // Arrange
+        var source = new TestStateSource(new Person());
+        ((ISourceStateReporter)source).ReportSynchronized();
+
+        // Act
+        source.ReportConnectionLost();
+
+        // Assert
+        Assert.Equal(SourceState.Connecting, source.State);
+    }
 }
 
 /// <summary>
@@ -189,4 +251,12 @@ internal class TestStateSource : SubjectSourceBase
     public override ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         => new(WriteResult.Success);
+}
+
+internal sealed class ThrowingLoadSource : TestStateSource
+{
+    public ThrowingLoadSource(IInterceptorSubject rootSubject) : base(rootSubject) { }
+
+    public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+        => throw new InvalidOperationException("load failed");
 }

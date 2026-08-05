@@ -42,6 +42,10 @@ public sealed class SubjectPropertyWriter
         {
             _updates = [];
         }
+
+        // Buffering starts exactly when the source has stopped trusting its live feed, on first
+        // connect and on every reconnect, including reconnects the base pump never sees.
+        (_source as ISourceStateReporter)?.ReportConnecting();
     }
 
     /// <summary>
@@ -68,24 +72,29 @@ public sealed class SubjectPropertyWriter
                 // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
                 // This is safe - it means another reconnection cycle already loaded state and replayed updates.
                 _logger.LogDebug("LoadInitialStateAndResumeAsync called but updates already replayed by concurrent reconnection.");
-                return;
             }
-
-            foreach (var action in updates)
+            else
             {
-                try
+                foreach (var action in updates)
                 {
-                    action();
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception e)
+                    {
+                        _logger.LogError(e, "Failed to apply subject update.");
+                    }
                 }
-                catch (Exception e)
-                {
-                    _logger.LogError(e, "Failed to apply subject update.");
-                }
-            }
 
-            // Must be after replay: Write() reads _updates without lock on the fast path.
-            _updates = null;
+                // Must be after replay: Write() reads _updates without lock on the fast path.
+                _updates = null;
+            }
         }
+
+        // Both paths mean state has been loaded and replayed, by this call or a concurrent one,
+        // so both fall through to a single report rather than duplicating the call.
+        (_source as ISourceStateReporter)?.ReportSynchronized();
     }
 
     /// <summary>

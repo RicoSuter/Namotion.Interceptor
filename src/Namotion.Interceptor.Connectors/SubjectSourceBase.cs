@@ -52,6 +52,18 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISo
     void ISourceStateReporter.ReportSynchronized() => TransitionTo(SourceState.Synchronized);
 
     /// <summary>
+    /// Reports that the connection was lost, for connectors that detect an outage before they
+    /// start buffering.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately separate from <see cref="SubjectPropertyWriter.StartBuffering"/>: calling that
+    /// at detection time would replace the buffer with a fresh list, and the later StartBuffering
+    /// on the reconnect path would then discard everything buffered in between. That would change
+    /// data-path behaviour in order to fix a reporting bug.
+    /// </remarks>
+    public void ReportConnectionLost() => TransitionTo(SourceState.Connecting);
+
+    /// <summary>
     /// Moves to <paramref name="newState"/> and publishes the change, or does nothing when the
     /// transition is a no-op or the source has already stopped.
     /// </summary>
@@ -151,47 +163,56 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISo
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        TransitionTo(SourceState.Connecting);   // no-op in practice, keeps the invariant local
+        try
         {
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                _propertyWriter.StartBuffering();
-                await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
-
-                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
-
-                using var processor = new ChangeQueueProcessor(
-                    this,
-                    _context,
-                    propertyReference => propertyReference.TryGetSource(out var source) && source == this,
-                    WriteChangesViaRetryQueueAsync,
-                    _bufferTime,
-                    maxQueueDepth: null,
-                    logger: _logger);
-
-                // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
-                // re-apply queued changes locally if the source hasn't changed the property.
-                // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
-                ReapplyRetryQueue();
-
-                await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to listen for changes in source.");
                 try
                 {
-                    await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
+                    _propertyWriter.StartBuffering();
+                    await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
+
+                    await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+
+                    using var processor = new ChangeQueueProcessor(
+                        this,
+                        _context,
+                        propertyReference => propertyReference.TryGetSource(out var source) && source == this,
+                        WriteChangesViaRetryQueueAsync,
+                        _bufferTime,
+                        maxQueueDepth: null,
+                        logger: _logger);
+
+                    // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
+                    // re-apply queued changes locally if the source hasn't changed the property.
+                    // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
+                    ReapplyRetryQueue();
+
+                    await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     return;
                 }
+                catch (Exception ex)
+                {
+                    TransitionTo(SourceState.Connecting);
+                    _logger.LogError(ex, "Failed to listen for changes in source.");
+                    try
+                    {
+                        await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+                }
             }
+        }
+        finally
+        {
+            TransitionTo(SourceState.Stopped);
         }
     }
 
