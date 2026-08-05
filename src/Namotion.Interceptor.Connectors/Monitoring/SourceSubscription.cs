@@ -8,10 +8,10 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// One subscriber to the source event stream, with its own queue and its own drain.
 /// </summary>
 /// <remarks>
-/// Per-subscriber queues mean a slow handler delays only itself. They also remove the need for
-/// sequence stamping: this queue is created empty, so it cannot contain events enqueued before the
-/// subscription existed. Pair it with <see cref="Sources"/>, captured atomically with the
-/// subscription, to observe every change exactly once.
+/// Per-subscriber queues mean a slow handler delays only itself, and remove the need for sequence
+/// stamping: a queue is created empty, so it cannot hold events enqueued before the subscription
+/// existed. Pair with <see cref="Sources"/> (captured atomically with the subscription) to observe
+/// every change exactly once.
 /// </remarks>
 public sealed class SourceSubscription : IDisposable
 {
@@ -67,11 +67,9 @@ public sealed class SourceSubscription : IDisposable
             {
                 if (_disposed)
                 {
-                    // Deliberately leaves _draining set rather than resetting it to 0. That is
-                    // harmless, not a leak: Enqueue checks _disposed BEFORE it ever looks at
-                    // _draining, so once disposed no further Enqueue call can reach the
-                    // CompareExchange that would otherwise need _draining back at 0 to schedule a
-                    // new Drain. The flag simply goes dead along with the rest of the subscription.
+                    // Leaves _draining set rather than resetting it: harmless, since Enqueue checks
+                    // _disposed before _draining, so no further Enqueue can reach the CompareExchange
+                    // that would need _draining back at 0. The flag just goes dead with the subscription.
                     return;
                 }
 

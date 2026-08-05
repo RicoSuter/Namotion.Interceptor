@@ -24,9 +24,8 @@ internal static class SourceScope
     /// up from it through tracked parents.
     /// </summary>
     /// <remarks>
-    /// Nothing enforces that the parent graph is acyclic: two subjects can reference each other
-    /// (directly or through a longer chain), so the walk always tracks visited subjects and cannot
-    /// loop, even on a single-parent chain.
+    /// Nothing enforces that the parent graph is acyclic (two subjects can reference each other,
+    /// directly or through a longer chain), so the walk tracks visited subjects and cannot loop.
     /// </remarks>
     internal static bool IsAncestorOrSelf(IInterceptorSubject candidate, IInterceptorSubject target)
     {

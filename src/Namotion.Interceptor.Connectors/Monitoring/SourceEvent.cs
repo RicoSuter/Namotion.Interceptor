@@ -42,25 +42,22 @@ public readonly record struct SourceEvent(
     DateTimeOffset Timestamp)
 {
     /// <summary>
-    /// The authoritative state for this event's subject, read now rather than captured when the
-    /// event was created. This is what a consumer maintaining a derived view applies.
+    /// The authoritative state for this event's subject, resolved fresh rather than the value
+    /// captured when the event was created. This is what a consumer maintaining a derived view
+    /// should apply.
     /// </summary>
     /// <remarks>
-    /// For <see cref="SourceEventKind.StateChanged"/> this is the SOURCE's state and says nothing
-    /// about any individual property; a consumer updating properties on a state change must call
-    /// <see cref="SourceMonitoringExtensions.GetSourceState"/> per property instead.
-    /// Not cached: each access performs a property-data lookup and a volatile read, so hoist it to
-    /// a local if you read it more than once.
+    /// For <see cref="SourceEventKind.StateChanged"/> this is the SOURCE's state, not any one
+    /// property's; use <see cref="SourceMonitoringExtensions.GetSourceState"/> per property instead.
+    /// Not cached: hoist to a local if you read it more than once.
     /// <para>
-    /// The "left the tree" check this relies on for <see cref="SourceEventKind.PropertyLeftView"/>
-    /// asks whether the subject's context still reaches the event's monitor, which is only a proxy
-    /// for tree membership. It is defeated in two cases: a subject constructed directly with a
-    /// context (the generator emits <c>Context.AddFallbackContext(context)</c> in that constructor,
-    /// and detach never removes it), and a subject that has had two parents (only the first attach
-    /// adds the parent-tree fallback; see the topology-aware test coverage in
-    /// <c>SourceMonitorTests</c>). In both cases the context keeps reaching the monitor after the
-    /// subject has actually left the tree, so a <c>PropertyLeftView</c> event's <c>CurrentState</c>
-    /// still returns the owning source's state instead of <see cref="SourceState.Unclaimed"/>.
+    /// For <see cref="SourceEventKind.PropertyLeftView"/>, "left the tree" is approximated by
+    /// whether the subject's context still reaches the event's monitor, which lags true tree
+    /// membership in two cases: a subject constructed directly with a context (the generator adds a
+    /// fallback context in that constructor, and detach never removes it), and a subject that has
+    /// had two parents (only the first attach adds the parent-tree fallback). In both cases
+    /// <see cref="CurrentState"/> keeps returning the owning source's state instead of
+    /// <see cref="SourceState.Unclaimed"/> after the subject has actually left.
     /// </para>
     /// </remarks>
     public SourceState CurrentState => ResolveCurrentState();
@@ -80,9 +77,8 @@ public readonly record struct SourceEvent(
 
         var property = Property.Value;
 
-        // A property whose subject has left this monitor's tree has no state within it, whatever the
-        // ownership data still says. Detach deliberately leaves ownership intact, so without this a
-        // claim delivered after a detach would permanently undo the release.
+        // Detach leaves ownership intact, so without this check a claim delivered after detach
+        // would resurrect a released property. See the CurrentState remarks for the topology limits.
         if (Monitor is not null && !property.Subject.Context.GetSourceMonitors().Contains(Monitor))
         {
             return SourceState.Unclaimed;

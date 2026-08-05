@@ -65,11 +65,11 @@ public interface ISubjectSource : ISubjectConnector
     /// Raised when <see cref="State"/> changes.
     /// </summary>
     /// <remarks>
-    /// Raised synchronously on the transitioning thread and inside the source's transition lock.
-    /// Handlers MUST be observe-only: they must not block, and must not cause a transition of any
-    /// source, directly or indirectly, because the lock is reentrant and a nested transition would
-    /// publish out of order. Mutating consumers belong on the SourceMonitor stream, where delivery
-    /// is queued and outside all locks.
+    /// Raised synchronously on the transitioning thread, inside the source's transition lock.
+    /// Handlers must be observe-only: no blocking, and no causing a transition of any source
+    /// (directly or indirectly), since the lock is reentrant and a nested transition would publish
+    /// out of order. Mutating consumers belong on the SourceMonitor stream, where delivery is
+    /// queued outside all locks.
     /// </remarks>
     event EventHandler<SourceEvent>? StateChanged;
 }

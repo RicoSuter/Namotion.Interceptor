@@ -306,10 +306,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
             _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
 
-            // The SDK reconnect path does not buffer until PerformFullStateSyncIfNeededAsync runs
-            // after reconnection, so without this the source would report Synchronized for the whole
-            // outage. Deliberately not StartBuffering: that would replace the buffer, and the later
-            // StartBuffering on the reconnect path would then discard everything buffered here.
+            // Without this, the source would report Synchronized for the whole outage: the SDK
+            // reconnect path doesn't buffer until PerformFullStateSyncIfNeededAsync runs. Not
+            // StartBuffering here either (see ReportConnectionLost remarks for why).
             _source.ReportConnectionLost();
 
             // Set flag before BeginReconnect to avoid window where external observers see IsReconnecting=false

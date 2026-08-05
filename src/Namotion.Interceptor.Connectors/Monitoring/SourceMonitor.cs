@@ -11,10 +11,9 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// Added to the tree root context by WithSourceMonitoring.
 /// </summary>
 /// <remarks>
-/// Must run after ContextInheritanceHandler and ParentTrackingHandler: both maintain state that the
-/// attach/detach catch-up scan and the topology-aware CurrentState depend on (the parent-context
-/// fallback and the parent set respectively), so this handler needs their update to have already
-/// happened for the same lifecycle change.
+/// Must run after ContextInheritanceHandler and ParentTrackingHandler: the catch-up scan and the
+/// topology-aware CurrentState depend on state they maintain (the parent-context fallback and the
+/// parent set) for the same lifecycle change.
 /// </remarks>
 [RunsAfter(typeof(ContextInheritanceHandler), typeof(ParentTrackingHandler))]
 public class SourceMonitor : ILifecycleHandler
@@ -24,11 +23,10 @@ public class SourceMonitor : ILifecycleHandler
 
     private ILogger? _logger;
 
-    // Boxed in a single-element array so the reference itself can be read with Volatile.Read: an
-    // ImmutableArray<T> is a struct, which the generic Volatile/Interlocked helpers cannot target
-    // directly. Writes always happen under _lock and replace the box wholesale (copy-on-write), so
-    // Sources, HasSubscribers and Publish can read the latest published snapshot without taking the
-    // lock on this hot path. Same technique as ParentsHandlerExtensions.ParentsSet._cache.
+    // Boxed in a single-element array so the reference can be read with Volatile.Read: ImmutableArray<T>
+    // is a struct, which Volatile/Interlocked cannot target directly. Writes happen under _lock and
+    // swap the box wholesale, so Sources, HasSubscribers and Publish can read the latest snapshot
+    // lock-free. Same technique as ParentsHandlerExtensions.ParentsSet._cache.
     private volatile ImmutableArray<ISubjectSource>[] _sources = [ImmutableArray<ISubjectSource>.Empty];
     private volatile ImmutableArray<SourceSubscription>[] _subscriptions = [ImmutableArray<SourceSubscription>.Empty];
 
@@ -45,32 +43,23 @@ public class SourceMonitor : ILifecycleHandler
     internal bool HasSubscribers => !_subscriptions[0].IsEmpty;
 
     /// <summary>
-    /// Resolves the logger on first use, from whichever call site needs it first: Subscribe, or one
-    /// of the wait engine's diagnostic warnings. The context is configured before any logging
-    /// provider exists (see WithSourceMonitoring), so a resolver deferred to first use is the only
-    /// way an application that never calls Subscribe still gets its wait warnings logged. Every call
-    /// site is already under _lock, so the read-then-maybe-write here needs no synchronization of
-    /// its own.
+    /// Resolves the logger on first use (Subscribe, or a wait engine warning), since the context is
+    /// configured before any logging provider exists (see WithSourceMonitoring). Every call site is
+    /// already under _lock, so the read-then-maybe-write here needs no synchronization of its own.
     /// </summary>
     private ILogger? Logger => _logger ??= _loggerResolver?.Invoke();
 
     /// <inheritdoc />
     /// <remarks>
-    /// The attach and detach hot paths pay one flag check (HasSubscribers) when nobody is
-    /// listening. Pending waits deliberately do not count as subscribers: a wait is active during
-    /// startup, exactly when attach storms happen, and never needs property events. A
-    /// property-reference add or remove always calls OnWaitConditionChanged, which takes _lock to
-    /// check for pending waits: an earlier lock-free emptiness check was removed because it raced
-    /// WaitForSynchronizationAsync's own check-and-add and could drop the wakeup (see
-    /// OnWaitConditionChanged). So an attach storm with no pending waits and no subscribers costs
-    /// one flag read plus one uncontended lock acquisition per property.
+    /// HasSubscribers lets an attach/detach storm skip the scan when nobody is listening. Pending
+    /// waits do not count as subscribers - they need no property events, only
+    /// OnWaitConditionChanged, which every property-reference add/remove calls regardless (see
+    /// OnWaitConditionChanged for why that path takes _lock).
     /// </remarks>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        // Branch scope reads mutable parent data, so a reparent changes the answer with no
-        // registration or state transition. A same-tree reparent fires neither IsContextAttach nor
-        // IsContextDetach, so gate on reference mutation, and never on the subscriber count: a wait
-        // is exactly the consumer that has no subscription.
+        // A reparent changes branch scope with no attach/detach event, so gate on reference
+        // mutation, not subscriber count - a wait is the one consumer with no subscription.
         if (change.IsPropertyReferenceAdded || change.IsPropertyReferenceRemoved)
         {
             OnWaitConditionChanged();
@@ -193,17 +182,15 @@ public class SourceMonitor : ILifecycleHandler
     }
 
     /// <summary>
-    /// Publishes while holding _lock, matching Register, Unregister and OnSourceStateChanged's own
-    /// state changes. Used by property ownership changes (SetSource/RemoveSource), which mutate
-    /// property data entirely outside this monitor, so this cannot make a newly-subscribed consumer
-    /// see a claim that already happened before it subscribed: SourceSubscription.Sources has no
-    /// ownership baseline to reconcile against (see docs/connectors-monitoring.md, Worked
-    /// Sample). What it does close is delivery ordering: without the lock, an ownership event could
-    /// be enqueued to a subscriber out of order relative to a concurrent Register/Unregister/
-    /// Subscribe on the same monitor, since Publish itself is just an unsynchronized read of the
-    /// current subscription list. Safe from deadlock: Publish only enqueues onto a ConcurrentQueue
-    /// and, at most, schedules a Task.Run drain; it never invokes a subscriber handler synchronously
-    /// and never calls back into any SourceMonitor method that takes _lock.
+    /// Publishes under _lock. Register and Unregister do the same, because they publish alongside a
+    /// mutation of _sources and the lock keeps that atomic with a concurrent Subscribe's snapshot;
+    /// OnSourceStateChanged does not need it, since a state transition touches no monitor-owned
+    /// state. Used by SetSource/RemoveSource, which mutate property data entirely outside this
+    /// monitor, so an ownership event has no snapshot baseline to reconcile against the way
+    /// registration does (see docs/connectors-monitoring.md, Worked Sample); only delivery order
+    /// relative to a concurrent Register/Unregister/Subscribe needs protecting. Cannot deadlock:
+    /// Publish only enqueues onto a ConcurrentQueue and, at most, schedules a Task.Run; it never runs
+    /// a handler synchronously or calls back into anything that takes _lock.
     /// </summary>
     internal void PublishUnderLock(in SourceEvent sourceEvent)
     {
@@ -213,9 +200,8 @@ public class SourceMonitor : ILifecycleHandler
         }
     }
 
-    // Born at 1. The monitor takes this hold at WithSourceMonitoring time, during context
-    // configuration, before the host is even built, which is what makes signalling
-    // order-independent without any argument about hosted service construction order.
+    // Born at 1, taken at WithSourceMonitoring time (before the host is built), so no wait can
+    // complete until something explicitly releases it, regardless of hosted-service start order.
     private int _registrationHolds = 1;
     private int _initialHoldReleased;
 
@@ -256,9 +242,9 @@ public class SourceMonitor : ILifecycleHandler
         }
     }
 
-    // Unlike _sources/_subscriptions, every read and write of _waits happens under _lock (see
-    // OnWaitConditionChanged for why the emptiness check cannot be lock-free), so this needs
-    // neither the volatile field nor the box-per-publish trick those two use for lock-free reads.
+    // Unlike _sources/_subscriptions, every access to _waits happens under _lock (see
+    // OnWaitConditionChanged), so this needs neither the volatile field nor the box trick those two
+    // use for lock-free reads.
     private ImmutableArray<PendingWait> _waits = ImmutableArray<PendingWait>.Empty;
 
     /// <summary>
@@ -323,11 +309,9 @@ public class SourceMonitor : ILifecycleHandler
 
         if (!matched)
         {
-            // Registration is complete and still nothing claims this branch. That is very likely a
-            // misconfiguration, and blocking forever in silence reads as a hang rather than a
-            // diagnosis, so say it once per wait rather than on every re-evaluation. MarkWarned is
-            // only called here, at the point the warning is actually about to fire, so an unrelated
-            // re-evaluation that finds the branch still matched never burns the one-shot flag.
+            // No in-scope source but registration is complete: likely a misconfiguration. Warn once
+            // per wait, not on every re-evaluation - MarkWarned is called only here, right before the
+            // warning fires, so a later pass that finds the branch matched again never burns the flag.
             if (wait is not null && !wait.MarkWarned())
             {
                 Logger?.LogWarning(
@@ -341,8 +325,8 @@ public class SourceMonitor : ILifecycleHandler
 
         if (allInScopeStopped)
         {
-            // Stopped is terminal, so this branch will never become live. Completing is more useful
-            // than hanging, but silence would read as success, so say it out loud.
+            // Stopped is terminal, so this branch will never become live. Completing beats hanging,
+            // but silence would look like success, so log it.
             Logger?.LogWarning(
                 "A synchronization wait completed with every in-scope source stopped. " +
                 "Stopped is terminal, so this branch will not synchronize again.");
@@ -352,21 +336,17 @@ public class SourceMonitor : ILifecycleHandler
     }
 
     /// <summary>
-    /// Re-evaluates every pending wait. Called on the hot property-reference-add/remove path (see
-    /// HandleLifecycleChange) as well as from every other signaler (Register, Unregister,
-    /// CompleteSourceRegistration/ReleaseHold, and a registered source's own StateChanged).
+    /// Re-evaluates every pending wait. Called from the hot property-reference-add/remove path (see
+    /// HandleLifecycleChange) and from every other signaler (Register, Unregister, hold
+    /// release/CompleteSourceRegistration, a registered source's own StateChanged).
     /// </summary>
     /// <remarks>
-    /// The emptiness check below takes _lock rather than reading _waits lock-free. A lock-free
-    /// check used to gate this method entirely, as a performance optimization, but it opened a lost
-    /// wakeup: WaitForSynchronizationAsync's own check-and-add also runs under _lock, so without
-    /// this method taking the same lock, a signal could read "no waits yet" and return in the
-    /// window between the waiter's IsSatisfied check and its registration into _waits, and no later
-    /// signal would ever re-evaluate it. Taking _lock here closes that window: the two critical
-    /// sections now serialize, so a signal either runs before the waiter's check-and-add (and the
-    /// waiter's own IsSatisfied then observes the new state directly) or after the wait is already
-    /// published (and this method's re-evaluation picks it up). Correctness beats the
-    /// micro-optimization the lock-free check existed for.
+    /// The emptiness check takes _lock rather than reading _waits lock-free. A lock-free check used
+    /// to gate this method as a performance optimization, but it caused a lost wakeup: a signal
+    /// could observe "no waits yet" in the window between a waiter's IsSatisfied check and its add
+    /// to _waits, with no later signal to re-evaluate it, hanging the wait forever. Taking _lock
+    /// here serializes with WaitForSynchronizationAsync's own check-and-add, so a signal always runs
+    /// fully before or fully after it. Do not move this check outside the lock again.
     /// </remarks>
     private void OnWaitConditionChanged()
     {
@@ -380,12 +360,9 @@ public class SourceMonitor : ILifecycleHandler
             }
         }
 
-        // A throw from one wait's IsSatisfied (a misbehaving anchor, a throwing logger) must not
-        // stop the remaining waits in this pass from being re-evaluated - that would be a lost
-        // wakeup for every wait after the throwing one, not just for the throwing one itself. Each
-        // wait is isolated, and every exception collected is still surfaced to the caller once the
-        // full pass has run, matching the same collect-then-rethrow pattern used by
-        // SourceMonitoringExtensions.CompleteSourceRegistration and CompositeDisposable.Dispose.
+        // A throw from one wait's IsSatisfied must not skip re-evaluating the rest - that would be a
+        // lost wakeup for every wait after it. Collect and rethrow once the full pass completes,
+        // matching SourceMonitoringExtensions.CompleteSourceRegistration and CompositeDisposable.Dispose.
         List<Exception>? exceptions = null;
         foreach (var wait in waits)
         {

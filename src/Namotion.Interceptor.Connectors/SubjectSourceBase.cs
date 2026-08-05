@@ -64,8 +64,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <remarks>
     /// Deliberately separate from <see cref="SubjectPropertyWriter.StartBuffering"/>: calling that
     /// at detection time would replace the buffer with a fresh list, and the later StartBuffering
-    /// on the reconnect path would then discard everything buffered in between. That would change
-    /// data-path behaviour in order to fix a reporting bug.
+    /// on the reconnect path would then discard everything buffered in between.
     /// </remarks>
     public void ReportConnectionLost() => TransitionTo(SourceState.Connecting);
 
@@ -74,10 +73,10 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// transition is a no-op or the source has already stopped.
     /// </summary>
     /// <remarks>
-    /// The state change, the timestamp write, and the event raise are all inside one lock. A bare
-    /// compare-exchange is not enough: a writer could set Synchronized, be preempted, let disposal
-    /// set Stopped and unregister, then resume and publish Synchronized after Stopped. Both
-    /// compare-exchanges would have succeeded, so no stickiness rule can prevent it.
+    /// The state write, timestamp write and event raise are all inside one lock: a bare
+    /// compare-exchange is not enough, since a writer could set Synchronized, be preempted, let
+    /// disposal set Stopped and unregister, then resume and publish Synchronized after Stopped -
+    /// both compare-exchanges would have succeeded, so no stickiness rule could prevent it.
     /// </remarks>
     internal void TransitionTo(SourceState newState)
     {
@@ -167,10 +166,10 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <inheritdoc />
     public override Task StartAsync(CancellationToken cancellationToken)
     {
-        // Stopped is terminal, and the platform will not enforce it: BackgroundService.StartAsync
-        // creates a fresh linked CancellationTokenSource on every call, so a second StartAsync on
-        // the same instance would run ExecuteAsync again against an uncancelled token. Without this
-        // guard such a source would claim, load and apply live values while State stayed Stopped.
+        // Stopped is terminal, but the platform won't enforce it: BackgroundService.StartAsync
+        // creates a fresh CancellationTokenSource each call, so a second StartAsync would run
+        // ExecuteAsync again against an uncancelled token. Without this guard, a "restarted" source
+        // would claim, load and apply live values while State stayed Stopped.
         if (State == SourceState.Stopped)
         {
             _logger.LogWarning(
