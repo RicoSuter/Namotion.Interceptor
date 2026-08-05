@@ -40,6 +40,9 @@ public static class SourcePropertyExtensions
             return true;
         }
 
+        // Check-then-act: another thread can change ownership between the failed add above and this
+        // read. The returned boolean reflects the state observed at the moment of THIS read, not a
+        // guarantee that it still holds by the time the caller inspects it.
         return property.TryGetPropertyData(SourceKey, out var existing) && ReferenceEquals(existing, source);
     }
 

@@ -23,8 +23,14 @@ public class SourceMonitor : ILifecycleHandler
     private readonly Func<ILogger?>? _loggerResolver;
 
     private ILogger? _logger;
-    private ImmutableArray<ISubjectSource> _sources = [];
-    private ImmutableArray<SourceSubscription> _subscriptions = [];
+
+    // Boxed in a single-element array so the reference itself can be read with Volatile.Read: an
+    // ImmutableArray<T> is a struct, which the generic Volatile/Interlocked helpers cannot target
+    // directly. Writes always happen under _lock and replace the box wholesale (copy-on-write), so
+    // Sources, HasSubscribers and Publish can read the latest published snapshot without taking the
+    // lock on this hot path. Same technique as ParentsHandlerExtensions.ParentsSet._cache.
+    private volatile ImmutableArray<ISubjectSource>[] _sources = [ImmutableArray<ISubjectSource>.Empty];
+    private volatile ImmutableArray<SourceSubscription>[] _subscriptions = [ImmutableArray<SourceSubscription>.Empty];
 
     /// <summary>Creates a monitor. Prefer WithSourceMonitoring over calling this directly.</summary>
     public SourceMonitor(Func<ILogger?>? loggerResolver = null)
@@ -33,10 +39,10 @@ public class SourceMonitor : ILifecycleHandler
     }
 
     /// <summary>The sources registered right now. For a race-free baseline use SourceSubscription.Sources.</summary>
-    public IReadOnlyList<ISubjectSource> Sources => _sources;
+    public IReadOnlyList<ISubjectSource> Sources => _sources[0];
 
     /// <summary>True when at least one public subscriber exists. Gates the attach and detach catch-up scan.</summary>
-    internal bool HasSubscribers => !_subscriptions.IsEmpty;
+    internal bool HasSubscribers => !_subscriptions[0].IsEmpty;
 
     /// <inheritdoc />
     /// <remarks>
@@ -98,8 +104,8 @@ public class SourceMonitor : ILifecycleHandler
         lock (_lock)
         {
             _logger ??= _loggerResolver?.Invoke();
-            var subscription = new SourceSubscription(handler, _sources, Remove, _logger);
-            _subscriptions = _subscriptions.Add(subscription);
+            var subscription = new SourceSubscription(handler, _sources[0], Remove, _logger);
+            _subscriptions = [_subscriptions[0].Add(subscription)];
             return subscription;
         }
     }
@@ -108,7 +114,7 @@ public class SourceMonitor : ILifecycleHandler
     {
         lock (_lock)
         {
-            _subscriptions = _subscriptions.Remove(subscription);
+            _subscriptions = [_subscriptions[0].Remove(subscription)];
         }
     }
 
@@ -119,12 +125,12 @@ public class SourceMonitor : ILifecycleHandler
 
         lock (_lock)
         {
-            if (_sources.Contains(source))
+            if (_sources[0].Contains(source))
             {
                 return;
             }
 
-            _sources = _sources.Add(source);
+            _sources = [_sources[0].Add(source)];
             source.StateChanged += OnSourceStateChanged;
 
             Publish(new SourceEvent(
@@ -141,12 +147,12 @@ public class SourceMonitor : ILifecycleHandler
 
         lock (_lock)
         {
-            if (!_sources.Contains(source))
+            if (!_sources[0].Contains(source))
             {
                 return;
             }
 
-            _sources = _sources.Remove(source);
+            _sources = [_sources[0].Remove(source)];
             source.StateChanged -= OnSourceStateChanged;
 
             Publish(new SourceEvent(
@@ -165,7 +171,7 @@ public class SourceMonitor : ILifecycleHandler
     /// <summary>Enqueues an event onto every subscriber's own queue.</summary>
     internal void Publish(in SourceEvent sourceEvent)
     {
-        var subscriptions = _subscriptions;
+        var subscriptions = _subscriptions[0];
         foreach (var subscription in subscriptions)
         {
             subscription.Enqueue(sourceEvent);
@@ -257,7 +263,7 @@ public class SourceMonitor : ILifecycleHandler
 
         var matched = false;
         var allInScopeStopped = true;
-        foreach (var source in _sources)
+        foreach (var source in _sources[0])
         {
             if (!SourceScope.IsInScope(source, anchor))
             {
