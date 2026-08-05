@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Connectors;
+namespace Namotion.Interceptor.Connectors.Monitoring;
 
 /// <summary>The kind of source metadata change a <see cref="SourceEvent"/> reports.</summary>
 public enum SourceEventKind

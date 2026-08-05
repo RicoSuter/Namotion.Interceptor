@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Tracking.Parent;
 
-namespace Namotion.Interceptor.Connectors;
+namespace Namotion.Interceptor.Connectors.Monitoring;
 
 /// <summary>
 /// Decides which sources a branch-scoped wait must observe.

@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Connectors;
+namespace Namotion.Interceptor.Connectors.Monitoring;
 
 /// <summary>
 /// The synchronization state of a source, and of a property with respect to its owning source.

@@ -4,7 +4,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 
-namespace Namotion.Interceptor.Connectors;
+namespace Namotion.Interceptor.Connectors.Monitoring;
 
 /// <summary>
 /// The per-tree registry of sources, the source event stream, and the synchronization waits.

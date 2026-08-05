@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 
-namespace Namotion.Interceptor.Connectors;
+namespace Namotion.Interceptor.Connectors.Monitoring;
 
 /// <summary>
 /// One subscriber to the source event stream, with its own queue and its own drain.

@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Hosting;
 
-namespace Namotion.Interceptor.Connectors;
+namespace Namotion.Interceptor.Connectors.Monitoring;
 
 /// <summary>
 /// Completes source registration once host startup has finished, so every DI-registered source has

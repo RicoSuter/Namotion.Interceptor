@@ -1,5 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 
+using Namotion.Interceptor.Connectors.Monitoring;
+
 namespace Namotion.Interceptor.Connectors;
 
 /// <summary>

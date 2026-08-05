@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors.Monitoring;
 
 namespace Namotion.Interceptor.Connectors;
 

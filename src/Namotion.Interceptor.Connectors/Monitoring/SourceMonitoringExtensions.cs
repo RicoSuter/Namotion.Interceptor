@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
-namespace Namotion.Interceptor.Connectors;
+namespace Namotion.Interceptor.Connectors.Monitoring;
 
 /// <summary>Consumer-facing entry points for source monitoring.</summary>
 public static class SourceMonitoringExtensions

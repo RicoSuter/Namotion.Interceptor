@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Connectors;
+namespace Namotion.Interceptor.Connectors.Monitoring;
 
 /// <summary>
 /// The seam through which <see cref="SubjectPropertyWriter"/> drives a source's connection state.

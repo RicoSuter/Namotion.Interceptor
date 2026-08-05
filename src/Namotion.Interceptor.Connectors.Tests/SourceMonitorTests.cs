@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
