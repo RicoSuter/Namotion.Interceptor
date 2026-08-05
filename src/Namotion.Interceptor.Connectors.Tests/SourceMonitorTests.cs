@@ -246,6 +246,87 @@ public class SourceMonitorTests
     }
 
     [Fact]
+    public async Task WhenUnregisterAndSubscribeRaceConcurrently_ThenTheSourceIsObservedExactlyOnce()
+    {
+        // Arrange
+        const int iterations = 10;
+        var outcomes = new List<(bool WasInSnapshot, bool WasDelivered)>();
+
+        // Act
+        for (var iteration = 0; iteration < iterations; iteration++)
+        {
+            outcomes.Add(await RaceUnregisterAgainstSubscribeOnceAsync());
+        }
+
+        // Assert
+        Assert.All(outcomes, outcome => Assert.True(
+            outcome.WasInSnapshot ^ outcome.WasDelivered,
+            $"snapshot={outcome.WasInSnapshot}, delivered={outcome.WasDelivered}; the source must appear " +
+            "exactly once, in the snapshot or as a delivered event, never both, never neither."));
+    }
+
+    /// <summary>
+    /// Manufactures, on one fresh monitor, the exact race described in the review finding for Unregister:
+    /// a source is registered, then Subscribe is started, followed by Unregister paused right where it reads
+    /// the source's State to build the SourceUnregistered event (pre-fix that read happens after the monitor's
+    /// lock is released; post-fix it happens while the lock is still held). This allows a pre-fix run to see
+    /// the source both in its snapshot and as a delivered event, breaking the exactly-once contract. Post-fix
+    /// the lock is held during publish, preventing Subscribe from both seeing the source in its initial
+    /// snapshot and receiving the unregistered event.
+    /// </summary>
+    private static async Task<(bool WasInSnapshot, bool WasDelivered)> RaceUnregisterAgainstSubscribeOnceAsync()
+    {
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var received = new ConcurrentQueue<SourceEvent>();
+
+        // Register a source with a gated State property for the Unregister race
+        var reachedStateRead = new ManualResetEventSlim(false);
+        var releaseStateRead = new ManualResetEventSlim(false);
+        var source = new GatedStateSource(new Person(context), reachedStateRead, releaseStateRead);
+
+        // Register the source (will block on State read because gates start NOT SET)
+        var registerTask = Task.Run(() => monitor.Register(source));
+        Assert.True(reachedStateRead.Wait(TimeSpan.FromSeconds(10)),
+            "Register should have reached the State read before the timeout.");
+
+        // Release the register gate and proceed to subscribe
+        releaseStateRead.Set();
+        await registerTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Subscribe while source is still in the monitor (before Unregister)
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+
+        // Now reset gates for the Unregister race
+        reachedStateRead.Reset();
+        releaseStateRead.Reset();
+
+        var unregisterTask = Task.Run(() => monitor.Unregister(source));
+        Assert.True(reachedStateRead.Wait(TimeSpan.FromSeconds(10)),
+            "Unregister should have reached the State read before the timeout.");
+
+        // At this point, Unregister is holding the lock and is blocked on State read.
+        // The subscription already captured the source in its baseline.
+        // Release Unregister to see if it delivers the event to the subscription.
+        releaseStateRead.Set();
+        await unregisterTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var wasInSnapshot = subscription.Sources.Contains(source);
+
+        // Ensure all events have been delivered by waiting for a sentinel
+        var sentinel = new TestStateSource(new Person(context));
+        monitor.Register(sentinel);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)),
+            pollInterval: TimeSpan.FromMilliseconds(2));
+
+        var wasDelivered = received.Any(
+            e => e.Kind == SourceEventKind.SourceUnregistered && ReferenceEquals(e.Source, source));
+
+        return (wasInSnapshot, wasDelivered);
+    }
+
+    [Fact]
     public void WhenNoMonitorIsConfigured_ThenGetSourceMonitorThrowsWithGuidance()
     {
         // Arrange
