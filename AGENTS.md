@@ -98,10 +98,12 @@ The library uses a fluent configuration API:
 
 ## Key Dependencies
 
-- Microsoft.CodeAnalysis.CSharp 4.14.0 (source generator)
-- System.Reactive 6.0.1 (change tracking observables)
+Versions are pinned in the project files, not here, so read them from there.
+
+- Microsoft.CodeAnalysis.CSharp (source generator)
+- System.Reactive (change tracking observables)
 - Microsoft.Extensions.DependencyInjection.Abstractions (hosting)
-- OPCFoundation.NetStandard.Opc.Ua.* 1.5.376.244 (industrial integration)
+- OPCFoundation.NetStandard.Opc.Ua.* (industrial integration)
 
 ## Industrial Integration Focus
 
