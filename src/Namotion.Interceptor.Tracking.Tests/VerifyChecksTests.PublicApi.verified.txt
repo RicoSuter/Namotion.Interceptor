@@ -71,6 +71,7 @@ namespace Namotion.Interceptor.Tracking.Change
         public System.DateTimeOffset? ReceivedTimestamp { get; }
         public bool Equals(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange other) { }
         public override bool Equals(object? obj) { }
+        public TValue GetCurrentValue<TValue>() { }
         public override int GetHashCode() { }
         public TValue GetNewValue<TValue>() { }
         public TValue GetOldValue<TValue>() { }

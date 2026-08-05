@@ -104,6 +104,31 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
             ? value
             : throw new InvalidCastException($"New value of property '{Property.Name}' is of type '{_newValueStorage.StoredType?.FullName ?? _newBoxedHolder?.GetType().FullName ?? "null"}' and cannot be cast to '{typeof(TValue).FullName}'.");
 
+    /// <summary>
+    /// Reads the property's value now, rather than the value captured when this change was created.
+    /// Deliveries can arrive out of commit order under concurrent writes to the same property, so a
+    /// consumer maintaining a derived view must use this instead of <see cref="GetNewValue{TValue}"/>,
+    /// which describes one commit and can be superseded by the time it is delivered.
+    /// </summary>
+    /// <exception cref="InvalidCastException">The current value is not assignable to <typeparamref name="TValue"/>.</exception>
+    public TValue GetCurrentValue<TValue>()
+    {
+        var value = Property.Metadata.GetValue?.Invoke(Property.Subject);
+        if (value is TValue typed)
+        {
+            return typed;
+        }
+
+        if (value is null)
+        {
+            return default!;
+        }
+
+        throw new InvalidCastException(
+            $"Current value of property '{Property.Name}' is of type '{value.GetType().FullName}' " +
+            $"and cannot be cast to '{typeof(TValue).FullName}'.");
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetOldValue<TValue>(out TValue value) =>
         TryGetValue(_oldValueStorage, _oldBoxedHolder, out value);
