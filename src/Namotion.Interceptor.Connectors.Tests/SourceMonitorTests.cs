@@ -246,7 +246,7 @@ public class SourceMonitorTests
     }
 
     [Fact]
-    public async Task WhenUnregisterAndSubscribeRaceConcurrently_ThenTheSourceIsObservedExactlyOnce()
+    public async Task WhenUnregisterAndSubscribeRaceConcurrently_ThenSnapshotPresenceAgreesWithDelivery()
     {
         // Arrange
         const int iterations = 10;
@@ -259,20 +259,33 @@ public class SourceMonitorTests
         }
 
         // Assert
+        // Unlike Register, Unregister is not a change from the racing subscriber's point of view unless
+        // the subscriber already knew about the source. So the two facts must AGREE, not be exclusive:
+        // seen in the baseline snapshot implies exactly one delivered SourceUnregistered, and absent from
+        // the snapshot implies no delivered event, because a subscriber that never learned the source
+        // existed must not be told it left.
         Assert.All(outcomes, outcome => Assert.True(
-            outcome.WasInSnapshot ^ outcome.WasDelivered,
-            $"snapshot={outcome.WasInSnapshot}, delivered={outcome.WasDelivered}; the source must appear " +
-            "exactly once, in the snapshot or as a delivered event, never both, never neither."));
+            outcome.WasInSnapshot == outcome.WasDelivered,
+            $"snapshot={outcome.WasInSnapshot}, delivered={outcome.WasDelivered}; a source that was already " +
+            "registered before the race is prior state, not a change, so a racing subscriber must either see " +
+            "it in the snapshot AND receive exactly one SourceUnregistered for it, or see neither."));
     }
 
     /// <summary>
-    /// Manufactures, on one fresh monitor, the exact race described in the review finding for Unregister:
-    /// a source is registered, then Subscribe is started, followed by Unregister paused right where it reads
-    /// the source's State to build the SourceUnregistered event (pre-fix that read happens after the monitor's
-    /// lock is released; post-fix it happens while the lock is still held). This allows a pre-fix run to see
-    /// the source both in its snapshot and as a delivered event, breaking the exactly-once contract. Post-fix
-    /// the lock is held during publish, preventing Subscribe from both seeing the source in its initial
-    /// snapshot and receiving the unregistered event.
+    /// Manufactures, on one fresh monitor, the race between a source that was already registered before the
+    /// race starts and a Subscribe call that competes with the Unregister of that source. Mirrors the
+    /// Register race above, but registration itself happens first and untimed, because Unregister racing a
+    /// new subscriber is only interesting once the source is prior state rather than a fresh change.
+    /// Unregister is paused right where it reads the source's State to build the SourceUnregistered event
+    /// (pre-fix that read happens after the monitor's lock is released; post-fix it happens while the lock
+    /// is still held). Subscribe is started concurrently and given every chance to complete before Unregister
+    /// is allowed to resume. Against the pre-fix code the lock is already released by the time Subscribe
+    /// runs, so Subscribe races ahead: it captures a snapshot from which the source has already been removed
+    /// (WasInSnapshot false) but is added to the subscriber list in time to still receive the delivered
+    /// SourceUnregistered event once Unregister's paused Publish resumes (WasDelivered true), breaking the
+    /// agreement. Against the fixed code, Unregister still holds the lock while Subscribe is blocked, so
+    /// Subscribe cannot observe or register until after Publish has already run without it, keeping both
+    /// facts false and in agreement.
     /// </summary>
     private static async Task<(bool WasInSnapshot, bool WasDelivered)> RaceUnregisterAgainstSubscribeOnceAsync()
     {
@@ -280,24 +293,14 @@ public class SourceMonitorTests
         var monitor = context.GetSourceMonitor();
         var received = new ConcurrentQueue<SourceEvent>();
 
-        // Register a source with a gated State property for the Unregister race
+        // Register a source with a gated State property, but keep the gate open so this initial
+        // registration, which is not part of the race, completes immediately without blocking.
         var reachedStateRead = new ManualResetEventSlim(false);
-        var releaseStateRead = new ManualResetEventSlim(false);
+        var releaseStateRead = new ManualResetEventSlim(true);
         var source = new GatedStateSource(new Person(context), reachedStateRead, releaseStateRead);
+        monitor.Register(source);
 
-        // Register the source (will block on State read because gates start NOT SET)
-        var registerTask = Task.Run(() => monitor.Register(source));
-        Assert.True(reachedStateRead.Wait(TimeSpan.FromSeconds(10)),
-            "Register should have reached the State read before the timeout.");
-
-        // Release the register gate and proceed to subscribe
-        releaseStateRead.Set();
-        await registerTask.WaitAsync(TimeSpan.FromSeconds(10));
-
-        // Subscribe while source is still in the monitor (before Unregister)
-        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
-
-        // Now reset gates for the Unregister race
+        // Reset the gates for the Unregister-vs-Subscribe race.
         reachedStateRead.Reset();
         releaseStateRead.Reset();
 
@@ -305,15 +308,33 @@ public class SourceMonitorTests
         Assert.True(reachedStateRead.Wait(TimeSpan.FromSeconds(10)),
             "Unregister should have reached the State read before the timeout.");
 
-        // At this point, Unregister is holding the lock and is blocked on State read.
-        // The subscription already captured the source in its baseline.
-        // Release Unregister to see if it delivers the event to the subscription.
+        var subscribeTask = Task.Run(() => monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent)));
+
+        // Give Subscribe every opportunity to fully finish while Unregister is paused. Against the pre-fix
+        // code the lock is already released at this point, so Subscribe races ahead and completes here;
+        // against the fixed code Unregister still holds the lock, so Subscribe stays blocked and this times out.
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => subscribeTask.IsCompleted,
+                timeout: TimeSpan.FromMilliseconds(200),
+                pollInterval: TimeSpan.FromMilliseconds(2));
+        }
+        catch (TimeoutException)
+        {
+            // Subscribe is still blocked acquiring the lock Unregister holds. That is the fixed, race-free outcome.
+        }
+
         releaseStateRead.Set();
+
+        using var subscription = await subscribeTask.WaitAsync(TimeSpan.FromSeconds(10));
         await unregisterTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         var wasInSnapshot = subscription.Sources.Contains(source);
 
-        // Ensure all events have been delivered by waiting for a sentinel
+        // A subscriber's queue is FIFO and single-drained, so once a sentinel registered strictly after
+        // the race above has resolved is observed, any event for `source` that was ever enqueued for this
+        // subscription has already been delivered. This settles delivery without a blind sleep.
         var sentinel = new TestStateSource(new Person(context));
         monitor.Register(sentinel);
         await AsyncTestHelpers.WaitUntilAsync(
