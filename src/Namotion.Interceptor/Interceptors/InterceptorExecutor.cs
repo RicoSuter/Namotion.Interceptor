@@ -180,9 +180,17 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     {
         lock (_mutationLock)
         {
-            // The mirror of the guard in TryClearAttachContext, and first for the same reason: a
-            // still-referenced subject is rejected before anything is recorded. Two things make it
-            // worth having.
+            // A repeated attach naming the context already recorded stays the documented no-op, so
+            // that check comes first. It writes no record, which is what the count guard below
+            // exists to prevent, so nothing is lost by letting it through: only a record
+            // transition can reopen the race.
+            if (ReferenceEquals(_attachContext, context))
+            {
+                return false;
+            }
+
+            // The mirror of the guard in TryClearAttachContext: a still-referenced subject is
+            // rejected before any record is written. Two things make it worth having.
             //
             // It rejects an operation whose success is worse than its failure. Root-attaching an
             // already-referenced subject runs AttachSubjectToContext, which re-runs
@@ -204,11 +212,6 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
                     $"Subject '{_subject.GetType().FullName}' is already referenced from {_referenceCount} parent " +
                     "property/properties, so it cannot be attached as a root. Attach it before referencing it from a " +
                     "parent property, or let it inherit the graph through its parent instead of root-attaching it.");
-            }
-
-            if (ReferenceEquals(_attachContext, context))
-            {
-                return false;
             }
 
             if (_attachContext is not null)

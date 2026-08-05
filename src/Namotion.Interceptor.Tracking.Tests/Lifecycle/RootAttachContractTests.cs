@@ -812,6 +812,38 @@ public class RootAttachContractTests
     }
 
     [Fact]
+    public void WhenAttachIsRepeatedOnTheRecordedContext_ThenItStaysANoOpEvenWhileReferenced()
+    {
+        // The reference-count guard must not break the documented repeated-attach no-op. This is
+        // the connector shape: the item is attached through its parent's context and then assigned
+        // into that same parent, so the record names the context while the count is 1. The no-op
+        // path writes no record, which is the only thing the count guard exists to prevent, so it
+        // has to be checked first.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var parent = new Person(context) { FirstName = "Parent" };
+        var parentContext = ((IInterceptorSubject)parent).Context;
+
+        var item = new Person { FirstName = "Item" };
+        ((IInterceptorSubject)item).AttachToContext(parentContext);
+        parent.Mother = item;
+
+        var edges = UsedByContextsProbe.Count(parentContext);
+
+        // Act
+        ((IInterceptorSubject)item).AttachToContext(parentContext);
+
+        // Assert
+        Assert.Same(parentContext, ((IInterceptorSubject)item).TryGetAttachContext());
+        Assert.Equal(1, item.GetReferenceCount());
+        Assert.Equal(edges, UsedByContextsProbe.Count(parentContext));
+    }
+
+    [Fact]
     public void WhenReferencedSubjectIsRootAttached_ThenItThrowsAndPublishesNothing()
     {
         // Behaviour change 22, the attach-side mirror of change 8. Root-attaching a subject that a
