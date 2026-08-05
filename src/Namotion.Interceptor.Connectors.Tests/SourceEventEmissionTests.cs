@@ -269,6 +269,125 @@ public class SourceEventEmissionTests
     }
 
     [Fact]
+    public async Task WhenASubjectConstructedDirectlyWithTheMonitoredContextDetaches_ThenPropertyLeftViewReportsUnclaimed()
+    {
+        // Arrange
+        // The generator emits Context.AddFallbackContext(context) in this constructor overload, and
+        // that fallback is never removed on detach. Because the child already exists in the monitor's
+        // _attachedSubjects registry from that construction-time attach, the LATER property-based
+        // attach below is not treated as this subject's first attach (IsContextAttach is false for
+        // it), so ContextInheritanceHandler never adds root's context as a fallback either - the
+        // construction-time fallback is the only reachability path to the monitor, and it is
+        // permanent. A CurrentState resolved by asking whether the monitor is still reachable through
+        // the subject's context would therefore keep reporting the source's state forever, even after
+        // this subject has genuinely left the tree.
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var child = new Person(context);
+        root.Mother = child;
+        var property = new PropertyReference(child, nameof(Person.FirstName));
+        property.SetSource(new TestStateSource(root));
+        var received = new ConcurrentQueue<SourceEvent>();
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+
+        // Act
+        root.Mother = null;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.PropertyLeftView));
+        var leftEvent = received.First(e => e.Kind == SourceEventKind.PropertyLeftView);
+        Assert.Equal(SourceState.Unclaimed, leftEvent.CurrentState);
+        Assert.True(property.TryGetSource(out _));
+    }
+
+    [Fact]
+    public async Task WhenASubjectWithTwoParentsIsDetachedFromBoth_ThenPropertyLeftViewReportsUnclaimed()
+    {
+        // Arrange
+        // ContextInheritanceHandler only adds the parent-context fallback on the subject's FIRST
+        // attach (ReferenceCount: 1, IsContextAttach: true). The second parent's attach only
+        // increments ReferenceCount and never adds its own fallback, so the removal that fires when
+        // the second parent detaches (ReferenceCount: 0, IsPropertyReferenceRemoved: true) tries to
+        // remove a fallback that was never added - a no-op - leaving the FIRST parent's fallback (and
+        // therefore the monitor) permanently reachable through the subject's context, even though the
+        // subject has genuinely left the tree via both parents.
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var firstParent = new Person(context);
+        var secondParent = new Person(context);
+        var child = new Person();
+        firstParent.Mother = child;
+        secondParent.Mother = child;
+        var property = new PropertyReference(child, nameof(Person.FirstName));
+        property.SetSource(new TestStateSource(firstParent));
+        var received = new ConcurrentQueue<SourceEvent>();
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+
+        // Act
+        firstParent.Mother = null;
+        secondParent.Mother = null;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.PropertyLeftView));
+        var leftEvent = received.First(e => e.Kind == SourceEventKind.PropertyLeftView);
+        Assert.Equal(SourceState.Unclaimed, leftEvent.CurrentState);
+        Assert.True(property.TryGetSource(out _));
+    }
+
+    [Fact]
+    public async Task WhenASubjectReattachesAfterDetaching_ThenCurrentStateReportsTheSourceAgain()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var child = new Person();
+        root.Mother = child;
+        var property = new PropertyReference(child, nameof(Person.FirstName));
+        var source = new TestStateSource(root);
+        property.SetSource(source);
+        var received = new ConcurrentQueue<SourceEvent>();
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+
+        // Act
+        root.Mother = null;
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.PropertyLeftView));
+        root.Mother = child;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.PropertyEnteredView));
+        var enteredEvent = received.Last(e => e.Kind == SourceEventKind.PropertyEnteredView);
+        Assert.Equal(SourceState.Connecting, enteredEvent.CurrentState);
+        // Re-attach must restore membership without ever having touched ownership.
+        Assert.True(property.TryGetSource(out var stillOwning));
+        Assert.Same(source, stillOwning);
+    }
+
+    [Fact]
+    public void WhenASubjectDetachesWithNoSubscribers_ThenTheMonitorNoLongerConsidersItAMember()
+    {
+        // Arrange
+        // Membership tracking must not be gated behind HasSubscribers: CurrentState can be asked by
+        // anyone at any time, not only by a subscriber processing an event. Proven directly through
+        // the internal IsMember query rather than the event stream, since with no subscriber no event
+        // is published at all to observe.
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var child = new Person();
+        root.Mother = child;
+        Assert.False(monitor.HasSubscribers);
+        Assert.True(monitor.IsMember(child));
+
+        // Act
+        root.Mother = null;
+
+        // Assert
+        Assert.False(monitor.IsMember(child));
+    }
+
+    [Fact]
     public void WhenThereAreNoSubscribers_ThenTheCatchUpScanIsSkipped()
     {
         // Arrange

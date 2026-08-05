@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -11,9 +12,11 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// Added to the tree root context by WithSourceMonitoring.
 /// </summary>
 /// <remarks>
-/// Must run after ContextInheritanceHandler and ParentTrackingHandler: the catch-up scan and the
-/// topology-aware CurrentState depend on state they maintain (the parent-context fallback and the
-/// parent set) for the same lifecycle change.
+/// Must run after ParentTrackingHandler: OnWaitConditionChanged re-evaluates every pending wait via
+/// SourceScope.IsInScope, which walks the parent set ParentTrackingHandler maintains for the same
+/// lifecycle change, so that set must already reflect this change by the time this handler runs.
+/// Running after ContextInheritanceHandler keeps the two context-tracking handlers adjacent in the
+/// order; nothing here currently depends on the fallback context it maintains.
 /// </remarks>
 [RunsAfter(typeof(ContextInheritanceHandler), typeof(ParentTrackingHandler))]
 public class SourceMonitor : ILifecycleHandler
@@ -29,6 +32,18 @@ public class SourceMonitor : ILifecycleHandler
     // lock-free. Same technique as ParentsHandlerExtensions.ParentsSet._cache.
     private volatile ImmutableArray<ISubjectSource>[] _sources = [ImmutableArray<ISubjectSource>.Empty];
     private volatile ImmutableArray<SourceSubscription>[] _subscriptions = [ImmutableArray<SourceSubscription>.Empty];
+
+    // Ground truth for "is this subject currently inside this monitor's tree", read by
+    // SourceEvent.CurrentState instead of the lossy context-fallback-reachability proxy that used to
+    // stand in for it (see the HandleLifecycleChange remarks below for why that proxy lags reality).
+    // A HashSet would need every IsContextDetach to fire to avoid retaining subjects forever - a
+    // reasonable bet given LifecycleInterceptor's guarantees, but not one worth taking on a member
+    // used from arbitrary threads with no enumeration or count need of its own. ConditionalWeakTable
+    // holds keys weakly, so even a missed or skipped detach cannot keep a subject alive past whatever
+    // else in the application still references it, and TryGetValue/AddOrUpdate/Remove are documented
+    // thread-safe with no locking required from the caller, so this needs no lock of its own and
+    // cannot participate in any lock ordering with _lock.
+    private readonly ConditionalWeakTable<IInterceptorSubject, object?> _membership = new();
 
     /// <summary>Creates a monitor. Prefer WithSourceMonitoring over calling this directly.</summary>
     public SourceMonitor(Func<ILogger?>? loggerResolver = null)
@@ -55,9 +70,31 @@ public class SourceMonitor : ILifecycleHandler
     /// waits do not count as subscribers - they need no property events, only
     /// OnWaitConditionChanged, which every property-reference add/remove calls regardless (see
     /// OnWaitConditionChanged for why that path takes _lock).
+    /// <para>
+    /// Membership tracking below runs unconditionally, before the HasSubscribers gate: CurrentState
+    /// can be asked by anyone at any time, not only by a subscriber draining an event, so the fact it
+    /// reads from must stay current even while nobody is subscribed.
+    /// </para>
+    /// <para>
+    /// IsContextAttach/IsContextDetach are the right signals here, not IsPropertyReferenceAdded/Removed:
+    /// the latter fire on every individual parent link, including a second or third parent that leaves
+    /// the subject still very much in the tree through the first one. IsContextAttach/IsContextDetach
+    /// fire exactly once per subject, when its LifecycleInterceptor-tracked reference count crosses
+    /// into or out of zero - true tree entry and exit regardless of how many parents came and went in
+    /// between. That is also why ScanSubject below keys off the same two flags.
+    /// </para>
     /// </remarks>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
+        if (change.IsContextAttach)
+        {
+            _membership.AddOrUpdate(change.Subject, null);
+        }
+        else if (change.IsContextDetach)
+        {
+            _membership.Remove(change.Subject);
+        }
+
         // A reparent changes branch scope with no attach/detach event, so gate on reference
         // mutation, not subscriber count - a wait is the one consumer with no subscription.
         if (change.IsPropertyReferenceAdded || change.IsPropertyReferenceRemoved)
@@ -79,6 +116,13 @@ public class SourceMonitor : ILifecycleHandler
             ScanSubject(change.Subject, SourceEventKind.PropertyLeftView);
         }
     }
+
+    /// <summary>
+    /// True when <paramref name="subject"/> is currently inside this monitor's tree. Backs
+    /// SourceEvent.CurrentState's tree-membership check; see the CurrentState remarks for why this
+    /// asks the monitor directly instead of resolving through the subject's context.
+    /// </summary>
+    internal bool IsMember(IInterceptorSubject subject) => _membership.TryGetValue(subject, out _);
 
     private void ScanSubject(IInterceptorSubject subject, SourceEventKind kind)
     {

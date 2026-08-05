@@ -137,7 +137,7 @@ Delivery here is queued per subscription and runs outside every lock, so a slowe
 
 Because of that, the stream is not a ledger: it cannot be replayed to reconstruct a history of transitions for a property, even in principle, since the order events arrive in is not the order the transitions actually happened in. A consumer built on it maintains a view of current state, kept up to date by whichever events arrive, not a log of what happened and when.
 
-`CurrentState` has its own limit: it decides whether a property has left the tree by checking whether the subject's context still reaches the event's monitor, and that check lags true tree membership in two cases. A subject constructed directly with a context keeps that context reachable forever, because the generated constructor adds it as a fallback and detach never removes it. A subject that has had two parents only gets the parent-tree fallback from the first attach, not the second (the multi-tree caveat above). In both cases a `PropertyLeftView` event's `CurrentState` keeps reporting the owning source's state instead of `Unclaimed`, even after the subject has actually left the tree.
+`CurrentState` decides whether a property has left the tree from tree membership the monitor tracks directly as attach and detach happen, not by checking whether the subject's context still reaches the monitor. That check stays correct regardless of how many contexts or parents a subject has passed through: a subject constructed directly with a context, or one that has had two parents, resolves the same way as any other once it actually detaches.
 
 ## The State Model, Transitions, and Delivery Contract
 
