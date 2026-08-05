@@ -65,13 +65,16 @@ internal static class CurrentValueFilter
         // decides.
         if (!property.Subject.Properties.TryGetValue(property.Name, out var metadata) ||
             metadata.GetValue is null ||
-            metadata.IsDerived)
+            metadata.IsDerived ||
+            metadata.IsDynamic)
         {
-            // A derived getter recomputes, so it can hand back a fresh instance that is never equal to
-            // the value the change carries even though the model is exactly where that change left it.
-            // Staleness cannot be established, so the change is delivered: a redundant write costs one
-            // message, while a wrong drop is permanent, because the transition that would re-enqueue it
-            // is the very change being dropped.
+            // The comparison is only meaningful when the getter returns what the write stored, which
+            // holds for generated properties and nothing else. A derived getter recomputes and can hand
+            // back a fresh instance that is never equal to the value the change carries; a runtime
+            // registered property carries a caller supplied getter that need not read the stored value
+            // at all. Neither can establish staleness, so the change is delivered: a redundant write
+            // costs one message, while a wrong drop is permanent, because the transition that would
+            // re-enqueue the value is the very change being dropped.
             return true;
         }
 

@@ -54,7 +54,12 @@ public class SubjectSourceBenchmark
         var registeredSubject = _car.TryGetRegisteredSubject()!;
         foreach (var name in _propertyNames)
         {
-            var property = registeredSubject.AddProperty(name, typeof(string), static _ => "foo", static (_, _) => { });
+            // Closure-backed so the getter returns what the setter stored, the way the OPC UA loader
+            // registers dynamic properties. A constant getter makes every change look superseded to the
+            // connector's current-value check, so nothing is ever written and this benchmark measures
+            // an empty write path.
+            object? value = null;
+            var property = registeredSubject.AddProperty(name, typeof(string), _ => value, (_, newValue) => value = newValue);
             property.Reference.SetSource(_source);
         }
 
@@ -83,7 +88,11 @@ public class SubjectSourceBenchmark
             _propertyWriter.Write(null, _updates[i]);
         }
 
-        _signal.WaitOne();
+        if (!_signal.WaitOne(TimeSpan.FromSeconds(30)))
+        {
+            throw new InvalidOperationException(
+                "Timed out waiting for writes to reach the source: the connector delivered nothing.");
+        }
     }
 
     [Benchmark]
@@ -160,7 +169,11 @@ public class SubjectSourceBenchmark
 
         public void Wait()
         {
-            _signal.WaitOne();
+            if (!_signal.WaitOne(TimeSpan.FromSeconds(30)))
+            {
+                throw new InvalidOperationException(
+                    "Timed out waiting for writes to reach the source: the connector delivered nothing.");
+            }
         }
 
         protected override Task<IAsyncDisposable?> StartListeningAsync(
