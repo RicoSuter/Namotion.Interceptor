@@ -119,7 +119,7 @@ public class SubjectSourceBaseTests
         // in the model but before the change pump subscribes must not be lost. The write is
         // issued inside LoadInitialStateAsync, which runs before the ChangeQueueProcessor
         // was created prior to the capture-early fix, so the change was silently dropped.
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
@@ -163,7 +163,7 @@ public class SubjectSourceBaseTests
         // Arrange: a write captured while the source is connecting is overwritten by the
         // initial-state snapshot before the pump flushes. Sending it would push a value
         // the model no longer holds back to the source, so it must be dropped.
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 

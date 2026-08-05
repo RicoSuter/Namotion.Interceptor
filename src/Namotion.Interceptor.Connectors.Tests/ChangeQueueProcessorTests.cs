@@ -336,7 +336,7 @@ public class ChangeQueueProcessorTests
         // Arrange: changes queued before ProcessAsync starts were captured while the
         // source was still connecting. Such a change whose value the model has since
         // moved past must be dropped instead of pushed back to the source.
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
@@ -386,7 +386,7 @@ public class ChangeQueueProcessorTests
         // the past (device source timestamps, WithChangedTimestamp scopes). Connect-time
         // classification is positional, not timestamp-based, so such changes must never
         // be staleness-checked or dropped, even when the model has already moved on.
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
 
@@ -449,7 +449,7 @@ public class ChangeQueueProcessorTests
     public void WhenConstructedWithExternalSubscription_ThenDisposeDoesNotDisposeIt()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
         var subject = new Person(context);
@@ -477,7 +477,7 @@ public class ChangeQueueProcessorTests
     public void WhenDrainingImmediately_ThenReturnsQueuedItemsThenFalse()
     {
         // Arrange
-        var context = new InterceptorSubjectContext();
+        var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
         var subject = new Person(context);
