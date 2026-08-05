@@ -231,6 +231,37 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         }
     }
 
+    /// <summary>
+    /// Collapses parked changes to one per property, keeping the oldest old value and the newest
+    /// new value, the same merge the change queue applies at flush.
+    /// </summary>
+    /// <remarks>
+    /// Reconciliation classifies each change against the live value and mutates that value when it
+    /// restores, so two writes to one property have to be judged as one. Left separate, an older
+    /// write can match the live value, get restored, and thereby make the newer write look diverged,
+    /// which drops it: the older write would win over the newer one.
+    /// </remarks>
+    private static List<SubjectPropertyChange> CollapsePerProperty(SubjectPropertyChange[] changes)
+    {
+        var collapsed = new List<SubjectPropertyChange>(changes.Length);
+        var indices = new Dictionary<PropertyReference, int>(changes.Length, PropertyReference.Comparer);
+
+        foreach (var change in changes)
+        {
+            if (indices.TryGetValue(change.Property, out var index))
+            {
+                collapsed[index] = collapsed[index].MergeWithNewer(change);
+            }
+            else
+            {
+                indices[change.Property] = collapsed.Count;
+                collapsed.Add(change);
+            }
+        }
+
+        return collapsed;
+    }
+
     private async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
     {
         var retryChanges = WriteRetryQueue?.DrainForLocalReapply();
@@ -245,7 +276,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         var failed = 0;
         List<SubjectPropertyChange>? toSend = null;
 
-        foreach (var change in retryChanges)
+        foreach (var change in CollapsePerProperty(retryChanges))
         {
             try
             {

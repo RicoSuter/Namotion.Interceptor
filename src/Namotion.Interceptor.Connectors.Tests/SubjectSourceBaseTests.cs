@@ -224,6 +224,68 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenTwoWindowWritesToOnePropertyAreSplitByAnInboundApply_ThenTheNewerWriteWins()
+    {
+        // Arrange: two local writes to the same property during the connect window, with an
+        // inbound source apply landing between them so both are captured against the same
+        // baseline. Reconciliation walks captured changes in order against the live value, so
+        // restoring the older one moves the model and makes the newer one look diverged.
+        // Last writer must still win.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context) { FirstName = "A" };
+
+        var receivedValues = new ConcurrentQueue<string?>();
+        TestSubjectSource source = null!;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = _ =>
+            {
+                var property = subject.TryGetRegisteredSubject()!
+                    .TryGetProperty(nameof(Person.FirstName))!;
+
+                subject.FirstName = "B";
+
+                // The source reports the value it still holds, which resets the baseline, so the
+                // next local write is captured against A rather than against B.
+                property.SetValueFromSource(source, null, null, "A");
+
+                subject.FirstName = "C";
+
+                // A second report leaves the model on A at reconcile time, so the older write's
+                // old value matches the live value and the newer write's does not.
+                property.SetValueFromSource(source, null, null, "A");
+
+                return Task.FromResult<Action?>(null);
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedValues.Enqueue(change.GetNewValue<string?>());
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => !receivedValues.IsEmpty,
+            message: "Expected a window write to reach the source");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("C", subject.FirstName);
+        Assert.DoesNotContain("B", receivedValues);
+        Assert.Contains("C", receivedValues);
+    }
+
+    [Fact]
     public async Task WhenQueuedWriteIsSupersededByInitialState_ThenStaleWriteIsNotSent()
     {
         // Arrange: a write captured while the source is connecting is overwritten by the
