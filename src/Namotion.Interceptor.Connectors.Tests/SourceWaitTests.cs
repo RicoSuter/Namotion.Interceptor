@@ -561,6 +561,63 @@ public class SourceWaitTests
     }
 
     [Fact]
+    public async Task WhenAWaitRacesASourceTransitionToSynchronized_ThenTheWaitAlwaysCompletes()
+    {
+        // Arrange
+        // Reproduces a lost wakeup: OnWaitConditionChanged used to gate itself on a lock-free
+        // "_waits is empty" read. That read could observe the not-yet-published wait list while
+        // WaitForSynchronizationAsync's own check-and-add was still in flight under _lock, so the
+        // signal would return without ever completing the wait it just missed - and nothing later
+        // would re-evaluate it. A barrier lines up the two racing operations on every iteration so
+        // the narrow window gets exercised repeatedly instead of relying on incidental timing.
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var source = new TestStateSource(root);
+        monitor.Register(source);
+        monitor.CompleteSourceRegistration();
+
+        const int iterations = 20_000;
+        using var barrier = new Barrier(2);
+
+        var transitionThread = new Thread(() =>
+        {
+            for (var i = 0; i < iterations; i++)
+            {
+                if (!barrier.SignalAndWait(TimeSpan.FromSeconds(30)))
+                {
+                    return;
+                }
+
+                source.ReportSynchronized();
+            }
+        })
+        {
+            IsBackground = true
+        };
+        transitionThread.Start();
+
+        // Act & Assert
+        for (var i = 0; i < iterations; i++)
+        {
+            Assert.True(barrier.SignalAndWait(TimeSpan.FromSeconds(30)));
+
+            var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+
+            // A bounded timeout so a regression fails this test instead of wedging the run.
+            await wait.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Reset for the next iteration. TransitionTo allows Synchronized -> Connecting, and
+            // wait's removal from the monitor's pending-wait list happens before the awaited task
+            // above completes (see PendingWait.AwaitAsync), so the monitor has no leftover wait
+            // state carried into the next iteration.
+            source.ReportConnecting();
+        }
+
+        transitionThread.Join(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
     public void WhenOneMonitorsReleaseThrows_ThenTheOtherMonitorIsStillReleased()
     {
         // Arrange

@@ -56,11 +56,14 @@ public class SourceMonitor : ILifecycleHandler
 
     /// <inheritdoc />
     /// <remarks>
-    /// The attach and detach hot paths pay one flag check when nobody is listening. Pending waits
-    /// deliberately do not count as subscribers: a wait is active during startup, exactly when
-    /// attach storms happen, and never needs property events. A property-reference add or remove
-    /// pays its own, separate flag check before OnWaitConditionChanged takes _lock, so an attach
-    /// storm with no pending waits and no subscribers costs two flag reads and nothing else.
+    /// The attach and detach hot paths pay one flag check (HasSubscribers) when nobody is
+    /// listening. Pending waits deliberately do not count as subscribers: a wait is active during
+    /// startup, exactly when attach storms happen, and never needs property events. A
+    /// property-reference add or remove always calls OnWaitConditionChanged, which takes _lock to
+    /// check for pending waits: an earlier lock-free emptiness check was removed because it raced
+    /// WaitForSynchronizationAsync's own check-and-add and could drop the wakeup (see
+    /// OnWaitConditionChanged). So an attach storm with no pending waits and no subscribers costs
+    /// one flag read plus one uncontended lock acquisition per property.
     /// </remarks>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
@@ -253,9 +256,10 @@ public class SourceMonitor : ILifecycleHandler
         }
     }
 
-    // Boxed for the same reason as _sources/_subscriptions above: OnWaitConditionChanged needs a
-    // lock-free emptiness check on the hot property-reference-add/remove path.
-    private volatile ImmutableArray<PendingWait>[] _waits = [ImmutableArray<PendingWait>.Empty];
+    // Unlike _sources/_subscriptions, every read and write of _waits happens under _lock (see
+    // OnWaitConditionChanged for why the emptiness check cannot be lock-free), so this needs
+    // neither the volatile field nor the box-per-publish trick those two use for lock-free reads.
+    private ImmutableArray<PendingWait> _waits = ImmutableArray<PendingWait>.Empty;
 
     /// <summary>
     /// Completes when the branch containing <paramref name="subject"/> is synchronized: registration
@@ -276,14 +280,14 @@ public class SourceMonitor : ILifecycleHandler
             }
 
             wait = new PendingWait(subject);
-            _waits = [_waits[0].Add(wait)];
+            _waits = _waits.Add(wait);
         }
 
         return wait.AwaitAsync(cancellationToken, () =>
         {
             lock (_lock)
             {
-                _waits = [_waits[0].Remove(wait)];
+                _waits = _waits.Remove(wait);
             }
         });
     }
@@ -349,19 +353,31 @@ public class SourceMonitor : ILifecycleHandler
 
     /// <summary>
     /// Re-evaluates every pending wait. Called on the hot property-reference-add/remove path (see
-    /// HandleLifecycleChange), so the emptiness check below must not take _lock.
+    /// HandleLifecycleChange) as well as from every other signaler (Register, Unregister,
+    /// CompleteSourceRegistration/ReleaseHold, and a registered source's own StateChanged).
     /// </summary>
+    /// <remarks>
+    /// The emptiness check below takes _lock rather than reading _waits lock-free. A lock-free
+    /// check used to gate this method entirely, as a performance optimization, but it opened a lost
+    /// wakeup: WaitForSynchronizationAsync's own check-and-add also runs under _lock, so without
+    /// this method taking the same lock, a signal could read "no waits yet" and return in the
+    /// window between the waiter's IsSatisfied check and its registration into _waits, and no later
+    /// signal would ever re-evaluate it. Taking _lock here closes that window: the two critical
+    /// sections now serialize, so a signal either runs before the waiter's check-and-add (and the
+    /// waiter's own IsSatisfied then observes the new state directly) or after the wait is already
+    /// published (and this method's re-evaluation picks it up). Correctness beats the
+    /// micro-optimization the lock-free check existed for.
+    /// </remarks>
     private void OnWaitConditionChanged()
     {
-        if (_waits[0].IsEmpty)
-        {
-            return;
-        }
-
         ImmutableArray<PendingWait> waits;
         lock (_lock)
         {
-            waits = _waits[0];
+            waits = _waits;
+            if (waits.IsEmpty)
+            {
+                return;
+            }
         }
 
         // A throw from one wait's IsSatisfied (a misbehaving anchor, a throwing logger) must not
