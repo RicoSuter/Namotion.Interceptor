@@ -87,7 +87,6 @@ public class OpcUaServerSelfWriteTests
         // Assert
         Assert.Equal(0d, serverService.Diagnostics.IncomingChangesPerSecond);
     }
-
 }
 
 [InterceptorSubject]
