@@ -101,7 +101,7 @@ public static class SourcePropertyExtensions
         var timestamp = DateTimeOffset.UtcNow;
         foreach (var monitor in monitors)
         {
-            monitor.Publish(new SourceEvent(kind, source, property, oldState, newState, timestamp)
+            monitor.PublishUnderLock(new SourceEvent(kind, source, property, oldState, newState, timestamp)
             {
                 Monitor = monitor
             });

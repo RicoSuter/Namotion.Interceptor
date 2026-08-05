@@ -39,16 +39,28 @@ public class SourceMonitor : ILifecycleHandler
     }
 
     /// <summary>The sources registered right now. For a race-free baseline use SourceSubscription.Sources.</summary>
-    public IReadOnlyList<ISubjectSource> Sources => _sources[0];
+    public ImmutableArray<ISubjectSource> Sources => _sources[0];
 
     /// <summary>True when at least one public subscriber exists. Gates the attach and detach catch-up scan.</summary>
     internal bool HasSubscribers => !_subscriptions[0].IsEmpty;
 
+    /// <summary>
+    /// Resolves the logger on first use, from whichever call site needs it first: Subscribe, or one
+    /// of the wait engine's diagnostic warnings. The context is configured before any logging
+    /// provider exists (see WithSourceMonitoring), so a resolver deferred to first use is the only
+    /// way an application that never calls Subscribe still gets its wait warnings logged. Every call
+    /// site is already under _lock, so the read-then-maybe-write here needs no synchronization of
+    /// its own.
+    /// </summary>
+    private ILogger? Logger => _logger ??= _loggerResolver?.Invoke();
+
     /// <inheritdoc />
     /// <remarks>
-    /// The recently optimized attach and detach hot paths pay one flag check when nobody is
-    /// listening. Pending waits deliberately do not count as subscribers: a wait is active during
-    /// startup, exactly when attach storms happen, and never needs property events.
+    /// The attach and detach hot paths pay one flag check when nobody is listening. Pending waits
+    /// deliberately do not count as subscribers: a wait is active during startup, exactly when
+    /// attach storms happen, and never needs property events. A property-reference add or remove
+    /// pays its own, separate flag check before OnWaitConditionChanged takes _lock, so an attach
+    /// storm with no pending waits and no subscribers costs two flag reads and nothing else.
     /// </remarks>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
@@ -103,8 +115,7 @@ public class SourceMonitor : ILifecycleHandler
 
         lock (_lock)
         {
-            _logger ??= _loggerResolver?.Invoke();
-            var subscription = new SourceSubscription(handler, _sources[0], Remove, _logger);
+            var subscription = new SourceSubscription(handler, _sources[0], Remove, Logger);
             _subscriptions = [_subscriptions[0].Add(subscription)];
             return subscription;
         }
@@ -178,6 +189,27 @@ public class SourceMonitor : ILifecycleHandler
         }
     }
 
+    /// <summary>
+    /// Publishes while holding _lock, matching Register, Unregister and OnSourceStateChanged's own
+    /// state changes. Used by property ownership changes (SetSource/RemoveSource), which mutate
+    /// property data entirely outside this monitor, so this cannot make a newly-subscribed consumer
+    /// see a claim that already happened before it subscribed: SourceSubscription.Sources has no
+    /// ownership baseline to reconcile against (see docs/connectors-source-monitoring.md, Worked
+    /// Sample). What it does close is delivery ordering: without the lock, an ownership event could
+    /// be enqueued to a subscriber out of order relative to a concurrent Register/Unregister/
+    /// Subscribe on the same monitor, since Publish itself is just an unsynchronized read of the
+    /// current subscription list. Safe from deadlock: Publish only enqueues onto a ConcurrentQueue
+    /// and, at most, schedules a Task.Run drain; it never invokes a subscriber handler synchronously
+    /// and never calls back into any SourceMonitor method that takes _lock.
+    /// </summary>
+    internal void PublishUnderLock(in SourceEvent sourceEvent)
+    {
+        lock (_lock)
+        {
+            Publish(sourceEvent);
+        }
+    }
+
     // Born at 1. The monitor takes this hold at WithSourceMonitoring time, during context
     // configuration, before the host is even built, which is what makes signalling
     // order-independent without any argument about hosted service construction order.
@@ -221,7 +253,9 @@ public class SourceMonitor : ILifecycleHandler
         }
     }
 
-    private ImmutableArray<PendingWait> _waits = [];
+    // Boxed for the same reason as _sources/_subscriptions above: OnWaitConditionChanged needs a
+    // lock-free emptiness check on the hot property-reference-add/remove path.
+    private volatile ImmutableArray<PendingWait>[] _waits = [ImmutableArray<PendingWait>.Empty];
 
     /// <summary>
     /// Completes when the branch containing <paramref name="subject"/> is synchronized: registration
@@ -242,14 +276,14 @@ public class SourceMonitor : ILifecycleHandler
             }
 
             wait = new PendingWait(subject);
-            _waits = _waits.Add(wait);
+            _waits = [_waits[0].Add(wait)];
         }
 
         return wait.AwaitAsync(cancellationToken, () =>
         {
             lock (_lock)
             {
-                _waits = _waits.Remove(wait);
+                _waits = [_waits[0].Remove(wait)];
             }
         });
     }
@@ -292,7 +326,7 @@ public class SourceMonitor : ILifecycleHandler
             // re-evaluation that finds the branch still matched never burns the one-shot flag.
             if (wait is not null && !wait.MarkWarned())
             {
-                _logger?.LogWarning(
+                Logger?.LogWarning(
                     "A synchronization wait on {Subject} has no in-scope source, and source registration is complete. " +
                     "The wait will block until cancelled. Check that a source is configured for this branch.",
                     anchor.GetType().Name);
@@ -305,7 +339,7 @@ public class SourceMonitor : ILifecycleHandler
         {
             // Stopped is terminal, so this branch will never become live. Completing is more useful
             // than hanging, but silence would read as success, so say it out loud.
-            _logger?.LogWarning(
+            Logger?.LogWarning(
                 "A synchronization wait completed with every in-scope source stopped. " +
                 "Stopped is terminal, so this branch will not synchronize again.");
         }
@@ -313,27 +347,59 @@ public class SourceMonitor : ILifecycleHandler
         return true;
     }
 
-    /// <summary>Re-evaluates every pending wait.</summary>
+    /// <summary>
+    /// Re-evaluates every pending wait. Called on the hot property-reference-add/remove path (see
+    /// HandleLifecycleChange), so the emptiness check below must not take _lock.
+    /// </summary>
     private void OnWaitConditionChanged()
     {
+        if (_waits[0].IsEmpty)
+        {
+            return;
+        }
+
         ImmutableArray<PendingWait> waits;
         lock (_lock)
         {
-            waits = _waits;
+            waits = _waits[0];
         }
 
+        // A throw from one wait's IsSatisfied (a misbehaving anchor, a throwing logger) must not
+        // stop the remaining waits in this pass from being re-evaluated - that would be a lost
+        // wakeup for every wait after the throwing one, not just for the throwing one itself. Each
+        // wait is isolated, and every exception collected is still surfaced to the caller once the
+        // full pass has run, matching the same collect-then-rethrow pattern used by
+        // SourceMonitoringExtensions.CompleteSourceRegistration and CompositeDisposable.Dispose.
+        List<Exception>? exceptions = null;
         foreach (var wait in waits)
         {
-            bool satisfied;
-            lock (_lock)
+            try
             {
-                satisfied = IsSatisfied(wait.Anchor, wait);
-            }
+                bool satisfied;
+                lock (_lock)
+                {
+                    satisfied = IsSatisfied(wait.Anchor, wait);
+                }
 
-            if (satisfied)
-            {
-                wait.Complete();
+                if (satisfied)
+                {
+                    wait.Complete();
+                }
             }
+            catch (Exception exception)
+            {
+                (exceptions ??= []).Add(exception);
+            }
+        }
+
+        if (exceptions is { Count: 1 })
+        {
+            throw exceptions[0];
+        }
+
+        if (exceptions is { Count: > 1 })
+        {
+            throw new AggregateException(exceptions);
         }
     }
 

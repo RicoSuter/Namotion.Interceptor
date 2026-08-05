@@ -55,7 +55,7 @@ public partial class OutageStateTests
     }
 
     [Fact]
-    public async Task WhenTheConnectionIsLost_ThenTheSourceReturnsToSynchronized()
+    public async Task WhenTheConnectionIsLost_ThenTheSourceReportsConnectingUntilItRecovers()
     {
         // Arrange
         var brokerPort = GetFreeTcpPort();

@@ -128,31 +128,16 @@ public class SubjectTransactionBenchmark
             return Task.FromResult<Action?>(null);
         }
 
-        public SourceState State { get; private set; } = SourceState.Connecting;
+        public SourceState State => SourceState.Connecting;
 
-        public DateTimeOffset? LastSynchronizedAt { get; private set; }
+        public DateTimeOffset? LastSynchronizedAt => null;
 
         public int PendingWriteCount => 0;
 
-        public event EventHandler<SourceEvent>? StateChanged;
-
-        /// <summary>Test hook: drives the state the way a real source's pump would.</summary>
-        public void SetState(SourceState state)
+        public event EventHandler<SourceEvent>? StateChanged
         {
-            var oldState = State;
-            if (oldState == state)
-            {
-                return;
-            }
-
-            State = state;
-            if (state == SourceState.Synchronized)
-            {
-                LastSynchronizedAt = DateTimeOffset.UtcNow;
-            }
-
-            StateChanged?.Invoke(this, new SourceEvent(
-                SourceEventKind.StateChanged, this, null, oldState, state, DateTimeOffset.UtcNow));
+            add { }
+            remove { }
         }
     }
 }

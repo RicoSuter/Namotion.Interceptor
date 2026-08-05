@@ -203,7 +203,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring
     {
         public SourceMonitor(System.Func<Microsoft.Extensions.Logging.ILogger?>? loggerResolver = null) { }
         public bool IsRegistrationComplete { get; }
-        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Connectors.ISubjectSource> Sources { get; }
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Connectors.ISubjectSource> Sources { get; }
         public void CompleteSourceRegistration() { }
         public System.IDisposable DeferWaitCompletion() { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }

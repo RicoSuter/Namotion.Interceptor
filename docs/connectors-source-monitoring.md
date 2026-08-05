@@ -204,6 +204,8 @@ public partial class Device
 }
 ```
 
+This pattern depends on construction order: the updater must be constructed, and `Subscribe` called, before any source it cares about starts claiming properties. `ISubjectSource` exposes no way to enumerate the properties a source has already claimed, so `PropertyClaimed` (and `PropertyEnteredView`) are the only way this index ever learns about a claim. An updater constructed after a source has already started never receives the events for whatever that source claimed before the subscription existed, there is no way to recover the gap afterward, and the affected properties are simply absent from `_bySource` forever, leaving `IsAvailable` stuck `false` for them even though the source is `Synchronized`.
+
 The updater subscribes once and reacts to every event kind that can change a device's availability. `SourceRegistered` and `SourceUnregistered` carry no property, so nothing needs applying until a property is actually claimed:
 
 ```csharp
@@ -213,9 +215,10 @@ using Namotion.Interceptor.Connectors.Monitoring;
 
 public sealed class DeviceAvailabilityUpdater : IDisposable
 {
-    // Add-only. A stale entry left behind by a release, or by a subject leaving the tree, is
-    // harmless: Apply always re-reads through GetSourceState(), so the index only needs to be a
-    // superset of what a source currently owns, never a subset.
+    // Add-only, and only ever a record of claims this updater actually observed (see the
+    // construction-order requirement above). Within that limit, a stale entry left behind by a
+    // release, or by a subject leaving the tree, is harmless: Apply always re-reads through
+    // GetSourceState(), so once a property is in the index it never needs to be removed again.
     private readonly ConcurrentDictionary<ISubjectSource, ImmutableHashSet<PropertyReference>> _bySource = new();
     private readonly SourceSubscription _subscription;
 
@@ -269,4 +272,4 @@ public sealed class DeviceAvailabilityUpdater : IDisposable
 }
 ```
 
-For the four property-kind events, `sourceEvent.CurrentState` already resolves through `GetSourceState()` for that specific property, so `Apply` can use it directly. `StateChanged` carries no property at all, `sourceEvent.CurrentState` there is the source's own state and says nothing about any individual property, so the handler instead walks its own index of properties this source has claimed and calls `property.GetSourceState()` on each one. That per-property re-read is what makes the index safe to keep imprecise: even a property the index still lists after a release resolves to its actual current state rather than a stale one, so the index only has to avoid missing entries, never avoid extra ones.
+For the four property-kind events, `sourceEvent.CurrentState` already resolves through `GetSourceState()` for that specific property, so `Apply` can use it directly. `StateChanged` carries no property at all, `sourceEvent.CurrentState` there is the source's own state and says nothing about any individual property, so the handler instead walks its own index of properties this source has claimed and calls `property.GetSourceState()` on each one. That per-property re-read is what makes the index safe to keep imprecise about *removal*: even a property the index still lists after a release resolves to its actual current state rather than a stale one, so once a claim has been observed, the index never needs to drop it again. It does not make the index safe to keep imprecise about *addition*: a claim this updater never observed, because it subscribed after the claim happened, is missing from the index permanently, with no later event to fill the gap.

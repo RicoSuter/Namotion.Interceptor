@@ -51,6 +51,17 @@ public readonly record struct SourceEvent(
     /// <see cref="SourceMonitoringExtensions.GetSourceState"/> per property instead.
     /// Not cached: each access performs a property-data lookup and a volatile read, so hoist it to
     /// a local if you read it more than once.
+    /// <para>
+    /// The "left the tree" check this relies on for <see cref="SourceEventKind.PropertyLeftView"/>
+    /// asks whether the subject's context still reaches the event's monitor, which is only a proxy
+    /// for tree membership. It is defeated in two cases: a subject constructed directly with a
+    /// context (the generator emits <c>Context.AddFallbackContext(context)</c> in that constructor,
+    /// and detach never removes it), and a subject that has had two parents (only the first attach
+    /// adds the parent-tree fallback; see the topology-aware test coverage in
+    /// <c>SourceMonitorTests</c>). In both cases the context keeps reaching the monitor after the
+    /// subject has actually left the tree, so a <c>PropertyLeftView</c> event's <c>CurrentState</c>
+    /// still returns the owning source's state instead of <see cref="SourceState.Unclaimed"/>.
+    /// </para>
     /// </remarks>
     public SourceState CurrentState => ResolveCurrentState();
 

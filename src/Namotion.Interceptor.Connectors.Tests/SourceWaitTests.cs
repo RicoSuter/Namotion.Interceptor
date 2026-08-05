@@ -322,7 +322,6 @@ public class SourceWaitTests
         var monitor = context.GetSourceMonitor();
         var recordingLogger = new RecordingLogger();
         context.AddService<ILoggerFactory>(new RecordingLoggerFactory(recordingLogger));
-        using var subscription = monitor.Subscribe(_ => { }); // resolves the monitor's lazy logger
 
         var anchor = new Person(context);
         var source = new TestStateSource(anchor);
@@ -351,6 +350,70 @@ public class SourceWaitTests
 
         // Assert
         Assert.Contains(recordingLogger.Warnings, message => message.Contains("has no in-scope source"));
+    }
+
+    [Fact]
+    public void WhenNoSubscriptionWasEverMade_ThenTheEmptyScopeWarningStillFires()
+    {
+        // Arrange
+        // The Getting Started sample never calls Subscribe: it only registers a source and awaits
+        // WaitForSynchronizationAsync. The logger must resolve on demand, from whichever call site
+        // needs it first, not only from Subscribe - otherwise this exact sample never sees its one
+        // diagnostic for a misconfigured wait.
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var recordingLogger = new RecordingLogger();
+        context.AddService<ILoggerFactory>(new RecordingLoggerFactory(recordingLogger));
+        monitor.CompleteSourceRegistration();
+
+        var anchor = new Person(context);
+
+        // Act
+        var wait = anchor.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+        // Registering an unrelated source triggers a re-evaluation pass over every pending wait,
+        // including this one, without ever calling Subscribe.
+        monitor.Register(new TestStateSource(new Person(context)));
+
+        // Assert
+        Assert.Contains(recordingLogger.Warnings, message => message.Contains("has no in-scope source"));
+    }
+
+    [Fact]
+    public async Task WhenOneWaitsReEvaluationThrows_ThenOtherPendingWaitsAreStillReEvaluated()
+    {
+        // Arrange
+        var context = CreateContext();
+        context.AddService<ILoggerFactory>(new ThrowingLoggerFactory());
+        var monitor = context.GetSourceMonitor();
+        monitor.CompleteSourceRegistration();
+
+        var healthyRoot = new Person(context);
+        var healthySource = new TestStateSource(healthyRoot);
+        monitor.Register(healthySource);
+
+        // Added to _waits before the healthy wait below, so a loop with no per-wait isolation
+        // reaches this one first. Its scope is empty, which makes its re-evaluation log the
+        // empty-scope warning - and the logger this test installs throws from LogWarning, so
+        // re-evaluating this wait is what throws.
+        var emptyScopeRoot = new Person(context);
+        var emptyScopeWait = emptyScopeRoot.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(emptyScopeWait.IsCompleted);
+
+        // A second, later wait whose own re-evaluation never touches the logger: it has an
+        // in-scope source that is not yet synchronized, so IsSatisfied returns false without
+        // hitting either warning branch.
+        var healthyWait = healthyRoot.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(healthyWait.IsCompleted);
+
+        // Act - transitioning healthySource triggers a single re-evaluation pass over every
+        // pending wait. Without per-wait isolation, the throw while re-evaluating emptyScopeWait
+        // (first in the list) would abort the pass before healthyWait (second) is ever looked at
+        // again, which would leave it pending forever - a lost wakeup.
+        healthySource.ReportSynchronized();
+
+        // Assert
+        await healthyWait.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -573,6 +636,38 @@ internal sealed class RecordingLoggerFactory(RecordingLogger logger) : ILoggerFa
     }
 
     public ILogger CreateLogger(string categoryName) => logger;
+
+    public void Dispose()
+    {
+    }
+}
+
+/// <summary>A logger whose LogWarning call throws, to exercise exception-safety in wait re-evaluation.</summary>
+internal sealed class ThrowingLogger : ILogger
+{
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+        LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+        Func<TState, Exception?, string> formatter)
+    {
+        if (logLevel == LogLevel.Warning)
+        {
+            throw new InvalidOperationException("logging is broken");
+        }
+    }
+}
+
+/// <summary>Always resolves to a fresh <see cref="ThrowingLogger"/>, regardless of category.</summary>
+internal sealed class ThrowingLoggerFactory : ILoggerFactory
+{
+    public void AddProvider(ILoggerProvider provider)
+    {
+    }
+
+    public ILogger CreateLogger(string categoryName) => new ThrowingLogger();
 
     public void Dispose()
     {
