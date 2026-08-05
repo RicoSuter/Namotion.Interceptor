@@ -184,11 +184,13 @@ Two locks exist inside the lifecycle/registry system itself:
 1. `_attachedSubjects` in `LifecycleInterceptor`
 2. `_knownSubjects` in `SubjectRegistry`
 
-Acquisition order is always: `_attachedSubjects` → `_knownSubjects`. The `SubjectRegistry` never calls back into `LifecycleInterceptor` while holding `_knownSubjects`. No deadlock is possible.
+Acquisition order is always: `_attachedSubjects` → `_knownSubjects`. The `SubjectRegistry` never calls back into `LifecycleInterceptor` while holding `_knownSubjects`, so those two cannot deadlock against each other.
+
+That is an order between lock **kinds**, and it says nothing about two **instances** of one kind. `_attachedSubjects` is per interceptor, so a configuration resolving two `LifecycleInterceptor` instances has two of them with no order between them, and the subtree descent takes one while holding the other. See "Co-resolved lifecycle interceptors deadlock" under Known Gaps. Everything below this paragraph holds for a configuration resolving a single `LifecycleInterceptor`, which is every configuration in this repository.
 
 A second chain reaches into the context: `_attachedSubjects` → `InterceptorSubjectContext._mutationLock` → a `_usedByContexts` set lock. Every attach and detach enters `_mutationLock`, because the ownership claim, the reference count and the parent link all live behind it. Only the operations that actually publish or remove an edge or the parent link go on to the set lock, since that is where the reverse entry is registered or unregistered; an ordinary reference-count increment or ownership claim stops at `_mutationLock`. The set lock is a leaf: it touches only that set and calls into no other context.
 
-Taken together the two chains are acyclic in normal operation, and there is exactly one edge that would close them: `_mutationLock` → user code → `_attachedSubjects`. Only a `TryAddService` factory or `exists` predicate can produce it, by attaching a subject from inside the mutation critical section. The contract forbids that for this reason. This is issue #404, it predates the parent link and the redesign does not make it worse, but the redesign does put `_mutationLock` on the attach path of every subject, so the edge is worth naming here rather than leaving it in the context's own comments.
+Taken together the two chains are acyclic in normal operation for a single `LifecycleInterceptor`, and one edge would close them: `_mutationLock` → user code → `_attachedSubjects`. Only a `TryAddService` factory or `exists` predicate can produce it, by attaching a subject from inside the mutation critical section. The contract forbids that for this reason. This is issue #404, it predates the parent link and the redesign does not make it worse, but the redesign does put `_mutationLock` on the attach path of every subject, so the edge is worth naming here rather than leaving it in the context's own comments.
 
 The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled, which is a documented contract requirement.
 
@@ -428,6 +430,36 @@ same change that serialises the two root operations.
 interceptor pass, and the rendezvous that would pin it sits inside `LifecycleInterceptor`'s monitor,
 which no public seam reaches. A test that cannot hit the window would assert only that the ordinary
 sequential path works, which is coverage in appearance and not in substance.
+
+### Co-resolved lifecycle interceptors deadlock
+
+Two `LifecycleInterceptor` instances resolving from one context means two
+`_attachedSubjects` monitors with no order between them, and the subtree descent enters one
+while holding the other. Which direction depends on the route, and the routes are opposed:
+
+| Route | Nesting | Why |
+|---|---|---|
+| Root attach of a subject with children | first resolved, then second | the descent fires inside index 0's monitor; the second interceptor's later pass sees `IsContextAttach` false and does not descend |
+| Property write that attaches | second, then first | the first attach is seen by the innermost interceptor body, which runs first |
+| Property write that detaches | first, then second | the count reaches zero only under the outermost body, which runs last |
+| Root detach | second, then first | the first pass leaves the child at count one; the second brings it to zero and descends |
+
+Any concurrent pair from opposite rows deadlocks permanently. Two property writes alone are
+enough, one attaching and one detaching, with no root operation involved. No resolution order
+removes it: attach descends at first attach, which is the innermost body, and detach descends at
+count zero, which is the outermost, so the two always oppose.
+
+This predates the parent link. On the previous design `ContextInheritanceHandler` called
+`AddFallbackContext` from inside the firing interceptor's monitor, and the executor's override
+then entered the other instance's, producing the same edges through a different mechanism.
+
+**No test, deliberately.** The rendezvous sits inside the monitors, so a test could only be
+probabilistic, and a flaky test for a deadlock is worse than a written record of it.
+
+Not reachable here: no production code builds the configuration, and reaching it requires
+registering lifecycle services on the child context *before* composing the parent, because
+`WithService` dedups once the type already resolves. A connector cannot run against it either,
+since `TryGetLifecycleInterceptor()` throws when two resolve.
 
 ### The aggregated two-interceptor configuration
 
