@@ -175,6 +175,37 @@ public class HostedServiceHandlerTests
         });
     }
 
+    [Fact]
+    public async Task WhenActionsAreQueued_ThenWaitForPendingActionsCompletesOnlyAfterTheyHaveRun()
+    {
+        // Arrange
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+            var hostedService = new PersonBackgroundService(person);
+
+            // Act
+            person.AttachHostedService(hostedService);
+            await context.WaitForPendingHostedServiceActionsAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal("John", person.FirstName);
+        });
+    }
+
+    [Fact]
+    public async Task WhenNoHandlerIsConfigured_ThenWaitForPendingActionsCompletesImmediately()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+
+        // Act
+        var task = context.WaitForPendingHostedServiceActionsAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(task.IsCompletedSuccessfully);
+    }
+
     private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
     {
         var builder = Host.CreateApplicationBuilder();

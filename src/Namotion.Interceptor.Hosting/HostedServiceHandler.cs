@@ -190,6 +190,27 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         await tcs.Task.WaitAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Completes once the actions queued before this call have run.
+    /// </summary>
+    /// <remarks>
+    /// The drain is FIFO and sequential, so a marker posted after the queued starts runs last, and
+    /// everything ahead of it has completed by then. This is a barrier for work ALREADY queued:
+    /// subjects attaching afterwards post new actions it does not cover, which is the right
+    /// semantics for a loader that has finished building its tree. If the drain loop is not running,
+    /// the marker never executes and this never completes.
+    /// </remarks>
+    internal Task WaitForPendingActionsAsync(CancellationToken cancellationToken)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _actions.Post(_ =>
+        {
+            completion.TrySetResult();
+            return Task.CompletedTask;
+        });
+        return completion.Task.WaitAsync(cancellationToken);
+    }
+
     private void PostStartService(IHostedService hostedService, TaskCompletionSource? tcs)
     {
         _actions.Post(async token =>
