@@ -33,12 +33,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     internal ThroughputCounter IncomingThroughput { get; } = new();
     internal ThroughputCounter OutgoingThroughput { get; } = new();
 
-    // Set only while this thread is inside the node update loop of WriteChangesAsync.
-    // ClearChangeMasks raises StateChanged synchronously on the calling thread and that handler
-    // routes back into UpdateProperty, so without this the server would apply its own writes to
-    // the subject as if a client had sent them. Thread-scoped rather than an instance field, so a
-    // client write arriving on another thread can never be mistaken for one of ours, whichever
-    // lock either side happens to hold.
+    // Thread-scoped, not an instance field: a client write on another thread must not be caught by it.
     [ThreadStatic]
     private static bool _isWritingOwnNodeValues;
 
@@ -376,10 +371,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     {
         if (_isWritingOwnNodeValues)
         {
-            // The server's own node write, reflected straight back by ClearChangeMasks. Applying it
-            // would write the value the flush batch carried over whatever the subject holds now,
-            // which a newer local commit may already have superseded, and it would count the
-            // server's outgoing traffic as inbound client writes.
+            // Our own node write, reflected back synchronously by ClearChangeMasks.
             return;
         }
 
