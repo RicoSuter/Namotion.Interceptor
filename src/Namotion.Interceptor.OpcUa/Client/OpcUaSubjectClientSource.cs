@@ -446,6 +446,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         // Without this, keep-alive on the newly created session can fire immediately,
         // triggering OnKeepAlive → BeginReconnect → OnReconnectComplete → AbandonCurrentSession,
         // which nullifies the session while we're still setting up subscriptions and loading state.
+        // Report at detection, matching OnKeepAlive. Moving StartBuffering up instead would let a
+        // racing OnKeepAlive make the buffering below discard what was buffered in between.
+        ReportConnectionLost();
+
         sessionManager.SetReconnecting(true);
 
         try
