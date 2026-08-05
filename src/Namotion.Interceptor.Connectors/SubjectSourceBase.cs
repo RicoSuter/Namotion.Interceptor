@@ -232,14 +232,22 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     }
 
     /// <summary>
-    /// Collapses parked changes to one per property, keeping the oldest old value and the newest
-    /// new value, the same merge the change queue applies at flush.
+    /// Collapses parked changes to one per property, keeping the oldest old value and the new value
+    /// of the highest-revision commit.
     /// </summary>
     /// <remarks>
     /// Reconciliation classifies each change against the live value and mutates that value when it
     /// restores, so two writes to one property have to be judged as one. Left separate, an older
     /// write can match the live value, get restored, and thereby make the newer write look diverged,
     /// which drops it: the older write would win over the newer one.
+    /// <para>
+    /// Which one is newer is decided by <see cref="SubjectPropertyChange.Revision"/>, not by capture
+    /// order. Changes are enqueued after their commit and outside the subject lock, so under
+    /// concurrent writers arrival order is a race order. Both changes are writes to the same
+    /// property and therefore to the same subject, so their revisions are comparable. A change
+    /// carrying revision 0 was built outside a terminal write and orders against nothing, so
+    /// capture order decides between those.
+    /// </para>
     /// </remarks>
     private static List<SubjectPropertyChange> CollapsePerProperty(SubjectPropertyChange[] changes)
     {
@@ -248,15 +256,17 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
         foreach (var change in changes)
         {
-            if (indices.TryGetValue(change.Property, out var index))
-            {
-                collapsed[index] = collapsed[index].MergeWithNewer(change);
-            }
-            else
+            if (!indices.TryGetValue(change.Property, out var index))
             {
                 indices[change.Property] = collapsed.Count;
                 collapsed.Add(change);
+                continue;
             }
+
+            var kept = collapsed[index];
+            collapsed[index] = change.Revision < kept.Revision
+                ? change.MergeWithNewer(kept)
+                : kept.MergeWithNewer(change);
         }
 
         return collapsed;

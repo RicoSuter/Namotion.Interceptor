@@ -19,7 +19,8 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         InlineValueStorage oldValueStorage,
         InlineValueStorage newValueStorage,
         object? oldBoxedHolder,
-        object? newBoxedHolder)
+        object? newBoxedHolder,
+        long revision)
     {
         Property = property;
         Origin = origin;
@@ -29,6 +30,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         _newValueStorage = newValueStorage;
         _oldBoxedHolder = oldBoxedHolder;
         _newBoxedHolder = newBoxedHolder;
+        Revision = revision;
     }
 
     public PropertyReference Property { get; }
@@ -39,6 +41,13 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
 
     public DateTimeOffset? ReceivedTimestamp { get; }
 
+    /// <summary>
+    /// The writing subject's commit revision: monotonic per subject over committed writes, so two
+    /// changes to the same subject are ordered by comparing it. Revisions of different subjects are
+    /// NOT comparable. 0 means the change was constructed outside a terminal write.
+    /// </summary>
+    public long Revision { get; }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static SubjectPropertyChange Create<TValue>(
         PropertyReference property,
@@ -46,7 +55,8 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         DateTimeOffset changedTimestamp,
         DateTimeOffset? receivedTimestamp,
         TValue oldValue,
-        TValue newValue)
+        TValue newValue,
+        long revision = 0)
     {
         // Fast path: small ref-free value types stored inline - zero allocations. Structs containing
         // references (e.g. ImmutableArray<T>) must be excluded: inline storage is not GC-scanned, so a
@@ -63,7 +73,8 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
                 InlineValueStorage.Create(oldValue),
                 InlineValueStorage.Create(newValue),
                 null,
-                null);
+                null,
+                revision);
         }
 
         // Fast path: strings - store directly without wrapper (ZERO allocations)
@@ -77,7 +88,8 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
                 default,
                 default,
                 oldValue,
-                newValue);
+                newValue,
+                revision);
         }
 
         // Slow path: other reference types or large value types - TWO allocations (one per value)
@@ -89,7 +101,8 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
             default,
             default,
             new BoxedValueHolder<TValue>(oldValue),
-            new BoxedValueHolder<TValue>(newValue));
+            new BoxedValueHolder<TValue>(newValue),
+            revision);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -185,9 +198,11 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     /// <summary>
     /// Merges this (earlier) change with a newer change to the same property.
     /// Keeps this change's old value and takes the newer change's new value,
-    /// origin, and timestamps. Used during deduplication to preserve the correct
+    /// origin, and timestamps. Used during flush merging to preserve the correct
     /// diff baseline while reflecting the latest state. Copies the newer change's full
-    /// <see cref="Origin"/> so a deduplicated change keeps its kind and source.
+    /// <see cref="Origin"/> so a merged change keeps its kind and source. The newer change's
+    /// <see cref="Revision"/> carries over as well, so a merged survivor stays comparable against
+    /// further changes to the same subject.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public SubjectPropertyChange MergeWithNewer(SubjectPropertyChange newerChange)
@@ -200,7 +215,8 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
             _oldValueStorage,
             newerChange._newValueStorage,
             _oldBoxedHolder,
-            newerChange._newBoxedHolder);
+            newerChange._newBoxedHolder,
+            newerChange.Revision);
     }
 
     /// <summary>
@@ -216,7 +232,8 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
             _oldValueStorage,
             _newValueStorage,
             _oldBoxedHolder,
-            _newBoxedHolder);
+            _newBoxedHolder,
+            Revision);
 
     /// <summary>
     /// Equality based on PropertyReference only for efficient HashSet/Dictionary usage.

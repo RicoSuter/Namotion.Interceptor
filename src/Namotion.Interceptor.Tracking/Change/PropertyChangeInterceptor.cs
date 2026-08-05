@@ -188,7 +188,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             context.WriteTimestampForPublishing,
             SubjectChangeContext.Current.ReceivedTimestamp,
             context.CurrentValue,
-            context.GetFinalValue());
+            context.GetFinalValue(),
+            context.Revision);
 
         for (var i = 0; i < subscriptions.Length; i++)
         {
@@ -232,7 +233,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             context.WriteTimestampForPublishing,
             SubjectChangeContext.Current.ReceivedTimestamp,
             context.CurrentValue,
-            finalValue);
+            finalValue,
+            context.Revision);
 
         if (state is not null)
         {
