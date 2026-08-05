@@ -17,10 +17,14 @@ public static class SubjectAttachmentExtensions
     /// part in, and adds that context to the subject's resolution chain.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The subject is already attached through a different context, or already belongs to another
-    /// lifecycle graph. A subject belongs to at most one graph. Also thrown when the subject's own
-    /// context is not an <see cref="InterceptorExecutor"/>, since there is then nowhere to record
-    /// its position in the graph.
+    /// The subject is already referenced from parent properties, is already attached through a
+    /// different context, or already belongs to another lifecycle graph. A subject belongs to at most
+    /// one graph. All three are decided inside <see cref="InterceptorExecutor.TryRecordAttachContext"/>,
+    /// under the same lock that writes the record, so a rejection records nothing. The reference-count
+    /// rejection does not apply to a context resolving no <see cref="ILifecycleInterceptor"/>, because
+    /// the early return below precedes it. Also thrown when the subject's own context is not an
+    /// <see cref="InterceptorExecutor"/>, since there is then nowhere to record its position in the
+    /// graph.
     /// </exception>
     public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
     {

@@ -180,6 +180,32 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     {
         lock (_mutationLock)
         {
+            // The mirror of the guard in TryClearAttachContext, and first for the same reason: a
+            // still-referenced subject is rejected before anything is recorded. Two things make it
+            // worth having.
+            //
+            // It rejects an operation whose success is worse than its failure. Root-attaching an
+            // already-referenced subject runs AttachSubjectToContext, which re-runs
+            // FindSubjectsInProperties in Seed mode over a subtree that is already attached and
+            // overwrites its reconciliation baseline from the backing store. Sequentially that is
+            // invisible, because the child attaches no-op. Against a property write that next() has
+            // already committed it is not: the re-seed makes the writer's reconciliation
+            // early-return, and the old child is then never detached.
+            //
+            // And it closes the last sliver of the ReleaseAttachEdge race. That call compares
+            // against the record captured when the count reached zero, so a record written after
+            // the decrement survives; a record written before it still does not. This guard makes
+            // that unreachable, because a subject whose count is about to be decremented to zero
+            // still has a non-zero count when the racing attach tries to record. Reading the count
+            // under this same lock is what makes it airtight: IncrementReferenceCount takes it too.
+            if (_referenceCount != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Subject '{_subject.GetType().FullName}' is already referenced from {_referenceCount} parent " +
+                    "property/properties, so it cannot be attached as a root. Attach it before referencing it from a " +
+                    "parent property, or let it inherit the graph through its parent instead of root-attaching it.");
+            }
+
             if (ReferenceEquals(_attachContext, context))
             {
                 return false;

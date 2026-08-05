@@ -518,6 +518,7 @@ Attaching a subject that another graph already owns throws rather than half-atta
 |---|---|
 | Attaching a subject another graph owns | `InvalidOperationException`; earlier items of the same batch stay attached |
 | `AttachToContext` on a subject already attached through a different context | `InvalidOperationException`; detach it first |
+| `AttachToContext` while a parent property already references the subject | `InvalidOperationException`; attach it before referencing it from a parent, or let it inherit the graph through that parent. This guard runs before the attach-record checks but after the empty-interceptor early return, so a context that carries no lifecycle interceptor is still composed onto a referenced subject |
 | `AddFallbackContext` on a *subject's* context, with a lifecycle-bearing context that is not the recorded attach context | `InvalidOperationException` naming `AttachToContext` |
 | `RemoveFallbackContext` aimed at the attach edge | `InvalidOperationException` naming `DetachFromContext` |
 | `DetachFromContext` while the subject is still referenced from a parent property | `InvalidOperationException`; remove the references first. This guard runs before the attach-record checks, so it also applies to a subject whose context carries no lifecycle interceptor |

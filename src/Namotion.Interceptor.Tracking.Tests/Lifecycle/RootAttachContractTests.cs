@@ -811,6 +811,63 @@ public class RootAttachContractTests
         Assert.Same(contextA, ((IInterceptorSubject)subject).TryGetAttachContext());
     }
 
+    [Fact]
+    public void WhenReferencedSubjectIsRootAttached_ThenItThrowsAndPublishesNothing()
+    {
+        // Behaviour change 22, the attach-side mirror of change 8. Root-attaching a subject that a
+        // parent property already holds would re-run the seeding pass over an already-attached
+        // subtree and overwrite its reconciliation baseline from the backing store. Sequentially
+        // that is invisible, so what the assertions can reach is only that nothing is published.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var parent = new Person(context) { FirstName = "Parent" };
+        var child = new Person { FirstName = "Child" };
+        parent.Mother = child;
+
+        var baseline = UsedByContextsProbe.Count(context);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(
+            () => ((IInterceptorSubject)child).AttachToContext(context));
+
+        Assert.Null(((IInterceptorSubject)child).TryGetAttachContext());
+        Assert.Equal(baseline, UsedByContextsProbe.Count(context));
+    }
+
+    [Fact]
+    public void WhenPlainContextSubjectIsReferencedAndAttached_ThenItStillSucceeds()
+    {
+        // The asymmetry change 22 deliberately keeps, pinned so a later change cannot collapse it
+        // silently. AttachToContext returns on the empty interceptor set before it ever reaches
+        // TryRecordAttachContext, and a context with no lifecycle interceptor drives no descent, so
+        // the re-seed the guard exists to prevent cannot happen here.
+
+        // Arrange
+        var graphContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var plainContext = InterceptorSubjectContext.Create();
+
+        var parent = new Person(graphContext) { FirstName = "Parent" };
+        var child = new Person { FirstName = "Child" };
+        parent.Mother = child;
+
+        var baseline = UsedByContextsProbe.Count(plainContext);
+
+        // Act
+        var caught = Record.Exception(() => ((IInterceptorSubject)child).AttachToContext(plainContext));
+
+        // Assert
+        Assert.Null(caught);
+        Assert.Equal(1, child.GetReferenceCount());
+        Assert.Equal(baseline + 1, UsedByContextsProbe.Count(plainContext));
+    }
+
     private class ReAttachingHandler(Person target, Action<Exception> onThrow) : ILifecycleHandler
     {
         public void HandleLifecycleChange(SubjectLifecycleChange change)
