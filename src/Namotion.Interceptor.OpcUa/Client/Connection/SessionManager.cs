@@ -309,7 +309,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             // Without this, the source would report Synchronized for the whole outage: the SDK
             // reconnect path doesn't buffer until PerformFullStateSyncIfNeededAsync runs. Not
             // StartBuffering here either (see ReportConnectionLost remarks for why).
-            _source.ReportConnectionLost();
+            _source.NotifyConnectionLost();
 
             // Set flag before BeginReconnect to avoid window where external observers see IsReconnecting=false
             Interlocked.Exchange(ref _isReconnecting, 1);

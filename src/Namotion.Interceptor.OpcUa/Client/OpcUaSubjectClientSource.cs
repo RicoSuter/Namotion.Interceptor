@@ -48,6 +48,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     internal void ClearLastError() => Volatile.Write(ref _lastError, null);
 
+    /// <summary>
+    /// Forwards to the protected ReportConnectionLost transition seam for SessionManager, which
+    /// holds this concrete source type but is not part of its inheritance hierarchy and so cannot
+    /// call the protected member directly.
+    /// </summary>
+    internal void NotifyConnectionLost() => ReportConnectionLost();
+
     /// <inheritdoc />
     public override int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
 

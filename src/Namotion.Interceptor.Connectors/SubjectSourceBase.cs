@@ -51,12 +51,6 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <inheritdoc />
     public event EventHandler<SourceEvent>? StateChanged;
 
-    /// <summary>Reports that the source is connecting or reconnecting and its live feed is not trusted.</summary>
-    internal void ReportConnecting() => TransitionTo(SourceState.Connecting);
-
-    /// <summary>Reports that the source completed its initial load procedure.</summary>
-    internal void ReportSynchronized() => TransitionTo(SourceState.Synchronized);
-
     /// <summary>
     /// Reports that the connection was lost, for connectors that detect an outage before they
     /// start buffering.
@@ -64,9 +58,14 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <remarks>
     /// Deliberately separate from <see cref="SubjectPropertyWriter.StartBuffering"/>: calling that
     /// at detection time would replace the buffer with a fresh list, and the later StartBuffering
-    /// on the reconnect path would then discard everything buffered in between.
+    /// on the reconnect path would then discard everything buffered in between. Protected rather
+    /// than public: application code holding an ISubjectSource reference must not be able to flip a
+    /// synchronized source back to Connecting. A concrete source in another assembly that needs to
+    /// call this from a helper object outside its own inheritance hierarchy (SessionManager for
+    /// OpcUaSubjectClientSource) needs an internal forwarder on that source; see
+    /// OpcUaSubjectClientSource for the pattern.
     /// </remarks>
-    public void ReportConnectionLost() => TransitionTo(SourceState.Connecting);
+    protected void ReportConnectionLost() => TransitionTo(SourceState.Connecting);
 
     /// <summary>
     /// Moves to <paramref name="newState"/> and publishes the change, or does nothing when the
@@ -90,13 +89,14 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
             _state = (int)newState;
 
+            var now = DateTimeOffset.UtcNow;
             if (newState == SourceState.Synchronized)
             {
-                Interlocked.Exchange(ref _lastSynchronizedTicks, DateTimeOffset.UtcNow.UtcTicks);
+                Interlocked.Exchange(ref _lastSynchronizedTicks, now.UtcTicks);
             }
 
             var sourceEvent = new SourceEvent(
-                SourceEventKind.StateChanged, this, null, oldState, newState, DateTimeOffset.UtcNow);
+                SourceEventKind.StateChanged, this, null, oldState, newState, now);
 
             var handlers = StateChanged;
             if (handlers is not null)
@@ -183,6 +183,21 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         foreach (var monitor in _registeredMonitors)
         {
             monitor.Register(this);
+        }
+
+        // Dispose can race this method: it may run (and find nothing yet in _registeredMonitors to
+        // unregister) between the guard above and the assignment/registration loop just completed.
+        // TransitionTo is monotonic and Stopped is terminal, so if State reads Stopped here, Dispose
+        // has already run - re-check and unwind whatever was just registered so a disposed source
+        // never stays registered forever.
+        if (State == SourceState.Stopped)
+        {
+            foreach (var monitor in _registeredMonitors)
+            {
+                monitor.Unregister(this);
+            }
+            _registeredMonitors = [];
+            return Task.CompletedTask;
         }
 
         return base.StartAsync(cancellationToken);

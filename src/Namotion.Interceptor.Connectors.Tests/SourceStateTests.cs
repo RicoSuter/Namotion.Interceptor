@@ -273,7 +273,7 @@ public class SourceStateTests
         source.ReportSynchronized();
 
         // Act
-        source.ReportConnectionLost();
+        source.SimulateConnectionLost();
 
         // Assert
         Assert.Equal(SourceState.Connecting, source.State);
@@ -294,7 +294,18 @@ internal class TestStateSource : SubjectSourceBase
 
     public override IInterceptorSubject RootSubject { get; }
 
+    // Test-only aliases for the transition seam: production code drives these two through
+    // SubjectPropertyWriter's direct TransitionTo calls now (see SubjectPropertyWriter.StartBuffering
+    // and LoadInitialStateAndResumeAsync), but the test suite still drives state machine behaviour
+    // through named, state-specific entry points rather than a bare TransitionTo call.
+    public void ReportConnecting() => TransitionTo(SourceState.Connecting);
+
+    public void ReportSynchronized() => TransitionTo(SourceState.Synchronized);
+
     public void ReportStopped() => TransitionTo(SourceState.Stopped);
+
+    /// <summary>Exposes the now-protected ReportConnectionLost seam for tests outside the type hierarchy.</summary>
+    public void SimulateConnectionLost() => ReportConnectionLost();
 
     /// <summary>How many times the pump body has been entered. Used to prove the terminal guard works.</summary>
     public int ExecuteCount;

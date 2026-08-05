@@ -8,6 +8,19 @@ namespace Namotion.Interceptor.Connectors;
 /// The external system is the source of truth; the C# object is a replica.
 /// Sources must claim ownership of properties by calling <c>SetSource(this)</c> during initialization.
 /// </summary>
+/// <remarks>
+/// <see cref="ISubjectConnector.RootSubject"/>, <see cref="State"/>, and <see cref="LastSynchronizedAt"/> must not
+/// acquire any lock that is held while <see cref="StateChanged"/> is raised. A registered source is
+/// read through these getters by <c>SourceMonitor</c>, which itself holds its own lock while doing
+/// so (building the SourceRegistered/SourceUnregistered event, and evaluating a branch-scoped wait).
+/// If a getter here acquired the source's own transition lock, a StateChanged raise on one thread
+/// (holding the transition lock, waiting to enter SourceMonitor's lock via the event handler) could
+/// deadlock against a SourceMonitor caller on another thread (holding SourceMonitor's lock, waiting
+/// to enter the transition lock via one of these getters) - a classic ABBA lock-order inversion.
+/// <see cref="SubjectSourceBase"/> is safe because these getters are lock-free (Volatile.Read /
+/// Interlocked.Read / a stored reference); a custom implementer overriding them, or wrapping a
+/// property with its own synchronization, must preserve that.
+/// </remarks>
 public interface ISubjectSource : ISubjectConnector
 {
     /// <summary>
