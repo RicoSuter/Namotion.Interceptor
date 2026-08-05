@@ -61,12 +61,21 @@ childContext.AddFallbackContext(parentContext);
 // childContext now has access to all services from parentContext
 ```
 
-This is used internally by `WithContextInheritance()` to automatically assign the parent's context to child subjects.
+Context inheritance no longer uses this API. `WithContextInheritance()` publishes an internal parent
+link on the child's context instead, which resolves after any fallback context registered here, so
+explicit composition beats inheritance. The link is owned by the lifecycle system and cannot be added
+or removed through the fallback API.
+
+Adding a context that takes part in a lifecycle graph to a *subject's own* context throws and names
+`AttachToContext`, because the subject would otherwise resolve that graph's interceptors while being
+absent from its registry. See [Joining and Leaving a Graph](tracking.md#joining-and-leaving-a-graph).
+Composing two plain contexts, as above, is unaffected.
 
 **Resolution order:**
 1. Services registered directly on the context
-2. Services from fallback contexts (recursively)
-3. Results are deduplicated and ordered
+2. Services from fallback contexts (recursively), in registration order
+3. Services from the inherited parent context, if the subject is an attached child
+4. Results are deduplicated and ordered
 
 ## Service Ordering
 
