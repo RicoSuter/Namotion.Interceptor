@@ -199,8 +199,8 @@ public class ChangeQueueProcessorTests
 
         var subject = new Person(context);
         var flushCount = 0;
-        var flushStarted = new TaskCompletionSource();
-        var allowFlush = new TaskCompletionSource();
+        var flushStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowFlush = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var processor = new ChangeQueueProcessor(
             source: null,
@@ -392,8 +392,8 @@ public class ChangeQueueProcessorTests
 
         var subject = new Person(context);
         var receivedValues = new ConcurrentQueue<string>();
-        var firstWriteReceived = new TaskCompletionSource();
-        var allowFurtherWrites = new TaskCompletionSource();
+        var firstWriteReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowFurtherWrites = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         using var processor = new ChangeQueueProcessor(
             source: new object(),

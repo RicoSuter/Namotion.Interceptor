@@ -399,8 +399,8 @@ public class SubjectSourceExtensionsTests
         // Arrange
         var concurrentCalls = 0;
         var maxConcurrentCalls = 0;
-        var allStarted = new TaskCompletionSource();
-        var canContinue = new TaskCompletionSource();
+        var allStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canContinue = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var source = new ConcurrentTestSource(async () =>
         {

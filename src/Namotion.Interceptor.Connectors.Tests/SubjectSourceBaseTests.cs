@@ -312,7 +312,7 @@ public class SubjectSourceBaseTests
 
         var subject = new Person(context);
 
-        var tcs = new TaskCompletionSource();
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance)
         {
             WriteChangesOverride = (_, _) =>
@@ -352,7 +352,7 @@ public class SubjectSourceBaseTests
 
         var subject = new Person(context);
 
-        var tcs = new TaskCompletionSource();
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance)
         {
             WriteChangesOverride = (_, _) =>
@@ -394,8 +394,8 @@ public class SubjectSourceBaseTests
 
         // First call fails (simulates queued items failing to flush), second succeeds
         var callCount = 0;
-        var firstCallTcs = new TaskCompletionSource();
-        var secondCallTcs = new TaskCompletionSource();
+        var firstCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance,
             bufferTime: TimeSpan.Zero) // Disable buffering for immediate writes
         {
@@ -450,7 +450,7 @@ public class SubjectSourceBaseTests
 
         var subject = new Person(context);
 
-        var tcs = new TaskCompletionSource();
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance)
         {
             WriteChangesOverride = (_, _) =>
@@ -490,8 +490,8 @@ public class SubjectSourceBaseTests
         var subject = new Person(context);
 
         var callCount = 0;
-        var firstCallTcs = new TaskCompletionSource();
-        var secondCallTcs = new TaskCompletionSource();
+        var firstCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance,
             bufferTime: TimeSpan.Zero) // Disable buffering for immediate writes
         {
@@ -547,8 +547,8 @@ public class SubjectSourceBaseTests
 
         var allWrittenValues = new ConcurrentBag<string?[]>();
         var callCount = 0;
-        var firstCallTcs = new TaskCompletionSource();
-        var thirdCallTcs = new TaskCompletionSource();
+        var firstCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thirdCallTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance,
             bufferTime: TimeSpan.Zero)
         {
@@ -992,7 +992,7 @@ public class SubjectSourceBaseTests
             Action<TestSubjectSource> initialStateAction)
     {
         var writtenChanges = new ConcurrentBag<SubjectPropertyChange>();
-        var writeTcs = new TaskCompletionSource();
+        var writeTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         TestSubjectSource? source = null;
         source = new TestSubjectSource(subject, context, NullLogger.Instance,
