@@ -227,7 +227,12 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
         if (owned is not null)
         {
-            WriteRetryQueue.Enqueue(owned.ToArray());
+            // Collapsed before parking, not only at reconcile time. The queue is a bounded ring buffer
+            // that drops its oldest entries, so parking raw changes lets a burst on one property evict
+            // other properties' window writes before the reconcile ever sees them. Collapsing first
+            // makes the space this costs proportional to the number of properties written rather than
+            // to the number of writes.
+            WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
         }
     }
 
@@ -296,6 +301,10 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 if (Equals(currentValue, change.GetNewValue<object?>()))
                 {
                     // Already the current model value: the source has not received it, so send it.
+                    // Marked here because this path flushes the retry queue directly rather than going
+                    // through the processor, and without the mark a later transaction confirmation on
+                    // this property is not written back, which is the divergence that repair exists for.
+                    CurrentValueFilter.MarkWrittenOut(in change);
                     (toSend ??= []).Add(change);
                     sent++;
                 }

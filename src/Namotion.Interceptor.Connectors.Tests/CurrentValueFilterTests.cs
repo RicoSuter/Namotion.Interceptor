@@ -78,6 +78,41 @@ public class CurrentValueFilterTests
     }
 
     [Fact]
+    public async Task WhenADerivedGetterReturnsAFreshInstance_ThenItsChangeIsStillDeliveredWhenBuffered()
+    {
+        // Arrange: the getter recomputes, so what it hands back is never reference-equal to the value
+        // the change carries. Staleness is unprovable here, and dropping would be permanent: the
+        // transition that would re-enqueue the value is the change being dropped. Buffered on purpose,
+        // because that is the path the flush-time check runs on, and it is every connector's default.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var subject = new DerivedCollectionDevice(context);
+        var written = new ConcurrentQueue<string>();
+
+        using var processor = CreateProcessor(context, change =>
+        {
+            if (change.Property.Name == nameof(DerivedCollectionDevice.Pair))
+            {
+                written.Enqueue(string.Join(",", change.GetNewValue<int[]>()));
+            }
+        });
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act
+        subject.First = 1;
+        subject.Second = 2;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("1,2"));
+
+        await StopAsync(cancellation, processing);
+    }
+
+    [Fact]
     public async Task WhenANewerValueArrivesFromAnotherSource_ThenThisSourceStillReceivesIt()
     {
         // Arrange: two sources on one property. A pending write for source A is superseded by a value

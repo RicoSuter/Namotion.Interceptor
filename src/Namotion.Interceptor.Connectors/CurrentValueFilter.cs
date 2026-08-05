@@ -23,6 +23,9 @@ internal static class CurrentValueFilter
     // cached, so key length is per-call work. Matches the "ni.*" keys the tracking layer uses.
     private const string WrittenOutKey = "ni.wout";
 
+    // The CLR does not cache boxed booleans, so storing a bare `true` would allocate per call.
+    private static readonly object BoxedTrue = true;
+
     /// <summary>
     /// Records that a connector has written this property out. Sticky, and deliberately not per source:
     /// the mark only ever decides whether a transaction confirmation is written back, and a confirmation
@@ -32,7 +35,13 @@ internal static class CurrentValueFilter
     /// </summary>
     public static void MarkWrittenOut(in SubjectPropertyChange change)
     {
-        change.Property.SetPropertyData(WrittenOutKey, true);
+        // Read before write: this runs for every delivered change, and the store is a dictionary write
+        // plus a boxed bool, where the read is a lookup that allocates nothing. The flag never clears,
+        // so after the first delivery of a property every later one takes the cheap path.
+        if (!WasWrittenOut(change.Property))
+        {
+            change.Property.SetPropertyData(WrittenOutKey, BoxedTrue);
+        }
     }
 
     /// <summary>
@@ -55,8 +64,14 @@ internal static class CurrentValueFilter
         // state is not the same as a stale change, so the change is admitted and the write handler
         // decides.
         if (!property.Subject.Properties.TryGetValue(property.Name, out var metadata) ||
-            metadata.GetValue is null)
+            metadata.GetValue is null ||
+            metadata.IsDerived)
         {
+            // A derived getter recomputes, so it can hand back a fresh instance that is never equal to
+            // the value the change carries even though the model is exactly where that change left it.
+            // Staleness cannot be established, so the change is delivered: a redundant write costs one
+            // message, while a wrong drop is permanent, because the transition that would re-enqueue it
+            // is the very change being dropped.
             return true;
         }
 

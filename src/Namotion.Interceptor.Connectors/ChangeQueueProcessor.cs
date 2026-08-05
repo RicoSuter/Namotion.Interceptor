@@ -142,8 +142,9 @@ public class ChangeQueueProcessor : IDisposable
         // Snapshot of changes already queued at drain start: these were captured while the source was
         // still connecting, so one whose value the model has moved past is stale state and is dropped.
         // Changes arriving after it are steady state, where an intermediate value is data rather than
-        // staleness and must be delivered even though the model has moved on (see
-        // WhenSteadyStateChangesCarryOldTimestamps_ThenEveryChangeIsWritten).
+        // staleness, so this check does not apply to them. On the immediate path they are therefore
+        // delivered even once the model has moved on (WhenSteadyStateChangesCarryOldTimestamps_...);
+        // the buffered path still collapses them at flush time, which is the documented contract.
         //
         // Sources reach this with most window writes already handled: SubjectSourceBase drains and
         // reconciles them into the retry queue before ProcessAsync runs. Servers create the processor
