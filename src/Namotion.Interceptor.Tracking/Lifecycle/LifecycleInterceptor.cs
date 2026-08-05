@@ -252,7 +252,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             // first, and reaching it after the property path released finds no owner and no-ops. A
             // consumer calling DetachSubjectFromContext directly can still reach it for a referenced
             // subject, which is one more way that documented low-level call bypasses the guards.
-            subject.GetExecutor().ReleaseOwnership(this, context);
+            //
+            // The ledger removal above is what entitles this call to release: it can only succeed
+            // for a subject this interceptor claimed, which is the precondition ReleaseOwnership's
+            // recorded set relies on now that it no longer resolves.
+            subject.GetExecutor().ReleaseOwnership(this);
         }
     }
 
@@ -337,7 +341,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 // lands after the count was decided has already published its own record and edge,
                 // and releasing those would dismantle an attach that is still running.
                 executor.ReleaseAttachEdge(attachContextAtDecrement);
-                executor.ReleaseOwnership(this, context);
+
+                // Entitled to release because the set removal at the top of this method succeeded,
+                // which only a subject this interceptor claimed can have an entry for.
+                executor.ReleaseOwnership(this);
             }
         }
 

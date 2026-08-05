@@ -118,6 +118,14 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     // context is exactly how services are composed and must not throw.
     private IInterceptorSubjectContext? _attachContext;
     private ILifecycleInterceptor? _owner;
+
+    // Interceptors that claimed this subject while a different one already held the claim, so the
+    // release can answer from a field instead of resolving. Null while nobody but the standing
+    // owner has claimed, which is every single-interceptor configuration, so the common path
+    // allocates nothing. A list rather than a set because it holds one entry per co-resolved
+    // interceptor beyond the first, and because a manual scan gives reference equality without a
+    // comparer instance.
+    private List<ILifecycleInterceptor>? _coClaimants;
     private ImmutableArray<ILifecycleInterceptor> _attachInterceptors = ImmutableArray<ILifecycleInterceptor>.Empty;
     private int _referenceCount;
 
@@ -364,6 +372,11 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// interceptor enforces the re-attach rejection. Measured, it is not a hole: co-resolved
     /// interceptors unwind inside the same write, so the owner's own guard fires whichever unwind
     /// the handler re-attaches from.
+    ///
+    /// An accepted claim from an interceptor that is not the standing owner is recorded, which is
+    /// what lets <see cref="ReleaseOwnership"/> answer the same question later without resolving
+    /// anything. The resolve happens here, on a path that may throw and whose caller is prepared
+    /// for it, and never again.
     /// </summary>
     internal void ClaimOwnership(ILifecycleInterceptor owner, IInterceptorSubjectContext context)
     {
@@ -375,12 +388,28 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
                 return;
             }
 
-            if (!ReferenceEquals(_owner, owner) && !context.GetServices<ILifecycleInterceptor>().Contains(_owner))
+            if (ReferenceEquals(_owner, owner))
+            {
+                return;
+            }
+
+            if (!context.GetServices<ILifecycleInterceptor>().Contains(_owner))
             {
                 throw new InvalidOperationException(
                     $"Subject '{_subject.GetType().FullName}' already belongs to another lifecycle graph. A subject belongs " +
                     "to at most one graph; remove it from its current graph before referencing it from this one.");
             }
+
+            var coClaimants = _coClaimants ??= new List<ILifecycleInterceptor>(1);
+            for (var index = 0; index < coClaimants.Count; index++)
+            {
+                if (ReferenceEquals(coClaimants[index], owner))
+                {
+                    return;
+                }
+            }
+
+            coClaimants.Add(owner);
         }
     }
 
@@ -395,18 +424,30 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     }
 
     /// <summary>
-    /// Released on graph membership, mirroring <see cref="ClaimOwnership"/>: the caller may be the
-    /// owner, or the context it detaches through may resolve the standing owner. Identity alone is
-    /// not enough, because the claim is taken by the first co-resolved interceptor to attach while
-    /// the release is driven by the last one to bring the reference count to zero, and in an
-    /// aggregated configuration those are two different instances. Releasing on identity there is a
-    /// permanent no-op, which leaves the subject owned with no references, reporting attached and
-    /// unable to join any other graph.
+    /// Released by the standing owner or by an interceptor <see cref="ClaimOwnership"/> recorded
+    /// alongside it. Identity alone is not enough, because the claim is taken by the first
+    /// co-resolved interceptor to attach while the release is driven by the last one to bring the
+    /// reference count to zero, and in an aggregated configuration those are two different
+    /// instances. Releasing on identity there is a permanent no-op, which leaves the subject owned
+    /// with no references, reporting attached and unable to join any other graph.
     ///
-    /// A disjoint graph still cannot resolve the owner, so a detach in one graph can never clear a
-    /// claim another graph holds.
+    /// It answers from the recorded set rather than resolving the detaching context, and that is
+    /// the whole point: both call sites are <c>finally</c> blocks, and resolving a chain that has
+    /// since been rewired into a pure-delegation loop throws from there, masking the exception
+    /// already in flight and leaving the claim standing with no way to clear it. Field and list
+    /// operations under <c>_mutationLock</c> cannot throw, so the release always completes.
+    ///
+    /// The recorded set is a stricter predicate than a resolve: it answers "this interceptor
+    /// claimed" where a resolve answers "some context can still reach the owner". Every caller has
+    /// necessarily claimed, because both call sites run only after the caller removed its own
+    /// ledger entry, and only a successful claim can have created one. A disjoint graph therefore
+    /// still cannot clear a claim another graph holds.
+    ///
+    /// The set is dropped with the claim, so the two can never disagree: while <c>_owner</c> is
+    /// null the set is null too, and a release by an interceptor that claimed under a since-cleared
+    /// owner finds no owner and returns.
     /// </summary>
-    internal void ReleaseOwnership(ILifecycleInterceptor owner, IInterceptorSubjectContext context)
+    internal void ReleaseOwnership(ILifecycleInterceptor owner)
     {
         lock (_mutationLock)
         {
@@ -416,10 +457,32 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
                 return;
             }
 
-            if (ReferenceEquals(currentOwner, owner) || context.GetServices<ILifecycleInterceptor>().Contains(currentOwner))
+            if (!ReferenceEquals(currentOwner, owner))
             {
-                _owner = null;
+                var coClaimants = _coClaimants;
+                if (coClaimants is null)
+                {
+                    return;
+                }
+
+                var isCoClaimant = false;
+                for (var index = 0; index < coClaimants.Count; index++)
+                {
+                    if (ReferenceEquals(coClaimants[index], owner))
+                    {
+                        isCoClaimant = true;
+                        break;
+                    }
+                }
+
+                if (!isCoClaimant)
+                {
+                    return;
+                }
             }
+
+            _owner = null;
+            _coClaimants = null;
         }
     }
 

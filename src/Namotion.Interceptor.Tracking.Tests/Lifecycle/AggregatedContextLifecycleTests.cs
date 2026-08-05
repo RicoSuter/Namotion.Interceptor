@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -385,6 +386,100 @@ public class AggregatedContextLifecycleTests
         Assert.Empty(recorder.Detaches);
     }
 
+    [Fact]
+    public void WhenTheDetachResolvesThroughACyclicContext_ThenTheReleaseDoesNotMaskTheFailure()
+    {
+        // Guarantee. The release runs in a finally, so anything it throws replaces the exception
+        // already in flight and leaves the claim standing. Here the subject is root-attached
+        // through a pure delegator, that delegator is then rewired into a delegation loop, and the
+        // detach is driven directly on the interceptor that does not hold the claim. Every service
+        // resolution through the subject's own context now raises, so the release may consult only
+        // what the claim recorded.
+        //
+        // SubjectDetaching supplies the try block's failure because the failure the try produces on
+        // its own and the masking one are both the delegation-cycle InvalidOperationException and
+        // could not be told apart.
+
+        // Arrange
+        var (childContext, _) = CreateAggregatedContext();
+        var delegatingContext = InterceptorSubjectContext.Create();
+        delegatingContext.AddFallbackContext(childContext);
+
+        var subject = (IInterceptorSubject)new PropertyLessSubject();
+        subject.AttachToContext(delegatingContext);
+
+        var interceptors = delegatingContext.GetServices<ILifecycleInterceptor>();
+        var executor = subject.GetExecutor();
+        var nonOwner = (LifecycleInterceptor)interceptors.Single(interceptor => !executor.IsOwnedBy(interceptor));
+        nonOwner.SubjectDetaching += _ => throw new DetachMarkerException();
+
+        // The subject's own context is a pure delegator into the loop from here on.
+        delegatingContext.AddFallbackContext(delegatingContext);
+        delegatingContext.RemoveFallbackContext(childContext);
+
+        // Act
+        var exception = Record.Exception(() => nonOwner.DetachSubjectFromContext(subject));
+
+        // Assert
+        Assert.IsType<DetachMarkerException>(exception);
+        Assert.DoesNotContain(interceptors, interceptor => executor.IsOwnedBy(interceptor));
+
+        // The claim really is gone: with the chain repaired the subject leaves and joins a third,
+        // disjoint graph.
+        delegatingContext.AddFallbackContext(childContext);
+        delegatingContext.RemoveFallbackContext(delegatingContext);
+        subject.DetachFromContext(delegatingContext);
+
+        var thirdContext = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        subject.AttachToContext(thirdContext);
+        Assert.True(subject.IsAttached());
+    }
+
+    [Fact]
+    public void WhenTheInterceptorBringingTheCountToZeroIsNotTheOwner_ThenTheRecordedClaimReleasesOwnership()
+    {
+        // Guarantee, and the reason the release never has to resolve anything. On the property
+        // route the claim is taken by the innermost interceptor in the write chain while the count
+        // reaches zero under the outermost one, so the release travels through the set recorded at
+        // claim time rather than short-circuiting on interceptor identity.
+
+        // Arrange
+        var (childContext, _) = CreateAggregatedContext();
+        var interceptors = childContext.GetServices<ILifecycleInterceptor>();
+
+        var parent = new Person(childContext) { FirstName = "P" };
+        var child = new Person { FirstName = "C" };
+        var executor = ((IInterceptorSubject)child).GetExecutor();
+
+        ILifecycleInterceptor? releasingInterceptor = null;
+        foreach (var interceptor in interceptors)
+        {
+            var current = (LifecycleInterceptor)interceptor;
+            current.SubjectDetaching += change =>
+            {
+                if (change.ReferenceCount == 0 && ReferenceEquals(change.Subject, child))
+                {
+                    releasingInterceptor = current;
+                }
+            };
+        }
+
+        // Act
+        parent.Mother = child;
+        var ownerWhileAttached = interceptors.Single(interceptor => executor.IsOwnedBy(interceptor));
+        parent.Mother = null;
+
+        // Assert
+        Assert.NotNull(releasingInterceptor);
+        Assert.NotSame(ownerWhileAttached, releasingInterceptor);
+
+        Assert.DoesNotContain(interceptors, interceptor => executor.IsOwnedBy(interceptor));
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.False(((IInterceptorSubject)child).IsAttached());
+    }
+
+    private class DetachMarkerException : Exception;
+
     private class RecordingLifecycleHandler(Action<SubjectLifecycleChange> onChange) : ILifecycleHandler
     {
         public void HandleLifecycleChange(SubjectLifecycleChange change) => onChange(change);
@@ -400,4 +495,15 @@ public class AggregatedContextLifecycleTests
 
         public void DetachSubjectFromContext(IInterceptorSubject subject) => Detaches.Add(subject);
     }
+}
+
+/// <summary>
+/// A subject with no properties at all. <c>DetachRootSubject</c> resolves
+/// <c>IPropertyLifecycleHandler</c> once per property ahead of its try block, so a single property
+/// would raise the delegation-cycle exception before the try and the masking finally would never
+/// be reached.
+/// </summary>
+[InterceptorSubject]
+public partial class PropertyLessSubject
+{
 }

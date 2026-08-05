@@ -227,6 +227,12 @@ The move is not only an allocation saving. On `master` the count was **global**,
 
 Ownership is claimed against the **attaching context**, not by interceptor reference identity: an aggregated context resolves more than one `ILifecycleInterceptor` and every one of them attaches, so identity would reject the second one. A claim is refused only when the standing owner does not resolve from the context the new claim arrives through, which a genuinely disjoint graph never can. Two consequences follow, both confined to aggregated configurations that already share an interceptor: the predicate is asymmetric, since a context that resolves the standing owner may claim while one that does not may not, and the re-attach-during-detach rejection is enforced only by the owning interceptor, because that guard is gated on ownership. The second of those is a property of the guard rather than an observable bypass: in the aggregated shape both interceptors unwind inside the same write, so the owner's own guard still raises. See "The aggregated two-interceptor configuration" under "Known Gaps" for what the tests actually measured.
 
+**The release does not resolve anything.** `ClaimOwnership` records every accepted claim that arrives from an interceptor other than the standing owner, in a list on the executor next to `_owner`, and `ReleaseOwnership` answers from `_owner` plus that list. Nothing is allocated where a single interceptor claims, which is every non-aggregated configuration: the list stays null until a second interceptor claims the same subject.
+
+The record exists because both release call sites are `finally` blocks: the `count == 0` block of `DetachFromProperty` and the tail of `DetachRootSubject`. Resolving there is not safe. A chain that has been rewired into a pure-delegation loop makes `GetServices<ILifecycleInterceptor>()` throw, that exception replaces whatever the try block was already raising, and it leaves `_owner` set on a subject that has left the graph, with no public call left that can clear it. Two routes reach it, both needing an aggregated configuration and a consumer-built delegation loop: a lifecycle handler that rewires the chain when it sees the final detach change, and a direct `DetachSubjectFromContext` on the non-owning interceptor with the loop already in place. Field and list operations under `_mutationLock` cannot throw, so the release now always completes. The resolve still happens once, in `ClaimOwnership`, on a path whose caller is prepared to see it throw.
+
+The recorded predicate is **stricter** than the resolve it replaced: it answers "this interceptor claimed" where a resolve answered "some context can still reach the owner". That is sound because every caller has necessarily claimed. `DetachRootSubject` releases only after `_attachedSubjects.Remove(subject)` succeeded and `DetachFromProperty` only after its property set removal succeeded, and the only code that creates either entry is `AttachRootSubject` and `AttachToProperty`, both of which claim before they write to the ledger. The list is dropped together with `_owner`, so the two never disagree: while `_owner` is null the list is null, and an interceptor releasing under a since-cleared owner finds no owner and returns.
+
 Reads of the count use `Volatile.Read`, because the `ConcurrentDictionary` it replaced supplied that ordering for free and a plain field does not. The public `GetReferenceCount()` stays a snapshot.
 
 **What two graphs holding one subject actually looks like, which no issue records.** Measured on `master`, where the shape was reachable by an ordinary parent-to-parent attach. It survives here only in the shared-tracking-context configuration under "Known Gaps", because the cross-graph rejection now refuses every other route to it. Both registries index the subject, and parent tracking records both parents, because those write to the subject's own data rather than resolving through its context. Everything that resolves through the subject's own context reaches one graph only, the one its parent link or its attach edge names, so `TryGetRegisteredSubject()` answers from that graph and the other holds a subject it can enumerate and never hears from: a write to one of the subject's properties runs the first graph's interceptors, and an observer registered on the second graph's own root context sees nothing. The half that works is exactly the half written onto the subject; the half that does not is exactly the half resolved through it.
@@ -425,14 +431,18 @@ sequential path works, which is coverage in appearance and not in substance.
 
 ### The aggregated two-interceptor configuration
 
-Ownership is claimed and released on **graph membership**, not interceptor identity. `ClaimOwnership`
-accepts when the attaching context resolves the standing owner, and `ReleaseOwnership` releases when
-the detaching context does. Identity alone is wrong in both directions: an aggregated context
-resolves more than one `ILifecycleInterceptor` and every one of them attaches every subject, so an
-identity claim would reject the second co-resolved interceptor as a foreign graph, and an identity
-release would be a permanent no-op whenever the interceptor that claimed first is not the one that
-brings the count to zero, leaving the subject owned with no references, reporting attached and
-unable to join any other graph.
+Ownership is claimed on **graph membership**, not interceptor identity. `ClaimOwnership` accepts when
+the attaching context resolves the standing owner, and records the accepting interceptor alongside
+the owner. `ReleaseOwnership` releases the standing owner or any interceptor on that record, so it
+resolves nothing. Identity alone is wrong in both directions: an aggregated context resolves more
+than one `ILifecycleInterceptor` and every one of them attaches every subject, so an identity claim
+would reject the second co-resolved interceptor as a foreign graph, and an identity release would be
+a permanent no-op whenever the interceptor that claimed first is not the one that brings the count to
+zero, leaving the subject owned with no references, reporting attached and unable to join any other
+graph. Releasing on a resolve is wrong too, for a different reason: both release call sites are
+`finally` blocks, so a chain rewired into a pure-delegation loop makes the resolve throw from there
+and mask the exception already in flight, leaving the claim standing forever. See "Reference Count
+and Graph Ownership" for the claim-before-release argument the record rests on.
 
 The consequences below are confined to aggregated configurations that already share an interceptor.
 Rejection of genuinely distinct graphs is unaffected, because a disjoint context cannot resolve the
@@ -448,6 +458,17 @@ those tests found:
   subject can then join a third, disjoint graph. The reference count is one per interceptor, so an
   ordinary single-parent child sits at two rather than one. A guarantee, pinned by
   `WhenAggregatedContextAttachesAndDetachesASubject_ThenOwnershipIsClaimedOnceAndReleasedOnce`.
+- **The release travels through the record, not through identity.** On the property route the claim
+  is taken by the innermost interceptor in the write chain while the count reaches zero under the
+  outermost one, so an ordinary aggregated attach and detach exercises the recorded set rather than
+  short-circuiting on identity. A guarantee, pinned by
+  `WhenTheInterceptorBringingTheCountToZeroIsNotTheOwner_ThenTheRecordedClaimReleasesOwnership`.
+- **A detach whose context has turned cyclic still releases, and still reports its own failure.**
+  With the subject root-attached through a pure delegator that is then rewired into a delegation
+  loop, a direct `DetachSubjectFromContext` on the non-owning interceptor raises from inside its try
+  block. The release in the `finally` consults the record, so it neither throws over that exception
+  nor strands the claim, and the subject joins another graph afterwards. A guarantee, pinned by
+  `WhenTheDetachResolvesThroughACyclicContext_ThenTheReleaseDoesNotMaskTheFailure`.
 - **The predicate is asymmetric, and which way it falls depends on the route in.** A context that
   resolves the standing owner may claim, one that does not may not, and the owner is whoever claims
   first among co-resolved interceptors. `AttachToContext` walks the resolved set in order, so a root
