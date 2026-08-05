@@ -62,10 +62,10 @@ public class SourceMonitor
 
             _sources = _sources.Add(source);
             source.StateChanged += OnSourceStateChanged;
-        }
 
-        Publish(new SourceEvent(
-            SourceEventKind.SourceRegistered, source, null, source.State, source.State, DateTimeOffset.UtcNow));
+            Publish(new SourceEvent(
+                SourceEventKind.SourceRegistered, source, null, source.State, source.State, DateTimeOffset.UtcNow));
+        }
     }
 
     /// <summary>Unregisters a source. A no-op for a source that was never registered.</summary>
@@ -82,10 +82,10 @@ public class SourceMonitor
 
             _sources = _sources.Remove(source);
             source.StateChanged -= OnSourceStateChanged;
-        }
 
-        Publish(new SourceEvent(
-            SourceEventKind.SourceUnregistered, source, null, source.State, source.State, DateTimeOffset.UtcNow));
+            Publish(new SourceEvent(
+                SourceEventKind.SourceUnregistered, source, null, source.State, source.State, DateTimeOffset.UtcNow));
+        }
     }
 
     private void OnSourceStateChanged(object? sender, SourceEvent sourceEvent) => Publish(sourceEvent);
