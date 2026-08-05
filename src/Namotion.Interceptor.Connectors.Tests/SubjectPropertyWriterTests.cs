@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Namotion.Interceptor.Connectors.Monitoring;
+using Namotion.Interceptor.Connectors.Tests.Models;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
@@ -182,4 +184,44 @@ public class SubjectPropertyWriterTests
         Assert.Empty(updates);
     }
 
+    [Fact]
+    public async Task WhenAStaleLoadCompletesAfterANewerCycleHasStartedBuffering_ThenTheStaleCycleIsDiscarded()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var person = new Person(context);
+
+        var staleLoadEntered = new TaskCompletionSource();
+        var releaseStaleLoad = new TaskCompletionSource();
+        var staleApplied = false;
+
+        var source = new TestSubjectSource(person, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = async _ =>
+            {
+                staleLoadEntered.TrySetResult();
+                await releaseStaleLoad.Task;
+                return (Action?)(() => staleApplied = true);
+            },
+        };
+
+        // A standalone writer, separate from the source's own internal pump (never started here):
+        // ReportConnecting/ReportSynchronized still drive the same source's real state machine,
+        // since TransitionTo operates on the source instance, not on any one writer.
+        var writer = new SubjectPropertyWriter(source, NullLogger.Instance);
+
+        // Act
+        writer.StartBuffering();                                       // cycle A (stale), generation 1
+        var staleTask = writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
+        await staleLoadEntered.Task;                                   // cycle A is now blocked inside LoadInitialStateAsync
+
+        writer.StartBuffering();                                       // cycle B supersedes A, generation 2
+
+        releaseStaleLoad.SetResult();
+        await staleTask;
+
+        // Assert
+        Assert.False(staleApplied, "The superseded cycle's stale snapshot must never be applied.");
+        Assert.Equal(SourceState.Connecting, source.State);
+    }
 }

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors.Monitoring;
 
 namespace Namotion.Interceptor.Connectors;
 
@@ -19,6 +20,12 @@ public sealed class SubjectPropertyWriter
     private readonly Lock _lock = new();
 
     private List<Action>? _updates = [];
+
+    // Bumped by every StartBuffering call. LoadInitialStateAndResumeAsync captures the generation
+    // in effect when it starts and compares it again after its (possibly long) await: if a later
+    // StartBuffering happened in between, this call's snapshot is stale and must not be applied,
+    // replayed, or certified as Synchronized - see LoadInitialStateAndResumeAsync.
+    private int _generation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
@@ -41,11 +48,12 @@ public sealed class SubjectPropertyWriter
         lock (_lock)
         {
             _updates = [];
+            _generation++;
         }
 
         // Buffering starts exactly when the source has stopped trusting its live feed, on first
         // connect and on every reconnect, including reconnects the base pump never sees.
-        (_source as SubjectSourceBase)?.ReportConnecting();
+        (_source as SubjectSourceBase)?.TransitionTo(SourceState.Connecting);
     }
 
     /// <summary>
@@ -60,41 +68,68 @@ public sealed class SubjectPropertyWriter
     /// <returns>The task.</returns>
     public async Task LoadInitialStateAndResumeAsync(CancellationToken cancellationToken)
     {
-        var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
+        int generation;
         lock (_lock)
         {
-            applyAction?.Invoke();
+            generation = _generation;
+        }
 
-            // Replay previously buffered updates
-            var updates = _updates;
-            if (updates is null)
+        var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
+
+        var superseded = false;
+        lock (_lock)
+        {
+            if (generation != _generation)
             {
-                // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
-                // This is safe - it means another reconnection cycle already loaded state and replayed updates.
-                _logger.LogDebug("LoadInitialStateAndResumeAsync called but updates already replayed by concurrent reconnection.");
+                // A later StartBuffering happened while this call was awaiting LoadInitialStateAsync,
+                // so the snapshot just returned is stale: applying it now would overwrite whatever
+                // the newer cycle has already written (or will write), and reporting Synchronized
+                // would certify that stale data as current. Discard the apply action entirely, don't
+                // touch _updates (the newer cycle owns that buffer), and skip the report below.
+                superseded = true;
+                _logger.LogDebug("LoadInitialStateAndResumeAsync discarded a stale snapshot superseded by a later reconnect.");
             }
             else
             {
-                foreach (var action in updates)
-                {
-                    try
-                    {
-                        action();
-                    }
-                    catch (Exception e)
-                    {
-                        _logger.LogError(e, "Failed to apply subject update.");
-                    }
-                }
+                applyAction?.Invoke();
 
-                // Must be after replay: Write() reads _updates without lock on the fast path.
-                _updates = null;
+                // Replay previously buffered updates
+                var updates = _updates;
+                if (updates is null)
+                {
+                    // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
+                    // This is safe - it means another reconnection cycle already loaded state and replayed updates.
+                    _logger.LogDebug("LoadInitialStateAndResumeAsync called but updates already replayed by concurrent reconnection.");
+                }
+                else
+                {
+                    foreach (var action in updates)
+                    {
+                        try
+                        {
+                            action();
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.LogError(e, "Failed to apply subject update.");
+                        }
+                    }
+
+                    // Must be after replay: Write() reads _updates without lock on the fast path.
+                    _updates = null;
+                }
             }
         }
 
-        // Both paths mean state has been loaded and replayed, by this call or a concurrent one,
-        // so both fall through to a single report rather than duplicating the call.
-        (_source as SubjectSourceBase)?.ReportSynchronized();
+        if (superseded)
+        {
+            return;
+        }
+
+        // Both remaining paths mean state has been loaded and replayed, by this call or a concurrent
+        // one at the SAME generation, so both fall through to a single report rather than duplicating
+        // the call.
+        (_source as SubjectSourceBase)?.TransitionTo(SourceState.Synchronized);
     }
 
     /// <summary>
