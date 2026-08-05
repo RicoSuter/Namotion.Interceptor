@@ -2324,6 +2324,209 @@ Append to `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/RootAttachContractT
         Assert.Equal(0, lateDetaches);
     }
 
+    [Fact]
+    public void WhenRemoveFallbackContextTargetsTheAttachEdge_ThenItThrows()
+    {
+        // Behaviour change 2's second half. The guard hook has no other coverage: every migrated
+        // test now goes through DetachFromContext and never exercises the rejection.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var subject = new Person { FirstName = "Subject" };
+        ((IInterceptorSubject)subject).AttachToContext(context);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(
+            () => ((IInterceptorSubject)subject).Context.RemoveFallbackContext(context));
+
+        Assert.True(((IInterceptorSubject)subject).IsAttached());
+        Assert.Same(context, ((IInterceptorSubject)subject).TryGetAttachContext());
+    }
+
+    [Fact]
+    public void WhenAnInterceptorsContextLeavesTheChain_ThenItStillReceivesTheDetachItWasOwed()
+    {
+        // Behaviour change 16's second half. Re-resolving at detach would give this interceptor
+        // nothing, leaking whatever per-subject state it took at attach.
+
+        // Arrange
+        var detaches = 0;
+        var departingContext = InterceptorSubjectContext
+            .Create()
+            .WithService(() => new CountingLifecycleInterceptor(() => Interlocked.Increment(ref detaches)), _ => false);
+
+        var attachContext = InterceptorSubjectContext.Create();
+        attachContext.AddFallbackContext(departingContext);
+
+        var subject = new Person { FirstName = "Subject" };
+        ((IInterceptorSubject)subject).AttachToContext(attachContext);
+
+        // The interceptor's context leaves the chain after the attach recorded it.
+        attachContext.RemoveFallbackContext(departingContext);
+        Assert.Empty(attachContext.GetServices<ILifecycleInterceptor>());
+
+        // Act
+        ((IInterceptorSubject)subject).DetachFromContext(attachContext);
+
+        // Assert
+        Assert.Equal(1, detaches);
+    }
+
+    [Fact]
+    public void WhenPropertyOwnedSubjectIsRootAttachedIntoAnotherGraph_ThenNoRecordAndNoEdgeArePublished()
+    {
+        // The directed test spec section 9 asks for, and the only thing that kills the mutant which
+        // deletes the ownership read in TryRecordAttachContext. The cross-graph reproduction goes
+        // through the property path and is rejected by ClaimOwnership instead, so it passes with
+        // that check deleted.
+
+        // Arrange
+        var contextA = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var contextB = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var parentA = new Person(contextA) { FirstName = "ParentA" };
+        var owned = new Person { FirstName = "Owned" };
+        parentA.Mother = owned;
+
+        var baseline = UsedByContextsProbe.Count(contextB);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(
+            () => ((IInterceptorSubject)owned).AttachToContext(contextB));
+
+        Assert.Null(((IInterceptorSubject)owned).TryGetAttachContext());
+        Assert.Equal(baseline, UsedByContextsProbe.Count(contextB));
+    }
+
+    [Fact]
+    public void WhenConnectorItemIsAssignedUnderItsAttachParent_ThenItKeepsTheAttachEdgeAndGetsNoLink()
+    {
+        // Kills the mutant that sets the link and releases the attach edge instead of skipping the
+        // link. Nothing else observes the record after a connector-shaped assignment.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithContextInheritance();
+
+        var parent = new Person(context) { FirstName = "Parent" };
+        var parentContext = ((IInterceptorSubject)parent).Context;
+
+        var item = new Person { FirstName = "Item" };
+        ((IInterceptorSubject)item).AttachToContext(parentContext);
+
+        // Act
+        parent.Mother = item;
+
+        // Assert: the record still names the attach context, so the edge was not traded for a link.
+        Assert.Same(parentContext, ((IInterceptorSubject)item).TryGetAttachContext());
+        Assert.Equal(1, item.GetReferenceCount());
+        Assert.NotNull(((IInterceptorSubject)item).TryGetRegisteredSubject());
+    }
+
+    [Fact]
+    public void WhenHandlerRootAttachesTheSubjectDuringItsOwnDetach_ThenItThrows()
+    {
+        // Behaviour change 17 through the OTHER attach entry point. The property-path variant is
+        // covered in commit 2; this one reaches ThrowIfDetachIsUnwinding via AttachRootSubject.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        Exception? caught = null;
+        var parent = new Person(context) { FirstName = "Parent" };
+        context.WithService(() => new RootReAttachingHandler(exception => caught = exception));
+
+        var child = new Person { FirstName = "Child" };
+        parent.Mother = child;
+
+        // Act
+        parent.Mother = null;
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(caught);
+        Assert.Equal(0, child.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenSubjectReferencesItself_ThenNoSelfLinkIsPublished()
+    {
+        // Kills the mutant that deletes the self-context guard. A self-link makes the context
+        // delegate to itself, so every intercepted access on the subject raises afterwards.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var subject = new Person(context) { FirstName = "Subject" };
+
+        // Act
+        subject.Mother = subject;
+
+        // Assert: still readable and writable, which a self-delegating context would not be.
+        subject.LastName = "written after the self reference";
+        Assert.Equal("written after the self reference", subject.LastName);
+        Assert.Equal(1, subject.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenASecondLifecycleBearingContextIsAdded_ThenItThrowsEvenThoughARecordExists()
+    {
+        // Kills the mutant that makes the AddFallbackContext guard test only for a non-null record
+        // rather than for record identity. Without it the subject resolves graph B's interceptors
+        // while being absent from B's ledger and registry.
+
+        // Arrange
+        var contextA = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var contextB = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var subject = new Person { FirstName = "Subject" };
+        ((IInterceptorSubject)subject).AttachToContext(contextA);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(
+            () => ((IInterceptorSubject)subject).Context.AddFallbackContext(contextB));
+
+        Assert.Same(contextA, ((IInterceptorSubject)subject).TryGetAttachContext());
+    }
+
+    private class RootReAttachingHandler(Action<Exception> onThrow) : ILifecycleHandler
+    {
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (!change.IsPropertyReferenceRemoved || change.ReferenceCount != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                change.Subject.AttachToContext(change.Subject.Context);
+            }
+            catch (Exception exception)
+            {
+                onThrow(exception);
+            }
+        }
+    }
+
     private class MarkerService;
 
     private class CountingLifecycleInterceptor(Action onDetach) : ILifecycleInterceptor
@@ -2517,12 +2720,19 @@ public class KnownGapTests
 
         var item = new Person { FirstName = "Item" };
         ((IInterceptorSubject)item).AttachToContext(((IInterceptorSubject)parent).Context);
+
+        // The FIRST reference must be the attach parent, so the link gate skips: it fires only at
+        // reference count 1, and there it sees a context the attach edge already names. Referencing
+        // the item from the holder first would set a link to the holder instead and the item would
+        // survive the parent leaving, which is not the shape #410 describes.
+        parent.Mother = item;
         holder.Mother = item;
 
         // Act
         ((IInterceptorSubject)parent).DetachFromContext(context);
 
-        // Assert: the gap.
+        // Assert: the gap. The item is still referenced and still attached, and its only edge is an
+        // attach edge into a context that has itself left the graph.
         Assert.Equal(1, item.GetReferenceCount());
         Assert.Empty(((IInterceptorSubject)item).Context.GetServices<IWriteInterceptor>());
     }
@@ -2609,16 +2819,25 @@ public class KnownGapTests
         // context count as one graph while having two registries. The two-graph finding from spec
         // section 2 is not closed in that configuration.
 
-        // Arrange
+        // Arrange. The fallback must be wired BEFORE WithRegistry: WithService skips only when the
+        // service type already RESOLVES through the chain, so registering first would give each
+        // root its own LifecycleInterceptor, two genuinely separate graphs, and the cross-graph
+        // rejection would fire correctly rather than demonstrating the gap.
         var trackingContext = InterceptorSubjectContext
             .Create()
             .WithContextInheritance();
 
-        var rootA = InterceptorSubjectContext.Create().WithRegistry();
+        var rootA = InterceptorSubjectContext.Create();
         rootA.AddFallbackContext(trackingContext);
+        rootA.WithRegistry();
 
-        var rootB = InterceptorSubjectContext.Create().WithRegistry();
+        var rootB = InterceptorSubjectContext.Create();
         rootB.AddFallbackContext(trackingContext);
+        rootB.WithRegistry();
+
+        // One lifecycle interceptor, two registries.
+        Assert.Same(rootA.TryGetLifecycleInterceptor(), rootB.TryGetLifecycleInterceptor());
+        Assert.NotSame(rootA.TryGetService<ISubjectRegistry>(), rootB.TryGetService<ISubjectRegistry>());
 
         var parentA = new Person(rootA) { FirstName = "ParentA" };
         var parentB = new Person(rootB) { FirstName = "ParentB" };
@@ -2826,7 +3045,7 @@ Five additions, per spec section 10:
 4. The resolved-position ordering dependency from spec section 2: a handler's observed order depends on its resolved service position, not its registration position, and `SubjectRegistry` carries no ordering attribute so where it lands is purely its registration index. No issue records this and this design preserves it.
 5. The global versus per-graph reference count distinction, and how one graph per subject collapses it: `ReferenceCount` was global while `IsContextAttach` was per-graph, and that mismatch produced #207.
 
-- [ ] **Step 6: Fold the three planning decisions back into the spec**
+- [ ] **Step 6: Fold the planning decisions and corrections back into the spec**
 
 In `docs/superpowers/specs/2026-08-04-context-inheritance-design.md`:
 
@@ -2834,7 +3053,9 @@ In `docs/superpowers/specs/2026-08-04-context-inheritance-design.md`:
 2. Section 9: correct the evidence row for change 3, which says the `_usedByContexts` probe lives in `Namotion.Interceptor.Tests`. It lives in `Namotion.Interceptor.Tracking.Tests` behind a new `InternalsVisibleTo` grant, because the core test project has no Tracking reference.
 3. Section 4 and section 10's benchmark row: correct the claim that the owner claim and the count increment share one lock acquisition. They cannot, because `set.Add`'s early return sits between them.
 4. Section 9's gap test list: record that the `DetachFromContext` racing a property attach case has **no test**, because the rendezvous it needs is inside `LifecycleInterceptor`'s monitor and no public seam reaches it. Leaving it unpinned is the honest outcome; a test that cannot hit the window would only look like coverage.
-5. Section 5's `AttachToContext` listing and section 9's "plain contexts" evidence row: **`AttachToContext` skips the record entirely when the context resolves no `ILifecycleInterceptor`**, degenerating to plain composition. Without it the generated constructor marks a plain-context subject as attached to a graph that does not exist, and that mark refuses every later attempt to join a real one. Record the consequence too: `DetachFromContext` is not the inverse of `AttachToContext` for such a subject, `RemoveFallbackContext` is. Add the same line to `docs/tracking.md`'s edge-kinds table under step 3, so the asymmetry is a documented rule rather than a surprise.
+5. Section 8's **behaviour change 15 appears to be unobservable and should be struck or restated.** It claims a second interceptor co-registered on the attach context loses the detach notification that `master`'s executor override gave it when the attach edge is released on the property route. Trace it and the difference disappears: the handler's descent at reference count zero notifies everything resolved from the *parent's* context, and in every reachable shape that set is a superset of the attach context's, because the parent's context resolves the attach context. The one shape where they could differ, an attach context not reachable from the parent's context, is the cross-graph case that behaviour change 5 now rejects. On `master` the #207 shape never releases the attach edge at all, so the "where master notifies" clause describes a path that does not run. Verify this during implementation before striking it; if a shape does exist, it needs a test and the change stays. Either way section 9's evidence row for 15 must stop claiming a test that cannot be written.
+
+6. Section 5's `AttachToContext` listing and section 9's "plain contexts" evidence row: **`AttachToContext` skips the record entirely when the context resolves no `ILifecycleInterceptor`**, degenerating to plain composition. Without it the generated constructor marks a plain-context subject as attached to a graph that does not exist, and that mark refuses every later attempt to join a real one. Record the consequence too: `DetachFromContext` is not the inverse of `AttachToContext` for such a subject, `RemoveFallbackContext` is. Add the same line to `docs/tracking.md`'s edge-kinds table under step 3, so the asymmetry is a documented rule rather than a surprise.
 
 - [ ] **Step 7: Verify no em dashes were introduced**
 
@@ -2901,30 +3122,37 @@ Multiple launches each. Record the numbers for the pull request description.
 
 For each mutant in spec section 9, apply it, confirm the named test fails, and revert. This is the discipline that says the tests test what we think they do. Work through them one at a time; do not batch.
 
+Every pairing below was checked against what the named test actually asserts. Six of the spec's original pairings did not kill their mutant and have been repointed or split; the two that nothing kills are marked as such rather than given a test that would only look like coverage.
+
 | Mutant | Must fail |
 |---|---|
 | Restore `IsContextAttach` to the link gate | `WhenConstructorAttachedChildIsPlacedUnderAParent_...` |
-| Publish the link from `LifecycleInterceptor` instead of the handler | `RecursiveAttachTests.WhenUsingLifecycleWithoutContextInheritance_ThenOnlyDirectChildrenAreAttached` |
-| Gate the descent on `count == 1` instead of `IsContextAttach` | `WhenPreWiredChildIsAttachedUnderANewParent_...` |
+| Publish the link from `LifecycleInterceptor` instead of the handler | `AttachOrderCharacterizationTests.WhenHandlerRunsBeforeContextInheritance_...`. **Not** `RecursiveAttachTests`: the internal setter runs no descent, so under `WithLifecycle()` alone the grandchild still does not attach and that test passes either way |
+| Gate the descent on `count == 1` instead of `IsContextAttach` | `WhenPreWiredChildIsAttachedUnderANewParent_...`, which only works because its parent is now un-attached at pre-wire time |
 | Release the link before the handlers instead of in the `finally` | `AttachOrderCharacterizationTests.WhenThreeLevelGraphIsAttached_...` |
-| Delete the owner check in `TryRecordAttachContext` | `WhenSubjectOwnedByOneGraphIsAttachedToAnother_...` |
-| Delete the `finally` around the detach edge removal | `WhenDetachInterceptorThrows_...` |
-| Delete the self-context guard | a new `a.Mother = a` test; add one if missing |
+| Delete the owner check in `ClaimOwnership` | `WhenSubjectOwnedByOneGraphIsAttachedToAnother_...` |
+| Delete the ownership claim in `AttachRootSubject` | `WhenRootAttachedSubjectIsReferencedFromAnotherGraph_...`. This is the hole the review found, so the mutant is the plan's own first draft |
+| Delete the ownership release in `DetachRootSubject` | `WhenPlainContextSubjectJoinsAGraphLater_...` and any re-attach after a root detach |
+| Delete the ownership read in `TryRecordAttachContext` | `WhenPropertyOwnedSubjectIsRootAttachedIntoAnotherGraph_...`. Split from the row above: the cross-graph reproduction is rejected by `ClaimOwnership` on the property path and passes with this check deleted |
+| Delete the `finally` around the detach edge removal | `WhenDetachInterceptorThrows_...`, and only because of its edge assertion: the record is cleared before the interceptor loop, so `IsAttached()` is false and a re-attach succeeds even with the `finally` gone |
+| Delete the self-context guard | `WhenSubjectReferencesItself_ThenNoSelfLinkIsPublished` |
 | Delete the rollback in `AttachToContext`'s `catch` | `WhenAttachHandlerThrowsPartWay_...` |
-| Put the assertion or the link publication outside the `count == 1` branch | `AttachOrderCharacterizationTests.WhenSubjectHasTwoParents_...` |
+| Put the `Debug.Assert` outside the `count == 1` branch | `AttachOrderCharacterizationTests.WhenSubjectHasTwoParents_...`, in a Debug build |
+| Put the link publication outside the `count == 1` branch | `WhenConnectorItemIsAssignedUnderItsAttachParent_...`. The two-parents test does **not** kill this half: `TrySetParentContext` returns false when a link exists, so a second parent is a no-op |
+| Set the link and release the attach edge instead of skipping the link | `WhenConnectorItemIsAssignedUnderItsAttachParent_...` |
 | Make the reverse-entry unregistration unconditional | `WhenTwoEdgesTargetOneContext_...` |
-| Route the detach cleanup through public `RemoveFallbackContext` | `WhenTwoThreadsDetachTheSameRoot_...` |
+| Route the detach cleanup through public `RemoveFallbackContext` | both `AttachEdgeLeakTests` reproductions, on the property route. **Not** `WhenTwoThreadsDetachTheSameRoot_...`: by the time the root path's `finally` runs the record is already null, so the public guard no-ops and behaviour is identical |
 | Drop the reference-count guard on `DetachFromContext` | `WhenSubjectIsStillReferenced_...` |
 | Drop the last-property-detach release of the attach edge | both `AttachEdgeLeakTests` reproductions |
 | Make the lifecycle-bearing guard test `_owner == null` | every root attach; the whole suite |
-| Make the guard test only that the record is non-null | a new test adding a second lifecycle-bearing context; add one if missing |
-| Delete the re-attach-during-detach throw | `WhenHandlerReAttachesSubjectDuringItsOwnDetach_...` |
-| Read the reference count without `Volatile.Read` | not deterministically catchable; record that rather than claiming coverage |
-| Re-resolve the interceptors at detach | `WhenChainTurnedCyclicAfterAttach_...` and `WhenAnInterceptorIsRegisteredAfterTheAttach_...` |
-| Make the `_owner` release unconditional | a new two-graph release test; add one if missing |
-| Release `_owner` while not holding `_attachedSubjects` | not deterministically catchable; record that |
+| Make the guard test only that the record is non-null | `WhenASecondLifecycleBearingContextIsAdded_ThenItThrowsEvenThoughARecordExists` |
+| Delete the re-attach-during-detach throw | `WhenHandlerReAttachesSubjectDuringItsOwnDetach_...` and `WhenHandlerRootAttachesTheSubjectDuringItsOwnDetach_...`, one per entry point |
+| Re-resolve the interceptors at detach | `WhenAnInterceptorIsRegisteredAfterTheAttach_...` and `WhenAnInterceptorsContextLeavesTheChain_...`. **Not** `WhenChainTurnedCyclicAfterAttach_...`, which asserts the edge comes out and does not distinguish which set was used |
+| Skip the `interceptors.IsEmpty` early return in `AttachToContext` | `WhenPlainContextSubjectJoinsAGraphLater_...` (decision 4) |
+| Read the reference count without `Volatile.Read` | **Nothing kills this.** It is a memory-visibility weakening with no deterministic observation. Report it as uncaught |
+| Release `_owner` while not holding `_attachedSubjects`, or make the release unconditional | **Nothing kills either.** A non-owner reaching `ReleaseOwnership` requires the subject to be in a second graph's ledger, which the ownership claim already prevents, so the mutant is unreachable rather than merely hard to observe. Report both as uncaught, with that reasoning |
 
-Four rows say "add one if missing" and two say "not deterministically catchable". Both outcomes are results: add the tests, and report the two uncatchable mutants rather than pretending they die.
+Three mutants have no killer and that is the honest outcome: two are unreachable given the guards above them, and one is a visibility weakening. Report them as uncaught rather than adding a test that passes for unrelated reasons.
 
 - [ ] **Step 5: Re-review the four planning decisions against the implemented code**
 
@@ -2956,7 +3184,9 @@ The plan ends here. Updating GitHub issues (#402, #207, #410, #210, #411, #384, 
 
 **Spec coverage.** Section 4's architecture is Task 3 steps 1 through 10. Section 5's sequences are steps 4 through 10, with the guard predicate at step 6 and the detach `finally` at step 10d. Section 6's migration is step 11. Section 7's aliasing rule is step 3, its exception table is Task 5 step 3. Section 8's eighteen behaviour changes each have an evidence row covered by Task 2 or Task 4. Section 9's three test categories are Tasks 1, 2 and 4; its mutant list is Task 6 step 4; its oracle inventory is Task 3 step 13 and Task 6 step 2. Section 10's staging is the five commits, its integration gate is Task 3 step 14 and Task 6 step 1, its benchmark gates are Task 3 step 16 and Task 6 step 3, its documentation list is Task 5.
 
-Two spec items are deliberately not implemented as written, and both are called out in the plan rather than silently dropped: the `DetachFromContext`-racing-a-property-attach gap test, which no public seam can reach, and the shared lock acquisition for the owner claim and the count increment, which `set.Add`'s early return makes impossible.
+Four spec items are deliberately not implemented as written, and each is called out rather than silently dropped: the `DetachFromContext`-racing-a-property-attach gap test, which no public seam can reach; the shared lock acquisition for the owner claim and the count increment, which `set.Add`'s early return makes impossible; behaviour change 15, which appears unobservable in any reachable shape; and three mutants that nothing kills, two of them because the guards above them make the mutant unreachable.
+
+Every one of those is a claim the spec makes that the plan could not honour. They are listed in Task 5 step 6 and Task 6 step 4 so the spec ends up agreeing with what was actually built, rather than the plan quietly diverging from it.
 
 **Type consistency.** `GetExecutor` returns `InterceptorExecutor` and is used identically in `SubjectAttachmentExtensions`, `LifecycleInterceptorExtensions`, `LifecycleInterceptor` and `ContextInheritanceHandler`. `TryClearAttachContext` has the same `out ImmutableArray<ILifecycleInterceptor>` signature at its definition in Task 3 step 6 and its call in step 7. `RemoveAttachEdge` is declared on `InterceptorSubjectContext` in step 4 and called from the executor in step 6 and from `SubjectAttachmentExtensions` in step 7, on an `InterceptorExecutor` receiver in both cases, which inherits it. `ReferenceCount` is a property everywhere. `HasParentContext` is a property, read in `ContextInheritanceHandler`'s assertion and in `ThrowIfDetachIsUnwinding`. `UsedByContextsProbe.Count` takes `IInterceptorSubjectContext` at its definition in Task 2 and is called with both a raw context and a `subject.Context` in Tasks 2 and 4.
 
