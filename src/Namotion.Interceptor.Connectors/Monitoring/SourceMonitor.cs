@@ -197,7 +197,7 @@ public class SourceMonitor : ILifecycleHandler
     /// state changes. Used by property ownership changes (SetSource/RemoveSource), which mutate
     /// property data entirely outside this monitor, so this cannot make a newly-subscribed consumer
     /// see a claim that already happened before it subscribed: SourceSubscription.Sources has no
-    /// ownership baseline to reconcile against (see docs/connectors-source-monitoring.md, Worked
+    /// ownership baseline to reconcile against (see docs/connectors-monitoring.md, Worked
     /// Sample). What it does close is delivery ordering: without the lock, an ownership event could
     /// be enqueued to a subscriber out of order relative to a concurrent Register/Unregister/
     /// Subscribe on the same monitor, since Publish itself is just an unsynchronized read of the

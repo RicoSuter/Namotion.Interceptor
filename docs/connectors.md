@@ -15,7 +15,7 @@ In practice, sources act as network clients and servers act as network servers, 
 - [MQTT](connectors-mqtt.md) - MQTT client/server integration for IoT scenarios
 - [OPC UA](connectors-opcua.md) - OPC UA client/server integration for industrial automation ([Client](connectors-opcua-client.md) | [Server](connectors-opcua-server.md) | [Mapping](connectors-opcua-mapping.md))
 - [Subject Updates](connectors-subject-updates.md) - Wire format for serializing subject state
-- [Source Monitoring](connectors-source-monitoring.md) - Synchronization state, waits, and the source event stream
+- [Source Monitoring](connectors-monitoring.md) - Synchronization state, waits, and the source event stream
 
 ## Sources
 
@@ -136,7 +136,7 @@ var context = InterceptorSubjectContext
     .WithSourceMonitoring(builder.Services);
 ```
 
-See [Source Monitoring](connectors-source-monitoring.md) for waiting on synchronization, reading per-property state, and the event stream.
+See [Source Monitoring](connectors-monitoring.md) for waiting on synchronization, reading per-property state, and the event stream.
 
 ### Inbound Update Error Handling
 
@@ -194,7 +194,7 @@ public interface ISubjectSource : ISubjectConnector
 }
 ```
 
-Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See [Breaking Change for Custom ISubjectSource Implementers](connectors-source-monitoring.md#breaking-change-for-custom-isubjectsource-implementers).
+Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See [Breaking Change for Custom ISubjectSource Implementers](connectors-monitoring.md#breaking-change-for-custom-isubjectsource-implementers).
 
 #### Custom Source Example
 
