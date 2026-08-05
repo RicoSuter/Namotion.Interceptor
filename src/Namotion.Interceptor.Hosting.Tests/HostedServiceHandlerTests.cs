@@ -194,6 +194,50 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
+    public async Task WhenAStopActionIsQueued_ThenWaitForPendingActionsCompletesOnlyAfterItHasRun()
+    {
+        // Arrange
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+            var hostedService = new PersonBackgroundService(person);
+            person.AttachHostedService(hostedService);
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
+
+            // Act - companion to WhenActionsAreQueued_ThenWaitForPendingActionsCompletesOnlyAfterTheyHaveRun
+            // above, which only covers the start-action path.
+            person.DetachHostedService(hostedService);
+            await context.WaitForPendingHostedServiceActionsAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal("Disposed", person.FirstName);
+        });
+    }
+
+    [Fact]
+    public async Task WhenAnActionIsPostedAfterTheWaitIsCreated_ThenTheWaitDoesNotWaitForIt()
+    {
+        // Arrange
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+            var gated = new GatedHostedService();
+
+            // Act - the wait's marker is posted (synchronously, inside this call, before it returns
+            // the incomplete task) before the gated service's own start action is posted, so a
+            // correct FIFO barrier must not wait for it: the marker runs first and completes the
+            // wait regardless of whether the gated service ever finishes starting.
+            var waitTask = context.WaitForPendingHostedServiceActionsAsync(CancellationToken.None);
+            person.AttachHostedService(gated);
+
+            // Assert
+            await waitTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            gated.Release();
+        });
+    }
+
+    [Fact]
     public async Task WhenNoHandlerIsConfigured_ThenWaitForPendingActionsCompletesImmediately()
     {
         // Arrange
@@ -226,4 +270,19 @@ public class HostedServiceHandlerTests
             await host.StopAsync();
         }
     }
+}
+
+/// <summary>A hosted service whose StartAsync blocks until Release is called.</summary>
+internal sealed class GatedHostedService : IHostedService
+{
+    private readonly TaskCompletionSource _started = new();
+
+    public void Release() => _started.TrySetResult();
+
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        await _started.Task.WaitAsync(cancellationToken);
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
