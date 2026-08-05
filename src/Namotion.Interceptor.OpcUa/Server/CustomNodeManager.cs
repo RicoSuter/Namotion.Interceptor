@@ -409,8 +409,8 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             if (changes.HasFlag(NodeStateChangeMasks.Value))
             {
-                // Callers that reach here hold NodeManager.Lock;
-                // a value set without a matching ClearChangeMasks would break that
+                // Callers that reach here hold NodeManager.Lock; every value set must be flushed by
+                // the same actor under that same hold, or a later flush misattributes it as a client write.
                 _serverService.UpdateProperty(property.Reference, variableNode.Timestamp, variableNode.Value);
             }
         };
