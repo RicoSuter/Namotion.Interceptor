@@ -402,6 +402,8 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             if (changes.HasFlag(NodeStateChangeMasks.Value))
             {
+                // Callers that reach here hold NodeManager.Lock;
+                // a value set without a matching ClearChangeMasks would break that
                 _serverService.UpdateProperty(property.Reference, variableNode.Timestamp, variableNode.Value);
             }
         };
