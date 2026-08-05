@@ -215,7 +215,7 @@ That argument holds only while three guards hold together:
 2. `RemoveFallbackContext` rejects the attach edge,
 3. `DetachFromContext` rejects a non-zero reference count.
 
-Relax any one and a root can become a pure delegator while holding a link, at which point the single write site becomes cycle-capable. One relaxation already exists on the error path and is recorded at the write site: the attach rollback removes the edge with no reference-count check, so a subject that is already a property child, is root-attached within the same graph and whose attach then throws is left parent-only.
+Relax any one and a root can become a pure delegator while holding a link, at which point the single write site becomes cycle-capable. A fourth relaxation already exists on the error path and is recorded at the write site: `ClearAttachContext`, the rollback `AttachToContext` runs when an attach interceptor throws, removes the edge with no reference-count check, so a subject that is already a property child, is root-attached within the same graph and whose attach then throws is left parent-only.
 
 **Release ordering.** The link is cleared in `DetachFromProperty`'s `finally`, at reference count zero, and never before the handlers run. The descent resolves the next level's handlers through the child's own context, and a property-attached subject has no other edge, so clearing first would give grandchildren bookkeeping without handler invocation and would also lose the subject's own per-property deregistration. It also closes the window in which the subject is unowned while its graph is still mid-detach, during which another graph could claim it.
 
@@ -228,6 +228,8 @@ The move is not only an allocation saving. On `master` the count was **global**,
 Ownership is claimed against the **attaching context**, not by interceptor reference identity: an aggregated context resolves more than one `ILifecycleInterceptor` and every one of them attaches, so identity would reject the second one. A claim is refused only when the standing owner does not resolve from the context the new claim arrives through, which a genuinely disjoint graph never can. Two consequences follow, both confined to aggregated configurations that already share an interceptor: the predicate is asymmetric, since a context that resolves the standing owner may claim while one that does not may not, and the re-attach-during-detach rejection is enforced only by the owning interceptor, because that guard is gated on ownership.
 
 Reads of the count use `Volatile.Read`, because the `ConcurrentDictionary` it replaced supplied that ordering for free and a plain field does not. The public `GetReferenceCount()` stays a snapshot.
+
+**What two graphs holding one subject actually looks like, which no issue records.** Measured on `master`, where the shape was reachable by an ordinary parent-to-parent attach. It survives here only in the shared-tracking-context configuration under "Known Gaps", because the cross-graph rejection now refuses every other route to it. Both registries index the subject, and parent tracking records both parents, because those write to the subject's own data rather than resolving through its context. Everything that resolves through the subject's own context reaches one graph only, the one its parent link or its attach edge names, so `TryGetRegisteredSubject()` answers from that graph and the other holds a subject it can enumerate and never hears from: a write to one of the subject's properties runs the first graph's interceptors, and an observer registered on the second graph's own root context sees nothing. The half that works is exactly the half written onto the subject; the half that does not is exactly the half resolved through it.
 
 ## Handler Order Depends on Resolved Position
 
@@ -245,6 +247,252 @@ No issue records this. The parent-link design preserves it deliberately, which i
 **One detach order did move, and in the direction of consistency.** The detach descent used to run only when the inherited edge was present, so a subject whose edge was absent, such as one attached in its own constructor and then placed under a parent, fell through to the explicit child recursion that runs after the whole handler chain. That produced a top-down cascade for exactly that shape while every other shape cascaded bottom-up. The descent now runs unconditionally at reference count zero, so every shape whose parent context carries `ContextInheritanceHandler` cascades bottom-up.
 
 The explicit child recursion at the end of `DetachFromProperty` still runs. Where the descent already detached a child, that child no longer has a ledger entry and the recursion returns immediately, so it costs a lookup and changes nothing. Where inheritance is not registered it is the only cascade there is, and it produces the top-down order, because a subject's own handlers run before its children are recursed into.
+
+## Known Gaps
+
+Behaviours this design leaves broken on purpose. Most of them are pinned by a test in
+`src/Namotion.Interceptor.Tracking.Tests/Lifecycle/KnownGapTests.cs`, one test per entry, and those
+tests **assert the undesirable outcome**. A reader who finds one failing must not weaken the
+assertion to make it pass. A failure means one of two things: either someone improved the behaviour,
+in which case update the test and the matching entry here deliberately, or someone regressed it and
+the assertion is doing its job. The two entries at the end have no test, and say why.
+
+### Root attach racing root detach on the same subject
+
+`AttachToContext` and `DetachFromContext` are each two steps, a record transition under
+`_mutationLock` followed by an interceptor pass outside it, and they are not atomic against each
+other. A detach can clear the record, an attach can then record and publish its edge, and the
+detach's second step removes that edge, leaving a record with no edge: the subject reports attached
+and resolves nothing. All four record and edge combinations are reachable.
+
+One shape of it is inside the library rather than in consumer sequencing. `ClearAttachContext`, the
+rollback `AttachToContext` runs when the attach throws, clears the record under `_mutationLock`,
+releases the lock, and removes the edge in a second acquisition. A retry that records the same
+context in between and deduplicates against the still-present edge then loses that edge to the
+rollback's removal.
+
+Not fixed because making the two steps one requires the edge removal inside `_mutationLock`, which
+drags `InvalidateUsingContexts` in with it, and #400 deliberately keeps that outside. Closing it
+means serialising the two root operations per subject, which is a separate change.
+
+Pinned by `WhenAttachRacesDetachOnTheSameRoot_ThenNoInvariantOtherThanEdgeAgreementHolds`. That test
+deliberately does **not** assert that the record and the edge agree, because that agreement is
+exactly what the defect breaks. What it pins is the weaker property that must survive: whatever the
+race leaves behind, a full attach and detach round still completes, so no round can wedge the
+subject in a state no consumer call can leave.
+
+### Adding the attach context back during the detach window
+
+`DetachFromContext` clears the record before the interceptor loop, so an `AddFallbackContext` naming
+that same context and arriving inside the window is no longer naming the recorded attach context.
+`OnAddingFallbackContext` sees a lifecycle-bearing context that is not the record and throws. The
+silent form of this, in which the add succeeded and left a subject resolving a graph it was leaving,
+is gone. What remains is that the caller cannot complete the add at all.
+
+Not fixed because clearing the record before the interceptor pass is what makes the detach run
+exactly once and makes the edge removal unconditional in the `finally`. The window closes with the
+same serialisation as the entry above.
+
+Pinned by `WhenAddingTheAttachContextDuringTheDetachWindow_ThenItThrows`, which rendezvouses with a
+custom `ILifecycleInterceptor` so that the add provably lands inside the window rather than after it.
+
+### A multi-parent subject whose linked parent leaves the graph
+
+The parent link is written once, at reference count one, and names whichever parent referenced the
+subject first. When that parent leaves the graph while a second parent still holds the subject, the
+subject's count goes to one rather than zero, so `TryClearParentContext` does not run and nothing
+repoints the link. The link keeps naming a context that has itself left the graph and now resolves
+nothing, so the subject stays attached and referenced while resolving no interceptors at all. Its
+`GetServices<IWriteInterceptor>()` is empty. That is more severe than #410 predicts.
+
+Not fixed because the only candidate fix is repointing the link on partial detach, which was
+proposed and refuted three times. See "Rejected Alternatives".
+
+Pinned by `WhenLinkedParentLeavesWhileAnotherHoldsTheSubject_ThenTheSubjectGoesDark`.
+
+### A connector item whose only edge is its attach edge
+
+The connector sites attach an item through its parent's context and then assign it into a property
+of that same parent. The link gate deliberately skips a context the attach edge already names, so
+the item never gets a link at all and its only edge is that attach edge. A second holder then keeps
+the item's reference count above zero when the attach parent leaves, so the attach edge is never
+released either, and it points into a context that no longer resolves anything. Same dark state as
+the entry above, reached without a link ever existing.
+
+Not fixed for the same reason, and this shape is what refutes the repoint most directly: there is no
+link here to repoint, so the repoint's trigger never fires on the shape that has real users.
+
+Pinned by `WhenConnectorItemsAttachParentLeaves_ThenTheItemGoesDark`. The order of the two
+references matters and the test says so: the attach parent must take the first reference, because
+referencing the item from the holder first would set a link to the holder and the item would survive.
+
+### A cross-graph rejection part way through a batch write
+
+`WriteProperty` calls `next()` before taking the lock, so by the time `AttachToProperty` rejects an
+item already owned by another graph, the backing store holds the new collection and the earlier
+items of the same batch are attached. The write is committed and the batch is half applied. The
+rejected item itself is clean: `ClaimOwnership` runs ahead of every mutation in `AttachToProperty`,
+so the item keeps exactly the references its own graph gave it rather than being counted in two.
+
+Not fixed. This is #384's shape, and the exception is new here: change to the ownership claim made
+`AttachToProperty` throw where it previously could not. An earlier version tried to prevent the
+partial batch with a batch-level pre-check, which review refuted because hoisting the check
+separates it from the claim and reintroduces the time-of-check race the claim exists to close.
+
+Pinned by `WhenCrossGraphRejectionHappensMidBatch_ThenEarlierItemsStayAttached`.
+
+### An attach handler that throws part way through a root attach
+
+`AttachToContext`'s `catch` calls `ClearAttachContext`, which rolls back this context's own record
+and edge. It cannot roll back anything the lifecycle system already did: `AttachSubjectToContext`
+seeds `_lastProcessedValues` and attaches children before the root's own attach callback runs, so a
+throw there leaves the children attached and counted while the root reports unattached.
+
+Not fixed. The fix is rollback inside `AttachToProperty`, which is #384 and out of scope here.
+
+Pinned by `WhenAttachHandlerThrowsPartWay_ThenTheLifecycleResidueRemains`.
+
+### A fallback cycle letting a subject inherit its own descendant's subtree service
+
+`a.Mother = b; b.Father = a;` makes each subject's context reachable from the other, so a service
+registered on `b`'s context resolves from `a`. That contradicts what `ContextSubtreeServiceTests`
+documents about subtree scoping.
+
+Not fixed, and not introduced here: it predates this design and is reachable through ordinary
+consumer fallback composition. Only *pure delegation* cycles raise, and the cycle argument in "The
+Parent Link" is about those. Ordinary fallback cycles remain reachable and silent, and the service
+walk's visited set keeps them from looping.
+
+Pinned by `WhenFallbackCycleExists_ThenASubjectInheritsItsOwnDescendantsSubtreeService`.
+
+### Two root contexts sharing one tracking context
+
+Ownership is an `ILifecycleInterceptor` reference. Two root contexts that each add the same tracking
+context as a fallback resolve the same `LifecycleInterceptor`, so they count as one graph while
+having two registries. The cross-graph rejection therefore does not fire, and a subject referenced
+from both ends up with reference count two and an entry in both registries, which is the half-working
+two-graph state described under "Reference Count and Graph Ownership".
+
+Not fixed. Distinguishing the two needs graph identity as a first-class parameter, which is the cost
+listed under "Rejected Alternatives".
+
+Pinned by `WhenTwoRootContextsShareOneTrackingContext_ThenTheCrossGraphRejectionDoesNotApply`. The
+wiring order in that test is load-bearing and its comment says so: the fallback must be added before
+`WithRegistry()`, because `WithService` skips only when the service type already resolves through the
+chain, so registering the registry first would give each root its own `LifecycleInterceptor` and two
+genuinely separate graphs, and the rejection would then fire correctly instead of demonstrating the
+gap.
+
+### The detach cascade order of a constructor-attached subtree
+
+Not a defect, and the one entry here that pins a desirable outcome rather than an undesirable one. A
+constructor-attached subject that owns a child and is then placed under a parent is the only shape
+whose detach cascade order moved with this design, from top-down to the bottom-up order every other
+shape already produced (see "Handler Order Depends on Resolved Position"). Only one snapshot covers
+it incidentally, so it is pinned deliberately here.
+
+Pinned by `WhenConstructorAttachedSubtreeIsRemovedFromItsParent_ThenTheCascadeIsBottomUp`.
+
+### The residual race after both root guards, which has no test
+
+Each root guard is atomic in itself. `TryClearAttachContext` and `TryRecordAttachContext` both read
+the reference count and transition the record inside the same `_mutationLock` acquisition, and
+`IncrementReferenceCount` takes that same lock, so a property attach cannot land between the check
+and the transition and a rejection leaves the subject exactly as it was.
+
+What neither covers is a property operation landing **after** the transition, on either side,
+because the interceptor pass runs outside the lock:
+
+- *Detach side.* The guard accepts at count zero, a property attach lands before the detach
+  interceptors run, and the detach then removes the `_attachedSubjects` entry of a subject that has
+  just become a child. The parent's later removal no-ops and the count strands at one.
+- *Attach side.* The record is taken at count zero, a property attach lands before
+  `AttachSubjectToContext` runs, and the re-seed of an already-attached subtree happens anyway,
+  overwriting its reconciliation baseline from the backing store.
+
+Both need a genuine overlap between a root operation and a property write on the same subject, which
+is narrower than the sequential misuse the guards reject.
+
+Closing either needs the record transition and the whole interceptor pass inside
+`LifecycleInterceptor`'s monitor, which means new API on `ILifecycleInterceptor`, so it goes with the
+same change that serialises the two root operations.
+
+**No test, deliberately.** The window both residuals need is between the record transition and the
+interceptor pass, and the rendezvous that would pin it sits inside `LifecycleInterceptor`'s monitor,
+which no public seam reaches. A test that cannot hit the window would assert only that the ordinary
+sequential path works, which is coverage in appearance and not in substance.
+
+### The aggregated two-interceptor configuration, which has no test
+
+Ownership is claimed and released on **graph membership**, not interceptor identity. `ClaimOwnership`
+accepts when the attaching context resolves the standing owner, and `ReleaseOwnership` releases when
+the detaching context does. Identity alone is wrong in both directions: an aggregated context
+resolves more than one `ILifecycleInterceptor` and every one of them attaches every subject, so an
+identity claim would reject the second co-resolved interceptor as a foreign graph, and an identity
+release would be a permanent no-op whenever the interceptor that claimed first is not the one that
+brings the count to zero, leaving the subject owned with no references, reporting attached and
+unable to join any other graph.
+
+Two consequences follow, both confined to aggregated configurations that already share an
+interceptor. Rejection of genuinely distinct graphs is unaffected, because a disjoint context cannot
+resolve the standing owner.
+
+- **The predicate is asymmetric.** A context that resolves the standing owner may claim, one that
+  does not may not. Since the owner is whoever claims first among co-resolved interceptors, which of
+  the two outcomes a configuration gets depends on resolved interceptor order.
+- **Only the owning interceptor enforces the re-attach-during-detach rejection**, because
+  `ThrowIfDetachIsUnwinding` is gated on `IsOwnedBy(this)`. In a two-interceptor aggregate a
+  re-attach during the non-owner's unwind passes both that guard and the claim.
+
+**No test.** The configuration is legal but has no user in this repository, so the gap is recorded at
+the call site and here rather than closed.
+
+## Rejected Alternatives
+
+Recorded so that a refuted idea is not proposed again.
+
+**Repointing the parent link when one of several parents detaches.** This would close the
+multi-parent dark-subject gap by moving the link to a surviving parent. Proposed and refuted three
+times, once per guard:
+
+- *Unguarded.* Two reviewers independently built pure delegation cycles from it. The repoint is a
+  second write site, and the cycle argument in "The Parent Link" holds only for one.
+- *Guarded by `ResolveDelegationTarget`.* The guard cannot express the question. That method returns
+  the chain's **terminal**, not path membership, so it cannot answer "is this context on the
+  candidate's chain", and whenever the context is a pure delegator, which is exactly the case the
+  repoint addresses, it returns a false safe.
+- *Guarded by a hop-limited walk.* The walk length is the candidate's depth, so a 200-level graph
+  yields a 201-hop chain and any limit small enough to be a guard refuses the repoint on every deep
+  graph, which is precisely where multi-parent sharing is most likely.
+
+And none of the three fires on the connector shape, where the failure has real users, because the
+link gate sets no link there and there is nothing to repoint.
+
+The failure mode it would introduce is also worse than the one it closes. A link cycle does not
+surface as a catchable resolution error: the **detach path** throws, because
+`InvokeRemovedLifecycleHandlers` resolves through the child's own context and the descent one level
+down uses `subject.Context`. The reference counts, the `_attachedSubjects` entries and the
+`_lastProcessedValues` entries then strand permanently, with the backing store already written
+because `WriteProperty` calls `next()` first. It is unrecoverable from consumer code: a
+consumer-built fallback cycle is undone with `RemoveFallbackContext`, but the link is internal and
+the only path that clears it is the detach that just threw. So the trade is a rare silent read-side
+loss against a rare permanent leak plus a wedged subtree.
+
+**Genuine multi-graph support**, meaning one subject legitimately belonging to two lifecycle graphs
+rather than the half-working state that reaches it today. Rejected on cost, which is not local:
+
+- Graph identity threaded through the registry, path, connector and source APIs, because
+  `TryGetService` throws when two services of a type resolve and `TryGetRegisteredSubject` resolves
+  the registry that way.
+- A merged interceptor chain whose interleaving between the two graphs is undetermined, and where a
+  short-circuiting interceptor in one graph decides for both.
+- The return of delegation cycles: building graph 1 with A above Q and graph 2 with Q above A makes
+  each the other's parent.
+- Ownership tags on every link.
+- A permanent distinction between a per-graph and a total reference count.
+
+If it is ever wanted it should be a deliberate design with graph identity as a first-class parameter.
+The cross-graph rejection exists to make that need discoverable instead of silent.
 
 ## Invariants
 

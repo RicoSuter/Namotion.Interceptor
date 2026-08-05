@@ -11,9 +11,9 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// outcome so that a later change which worsens one fails visibly instead of silently.
 ///
 /// A failure here is not automatically a bug. It means either someone improved the behaviour, in
-/// which case update the test and the design document's section 11 deliberately, or someone
-/// regressed it. Every case below is recorded in
-/// docs/superpowers/specs/2026-08-04-context-inheritance-design.md sections 5, 9 and 11.
+/// which case update the test and the design document deliberately, or someone regressed it. Every
+/// case below is recorded in docs/design/tracking-lifecycle.md, section "Known Gaps", one entry per
+/// test.
 /// </summary>
 public class KnownGapTests
 {

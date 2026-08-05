@@ -218,7 +218,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// <summary>
     /// Publishes the inherited parent context. The single write site is
     /// <c>ContextInheritanceHandler</c> at reference count one, and the cycle argument in
-    /// docs/superpowers/specs/2026-08-04-context-inheritance-design.md section 4 depends on it
+    /// docs/design/tracking-lifecycle.md, section "The Parent Link", depends on it
     /// staying single and on three guards holding together: the attach edge surviving while the
     /// subject is referenced, RemoveFallbackContext rejecting the attach edge, and
     /// DetachFromContext rejecting a non-zero reference count. Relax any one and a root can become

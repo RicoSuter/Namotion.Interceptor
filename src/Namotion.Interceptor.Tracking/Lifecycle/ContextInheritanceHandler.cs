@@ -33,7 +33,8 @@ public class ContextInheritanceHandler : ILifecycleHandler
             if (change.ReferenceCount == 1)
             {
                 // The single write site for the parent link. Any second one needs its own cycle
-                // argument; see the design document's section 4. The assertion is defence in depth
+                // argument; see "The Parent Link" in docs/design/tracking-lifecycle.md. The
+                // assertion is defence in depth
                 // on the same invariant the re-attach check in LifecycleInterceptor enforces, and is
                 // an assertion rather than a silent branch so that it cannot become unreachable and
                 // therefore untestable.
