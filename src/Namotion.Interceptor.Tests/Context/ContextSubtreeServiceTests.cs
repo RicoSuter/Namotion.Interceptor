@@ -118,6 +118,56 @@ public class ContextSubtreeServiceTests
         Assert.Equal(1, interceptor.WriteCount);
     }
 
+    /// <summary>
+    /// Pins step 2 before step 3 of the resolution order documented in docs/interceptor.md: a
+    /// fallback context composed onto a subject's own context resolves before its inherited parent
+    /// link, so explicit composition beats inheritance.
+    /// </summary>
+    [Fact]
+    public void WhenSubjectHasBothAComposedFallbackAndAParentLink_ThenTheComposedOneResolvesFirst()
+    {
+        // Arrange
+        var order = new List<string>();
+
+        var rootContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var inheritedInterceptor = new RecordingWriteInterceptor("inherited", order);
+        rootContext.AddService<IWriteInterceptor>(inheritedInterceptor);
+
+        var parent = new SubtreeSensor(rootContext);
+        var child = new SubtreeSensor();
+
+        // The parent link is published when the child becomes a property child, so it is in place
+        // before the fallback is composed onto the child's own context.
+        parent.Child = child;
+
+        // Carries no lifecycle interceptor, because adding a lifecycle-bearing context to a
+        // subject's own context is rejected.
+        var composedContext = InterceptorSubjectContext.Create();
+        var composedInterceptor = new RecordingWriteInterceptor("composed", order);
+        composedContext.AddService<IWriteInterceptor>(composedInterceptor);
+
+        var childContext = ((IInterceptorSubject)child).Context;
+        childContext.AddFallbackContext(composedContext);
+
+        order.Clear();
+
+        // Act
+        child.Value = 1;
+
+        // Assert
+        Assert.Equal(["composed", "inherited"], order);
+
+        var resolved = childContext
+            .GetServices<IWriteInterceptor>()
+            .OfType<RecordingWriteInterceptor>()
+            .ToArray();
+
+        Assert.Equal([composedInterceptor, inheritedInterceptor], resolved);
+    }
+
     private sealed class CountingWriteInterceptor : IWriteInterceptor
     {
         private int _writeCount;
@@ -138,6 +188,8 @@ public class ContextSubtreeServiceTests
             order.Add(name);
             next(ref context);
         }
+
+        public override string ToString() => name;
     }
 }
 
