@@ -233,11 +233,16 @@ public class KnownGapTests
         var child = new Person { FirstName = "Child" };
         var root = new Person { FirstName = "Root", Mother = child };
 
+        var edges = UsedByContextsProbe.Count(context);
+
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() => ((IInterceptorSubject)root).AttachToContext(context));
 
-        // The gap: the root's own record and edge are rolled back, the child's attach is not.
+        // The gap: the root's own record and edge are rolled back, the child's attach is not. The
+        // edge assertion also kills the mutant that drops ClearAttachContext's RemoveAttachEdge,
+        // which would leave the root resolving the graph while reporting unattached.
         Assert.Null(((IInterceptorSubject)root).TryGetAttachContext());
+        Assert.Equal(edges, UsedByContextsProbe.Count(context));
         Assert.Equal(1, child.GetReferenceCount());
     }
 

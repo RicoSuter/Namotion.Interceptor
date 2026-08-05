@@ -7,7 +7,8 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
-/// Issues #402 defects 3, 4 and 5, the two-graph half-attach from spec section 2, and re-attach
+/// Issues #402 defects 3, 4 and 5, the two-graph half-attach recorded under "Reference
+/// Count and Graph Ownership" in docs/design/tracking-lifecycle.md, and re-attach
 /// during detach. Each must fail against unmodified master for the reason named in its comment.
 /// Defect 2 (concurrent detach running the interceptors twice) and the remaining behaviour changes
 /// need the new API, so they are the tests appended below.
@@ -91,7 +92,7 @@ public class RootAttachContractTests
     [Fact]
     public void WhenSubjectOwnedByOneGraphIsAttachedToAnother_ThenItThrowsAndPublishesNothing()
     {
-        // Spec section 2: on master both registries index the subject and only graph A resolves,
+        // On master both registries index the subject and only graph A resolves,
         // so graph B holds a subject it can enumerate and never hears from.
 
         // Arrange
@@ -121,7 +122,7 @@ public class RootAttachContractTests
     [Fact]
     public void WhenRootAttachedSubjectIsReferencedFromAnotherGraph_ThenItThrowsAndPublishesNothing()
     {
-        // Spec section 9 lists TWO shapes for change 5 and this is the second: root in A, then
+        // There are TWO shapes for the cross-graph rejection and this is the second: root in A, then
         // child in B. It is the shape that catches a root attach which records the attach context
         // without claiming ownership, because the parent-to-parent shape above claims ownership on
         // the property path and passes either way.
@@ -386,6 +387,36 @@ public class RootAttachContractTests
     }
 
     [Fact]
+    public void WhenDetachNamesAContextOtherThanTheRecordedOne_ThenItThrowsAndStrandsNothing()
+    {
+        // Kills the mutant that deletes the record-identity check in TryClearAttachContext. Without
+        // it the call clears the record and then no-ops the edge removal, because the edge it names
+        // is not the one that was published, leaving the real attach edge with no record able to
+        // remove it.
+
+        // Arrange
+        var attachContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var otherContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var subject = new Person { FirstName = "Subject" };
+        ((IInterceptorSubject)subject).AttachToContext(attachContext);
+
+        var edges = UsedByContextsProbe.Count(attachContext);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(
+            () => ((IInterceptorSubject)subject).DetachFromContext(otherContext));
+
+        Assert.Same(attachContext, ((IInterceptorSubject)subject).TryGetAttachContext());
+        Assert.Equal(edges, UsedByContextsProbe.Count(attachContext));
+    }
+
+    [Fact]
     public void WhenTwoEdgesTargetOneContext_ThenRemovingOneKeepsInvalidationReachingTheOther()
     {
         // Behaviour change 9, unreachable on master where one edge kind plus dedup rules it out.
@@ -516,7 +547,8 @@ public class RootAttachContractTests
     {
         // Decision 4. A context carrying no lifecycle interceptor is not a graph, so the
         // constructor's AttachToContext degenerates to plain composition and records nothing.
-        // Spec section 7 already says such a subject reports IsAttached() false; recording would
+        // "Reference Count and Graph Ownership" in docs/design/tracking-lifecycle.md says such a
+        // subject reports IsAttached() false; recording would
         // have contradicted that.
 
         // Arrange
@@ -638,7 +670,7 @@ public class RootAttachContractTests
     [Fact]
     public void WhenPropertyOwnedSubjectIsRootAttachedIntoAnotherGraph_ThenNoRecordAndNoEdgeArePublished()
     {
-        // The directed test spec section 9 asks for. The ownership read in TryRecordAttachContext
+        // The directed test for the ownership read in TryRecordAttachContext. That read
         // is the only thing preventing the publish here, not the first of two defences: delete it
         // and nothing throws at all. Once the record and the edge into contextB are published, the
         // subject's own context resolves both graphs' interceptors, so ClaimOwnership's membership
@@ -671,8 +703,10 @@ public class RootAttachContractTests
     [Fact]
     public void WhenConnectorItemIsAssignedUnderItsAttachParent_ThenItKeepsTheAttachEdgeAndGetsNoLink()
     {
-        // Kills the mutant that sets the link and releases the attach edge instead of skipping the
-        // link. Nothing else observes the record after a connector-shaped assignment.
+        // Kills both mutants of the attach-context guard: the one that sets the link and releases
+        // the attach edge, which the record catches, and the one that sets the link in addition to
+        // the kept edge, which only the absent link catches because record, count and registry are
+        // then all unchanged.
 
         // Arrange
         var context = InterceptorSubjectContext
@@ -689,8 +723,10 @@ public class RootAttachContractTests
         // Act
         parent.Mother = item;
 
-        // Assert: the record still names the attach context, so the edge was not traded for a link.
+        // Assert: the record still names the attach context, so the edge was not traded for a link,
+        // and no link was published alongside it either.
         Assert.Same(parentContext, ((IInterceptorSubject)item).TryGetAttachContext());
+        Assert.False(((IInterceptorSubject)item).GetExecutor().HasParentContext);
         Assert.Equal(1, item.GetReferenceCount());
         Assert.NotNull(((IInterceptorSubject)item).TryGetRegisteredSubject());
     }

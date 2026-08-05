@@ -53,7 +53,8 @@ public class AttachOrderCharacterizationTests
         // The recording handler is registered after WithContextInheritance and carries no ordering
         // attribute, so it resolves BEHIND the inheritance handler. The inheritance handler's
         // descent therefore attaches M3 synchronously before the recorder ever sees M2, which is
-        // the bottom-up order spec section 2 measured for an after-inheritance handler.
+        // the bottom-up order "Handler Order Depends on Resolved Position" in
+        // docs/design/tracking-lifecycle.md records for an after-inheritance handler.
         Assert.Equal(["EVENT.attached(M3)", "EVENT.attached(M2)"], attachEvents);
         Assert.Equal(["handler.att(M3)", "handler.att(M2)"], attachHandlerLog);
 

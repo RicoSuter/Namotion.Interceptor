@@ -450,7 +450,7 @@ standing owner.
 
 The configuration is legal, it has no user in this repository, and it is now covered by
 `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/AggregatedContextLifecycleTests.cs` rather than by
-`KnownGapTests`, because two of the behaviours pinned there are guarantees rather than gaps. What
+`KnownGapTests`, because five of the behaviours pinned there are guarantees rather than gaps. What
 those tests found:
 
 - **Ownership survives the double attach and the double detach.** Exactly one of the two co-resolved
@@ -486,7 +486,7 @@ those tests found:
   It does not, because both co-resolved interceptors unwind inside the same write and the re-attach
   runs through both of them, so the owning interceptor, which has already removed the subject from its
   own ledger, raises. The bypass is unreachable through the public write path, and the comment on
-  `ClaimOwnership` overstates it. A guarantee, pinned by
+  `ClaimOwnership` says so. A guarantee, pinned by
   `WhenALifecycleHandlerReattachesDuringDetach_ThenTheReattachIsStillRejected`, which also pins the
   residue the rejection cannot undo: `next()` committed the re-attach write before the guard ran, so
   the new parent's backing store points at a detached subject.
@@ -506,8 +506,11 @@ those tests found:
   that subject announced once as a root and once through the property that actually holds it. Pinned
   by `WhenTheDescentReachesAChildBeforeItsParent_ThenOneContextAttachCarriesNoProperty`.
 - **`TryGetLifecycleInterceptor()` throws in this shape.** It resolves through `TryGetService<T>()`,
-  which raises when two services of a type resolve, so `SourceOwnershipManager`, `OpcUaSubjectServer`
-  and `MqttSubjectServer` cannot be constructed against an aggregated context at all. Pinned by
+  which raises when two services of a type resolve. `SourceOwnershipManager` calls it in its
+  constructor, so it cannot be constructed against an aggregated context at all. `OpcUaSubjectServer`
+  and `MqttSubjectServer` call it in `ExecuteAsync`, so they construct and then fail when the hosted
+  service starts, which surfaces as a faulted background service rather than a resolution failure.
+  Pinned by
   `WhenTheContextIsAggregated_ThenTryGetLifecycleInterceptorThrows`.
 - **An attach context below the graph's context loses its extra interceptor's detach.** A subject
   attached through a context that itself falls back to the graph's context records that context's
