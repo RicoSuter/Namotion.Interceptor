@@ -93,7 +93,10 @@ public class SubjectSourceBenchmark
         var queue = _context.GetService<PropertyChangeInterceptor>();
         for (var i = 0; i < _propertyNames.Length; i++)
         {
+            // The executor the chain would thread through; this benchmark stops at the stub terminal
+            // below, so it is only carried, never used.
             var context = new PropertyWriteContext<int>(
+                (InterceptorExecutor)((IInterceptorSubject)_car).Context,
                 new PropertyReference(_car, _propertyNames[i]),
                 0,
                 i);
