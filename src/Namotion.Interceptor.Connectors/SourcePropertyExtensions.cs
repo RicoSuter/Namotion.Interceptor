@@ -98,10 +98,19 @@ public static class SourcePropertyExtensions
             return;
         }
 
-        var timestamp = DateTimeOffset.UtcNow;
+        // Same lock-free HasSubscribers gate ScanSubject uses: with zero subscribers (the common
+        // shape - most trees have none or one dashboard-style consumer) this skips both UtcNow and
+        // the monitor's lock entirely for every claim and release, not just the timestamp.
+        DateTimeOffset? timestamp = null;
         foreach (var monitor in monitors)
         {
-            monitor.PublishUnderLock(new SourceEvent(kind, source, property, oldState, newState, timestamp)
+            if (!monitor.HasSubscribers)
+            {
+                continue;
+            }
+
+            timestamp ??= DateTimeOffset.UtcNow;
+            monitor.PublishUnderLock(new SourceEvent(kind, source, property, oldState, newState, timestamp.Value)
             {
                 Monitor = monitor
             });

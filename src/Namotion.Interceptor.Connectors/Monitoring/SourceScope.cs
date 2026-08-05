@@ -15,8 +15,30 @@ internal static class SourceScope
     /// </summary>
     internal static bool IsInScope(ISubjectSource source, IInterceptorSubject anchor)
     {
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
+        var pending = new Stack<IInterceptorSubject>();
+        return IsInScope(source, anchor, visited, pending);
+    }
+
+    /// <summary>
+    /// Same as <see cref="IsInScope(ISubjectSource,IInterceptorSubject)"/>, but walks the parent
+    /// graph using caller-supplied scratch collections instead of allocating fresh ones.
+    /// </summary>
+    /// <remarks>
+    /// Every caller of this overload is <c>SourceMonitor.IsSatisfied</c>, which already holds the
+    /// monitor's lock and re-evaluates on every property-reference add/remove tree-wide while any
+    /// wait is pending - reusing scratch collections there turns a per-source, per-re-evaluation
+    /// allocation into none. <paramref name="visitedScratch"/> and <paramref name="pendingScratch"/>
+    /// are cleared before this method returns, so passing the same instances into a later,
+    /// unrelated call is safe.
+    /// </remarks>
+    internal static bool IsInScope(
+        ISubjectSource source, IInterceptorSubject anchor,
+        HashSet<IInterceptorSubject> visitedScratch, Stack<IInterceptorSubject> pendingScratch)
+    {
         var sourceRoot = source.RootSubject;
-        return IsAncestorOrSelf(sourceRoot, anchor) || IsAncestorOrSelf(anchor, sourceRoot);
+        return IsAncestorOrSelf(sourceRoot, anchor, visitedScratch, pendingScratch) ||
+               IsAncestorOrSelf(anchor, sourceRoot, visitedScratch, pendingScratch);
     }
 
     /// <summary>
@@ -29,39 +51,59 @@ internal static class SourceScope
     /// </remarks>
     internal static bool IsAncestorOrSelf(IInterceptorSubject candidate, IInterceptorSubject target)
     {
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
+        var pending = new Stack<IInterceptorSubject>();
+        return IsAncestorOrSelf(candidate, target, visited, pending);
+    }
+
+    private static bool IsAncestorOrSelf(
+        IInterceptorSubject candidate, IInterceptorSubject target,
+        HashSet<IInterceptorSubject> visitedScratch, Stack<IInterceptorSubject> pendingScratch)
+    {
         if (ReferenceEquals(candidate, target))
         {
             return true;
         }
 
-        return SearchGraph(candidate, target);
+        return SearchGraph(candidate, target, visitedScratch, pendingScratch);
     }
 
-    private static bool SearchGraph(IInterceptorSubject candidate, IInterceptorSubject start)
+    private static bool SearchGraph(
+        IInterceptorSubject candidate, IInterceptorSubject start,
+        HashSet<IInterceptorSubject> visited, Stack<IInterceptorSubject> pending)
     {
-        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
-        var pending = new Stack<IInterceptorSubject>();
-        pending.Push(start);
-
-        while (pending.Count > 0)
+        try
         {
-            var current = pending.Pop();
-            if (!visited.Add(current))
+            pending.Push(start);
+
+            while (pending.Count > 0)
             {
-                continue;
+                var current = pending.Pop();
+                if (!visited.Add(current))
+                {
+                    continue;
+                }
+
+                if (ReferenceEquals(current, candidate))
+                {
+                    return true;
+                }
+
+                foreach (var parent in current.GetParents())
+                {
+                    pending.Push(parent.Property.Subject);
+                }
             }
 
-            if (ReferenceEquals(current, candidate))
-            {
-                return true;
-            }
-
-            foreach (var parent in current.GetParents())
-            {
-                pending.Push(parent.Property.Subject);
-            }
+            return false;
         }
-
-        return false;
+        finally
+        {
+            // Scratch collections may be reused by the caller across walks (including the second,
+            // opposite-direction walk within the same IsInScope call) - never leak subjects from
+            // this walk into the next one, on any return path.
+            visited.Clear();
+            pending.Clear();
+        }
     }
 }

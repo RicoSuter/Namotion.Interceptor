@@ -247,25 +247,38 @@ public class SourceMonitor : ILifecycleHandler
     // use for lock-free reads.
     private ImmutableArray<PendingWait> _waits = ImmutableArray<PendingWait>.Empty;
 
+    // Reused across every scope walk inside IsSatisfied (see SourceScope.IsInScope). Every caller of
+    // IsSatisfied already holds _lock, and SearchGraph clears both collections before returning
+    // (even on an early match), so reuse across sources within one pass, and across passes, is safe
+    // and allocation-free. Otherwise a wait re-evaluation - which fires on every property-reference
+    // add/remove tree-wide while any wait is pending - would allocate a HashSet and a Stack per
+    // in-scope source check.
+    private readonly HashSet<IInterceptorSubject> _scopeVisitedScratch = new(ReferenceEqualityComparer.Instance);
+    private readonly Stack<IInterceptorSubject> _scopePendingScratch = new();
+
     /// <summary>
     /// Completes when the branch containing <paramref name="subject"/> is synchronized: registration
-    /// is complete, at least one in-scope source is registered, and every registered non-Stopped
-    /// in-scope source is Synchronized.
+    /// is complete, and every registered non-Stopped in-scope source is Synchronized. An empty
+    /// in-scope set is vacuously satisfied once registration is complete (see IsSatisfied); before
+    /// that, it blocks, since an empty scope is still ambiguous between "no source yet" and "no
+    /// source ever" at that point.
     /// </summary>
     public Task WaitForSynchronizationAsync(
         IInterceptorSubject subject, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(subject);
 
-        PendingWait wait;
+        // Constructed before the fast-path check (not passed as null) so IsSatisfied's empty-scope
+        // warning can fire here too - a quiescent tree that never re-evaluates this wait would
+        // otherwise never see that diagnostic (see IsSatisfied's wait is not null and !wait.MarkWarned() guard).
+        var wait = new PendingWait(subject);
         lock (_lock)
         {
-            if (IsSatisfied(subject))
+            if (IsSatisfied(subject, wait))
             {
                 return Task.CompletedTask;
             }
 
-            wait = new PendingWait(subject);
             _waits = _waits.Add(wait);
         }
 
@@ -289,7 +302,7 @@ public class SourceMonitor : ILifecycleHandler
         var allInScopeStopped = true;
         foreach (var source in _sources[0])
         {
-            if (!SourceScope.IsInScope(source, anchor))
+            if (!SourceScope.IsInScope(source, anchor, _scopeVisitedScratch, _scopePendingScratch))
             {
                 continue;
             }
@@ -309,18 +322,26 @@ public class SourceMonitor : ILifecycleHandler
 
         if (!matched)
         {
-            // No in-scope source but registration is complete: likely a misconfiguration. Warn once
-            // per wait, not on every re-evaluation - MarkWarned is called only here, right before the
-            // warning fires, so a later pass that finds the branch matched again never burns the flag.
+            // Warn once per wait, not on every re-evaluation - MarkWarned is called only here, right
+            // before the warning fires, so a later pass that finds the branch matched again never
+            // burns the flag.
             if (wait is not null && !wait.MarkWarned())
             {
                 Logger?.LogWarning(
                     "A synchronization wait on {Subject} has no in-scope source, and source registration is complete. " +
-                    "The wait will block until cancelled. Check that a source is configured for this branch.",
+                    "The wait completes immediately: once registration is complete an empty scope is no longer " +
+                    "ambiguous between \"no source yet\" and \"no source ever\", so it definitively means this " +
+                    "branch is local-only and vacuously synchronized. Check that a source is configured for this " +
+                    "branch if that is unexpected.",
                     anchor.GetType().Name);
             }
 
-            return false;
+            // The blocking rule predates the registration-complete signal. Once the application has
+            // called CompleteSourceRegistration, an empty scope is no longer ambiguous, so it is
+            // vacuously satisfied - consistent with the all-Stopped rule below, which also completes
+            // vacuously rather than hanging. Before registration is complete this method already
+            // returned false above, so an empty scope still blocks during startup.
+            return true;
         }
 
         if (allInScopeStopped)
@@ -341,59 +362,48 @@ public class SourceMonitor : ILifecycleHandler
     /// release/CompleteSourceRegistration, a registered source's own StateChanged).
     /// </summary>
     /// <remarks>
-    /// The emptiness check takes _lock rather than reading _waits lock-free. A lock-free check used
-    /// to gate this method as a performance optimization, but it caused a lost wakeup: a signal
-    /// could observe "no waits yet" in the window between a waiter's IsSatisfied check and its add
-    /// to _waits, with no later signal to re-evaluate it, hanging the wait forever. Taking _lock
-    /// here serializes with WaitForSynchronizationAsync's own check-and-add, so a signal always runs
-    /// fully before or fully after it. Do not move this check outside the lock again.
+    /// Holds _lock across the whole pass, rather than re-acquiring it once per wait. A lock-free
+    /// emptiness check used to gate this method as a performance optimization, but it caused a lost
+    /// wakeup: a signal could observe "no waits yet" in the window between a waiter's IsSatisfied
+    /// check and its add to _waits, with no later signal to re-evaluate it, hanging the wait forever.
+    /// Holding _lock for the full pass serializes it with WaitForSynchronizationAsync's own
+    /// check-and-add at least as strictly as before (a signal now runs fully before or fully after
+    /// the whole pass, not just before or after each individual wait), so do not narrow this back to
+    /// a per-wait or lock-free check. Completing a wait (TrySetResult) inside the lock is safe
+    /// because PendingWait's TaskCompletionSource uses RunContinuationsAsynchronously: continuations
+    /// run on the thread pool, never synchronously on this thread, so they cannot re-enter _lock here.
     /// </remarks>
     private void OnWaitConditionChanged()
     {
-        ImmutableArray<PendingWait> waits;
+        List<Exception>? exceptions = null;
         lock (_lock)
         {
-            waits = _waits;
-            if (waits.IsEmpty)
+            if (_waits.IsEmpty)
             {
                 return;
             }
-        }
 
-        // A throw from one wait's IsSatisfied must not skip re-evaluating the rest - that would be a
-        // lost wakeup for every wait after it. Collect and rethrow once the full pass completes,
-        // matching SourceMonitoringExtensions.CompleteSourceRegistration and CompositeDisposable.Dispose.
-        List<Exception>? exceptions = null;
-        foreach (var wait in waits)
-        {
-            try
+            // A throw from one wait's IsSatisfied must not skip re-evaluating the rest - that would
+            // be a lost wakeup for every wait after it. Collect and rethrow once the full pass
+            // completes, matching SourceMonitoringExtensions.CompleteSourceRegistration and
+            // CompositeDisposable.Dispose (see ExceptionAggregation, shared with both).
+            foreach (var wait in _waits)
             {
-                bool satisfied;
-                lock (_lock)
+                try
                 {
-                    satisfied = IsSatisfied(wait.Anchor, wait);
+                    if (IsSatisfied(wait.Anchor, wait))
+                    {
+                        wait.Complete();
+                    }
                 }
-
-                if (satisfied)
+                catch (Exception exception)
                 {
-                    wait.Complete();
+                    (exceptions ??= []).Add(exception);
                 }
             }
-            catch (Exception exception)
-            {
-                (exceptions ??= []).Add(exception);
-            }
         }
 
-        if (exceptions is { Count: 1 })
-        {
-            throw exceptions[0];
-        }
-
-        if (exceptions is { Count: > 1 })
-        {
-            throw new AggregateException(exceptions);
-        }
+        ExceptionAggregation.ThrowIfAny(exceptions);
     }
 
     private sealed class PendingWait(IInterceptorSubject anchor)

@@ -49,9 +49,9 @@ A source is in scope for an anchor when its root subject and the anchor lie on t
 
 Two edge cases in that scoping matter before you rely on a wait.
 
-If, once source registration is complete, the anchor's scope matches no source at all (a mistyped root, a device that was never configured), the wait never completes. It blocks until cancelled, and the only sign anything is wrong is a one-time warning logged the first time that empty scope is detected for that wait. If a wait you expected to complete instead sits forever, check the log for that warning before looking anywhere else.
+Before source registration is complete, an empty scope (nothing has matched yet) is ambiguous: it could mean "no source for this branch, ever" or just "not registered yet", so the wait blocks rather than guessing. Once registration is complete, that ambiguity is gone: a scope that still matches no source (a mistyped root, a device that was never configured) definitively means the branch is local-only, and the wait completes immediately, the same way an all-`Stopped` scope does below. A one-time warning is still logged the first time an empty scope is detected for that wait, as a diagnostic for what is usually a misconfiguration even though it is no longer the only sign anything is wrong - check the log for it if a branch you expected to be driven by a source completes suspiciously fast.
 
-A scope whose sources are all `Stopped` behaves the opposite way: instead of blocking, it completes. `Stopped` is terminal (see [The State Model, Transitions, and Delivery Contract](#the-state-model-transitions-and-delivery-contract)), so it is tempting to assume a fully stopped branch hangs a wait the same way an empty scope does, but it does not: a scope where every in-scope source has stopped is treated as satisfied, and the wait returns successfully. A consumer that treats a completed wait as proof the branch is live can walk straight into a dead one.
+A scope whose sources are all `Stopped` behaves the same way: instead of blocking, it completes. `Stopped` is terminal (see [The State Model, Transitions, and Delivery Contract](#the-state-model-transitions-and-delivery-contract)), so it is tempting to assume a fully stopped branch hangs a wait, but it does not: a scope where every in-scope source has stopped is treated as satisfied, and the wait returns successfully. A consumer that treats a completed wait as proof the branch is live can walk straight into a dead one - the same caution applies to the empty-scope case just above, since both complete vacuously rather than because the branch actually finished loading.
 
 ## Reading Per-Property State
 
@@ -185,7 +185,21 @@ Every source metadata change is one `SourceEventKind`:
 
 Any type implementing `ISubjectSource` directly, rather than deriving from `SubjectSourceBase`, must now implement all four. This is a breaking change for such implementers.
 
-Deriving from `SubjectSourceBase` is recommended instead of implementing `ISubjectSource` directly: it implements all four members, drives the connection-phase transitions automatically through `SubjectPropertyWriter`, and is what every built-in connector (OPC UA, MQTT, WebSocket) already does. See [Implementing a Source](connectors.md#implementing-a-source) for the base class's hooks.
+`State`, `LastSynchronizedAt`, and `RootSubject` (inherited from `ISubjectConnector`) must not acquire any lock that is held while `StateChanged` is raised: `SourceMonitor` reads them while holding its own lock, so a getter that took the source's transition lock could deadlock against a concurrent transition. `SubjectSourceBase`'s implementations are lock-free (`Volatile.Read`, `Interlocked.Read`, or a stored reference); preserve that if you override them.
+
+If `StateChanged` is declared but never actually raised, for example a stub implementation that will fire it later, declare it with an explicit `add`/`remove` body so the compiler does not flag it as an unused event under warnings-as-errors (CS0067):
+
+```csharp
+public event EventHandler<SourceEvent>? StateChanged
+{
+    add { }
+    remove { }
+}
+```
+
+A direct `ISubjectSource` implementer must also call `SourceMonitor.Register(this)` when it starts and `SourceMonitor.Unregister(this)` when it stops or is disposed (obtain the monitor through `subject.Context.GetSourceMonitor()` or `GetSourceMonitors()`). `SubjectSourceBase` does this automatically around its pump lifecycle (see [The State Model, Transitions, and Delivery Contract](#the-state-model-transitions-and-delivery-contract)); without it, a hand-rolled source is invisible to the monitor entirely: it never appears in `SourceMonitor.Sources`, no `SourceRegistered`/`SourceUnregistered` events are ever published for it, and any branch-scoped wait whose scope depends on it hangs forever, since the wait engine never learns the source exists.
+
+Deriving from `SubjectSourceBase` is recommended instead of implementing `ISubjectSource` directly: it implements all four members, drives the connection-phase transitions automatically through `SubjectPropertyWriter`, registers and unregisters with the monitor around its pump lifecycle, and is what every built-in connector (OPC UA, MQTT, WebSocket) already does. See [Implementing a Source](connectors.md#implementing-a-source) for the base class's hooks.
 
 ## Worked Sample: Availability Attributes
 

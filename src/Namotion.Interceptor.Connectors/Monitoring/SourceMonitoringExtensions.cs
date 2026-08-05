@@ -82,7 +82,7 @@ public static class SourceMonitoringExtensions
     public static void CompleteSourceRegistration(this IInterceptorSubjectContext context)
     {
         var monitors = ResolveMonitorsOrThrow(context);
-        var exceptions = new List<Exception>();
+        List<Exception>? exceptions = null;
 
         foreach (var monitor in monitors)
         {
@@ -92,19 +92,11 @@ public static class SourceMonitoringExtensions
             }
             catch (Exception ex)
             {
-                exceptions.Add(ex);
+                (exceptions ??= []).Add(ex);
             }
         }
 
-        if (exceptions.Count == 1)
-        {
-            throw exceptions[0];
-        }
-
-        if (exceptions.Count > 1)
-        {
-            throw new AggregateException(exceptions);
-        }
+        ExceptionAggregation.ThrowIfAny(exceptions);
     }
 
     /// <summary>
@@ -133,7 +125,7 @@ public static class SourceMonitoringExtensions
     {
         public void Dispose()
         {
-            var exceptions = new List<Exception>();
+            List<Exception>? exceptions = null;
 
             foreach (var disposable in disposables)
             {
@@ -143,19 +135,11 @@ public static class SourceMonitoringExtensions
                 }
                 catch (Exception ex)
                 {
-                    exceptions.Add(ex);
+                    (exceptions ??= []).Add(ex);
                 }
             }
 
-            if (exceptions.Count == 1)
-            {
-                throw exceptions[0];
-            }
-
-            if (exceptions.Count > 1)
-            {
-                throw new AggregateException(exceptions);
-            }
+            ExceptionAggregation.ThrowIfAny(exceptions);
         }
     }
 
@@ -169,8 +153,18 @@ public static class SourceMonitoringExtensions
         this IInterceptorSubjectContext context, IServiceCollection services)
     {
         context.WithSourceMonitoring();
-        services.AddHostedService(serviceProvider => new SourceRegistrationGate(
-            context, serviceProvider.GetRequiredService<IHostApplicationLifetime>()));
+
+        // Bridges the host's logging provider into the context, the same way WithHostedServices
+        // wires HostedServiceHandler's logger from DI: the context is configured before the host is
+        // built, so without this the monitor's lazy logger resolver (see WithSourceMonitoring())
+        // never finds an ILoggerFactory and every wait-engine warning is a silent no-op.
+        services.AddHostedService(serviceProvider =>
+        {
+            context.TryAddService(serviceProvider.GetRequiredService<ILoggerFactory>, _ => true);
+            return new SourceRegistrationGate(
+                context, serviceProvider.GetRequiredService<IHostApplicationLifetime>());
+        });
+
         return context;
     }
 
