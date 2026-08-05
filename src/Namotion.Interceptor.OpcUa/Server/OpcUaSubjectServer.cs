@@ -33,6 +33,10 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     internal ThroughputCounter IncomingThroughput { get; } = new();
     internal ThroughputCounter OutgoingThroughput { get; } = new();
 
+    // Thread-scoped, not an instance field: a client write on another thread must not be caught by it.
+    [ThreadStatic]
+    internal static bool IsWritingOwnNodeValues;
+
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
 
@@ -131,21 +135,29 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         var span = changes.Span;
         lock (nodeManagerLock)
         {
-            for (var i = 0; i < span.Length; i++)
+            IsWritingOwnNodeValues = true;
+            try
             {
-                var change = span[i];
-                if (change.Property.TryGetPropertyData(OpcUaVariableKey, out var data) &&
-                    data is BaseDataVariableState node &&
-                    change.Property.TryGetRegisteredProperty() is { } registeredProperty)
+                for (var i = 0; i < span.Length; i++)
                 {
-                    var value = change.GetNewValue<object?>();
-                    var convertedValue = _configuration.ValueConverter
-                        .ConvertToNodeValue(value, registeredProperty);
+                    var change = span[i];
+                    if (change.Property.TryGetPropertyData(OpcUaVariableKey, out var data) &&
+                        data is BaseDataVariableState node &&
+                        change.Property.TryGetRegisteredProperty() is { } registeredProperty)
+                    {
+                        var value = change.GetNewValue<object?>();
+                        var convertedValue = _configuration.ValueConverter
+                            .ConvertToNodeValue(value, registeredProperty);
 
-                    node.Value = convertedValue;
-                    node.Timestamp = change.ChangedTimestamp.UtcDateTime;
-                    node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                        node.Value = convertedValue;
+                        node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+                        node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                    }
                 }
+            }
+            finally
+            {
+                IsWritingOwnNodeValues = false;
             }
         }
 
@@ -357,6 +369,12 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
     {
+        if (IsWritingOwnNodeValues)
+        {
+            // Our own node write, reflected back synchronously by ClearChangeMasks.
+            return;
+        }
+
         IncomingThroughput.Add(1);
         var receivedTimestamp = DateTimeOffset.UtcNow;
 
