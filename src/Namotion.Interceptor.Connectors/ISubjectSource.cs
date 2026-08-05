@@ -40,4 +40,35 @@ public interface ISubjectSource : ISubjectConnector
     /// A delegate that applies the initial state to the subject. Returns <c>null</c> if there is no state to apply.
     /// </returns>
     Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets the source's synchronization state. Describes the inbound direction only: the model
+    /// mirroring the external system. Outbound backlog is <see cref="PendingWriteCount"/>.
+    /// </summary>
+    SourceState State { get; }
+
+    /// <summary>
+    /// Gets when the most recent initial synchronization completed, or <c>null</c> if it never has.
+    /// While <see cref="SourceState.Connecting"/> after a drop, this is how a dashboard says
+    /// "stale, last confirmed at T".
+    /// </summary>
+    DateTimeOffset? LastSynchronizedAt { get; }
+
+    /// <summary>
+    /// Gets the number of writes currently queued for retry. Orthogonal to <see cref="State"/>:
+    /// this queue can be non-empty during entirely normal synchronized operation.
+    /// </summary>
+    int PendingWriteCount { get; }
+
+    /// <summary>
+    /// Raised when <see cref="State"/> changes.
+    /// </summary>
+    /// <remarks>
+    /// Raised synchronously on the transitioning thread and inside the source's transition lock.
+    /// Handlers MUST be observe-only: they must not block, and must not cause a transition of any
+    /// source, directly or indirectly, because the lock is reentrant and a nested transition would
+    /// publish out of order. Mutating consumers belong on the SourceMonitor stream, where delivery
+    /// is queued and outside all locks.
+    /// </remarks>
+    event EventHandler<SourceEvent>? StateChanged;
 }

@@ -501,6 +501,33 @@ public class SubjectSourceExtensionsTests
         public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
             => await writeCallback();
         public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
+
+        public SourceState State { get; private set; } = SourceState.Connecting;
+
+        public DateTimeOffset? LastSynchronizedAt { get; private set; }
+
+        public int PendingWriteCount => 0;
+
+        public event EventHandler<SourceEvent>? StateChanged;
+
+        /// <summary>Test hook: drives the state the way a real source's pump would.</summary>
+        public void SetState(SourceState state)
+        {
+            var oldState = State;
+            if (oldState == state)
+            {
+                return;
+            }
+
+            State = state;
+            if (state == SourceState.Synchronized)
+            {
+                LastSynchronizedAt = DateTimeOffset.UtcNow;
+            }
+
+            StateChanged?.Invoke(this, new SourceEvent(
+                SourceEventKind.StateChanged, this, null, oldState, state, DateTimeOffset.UtcNow));
+        }
     }
 
     /// <summary>
@@ -524,5 +551,32 @@ public class SubjectSourceExtensionsTests
         public void UnblockWrite() => _canComplete.TrySetResult();
 
         public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
+
+        public SourceState State { get; private set; } = SourceState.Connecting;
+
+        public DateTimeOffset? LastSynchronizedAt { get; private set; }
+
+        public int PendingWriteCount => 0;
+
+        public event EventHandler<SourceEvent>? StateChanged;
+
+        /// <summary>Test hook: drives the state the way a real source's pump would.</summary>
+        public void SetState(SourceState state)
+        {
+            var oldState = State;
+            if (oldState == state)
+            {
+                return;
+            }
+
+            State = state;
+            if (state == SourceState.Synchronized)
+            {
+                LastSynchronizedAt = DateTimeOffset.UtcNow;
+            }
+
+            StateChanged?.Invoke(this, new SourceEvent(
+                SourceEventKind.StateChanged, this, null, oldState, state, DateTimeOffset.UtcNow));
+        }
     }
 }

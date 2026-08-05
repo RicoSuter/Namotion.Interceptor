@@ -12,7 +12,7 @@ namespace Namotion.Interceptor.Connectors;
 /// <see cref="StartListeningAsync"/> (protected), <see cref="LoadInitialStateAsync"/> (public),
 /// and <see cref="WriteChangesAsync"/> (public).
 /// </summary>
-public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
+public abstract class SubjectSourceBase : BackgroundService, ISubjectSource, ISourceStateReporter
 {
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
@@ -20,12 +20,81 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private readonly TimeSpan _retryTime;
     private readonly SubjectPropertyWriter _propertyWriter;
 
+    private readonly Lock _stateLock = new();
+    private int _state = (int)SourceState.Connecting;
+    private long _lastSynchronizedTicks;
+
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
     /// <summary>
     /// Gets the number of writes currently queued for retry.
     /// </summary>
     public int PendingWriteCount => WriteRetryQueue?.PendingWriteCount ?? 0;
+
+    /// <inheritdoc />
+    public SourceState State => (SourceState)Volatile.Read(ref _state);
+
+    /// <inheritdoc />
+    public DateTimeOffset? LastSynchronizedAt
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _lastSynchronizedTicks);
+            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+    }
+
+    /// <inheritdoc />
+    public event EventHandler<SourceEvent>? StateChanged;
+
+    void ISourceStateReporter.ReportConnecting() => TransitionTo(SourceState.Connecting);
+
+    void ISourceStateReporter.ReportSynchronized() => TransitionTo(SourceState.Synchronized);
+
+    /// <summary>
+    /// Moves to <paramref name="newState"/> and publishes the change, or does nothing when the
+    /// transition is a no-op or the source has already stopped.
+    /// </summary>
+    /// <remarks>
+    /// The state change, the timestamp write, and the event raise are all inside one lock. A bare
+    /// compare-exchange is not enough: a writer could set Synchronized, be preempted, let disposal
+    /// set Stopped and unregister, then resume and publish Synchronized after Stopped. Both
+    /// compare-exchanges would have succeeded, so no stickiness rule can prevent it.
+    /// </remarks>
+    protected bool TransitionTo(SourceState newState)
+    {
+        lock (_stateLock)
+        {
+            var oldState = (SourceState)_state;
+            if (oldState == newState || oldState == SourceState.Stopped)
+            {
+                return false;
+            }
+
+            _state = (int)newState;
+
+            if (newState == SourceState.Synchronized)
+            {
+                Interlocked.Exchange(ref _lastSynchronizedTicks, DateTimeOffset.UtcNow.UtcTicks);
+            }
+
+            var sourceEvent = new SourceEvent(
+                SourceEventKind.StateChanged, this, null, oldState, newState, DateTimeOffset.UtcNow);
+
+            try
+            {
+                StateChanged?.Invoke(this, sourceEvent);
+            }
+            catch (Exception exception)
+            {
+                // A buggy Synchronized handler must not be mistaken for a source failure, or the
+                // source would be flipped back to Connecting and loop forever.
+                _logger.LogError(exception, "A StateChanged handler threw and was ignored.");
+            }
+
+            return true;
+        }
+    }
 
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
