@@ -753,6 +753,108 @@ public class OpcUaSubjectLoaderFailureTests
     }
 
     [Fact]
+    public async Task WhenALaterPhaseFailsAfterContainersAreBound_ThenALaterLoadStillRegistersTheChildren()
+    {
+        // Arrange: the collection, dictionary and subject reference rollback tests above all fail
+        // while BatchLoadCollectionsAndDictionariesAsync is still loading the container's children,
+        // and that phase deliberately defers its binding until afterwards, so nothing is bound when
+        // they roll back. This test targets the window the deferral does not cover: the collection
+        // loads cleanly and binds to the non-root parent, and only then does a later phase throw.
+        //
+        // Parent.Status is a plain value property, so LoadChildPropertiesAsync queues it for
+        // LoadAttributesAsync, which is the last phase of the level and therefore runs after the
+        // container assignment. Failing its browse transiently on the first load reproduces a
+        // rollback whose staged collection elements are already referenced by Parent.Items.
+        var parentId = new NodeId(4301, 2);
+        var itemsId = new NodeId(4302, 2);
+        var firstItemId = new NodeId(4303, 2);
+        var secondItemId = new NodeId(4304, 2);
+        var firstValueId = new NodeId(4305, 2);
+        var secondValueId = new NodeId(4306, 2);
+        var statusId = new NodeId(4307, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [RootId] = [MakeReference("Parent", parentId, NodeClass.Object)],
+            [parentId] =
+            [
+                MakeReference("Items", itemsId, NodeClass.Object),
+                MakeReference("Status", statusId, NodeClass.Variable)
+            ],
+            [itemsId] =
+            [
+                MakeReference("Items[0]", firstItemId, NodeClass.Object),
+                MakeReference("Items[1]", secondItemId, NodeClass.Object)
+            ],
+            [firstItemId] = [MakeReference("Value", firstValueId, NodeClass.Variable)],
+            [secondItemId] = [MakeReference("Value", secondValueId, NodeClass.Variable)]
+        };
+
+        var modelContext = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
+        var root = new RollbackLatePhaseRoot(modelContext);
+        root.Parent = new RollbackLatePhaseParent(modelContext);
+
+        var (loader, source) = CreateSourceAndLoaderFor(root, shouldAddDynamicProperties: false);
+
+        var failStatusAttributeBrowse = true;
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection descriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var description in descriptions)
+                {
+                    if (failStatusAttributeBrowse && description.NodeId == statusId)
+                    {
+                        results.Add(new BrowseResult { StatusCode = StatusCodes.BadServerHalted, References = [] });
+                        continue;
+                    }
+
+                    var children = new ReferenceDescriptionCollection();
+                    if (browseTree.TryGetValue(description.NodeId, out var references))
+                    {
+                        children.AddRange(references);
+                    }
+                    results.Add(new BrowseResult { References = children });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        var rootNode = MakeReference("Root", RootId, NodeClass.Object);
+
+        // Act: the first load rolls back after Parent.Items was already bound, the second runs
+        // against a healthy server.
+        await Assert.ThrowsAsync<OpcUaTransientServiceException>(
+            () => loader.LoadSubjectAsync(root, rootNode, mockSession.Object, CancellationToken.None));
+
+        failStatusAttributeBrowse = false;
+        var monitoredItems = await loader.LoadSubjectAsync(
+            root, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: both collection elements are back in the registry and monitored. A rollback that
+        // detaches a subject the model already references leaves it unregistered while Parent.Items
+        // still points at it, so the second load reuses it from property.Children without
+        // re-staging it, never re-attaches it, and then skips it as unregistered. That shows up
+        // here as a null registration and the two missing item monitored items.
+        var items = Assert.IsType<RollbackCollectionItem[]>(root.Parent!.Items);
+        Assert.Equal(2, items.Length);
+        Assert.All(items, item => Assert.NotNull(item.TryGetRegisteredSubject()));
+
+        var monitoredNodeIds = monitoredItems.Select(item => item.StartNodeId).ToHashSet();
+        Assert.Equal(3, monitoredItems.Count);
+        Assert.Contains(firstValueId, monitoredNodeIds);
+        Assert.Contains(secondValueId, monitoredNodeIds);
+        Assert.Contains(statusId, monitoredNodeIds);
+        Assert.Equal(3, source.Ownership.Properties.Count);
+    }
+
+    [Fact]
     public async Task WhenALoadFailsWhileHoldingTheStructureLock_ThenRollbackDoesNotDeadlock()
     {
         // Arrange: Root has a Sensor child whose own child fails with a transient browse status,
@@ -1023,6 +1125,27 @@ public partial class RollbackReferenceParent
 {
     [OpcUaNode("Child")]
     public partial RollbackCollectionItem? Child { get; set; }
+}
+
+[InterceptorSubject]
+public partial class RollbackLatePhaseRoot
+{
+    [OpcUaNode("Parent")]
+    public partial RollbackLatePhaseParent? Parent { get; set; }
+}
+
+[InterceptorSubject]
+public partial class RollbackLatePhaseParent
+{
+    [OpcUaNode("Items")]
+    public partial RollbackCollectionItem[]? Items { get; set; }
+
+    /// <summary>
+    /// A plain value property alongside the collection. Its node is browsed by the attribute
+    /// phase, which is the last phase of the level and so runs after the collection has bound.
+    /// </summary>
+    [OpcUaNode("Status")]
+    public partial double Status { get; set; }
 }
 
 [InterceptorSubject]

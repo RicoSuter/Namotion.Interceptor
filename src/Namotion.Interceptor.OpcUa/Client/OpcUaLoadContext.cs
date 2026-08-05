@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -274,6 +275,18 @@ internal sealed class OpcUaLoadContext : IDisposable
         for (var i = _stagedSubjects.Count - 1; i >= 0; i--)
         {
             var (staged, parentContext) = _stagedSubjects[i];
+
+            // A staged subject that acquired a property reference during the load is no longer
+            // staged: the model references it, so it is not an orphan to shed. Detaching it here
+            // would evict it from the registry while the parent property still points at it, and
+            // nothing reconciles those two. ContextInheritanceHandler is otherwise the only caller
+            // that removes a fallback context, and it only does so once the last property
+            // reference is gone, so this is what keeps that invariant true for the loader too.
+            if (staged.GetReferenceCount() > 0)
+            {
+                continue;
+            }
+
             try
             {
                 staged.Context.RemoveFallbackContext(parentContext);

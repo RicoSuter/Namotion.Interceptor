@@ -783,34 +783,22 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 
 ### Known Limitations
 
-**Rollback of a failed load is not fully transactional.** When a load fails partway, the staged
-subjects it created are detached so the registry sheds them and the next load starts clean. Property
-assignments made during the load are not reverted, because prior values were not captured.
+**Rollback of a failed load is not fully transactional.** When a load fails partway, the subjects it
+staged are detached so the registry sheds them and the next load starts clean. Property assignments
+made during the load are not reverted, because prior values were not captured.
 
-Collections and dictionaries are therefore bound to their parent property only after their children
-have loaded (`OpcUaSubjectLoader.BatchLoadCollectionsAndDictionariesAsync`), matching the order
-`LoadPendingSubjectReferencesAsync` uses. That closes the widest window, since the children's load is
-usually where most of the browse IO happens.
+Rollback only un-stages a subject that nothing references yet. A staged subject that was bound to a
+parent property during the load is left attached, because the model now references it and it is not
+an orphan to shed. This mirrors the rule the core already follows: `ContextInheritanceHandler` is the
+only other place that removes a fallback context, and it does so only once the last property
+reference is gone.
 
-It does not close every window. The phases that run afterwards (`LoadPendingSubjectReferencesAsync`,
-`LoadAttributesAsync`, and any outer recursion level) also browse and can fail after those bindings
-have applied. A failure there can leave a child referenced by its parent property but already
-detached from the registry. Such a subject is reused by the next load without being re-staged, so it
-is never re-attached, and its subtree stays unmonitored.
+Removing it in any other state would break a graph invariant rather than restore one. The subject
+would be evicted from the registry while its parent property still pointed at it, and nothing
+reconciles those two. The next load would reuse it from `property.Children` without re-staging it, so
+it would never re-attach, and the loader would then skip it as unregistered. The subtree would be
+silently unmonitored for good, with no retry recovering it.
 
-Retrying the load does not recover it, and neither does a structure change that keeps the child. The
-container is reassigned on every load, but the attach is skipped because the subject appears in both
-the old and the new value. Collection children are also matched by index, so a later index shift can
-rebind the affected subject to a different node rather than healing it.
-
-**The only recovery is to remove or replace the affected child value**, which forces the next load
-to create and stage a fresh subject. Detaching and re-attaching the parent subtree does not work,
-even though it re-walks the backing store: a context detach does not decrement the subject's
-reference count, so the re-attach raises it to two, and `ContextInheritanceHandler` restores the
-fallback context only on the first attach. The subject is left unable to resolve the registry, so
-the loader keeps skipping its subtree. Recreating the client does not help either, because the
-affected state lives in the subject graph and the registry rather than in the client, so a new
-client runs the same loader over the same graph and takes the same reuse path.
-
-Closing this completely requires recording and reverting property assignments during rollback, which
-is a larger design change than the ordering fix.
+The visible consequence is that a failed load can leave a partially populated subtree attached to the
+model. Those subjects are registered and monitored, and the next successful load completes them in
+place, which is the same behaviour as before the loader batched its browse calls.
