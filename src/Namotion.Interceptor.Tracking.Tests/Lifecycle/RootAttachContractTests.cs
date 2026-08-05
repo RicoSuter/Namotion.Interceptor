@@ -255,6 +255,38 @@ public class RootAttachContractTests
     }
 
     [Fact]
+    public void WhenDetachedRootIsAttachedToAnotherGraph_ThenOwnershipWasReleased()
+    {
+        // Kills the mutant that deletes the ownership release at the end of DetachRootSubject.
+        // Without it a detached root stays owned by the graph it left, so IsAttached() keeps
+        // reporting true and TryRecordAttachContext rejects the next attach into a different graph.
+        // The graphs must carry WithContextInheritance(), because only Tracking's
+        // LifecycleInterceptor claims ownership in the first place.
+
+        // Arrange
+        var graphA = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var graphB = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var subject = new Person { FirstName = "Subject" };
+        ((IInterceptorSubject)subject).AttachToContext(graphA);
+
+        // Act
+        ((IInterceptorSubject)subject).DetachFromContext(graphA);
+        var attachedAfterDetach = ((IInterceptorSubject)subject).IsAttached();
+        ((IInterceptorSubject)subject).AttachToContext(graphB);
+
+        // Assert
+        Assert.False(attachedAfterDetach);
+        Assert.True(((IInterceptorSubject)subject).IsAttached());
+        Assert.Same(graphB, ((IInterceptorSubject)subject).TryGetAttachContext());
+    }
+
+    [Fact]
     public void WhenSubjectIsStillReferenced_ThenDetachFromContextThrowsAndLeavesTheCountIntact()
     {
         // Behaviour change 8.
@@ -530,10 +562,11 @@ public class RootAttachContractTests
     public void WhenPropertyOwnedSubjectIsRootAttachedIntoAnotherGraph_ThenNoRecordAndNoEdgeArePublished()
     {
         // The directed test spec section 9 asks for. The ownership read in TryRecordAttachContext
-        // is what makes the rejection happen before anything is published; ClaimOwnership is a
-        // second line of defence that reaches the same outcome by rollback rather than by never
-        // publishing, so both assertions below hold with either one in place. What this pins is the
-        // outcome, not which of the two produced it.
+        // is the only thing preventing the publish here, not the first of two defences: delete it
+        // and nothing throws at all. Once the record and the edge into contextB are published, the
+        // subject's own context resolves both graphs' interceptors, so ClaimOwnership's membership
+        // predicate finds graph A's interceptor in that set and the claim succeeds. Reading
+        // ownership before the edge exists is therefore load-bearing on its own.
 
         // Arrange
         var contextA = InterceptorSubjectContext
@@ -583,6 +616,41 @@ public class RootAttachContractTests
         Assert.Same(parentContext, ((IInterceptorSubject)item).TryGetAttachContext());
         Assert.Equal(1, item.GetReferenceCount());
         Assert.NotNull(((IInterceptorSubject)item).TryGetRegisteredSubject());
+    }
+
+    [Fact]
+    public void WhenRootAttachedSubjectGainsItsFirstParent_ThenTheSubtreeDescentDoesNotRunAgain()
+    {
+        // Kills the mutant that gates the descent on ReferenceCount == 1 instead of IsContextAttach.
+        // Only this shape separates the two: the item is already in the ledger when it gains its
+        // first parent, so IsContextAttach is false while the count becomes 1. Under the mutant the
+        // descent re-runs AttachSubjectToContext over an already-attached subtree, re-seeding its
+        // reconciliation baseline from the backing store. The spy counts that invocation directly,
+        // because the re-seeding leaves nothing else observable behind.
+
+        // Arrange
+        var attachCount = 0;
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithService(() => new AttachCountingLifecycleInterceptor(() => attachCount++), _ => false);
+
+        var parent = new Person(context) { FirstName = "Parent" };
+        var parentContext = ((IInterceptorSubject)parent).Context;
+
+        var item = new Person { FirstName = "Item", Mother = new Person { FirstName = "Child" } };
+        ((IInterceptorSubject)item).AttachToContext(parentContext);
+
+        // The parent's constructor attach, the item's root attach, and the descent onto the item's
+        // own child, which is the pass the assignment below must not repeat.
+        var attachesBeforeAssignment = attachCount;
+
+        // Act
+        parent.Father = item;
+
+        // Assert
+        Assert.Equal(3, attachesBeforeAssignment);
+        Assert.Equal(attachesBeforeAssignment, attachCount);
     }
 
     [Fact]
@@ -719,6 +787,18 @@ public class RootAttachContractTests
         public void DetachSubjectFromContext(IInterceptorSubject subject)
         {
             onDetach();
+        }
+    }
+
+    private class AttachCountingLifecycleInterceptor(Action onAttach) : ILifecycleInterceptor
+    {
+        public void AttachSubjectToContext(IInterceptorSubject subject)
+        {
+            onAttach();
+        }
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject)
+        {
         }
     }
 }

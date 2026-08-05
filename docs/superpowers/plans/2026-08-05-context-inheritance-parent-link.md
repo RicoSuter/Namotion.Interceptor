@@ -3129,12 +3129,12 @@ Every pairing below was checked against what the named test actually asserts. Si
 |---|---|
 | Restore `IsContextAttach` to the link gate | `WhenConstructorAttachedChildIsPlacedUnderAParent_...` |
 | Publish the link from `LifecycleInterceptor` instead of the handler | `AttachOrderCharacterizationTests.WhenHandlerRunsBeforeContextInheritance_...`. **Not** `RecursiveAttachTests`: the internal setter runs no descent, so under `WithLifecycle()` alone the grandchild still does not attach and that test passes either way |
-| Gate the descent on `count == 1` instead of `IsContextAttach` | `WhenPreWiredChildIsAttachedUnderANewParent_...`, which only works because its parent is now un-attached at pre-wire time |
+| Gate the descent on `count == 1` instead of `IsContextAttach` | `WhenRootAttachedSubjectGainsItsFirstParent_ThenTheSubtreeDescentDoesNotRunAgain`. **Not** `WhenPreWiredChildIsAttachedUnderANewParent_...`: in that trace `IsContextAttach` and `count == 1` are equal, so it survives. The two diverge only for a subject already attached as a root that then gains its first parent |
 | Release the link before the handlers instead of in the `finally` | `AttachOrderCharacterizationTests.WhenThreeLevelGraphIsAttached_...` |
 | Delete the owner check in `ClaimOwnership` | `WhenSubjectOwnedByOneGraphIsAttachedToAnother_...` |
 | Delete the ownership claim in `AttachRootSubject` | `WhenRootAttachedSubjectIsReferencedFromAnotherGraph_...`. This is the hole the review found, so the mutant is the plan's own first draft |
-| Delete the ownership release in `DetachRootSubject` | `WhenPlainContextSubjectJoinsAGraphLater_...` and any re-attach after a root detach |
-| Delete the ownership read in `TryRecordAttachContext` | `WhenPropertyOwnedSubjectIsRootAttachedIntoAnotherGraph_...`. Split from the row above: the cross-graph reproduction is rejected by `ClaimOwnership` on the property path and passes with this check deleted |
+| Delete the ownership release in `DetachRootSubject` | `WhenDetachedRootIsAttachedToAnotherGraph_ThenOwnershipWasReleased`. **Not** `WhenTwoThreadsDetachTheSameRoot_...`, which uses a bare hand-written interceptor that never claims ownership, so deleting the release changes nothing for it |
+| Delete the ownership read in `TryRecordAttachContext` | `WhenPropertyOwnedSubjectIsRootAttachedIntoAnotherGraph_...`, and it is the **only** defence, not the first of two. Measured: with the read deleted the mutant produces no exception at all, because once the edge is published the subject resolves both graphs and `ClaimOwnership`'s membership predicate then accepts |
 | Delete the `finally` around the detach edge removal | `WhenDetachInterceptorThrows_...`, and only because of its edge assertion: the record is cleared before the interceptor loop, so `IsAttached()` is false and a re-attach succeeds even with the `finally` gone |
 | Delete the self-context guard | `WhenSubjectReferencesItself_ThenNoSelfLinkIsPublished` |
 | Delete the rollback in `AttachToContext`'s `catch` | `WhenAttachHandlerThrowsPartWay_...` |
@@ -3142,7 +3142,7 @@ Every pairing below was checked against what the named test actually asserts. Si
 | Put the link publication outside the `count == 1` branch | `WhenConnectorItemIsAssignedUnderItsAttachParent_...`. The two-parents test does **not** kill this half: `TrySetParentContext` returns false when a link exists, so a second parent is a no-op |
 | Set the link and release the attach edge instead of skipping the link | `WhenConnectorItemIsAssignedUnderItsAttachParent_...` |
 | Make the reverse-entry unregistration unconditional | `WhenTwoEdgesTargetOneContext_...` |
-| Route the detach cleanup through public `RemoveFallbackContext` | both `AttachEdgeLeakTests` reproductions, on the property route. **Not** `WhenTwoThreadsDetachTheSameRoot_...`: by the time the root path's `finally` runs the record is already null, so the public guard no-ops and behaviour is identical |
+| Route the detach cleanup through public `RemoveFallbackContext` | **Nothing kills this, and it is structural rather than a coverage gap.** Measured: every one of the three call sites clears the attach record before removing the edge, so the public guard can never fire and the internal bypass is currently unobservable. It stays because a future call site that removes before clearing would need it, but nothing today distinguishes the two |
 | Drop the reference-count guard on `DetachFromContext` | `WhenSubjectIsStillReferenced_...` |
 | Drop the last-property-detach release of the attach edge | both `AttachEdgeLeakTests` reproductions |
 | Make the lifecycle-bearing guard test `_owner == null` | every root attach; the whole suite |
