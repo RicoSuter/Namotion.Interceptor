@@ -248,7 +248,7 @@ public class SourceMonitor : ILifecycleHandler
         });
     }
 
-    private bool IsSatisfied(IInterceptorSubject anchor, bool anchorWarned = true)
+    private bool IsSatisfied(IInterceptorSubject anchor, PendingWait? wait = null)
     {
         if (!IsRegistrationComplete)
         {
@@ -256,6 +256,7 @@ public class SourceMonitor : ILifecycleHandler
         }
 
         var matched = false;
+        var allInScopeStopped = true;
         foreach (var source in _sources)
         {
             if (!SourceScope.IsInScope(source, anchor))
@@ -269,14 +270,21 @@ public class SourceMonitor : ILifecycleHandler
             {
                 return false;
             }
+
+            if (state != SourceState.Stopped)
+            {
+                allInScopeStopped = false;
+            }
         }
 
         if (!matched)
         {
             // Registration is complete and still nothing claims this branch. That is very likely a
             // misconfiguration, and blocking forever in silence reads as a hang rather than a
-            // diagnosis, so say it once per wait rather than on every re-evaluation.
-            if (!anchorWarned)
+            // diagnosis, so say it once per wait rather than on every re-evaluation. MarkWarned is
+            // only called here, at the point the warning is actually about to fire, so an unrelated
+            // re-evaluation that finds the branch still matched never burns the one-shot flag.
+            if (wait is not null && !wait.MarkWarned())
             {
                 _logger?.LogWarning(
                     "A synchronization wait on {Subject} has no in-scope source, and source registration is complete. " +
@@ -287,7 +295,7 @@ public class SourceMonitor : ILifecycleHandler
             return false;
         }
 
-        if (_sources.All(source => !SourceScope.IsInScope(source, anchor) || source.State == SourceState.Stopped))
+        if (allInScopeStopped)
         {
             // Stopped is terminal, so this branch will never become live. Completing is more useful
             // than hanging, but silence would read as success, so say it out loud.
@@ -313,7 +321,7 @@ public class SourceMonitor : ILifecycleHandler
             bool satisfied;
             lock (_lock)
             {
-                satisfied = IsSatisfied(wait.Anchor, wait.MarkWarned());
+                satisfied = IsSatisfied(wait.Anchor, wait);
             }
 
             if (satisfied)

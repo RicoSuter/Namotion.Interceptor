@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
@@ -224,6 +225,45 @@ public class SourceWaitTests
     }
 
     [Fact]
+    public void WhenScopeBecomesEmptyAfterUnrelatedReEvaluations_ThenTheEmptyScopeWarningStillFires()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var recordingLogger = new RecordingLogger();
+        context.AddService<ILoggerFactory>(new RecordingLoggerFactory(recordingLogger));
+        using var subscription = monitor.Subscribe(_ => { }); // resolves the monitor's lazy logger
+
+        var anchor = new Person(context);
+        var source = new TestStateSource(anchor);
+        monitor.Register(source);
+        monitor.CompleteSourceRegistration();
+
+        // The source stays Connecting, so the wait is pending, but its scope is not empty: it is
+        // matched, just not yet satisfied. This is what an unrelated re-evaluation must not confuse
+        // with a genuinely empty scope.
+        var wait = anchor.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        // Act - unrelated re-evaluations while the wait's own branch is still matched. Every one of
+        // these calls OnWaitConditionChanged for every pending wait, including this one. Pre-fix,
+        // MarkWarned() was evaluated eagerly as an IsSatisfied argument on each pass and permanently
+        // burned the one-shot flag even though the branch was never actually scope-empty at the time.
+        var elsewhere = new TestStateSource(new Person());
+        monitor.Register(elsewhere);
+        monitor.Unregister(elsewhere);
+        monitor.Register(new TestStateSource(new Person()));
+        Assert.Empty(recordingLogger.Warnings);
+
+        // Now make the wait's own branch genuinely scope-empty: precisely the reparent scenario this
+        // warning exists to diagnose.
+        monitor.Unregister(source);
+
+        // Assert
+        Assert.Contains(recordingLogger.Warnings, message => message.Contains("has no in-scope source"));
+    }
+
+    [Fact]
     public async Task WhenASourceIsRegisteredMidWait_ThenItIsIncludedAndReBlocksTheWait()
     {
         // Arrange
@@ -413,4 +453,38 @@ internal sealed class ThrowingScopeSource : TestStateSource
     }
 
     public override IInterceptorSubject RootSubject => throw new InvalidOperationException("scope check failed");
+}
+
+/// <summary>Captures every warning message logged through it, to assert on the monitor's diagnostics.</summary>
+internal sealed class RecordingLogger : ILogger
+{
+    public List<string> Warnings { get; } = [];
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+        LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+        Func<TState, Exception?, string> formatter)
+    {
+        if (logLevel == LogLevel.Warning)
+        {
+            Warnings.Add(formatter(state, exception));
+        }
+    }
+}
+
+/// <summary>Always resolves to the same <see cref="RecordingLogger"/>, regardless of category.</summary>
+internal sealed class RecordingLoggerFactory(RecordingLogger logger) : ILoggerFactory
+{
+    public void AddProvider(ILoggerProvider provider)
+    {
+    }
+
+    public ILogger CreateLogger(string categoryName) => logger;
+
+    public void Dispose()
+    {
+    }
 }

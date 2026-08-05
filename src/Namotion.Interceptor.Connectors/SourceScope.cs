@@ -24,9 +24,9 @@ internal static class SourceScope
     /// up from it through tracked parents.
     /// </summary>
     /// <remarks>
-    /// The common shape is a short single-parent chain, so that path allocates nothing. The visited
-    /// set is allocated only on the first fan-out, where the parent graph is a genuine DAG and an
-    /// unguarded walk could revisit or loop.
+    /// Nothing enforces that the parent graph is acyclic: two subjects can reference each other
+    /// (directly or through a longer chain), so the walk always tracks visited subjects and cannot
+    /// loop, even on a single-parent chain.
     /// </remarks>
     internal static bool IsAncestorOrSelf(IInterceptorSubject candidate, IInterceptorSubject target)
     {
@@ -35,26 +35,7 @@ internal static class SourceScope
             return true;
         }
 
-        var current = target;
-        while (true)
-        {
-            var parents = current.GetParents();
-            if (parents.Length == 0)
-            {
-                return false;
-            }
-
-            if (parents.Length > 1)
-            {
-                return SearchGraph(candidate, current);
-            }
-
-            current = parents[0].Property.Subject;
-            if (ReferenceEquals(current, candidate))
-            {
-                return true;
-            }
-        }
+        return SearchGraph(candidate, target);
     }
 
     private static bool SearchGraph(IInterceptorSubject candidate, IInterceptorSubject start)
