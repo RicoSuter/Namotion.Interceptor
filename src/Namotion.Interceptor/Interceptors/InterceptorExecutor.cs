@@ -276,19 +276,30 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     }
 
     /// <summary>
-    /// Releases whatever attach edge the subject holds, silently. Called when the subject leaves the
-    /// graph by the property route, where the descent has already detached it, so its own graph
-    /// loses nothing. A second interceptor co-registered on the attach context does lose the
-    /// notification master's executor override gave it.
+    /// Releases the attach edge the subject held when its reference count was decided, silently.
+    /// Called when the subject leaves the graph by the property route, where the descent has already
+    /// detached it, so its own graph loses nothing. A second interceptor co-registered on the attach
+    /// context does lose the notification master's executor override gave it.
     /// </summary>
-    internal void ReleaseAttachEdge()
+    /// <param name="expectedContext">
+    /// The record <see cref="DecrementReferenceCount"/> observed while it held the lock, or null when
+    /// there was none, in which case there is nothing to release.
+    /// </param>
+    internal void ReleaseAttachEdge(IInterceptorSubjectContext? expectedContext)
     {
-        IInterceptorSubjectContext? context;
+        if (expectedContext is null)
+        {
+            return;
+        }
 
         lock (_mutationLock)
         {
-            context = _attachContext;
-            if (context is null)
+            // Compared against the captured record rather than releasing whatever is live: the
+            // decrement and this call are separated by the detach handlers, and a concurrent
+            // AttachToContext can record and publish its own edge in between. Releasing that one
+            // would leave the subject owned and in the ledger while resolving nothing, with no
+            // record left for DetachFromContext to act on.
+            if (!ReferenceEquals(_attachContext, expectedContext))
             {
                 return;
             }
@@ -297,7 +308,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             _attachInterceptors = ImmutableArray<ILifecycleInterceptor>.Empty;
         }
 
-        RemoveAttachEdge(context);
+        RemoveAttachEdge(expectedContext);
     }
 
     /// <summary>
@@ -389,12 +400,18 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
         }
     }
 
-    internal int DecrementReferenceCount()
+    /// <summary>
+    /// Reports the attach record alongside the new count, from inside the critical section that
+    /// decides the count, so the caller that observes zero can release exactly the record that was
+    /// present at that instant rather than whatever a concurrent attach has written since.
+    /// </summary>
+    internal int DecrementReferenceCount(out IInterceptorSubjectContext? attachContext)
     {
         lock (_mutationLock)
         {
             var count = _referenceCount > 0 ? _referenceCount - 1 : 0;
             Volatile.Write(ref _referenceCount, count);
+            attachContext = _attachContext;
             return count;
         }
     }

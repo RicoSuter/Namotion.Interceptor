@@ -32,11 +32,12 @@ public static class LifecycleInterceptorExtensions
     }
 
     /// <summary>
-    /// Decrements the reference count and returns the new value.
+    /// Decrements the reference count and returns the new value, along with the attach record
+    /// observed at that instant.
     /// </summary>
-    internal static int DecrementReferenceCount(this IInterceptorSubject subject)
+    internal static int DecrementReferenceCount(this IInterceptorSubject subject, out IInterceptorSubjectContext? attachContext)
     {
-        return subject.GetExecutor().DecrementReferenceCount();
+        return subject.GetExecutor().DecrementReferenceCount(out attachContext);
     }
 
     public static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)

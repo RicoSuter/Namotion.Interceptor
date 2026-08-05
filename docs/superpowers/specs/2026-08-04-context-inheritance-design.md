@@ -376,6 +376,16 @@ behaviour and no worse. Both are already narrowed by the thesis, from every chil
 concurrent root operation, because `ContextInheritanceHandler` stops calling the public mutators
 entirely. Section 10 records the follow-up that closes them.
 
+**One shape of that non-atomicity is inside the library rather than in consumer sequencing, so it is
+named here.** `ClearAttachContext`, the rollback `AttachToContext` runs when the attach throws, clears
+the record under `_mutationLock`, releases the lock, and removes the edge in a second acquisition. A
+retry that records the same context and deduplicates against the still-present edge in between then
+loses that edge to the rollback's removal, and ends record-present with edge-absent: the subject reports
+attached and resolves nothing. Making the two steps one would need the edge removal inside
+`_mutationLock`, which drags `InvalidateUsingContexts` in with it, and #400 deliberately keeps that
+outside. So it stays a shape of the concession above rather than a gap of its own, and follow-up 1
+closes it along with the rest by serialising the two root operations per subject.
+
 `DetachFromContext` is also not atomic against a **property** attach, but the window is smaller than an
 earlier version of this section described. That version had the reference-count check and the record
 transition as two steps, with a property attach able to land between them. They are one step:
@@ -992,8 +1002,9 @@ Unchanged. A throwing `ILifecycleHandler` still propagates and still leaves part
 
 ## 8. Behaviour changes
 
-The complete list. Anything discovered beyond these nineteen is escalated, not absorbed. Changes 18 and
-19 were found during implementation and escalated rather than absorbed, which is what the rule asks for.
+The complete list. Anything discovered beyond these twenty-one is escalated, not absorbed. Changes 18
+and 19 were found during implementation and changes 20 and 21 in pre-merge review, and all four were
+escalated rather than absorbed, which is what the rule asks for.
 
 1. `AddFallbackContext` stops attaching.
 2. `RemoveFallbackContext` stops detaching a root, and throws when aimed at the attach edge.
@@ -1025,9 +1036,15 @@ The complete list. Anything discovered beyond these nineteen is escalated, not a
     `SubjectLifecycleChange.ReferenceCount` are unchanged, but the dictionary is public and enumerable,
     so its contents are technically observable.
 14. An `AddFallbackContext` naming the attach context during a root detach window now throws instead of
-    returning `false` and then losing its edge. That is #411's silent wrong answer, made loud as an
-    emergent consequence of the guard rather than by a rule written for it: the record is cleared before
-    the interceptor window, so the re-add is no longer naming the recorded attach context.
+    returning `false` and then losing its edge, **provided that context still resolves an
+    `ILifecycleInterceptor`**. That is #411's silent wrong answer, made loud as an emergent consequence
+    of the guard rather than by a rule written for it: the record is cleared before the interceptor
+    window, so the re-add is no longer naming the recorded attach context. The qualification is
+    load-bearing, because the guard's other conjunct is the lifecycle-bearing test. If the attach
+    context has had its lifecycle services removed since the attach, the guard passes on the empty set,
+    the deduplication returns `false` against the still-present edge, and `DetachFromContext`'s
+    `finally` then removes it, so the caller is silently told "already registered" and loses the edge.
+    That is #411's own shape, and it survives. Only the lifecycle-bearing variant throws and is pinned.
 15. The attach edge released on the property path at reference count zero is released silently, where
     `master` routes it through `InterceptorExecutor.RemoveFallbackContext` and notifies every resolved
     `ILifecycleInterceptor`. An interceptor that resolves from the attach context but not from the
@@ -1099,6 +1116,22 @@ The complete list. Anything discovered beyond these nineteen is escalated, not a
     a parent: fires" in section 5. It is an improvement rather than a regression: four other Registry
     snapshots already report their cascades bottom-up, and this was the only top-down one. Same events,
     same payloads, same flags, different order.
+20. The inherited parent context now always resolves **last**, after every explicit fallback. On
+    `master` the inherited edge was an ordinary fallback and kept its insertion position, so it
+    typically sat ahead of a fallback the consumer added after the attach. The parent link is a
+    separate field consulted once the fallback array is exhausted, so it now sits behind all of them.
+    This is observable in `GetServices` order, which is what decides interceptor and handler order,
+    so a subject carrying both an explicit fallback and an inherited parent sees the two sources swap
+    places. It is the ordering the consumer documentation in section 10 already has to state, and it
+    belongs on this list as a change rather than only as a documentation task.
+21. `AddFallbackContext` now **throws** for any lifecycle-bearing context that is not the subject's
+    recorded root attach context, not only during a detach window. Change 1 says only that it stops
+    attaching and change 14 covers only the detach-window case, so neither tells a reader that
+    `child.Context.AddFallbackContext(trackingContext)`, which on `master` returned `false` and did
+    nothing once that edge was already present, now raises. Composing a graph's context onto a
+    subject by hand is no longer a legal way to put that subject in the graph, and the message names
+    `AttachToContext` as the replacement. The guard itself is specified in sections 5 and 7; what is
+    recorded here is that it is a behaviour change in its own right.
 
 Traversal order is **not** otherwise on this list, and change 19 is the one exception. Fixing the
 traversal to top-down was considered and rejected: the handler-preserving design keeps the orders
@@ -1126,8 +1159,10 @@ someone improved the behaviour and the test should be updated deliberately, or s
 
 - #402 defect 1: an attach racing a detach on the same root, asserting the documented outcome rather
   than a correct one.
-- #411: an `AddFallbackContext` during the detach window, asserting the caller is told `false` and the
-  edge then goes.
+- #411 in its surviving shape: an `AddFallbackContext` during the detach window naming an attach
+  context that no longer resolves an `ILifecycleInterceptor`, asserting the caller is told `false` and
+  the edge then goes. The lifecycle-bearing variant throws instead, and change 14's rendezvous pins
+  that one.
 - `DetachFromContext` racing a property attach, which the reference-count guard does not close.
   **This one has no test, deliberately.** The window the residual race needs is between the record
   transition and the interceptor pass, and the rendezvous that would pin it sits inside
@@ -1195,6 +1230,8 @@ someone improved the behaviour and the test should be updated deliberately, or s
 | 17 | a handler that re-attaches the subject it is being notified about throws, through both attach entry points; the backing store keeps the written value and the reference count stays zero. The test's handler catches the exception so the outer detach still completes; an uncaught one propagates and leaves the detach partial, which is #384's rule and not a separate outcome |
 | 18 | **no test.** The throw is stated at `SubjectAttachmentExtensions.GetExecutor` and every subject in the repository supplies an executor, so a test would have to hand-write an `IInterceptorSubject` with a plain context purely to assert the message. The requirement is pinned indirectly: nothing compiles or runs without it |
 | 19 | `Registry.Tests/GraphBehavior/CycleTests.WhenBreakingCycle_ThenBothDetach.verified.txt`, whose two lines swap, plus `KnownGapTests.WhenConstructorAttachedSubtreeIsRemovedFromItsParent_ThenTheCascadeIsBottomUp`, which pins the new order deliberately rather than incidentally |
+| 20 | **not pinned by a test.** Nothing in the repository composes an explicit fallback onto a subject after that subject is attached, so no oracle carries both edge kinds on one context and the swap has nothing to move. `ContextSubtreeServiceTests.WhenSubjectRegistersOwnInterceptor_ThenItRunsBeforeTheOnesOfTheParentContext` pins own services ahead of the parent's, which is a different edge of the same order |
+| 21 | `RootAttachContractTests.WhenASecondLifecycleBearingContextIsAdded_ThenItThrowsEvenThoughARecordExists`, which is the general form; change 14's rendezvous covers the detach-window form |
 
 ### Oracles that must not move
 
@@ -1376,7 +1413,7 @@ comments, not only its body.
 | #207 | Close, citing both reproductions, both verified during review. |
 | #410 | **Update, keep open.** Symptom 2 is not closed. The route the issue names, a detach that leaves property values set, strands nothing when measured; stranding requires the subject to hold another reference, which is the multi-parent shape, and the connector shape fails the same way through its attach edge. Post all three measurements, and the correction that the subject resolves *nothing* rather than continuing to resolve through the departed context, which is more severe than the issue predicts. Symptom 1 only if the reproduction attempt succeeds; if it cannot be built, strike it with the reasoning recorded. |
 | #210 | Close as not reachable, with the constraint recorded that a future removal API must clear the ledger entry itself. |
-| #411 | **Update, keep open.** The silent form is gone: an add naming the attach context during the window now throws, because the record is cleared before the interceptor loop, so the caller is no longer told `false` and then left without an edge. That is a consequence of the guard rather than a rule written for it. The issue stays open because the caller still cannot complete the add and must retry; the transparent fix, a deferred add performed by the removing thread, is follow-up 1. |
+| #411 | **Update, keep open.** The silent form is gone *for an attach context that still resolves an `ILifecycleInterceptor`*: an add naming it during the window now throws, because the record is cleared before the interceptor loop, so the caller is no longer told `false` and then left without an edge. That is a consequence of the guard rather than a rule written for it. The silent form survives in one shape, and the update must say so: if the attach context has had its lifecycle services removed since the attach, the guard passes on the empty set, the deduplication returns `false` against the still-present edge, and the detach's `finally` then removes it, which is exactly the issue's shape. So the issue stays open both for that shape and because even where the add throws the caller cannot complete it and must retry; the transparent fix, a deferred add performed by the removing thread, is follow-up 1. |
 | #384 | Update, narrowed. The attach-tail case loses route 2 with #412's deferred handoff; route 1 is pre-existing. The detach-half case still raises on a cyclic chain, but such a chain now requires a consumer to have built one deliberately. Its stated blocker is removed. See section 11. |
 | #412 | Close unmerged, referencing this design. |
 

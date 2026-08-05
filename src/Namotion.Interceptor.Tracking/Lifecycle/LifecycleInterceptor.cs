@@ -234,18 +234,26 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsContextDetach = true
         };
 
-        SubjectDetaching?.Invoke(change);
-        InvokeRemovedLifecycleHandlers(subject, context, change);
-
-        // Paired with the claim in AttachRootSubject. Without it a detached root stays owned
-        // forever: IsAttached() keeps reporting true and any later attach to a different graph is
-        // rejected by an owner that no longer means anything. It sits after the handlers for the
-        // same reason the property path's release does. The descent cannot reach it for a subject
-        // it already removed from the ledger, because the guard at the top of this method returns
-        // first, and reaching it after the property path released finds no owner and no-ops. A
-        // consumer calling DetachSubjectFromContext directly can still reach it for a referenced
-        // subject, which is one more way that documented low-level call bypasses the guards.
-        subject.GetExecutor().ReleaseOwnership(this, context);
+        try
+        {
+            SubjectDetaching?.Invoke(change);
+            InvokeRemovedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            // Paired with the claim in AttachRootSubject. Without it a detached root stays owned
+            // forever: IsAttached() keeps reporting true and any later attach to a different graph is
+            // rejected by an owner that no longer means anything. It sits after the handlers for the
+            // same reason the property path's release does, and in a finally for the same reason
+            // DetachFromContext removes the edge in one: the record and the edge are already gone by
+            // the time a handler throws, so an owner left standing here belongs to no graph and can
+            // never be cleared through the public API. The descent cannot reach it for a subject
+            // it already removed from the ledger, because the guard at the top of this method returns
+            // first, and reaching it after the property path released finds no owner and no-ops. A
+            // consumer calling DetachSubjectFromContext directly can still reach it for a referenced
+            // subject, which is one more way that documented low-level call bypasses the guards.
+            subject.GetExecutor().ReleaseOwnership(this, context);
+        }
     }
 
     /// <summary>
@@ -292,7 +300,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
         }
 
-        var count = subject.DecrementReferenceCount();
+        var count = subject.DecrementReferenceCount(out var attachContextAtDecrement);
         var change = new SubjectLifecycleChange
         {
             Subject = subject,
@@ -324,7 +332,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             {
                 var executor = subject.GetExecutor();
                 executor.TryClearParentContext();
-                executor.ReleaseAttachEdge();
+
+                // The record captured with the decrement, not the live one: an AttachToContext that
+                // lands after the count was decided has already published its own record and edge,
+                // and releasing those would dismantle an attach that is still running.
+                executor.ReleaseAttachEdge(attachContextAtDecrement);
                 executor.ReleaseOwnership(this, context);
             }
         }

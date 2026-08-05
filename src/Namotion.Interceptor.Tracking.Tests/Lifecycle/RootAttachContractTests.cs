@@ -255,6 +255,41 @@ public class RootAttachContractTests
     }
 
     [Fact]
+    public void WhenDetachHandlerThrowsOnTheRootPath_ThenOwnershipIsStillReleased()
+    {
+        // The root twin of the property path's release in a finally. DetachFromContext has already
+        // cleared the record and its own finally removes the edge, so an ownership release skipped
+        // by a throwing handler leaves a subject that belongs to no graph and still has an owner:
+        // IsAttached() reports true forever and every later attach is rejected by both
+        // TryRecordAttachContext and ClaimOwnership. The graphs carry WithContextInheritance()
+        // because only Tracking's LifecycleInterceptor claims ownership in the first place, which is
+        // why the change 6 test above does not cover this.
+
+        // Arrange
+        var graphA = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var graphB = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        graphA.WithService(() => new ThrowingDetachHandler());
+
+        var subject = new Person { FirstName = "Subject" };
+        ((IInterceptorSubject)subject).AttachToContext(graphA);
+
+        // Act
+        var caught = Record.Exception(() => ((IInterceptorSubject)subject).DetachFromContext(graphA));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(caught);
+
+        ((IInterceptorSubject)subject).AttachToContext(graphB);
+        Assert.Same(graphB, ((IInterceptorSubject)subject).TryGetAttachContext());
+    }
+
+    [Fact]
     public void WhenDetachedRootIsAttachedToAnotherGraph_ThenOwnershipWasReleased()
     {
         // Kills the mutant that deletes the ownership release at the end of DetachRootSubject.
@@ -812,6 +847,17 @@ public class RootAttachContractTests
             catch (Exception exception)
             {
                 onThrow(exception);
+            }
+        }
+    }
+
+    private class ThrowingDetachHandler : ILifecycleHandler
+    {
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsContextDetach)
+            {
+                throw new InvalidOperationException("detach handler failed");
             }
         }
     }
