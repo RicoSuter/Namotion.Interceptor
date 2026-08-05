@@ -157,6 +157,72 @@ public class SubjectSourceBaseTests
         Assert.Equal("written-during-load", received.GetNewValue<string?>());
     }
 
+    /// <summary>
+    /// Rewrites inbound string values, standing in for a hook that transforms what a source sent
+    /// (unit normalization, rounding, clamping).
+    /// </summary>
+    private sealed class UppercasingInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.NewValue is string text)
+            {
+                context.NewValue = (TProperty)(object)text.ToUpperInvariant();
+            }
+
+            next(ref context);
+        }
+    }
+
+    [Fact]
+    public async Task WhenInboundInitialValueIsTransformedByHook_ThenTransformedValueReachesSource()
+    {
+        // Arrange: the source applies its snapshot during the initial state load and a hook rewrites
+        // the value on the way in, so what is stored is not what the source sent. The origin therefore
+        // demotes from FromSource to Local, and the transformed value has to reach the source once the
+        // load completes: the source still holds the untransformed value, and nothing else reconciles
+        // the two. This is the initial-load scenario the typed ChangeOrigin design (#366) delegates to
+        // this capture window, so it must keep working if the drain filter is ever changed.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+        context.AddService<IWriteInterceptor>(new UppercasingInterceptor());
+
+        var subject = new Person(context);
+
+        var receivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        TestSubjectSource source = null!;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = _ => Task.FromResult<Action?>(() =>
+                subject.TryGetRegisteredSubject()!
+                    .TryGetProperty(nameof(Person.FirstName))!
+                    .SetValueFromSource(source, null, null, "server-value")),
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedChanges.Enqueue(change);
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.FirstName)),
+            message: "Expected the hook-transformed initial value to reach the source");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert: the source is told the value the model actually holds, not the one it sent.
+        Assert.Equal("SERVER-VALUE", subject.FirstName);
+        var received = receivedChanges.First(c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Equal("SERVER-VALUE", received.GetNewValue<string?>());
+    }
+
     [Fact]
     public async Task WhenQueuedWriteIsSupersededByInitialState_ThenStaleWriteIsNotSent()
     {

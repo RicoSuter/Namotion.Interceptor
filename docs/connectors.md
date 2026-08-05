@@ -681,3 +681,19 @@ Properties can receive concurrent writes from multiple origins:
 Individual property updates are atomic and thread-safe without requiring additional synchronization.
 
 When overriding `StartListeningAsync`, use the provided `SubjectPropertyWriter` to write inbound updates. This handles buffering during initialization and ensures correct ordering.
+
+## Known Limitations
+
+These are the boundaries of the source write path. They are deliberate trade-offs rather than open defects, listed so a surprising outcome can be recognised quickly.
+
+**Capture memory is bounded per connection attempt, not across one.** The source-lifetime change subscription is drained into the bounded write retry queue at two points in every attempt: before the attempt starts, and again once the initial state has been applied. Between those points, which covers the retry delay and the whole of `StartListeningAsync` plus `LoadInitialStateAsync`, captured writes accumulate in the subscription with no bound. Peak memory is therefore proportional to the local write rate multiplied by the length of one attempt. A source that blocks for a long time inside `StartListeningAsync` accumulates for as long as it blocks. Repeated failed attempts do not compound, because each new attempt drains first.
+
+**Writes to properties the source has not claimed yet are discarded.** A source claims its properties inside `StartListeningAsync`. The drain empties the subscription and keeps only changes to properties this source owns, so a write issued before the first connection claims that property is dropped rather than parked. Writes after the first successful connection are unaffected, since ownership persists across reconnections.
+
+**Reconciliation compares values with `Equals`.** For types without value equality (arrays, mutable collections, plain reference types) that is reference equality. A captured write whose value has since been replaced by an equal-but-distinct instance is classified as diverged and dropped, so the source wins. Value-typed and string properties behave as expected.
+
+**With the retry queue disabled (`writeRetryQueueSize: 0`) these writes are dropped, not reconciled.** The queue is the parking space the drain reconciles from, so disabling it removes connect-window and reconnect-window recovery entirely. The subscription is still drained to keep it from growing.
+
+**The retry queue drops oldest first.** During an outage longer than the queue's capacity allows, the earliest parked writes are discarded before the newest. Queued writes are in-memory only and do not survive a process restart.
+
+**A write racing the initial-state load has a timing-dependent winner.** This is inherent to a local-first model rather than a limitation of the reconciliation: whether the local write or the source's snapshot wins depends on which lands first. Write after the connection has settled, or use [source transactions](tracking-transactions.md), when the outcome has to be deterministic. See [Write Consistency Guarantees](#write-consistency-guarantees) for the full outcome table.
