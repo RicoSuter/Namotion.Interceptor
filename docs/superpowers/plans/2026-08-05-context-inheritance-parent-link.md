@@ -40,7 +40,7 @@
 | `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/InheritedContextResolutionTests.cs` | Characterization tests 5 and 8. |
 | `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/AttachEdgeLeakTests.cs` | #207 reproductions, both paths, with the `_usedByContexts` probe. |
 | `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/RootAttachContractTests.cs` | #402 defects 2, 3, 4, 5, the two-graph rejection, re-attach during detach, and the new-API reproductions. |
-| `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/KnownGapTests.cs` | The eight gap tests from spec section 9. |
+| `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/KnownGapTests.cs` | Seven of the eight gap shapes in spec section 9, in eight tests because the dark-subject shape needs two. The eighth shape, `DetachFromContext` racing a property attach, is deliberately unwritten: see Task 4 step 4. |
 | `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/UsedByContextsProbe.cs` | Reflection accessor for `InterceptorSubjectContext._usedByContexts`, in the style of `Namotion.Interceptor.Tests/Context/ContextStateReflection.cs`. |
 
 ### Modified
@@ -68,11 +68,19 @@ Three items where the plan deviates from the spec, or resolves something the spe
 
 **2. The #207 probe cannot live where the spec puts it.** Spec section 9 places it in `Namotion.Interceptor.Tests` because `Namotion.Interceptor.Tracking.Tests` has no `InternalsVisibleTo` grant. But `Namotion.Interceptor.Tests` has no project reference to `Namotion.Interceptor.Tracking` either (`Namotion.Interceptor.Tests.csproj:28-32`), so it cannot call `WithContextInheritance()`. Adding a Tracking reference to the core test project inverts the layering. **Implemented as:** one `InternalsVisibleTo Include="Namotion.Interceptor.Tracking.Tests"` line in core's csproj, and the probe lives in Tracking.Tests with everything else it needs. Correct the evidence row for change 3 in spec section 9.
 
-**4. UNRESOLVED, needs a decision before Task 3 step 7.** A subject constructed with a plain context, `new Person(InterceptorSubjectContext.Create())`, has its generated constructor call `AttachToContext`, which records that plain context as the attach context even though it carries no lifecycle interceptor and there is no graph to join. Composing a tracking context onto that subject afterwards then throws twice over: `AddFallbackContext` rejects it because the tracking context is lifecycle-bearing and is not the recorded attach context, and `AttachToContext` rejects it because a different context is already recorded. The escape is `DetachFromContext(plainContext)` first, which works but nobody would guess it.
+**4. DECIDED, and flagged for re-review before merge.** A subject constructed with a plain context, `new Person(InterceptorSubjectContext.Create())`, has its generated constructor call `AttachToContext`, which recorded that plain context as the attach context even though it carries no lifecycle interceptor and there is no graph to join. That record then behaved as a claim: composing a tracking context onto the subject afterwards threw twice over, once from `AddFallbackContext` because the tracking context is lifecycle-bearing and is not the recorded attach context, and again from `AttachToContext` because a different context is already recorded. The escape was `DetachFromContext(plainContext)` first, which works but nobody would guess it.
 
-Spec section 9 lists "plain contexts" as an evidence row asserting such a subject "attaches, has no owner, and is unaffected by the cross-graph rule", and section 5 argues a plain context is exempt because it carries no interceptor. Both are true of *adding* a plain context and neither addresses *composing a tracking context later*.
+Measured reachability: **zero occurrences in this repository.** All 75 plain-context constructions are terminal, and every compose-later site starts from the parameterless constructor, so no record exists. It is the shape an external consumer hits, not one this codebase does.
 
-The obvious repair is for `AttachToContext` to skip the record entirely when `interceptors.IsEmpty`, since with no interceptor there is nothing to detach from and the call degenerates to exactly `AddFallbackContext`. That is small and in the spirit of the design, but it changes what `TryGetAttachContext` returns for such a subject, so it is the user's call and not the implementer's. **Do not implement Task 3 until this is settled.**
+**Resolved as: `AttachToContext` skips the record entirely when `interceptors.IsEmpty`** (Task 3 step 7). With no interceptor there is nothing to detach from, so the call degenerates to exactly `AddFallbackContext`, which is what it truthfully is. Three reasons this is the coherent choice rather than the defensive one:
+
+- It is the only option that makes the code agree with the spec. Section 7 already states that a subject holding nothing but an explicit fallback "has neither and reports false"; a plain-context-constructed subject holds exactly that, and recording would have made `IsAttached()` report true.
+- It keeps `_attachContext` two-valued, which section 5 states explicitly and which every guard depends on by reading it as a simple identity test.
+- It extends the design's one-name-one-meaning thesis to the degenerate case instead of carving an exception out of it.
+
+The cost, stated rather than buried: `DetachFromContext(plainContext)` now returns false silently instead of removing that edge, so the constructor and the detach are not literal inverses in this one case. The inverse of composition is `RemoveFallbackContext`, which still works on it. **This asymmetry is the specific thing to re-review at the end** (Task 6 step 5), with the implemented code in hand, because it is the only part of this decision that a reader could reasonably want the other way.
+
+Unchanged by this decision: `AddFallbackContext(trackingContext)` still throws for a recordless subject. That throw is the steering mechanism and stays. What changes is that following its advice now works on the first try.
 
 **3. The owner claim and the count increment do not share a lock acquisition.** Spec section 4 says the shared monitor "lets the owner claim and the count increment share one acquisition". They cannot: the claim must precede `set.Add(property)` so a cross-graph rejection throws before any mutation, and the increment must follow it so a duplicate property add does not inflate the count. `set.Add`'s early return sits between them. **Implemented as:** two acquisitions of an uncontended `Monitor`. Correct the parenthetical in spec section 4 and the benchmark-gate rationale in section 10.
 
@@ -764,26 +772,6 @@ public class RootAttachContractTests
         Assert.Equal(0, subject.GetReferenceCount());
     }
 
-    [Fact]
-    public void WhenSubjectUsesAPlainContext_ThenItAttachesAndHasNoOwner()
-    {
-        // Spec section 9's "plain contexts" evidence row: a subject constructed with a context that
-        // carries no lifecycle interceptor attaches and has no owner, so the cross-graph rule
-        // cannot fire for it.
-        //
-        // See open decision 4 before extending this test to compose a tracking context afterwards:
-        // whether that should be legal is not yet settled.
-
-        // Arrange
-        var plainContext = InterceptorSubjectContext.Create();
-
-        // Act
-        var subject = new Person(plainContext) { FirstName = "Subject" };
-
-        // Assert
-        Assert.Equal(0, subject.GetReferenceCount());
-        Assert.Empty(((IInterceptorSubject)subject).Context.GetServices<ILifecycleInterceptor>());
-    }
 
     [Fact]
     public void WhenHandlerReAttachesSubjectDuringItsOwnDetach_ThenItThrows()
@@ -1501,6 +1489,19 @@ public static class SubjectAttachmentExtensions
         var interceptors = context.GetServices<ILifecycleInterceptor>();
 
         var executor = subject.GetExecutor();
+
+        // No interceptor means there is no graph to join, so there is nothing to record: no
+        // library-owned edge for RemoveFallbackContext to refuse, no interceptor to notify on
+        // detach, and nothing that makes the subject attached. Recording it anyway would mark the
+        // subject as belonging to a graph that does not exist, and that mark would then refuse
+        // every later attempt to join a real one. So this call is exactly what it truthfully is,
+        // plain composition. Its inverse is RemoveFallbackContext, not DetachFromContext.
+        if (interceptors.IsEmpty)
+        {
+            executor.AddFallbackContext(context);
+            return;
+        }
+
         if (!executor.TryRecordAttachContext(context, interceptors))
         {
             return;
@@ -2251,6 +2252,50 @@ Append to `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/RootAttachContractT
     }
 
     [Fact]
+    public void WhenSubjectUsesAPlainContext_ThenNoAttachContextIsRecorded()
+    {
+        // Decision 4. A context carrying no lifecycle interceptor is not a graph, so the
+        // constructor's AttachToContext degenerates to plain composition and records nothing.
+        // Spec section 7 already says such a subject reports IsAttached() false; recording would
+        // have contradicted that.
+
+        // Arrange
+        var plainContext = InterceptorSubjectContext.Create();
+
+        // Act
+        var subject = new Person(plainContext) { FirstName = "Subject" };
+
+        // Assert
+        Assert.Null(((IInterceptorSubject)subject).TryGetAttachContext());
+        Assert.False(((IInterceptorSubject)subject).IsAttached());
+        Assert.Equal(0, subject.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenPlainContextSubjectJoinsAGraphLater_ThenItAttachesInOneStep()
+    {
+        // Decision 4's payoff, and the regression this guards: recording the plain context would
+        // make this throw "already attached through a different context", and the only escape
+        // would be a DetachFromContext nobody would guess at.
+
+        // Arrange
+        var plainContext = InterceptorSubjectContext.Create();
+        var subject = new Person(plainContext) { FirstName = "Subject" };
+
+        var trackingContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        // Act
+        ((IInterceptorSubject)subject).AttachToContext(trackingContext);
+
+        // Assert
+        Assert.True(((IInterceptorSubject)subject).IsAttached());
+        Assert.Same(trackingContext, ((IInterceptorSubject)subject).TryGetAttachContext());
+        Assert.NotNull(((IInterceptorSubject)subject).Context.TryGetLifecycleInterceptor());
+    }
+
+    [Fact]
     public void WhenAnInterceptorIsRegisteredAfterTheAttach_ThenItReceivesNoUnpairedDetach()
     {
         // Behaviour change 16: the detach notifies exactly the set the attach resolved.
@@ -2300,9 +2345,11 @@ Append to `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/RootAttachContractT
 dotnet test src/Namotion.Interceptor.Tracking.Tests --filter "FullyQualifiedName~RootAttachContractTests"
 ```
 
-Expected: PASS, 12 tests.
+Expected: PASS, every test in the class.
 
 If `WhenTwoEdgesTargetOneContext_...` fails, the conditional unregistration in step 3 of Task 3 is wrong: check that `UnregisterUsedByIfUnreferenced` reads the **new** state, not the state captured before the publish.
+
+If `WhenPlainContextSubjectJoinsAGraphLater_...` throws "already attached through a different context", the `interceptors.IsEmpty` early return in Task 3 step 7 is missing or placed after `TryRecordAttachContext`. That is decision 4 and it must be fixed there, not worked around in the test.
 
 - [ ] **Step 3: Write the gap tests**
 
@@ -2330,6 +2377,58 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// </summary>
 public class KnownGapTests
 {
+    [Fact]
+    public async Task WhenAttachRacesDetachOnTheSameRoot_ThenNoInvariantOtherThanEdgeAgreementHolds()
+    {
+        // #402 defect 1, explicitly NOT closed. Both operations are two steps and are not atomic
+        // against each other: a detach can clear the record, an attach can then record and publish,
+        // and the detach's second step then removes the edge, leaving a record with no edge.
+        //
+        // So this test deliberately does NOT assert that the record and the edge agree. That
+        // agreement is exactly what defect 1 breaks, and asserting it would be asserting a fix we
+        // did not make. What it pins is the weaker set that must survive: the reference count stays
+        // zero, nothing but InvalidOperationException escapes, and the subject is still usable.
+
+        for (var round = 0; round < 50; round++)
+        {
+            // Arrange
+            var context = InterceptorSubjectContext
+                .Create()
+                .WithContextInheritance();
+
+            var subject = new Person { FirstName = "Subject" };
+            ((IInterceptorSubject)subject).AttachToContext(context);
+
+            using var start = new ManualResetEventSlim(false);
+
+            // Act
+            var racers = new[]
+            {
+                Task.Factory.StartNew(() =>
+                {
+                    start.Wait();
+                    try { ((IInterceptorSubject)subject).AttachToContext(context); }
+                    catch (InvalidOperationException) { }
+                }, TaskCreationOptions.LongRunning),
+                Task.Factory.StartNew(() =>
+                {
+                    start.Wait();
+                    try { ((IInterceptorSubject)subject).DetachFromContext(context); }
+                    catch (InvalidOperationException) { }
+                }, TaskCreationOptions.LongRunning)
+            };
+
+            start.Set();
+            await Task.WhenAll(racers);
+
+            // Assert
+            Assert.Equal(0, subject.GetReferenceCount());
+
+            subject.LastName = "written after the race";
+            Assert.Equal("written after the race", subject.LastName);
+        }
+    }
+
     [Fact]
     public void WhenAddingTheAttachContextDuringTheDetachWindow_ThenItThrows()
     {
@@ -2568,7 +2667,7 @@ public class KnownGapTests
 dotnet test src/Namotion.Interceptor.Tracking.Tests --filter "FullyQualifiedName~KnownGapTests"
 ```
 
-Expected: PASS, 7 tests.
+Expected: PASS, 8 tests.
 
 **A failure here is information, not necessarily a defect.** Each test asserts an outcome the design predicts. If one fails, the design's prediction about that gap is wrong, which is a spec correction and must be reported before being papered over. Do not adjust an assertion to match observed behaviour without recording why in the commit message.
 
@@ -2735,6 +2834,7 @@ In `docs/superpowers/specs/2026-08-04-context-inheritance-design.md`:
 2. Section 9: correct the evidence row for change 3, which says the `_usedByContexts` probe lives in `Namotion.Interceptor.Tests`. It lives in `Namotion.Interceptor.Tracking.Tests` behind a new `InternalsVisibleTo` grant, because the core test project has no Tracking reference.
 3. Section 4 and section 10's benchmark row: correct the claim that the owner claim and the count increment share one lock acquisition. They cannot, because `set.Add`'s early return sits between them.
 4. Section 9's gap test list: record that the `DetachFromContext` racing a property attach case has **no test**, because the rendezvous it needs is inside `LifecycleInterceptor`'s monitor and no public seam reaches it. Leaving it unpinned is the honest outcome; a test that cannot hit the window would only look like coverage.
+5. Section 5's `AttachToContext` listing and section 9's "plain contexts" evidence row: **`AttachToContext` skips the record entirely when the context resolves no `ILifecycleInterceptor`**, degenerating to plain composition. Without it the generated constructor marks a plain-context subject as attached to a graph that does not exist, and that mark refuses every later attempt to join a real one. Record the consequence too: `DetachFromContext` is not the inverse of `AttachToContext` for such a subject, `RemoveFallbackContext` is. Add the same line to `docs/tracking.md`'s edge-kinds table under step 3, so the asymmetry is a documented rule rather than a surprise.
 
 - [ ] **Step 7: Verify no em dashes were introduced**
 
@@ -2826,7 +2926,20 @@ For each mutant in spec section 9, apply it, confirm the named test fails, and r
 
 Four rows say "add one if missing" and two say "not deterministically catchable". Both outcomes are results: add the tests, and report the two uncatchable mutants rather than pretending they die.
 
-- [ ] **Step 5: Report**
+- [ ] **Step 5: Re-review the four planning decisions against the implemented code**
+
+These were decided from the spec alone, before any of it compiled or ran. Each is now checkable against real behaviour, and this is the last point before the pull request where changing one is cheap. Do not skip because the suite is green: three of the four are green either way.
+
+| Decision | What to look at now that it runs |
+|---|---|
+| **4, the highest priority of the four** | `AttachToContext` skips the record when no interceptor resolves, so `DetachFromContext(plainContext)` returns false silently while `RemoveFallbackContext` removes that edge. Attach and detach are therefore not literal inverses for a plain context. Confirm the two pinning tests in `RootAttachContractTests` still express the intent, and decide deliberately whether the asymmetry should be documented in `docs/tracking.md` as a rule or removed by making `DetachFromContext` fall back to removing an unrecorded edge. This is the one part of decision 4 a reader could reasonably want the other way. |
+| 1 | The lifecycle path now requires an `InterceptorExecutor` for every subject it attaches. Confirm the thrown message actually names the requirement usefully, and that `GetReferenceCount()` returning 0 for a non-executor did not turn any real failure into a silent zero. |
+| 2 | The `InternalsVisibleTo` grant for `Namotion.Interceptor.Tracking.Tests`. If the two-edges test ended up not needing `TrySetParentContext`, drop the grant rather than leaving a widened internals surface behind. |
+| 3 | Two lock acquisitions per property attach instead of one. Check this against the benchmark numbers from step 3; if attach regressed, this is the first thing to look at. |
+
+Record the outcome of each in the report below, including "unchanged, and why" where nothing moves.
+
+- [ ] **Step 6: Report**
 
 The plan ends here. Updating GitHub issues (#402, #207, #410, #210, #411, #384, #412) and merging PR #419 are human-gated per spec section 10 and are **not** performed. Report:
 
@@ -2834,7 +2947,8 @@ The plan ends here. Updating GitHub issues (#402, #207, #410, #210, #411, #384, 
 - the benchmark numbers, both suites, against `master`
 - which mutants died, which needed a new test, and which could not be caught
 - any gap test whose asserted outcome differed from the design's prediction
-- the four spec corrections folded in during Task 5
+- the spec corrections folded in during Task 5
+- **the outcome of step 5's re-review of all four planning decisions**, decision 4's attach/detach asymmetry first
 
 ---
 
