@@ -70,12 +70,21 @@ public class SourceMonitorTests
         source.ReportSynchronized();
 
         // Assert
+        // Delivery is asynchronous, so an empty-of-StateChanged queue proves nothing on its own right
+        // here: a wrongly forwarded event may simply not have been drained yet. Register a sentinel
+        // afterwards and wait for ITS delivered event; once that has arrived, anything the
+        // (supposedly disconnected) source's ReportSynchronized wrongly published would already have
+        // been delivered too, since delivery per subscription is FIFO.
+        var sentinel = new TestStateSource(new Person(context));
+        monitor.Register(sentinel);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)));
         Assert.DoesNotContain(received, e => e.Kind == SourceEventKind.StateChanged);
         Assert.DoesNotContain(source, monitor.Sources);
     }
 
     [Fact]
-    public void WhenRegisteringTwice_ThenTheSecondRegistrationEmitsNothing()
+    public async Task WhenRegisteringTwice_ThenTheSecondRegistrationEmitsNothing()
     {
         // Arrange
         var context = CreateContext();
@@ -90,19 +99,41 @@ public class SourceMonitorTests
 
         // Assert
         Assert.Single(monitor.Sources);
+        // A sentinel settles delivery without a blind sleep: once its SourceRegistered has arrived,
+        // any event the second, idempotent Register call wrongly published would already have been
+        // delivered too, so exactly one SourceRegistered for `source` proves the second call emitted
+        // nothing, not just that Sources stayed a single element.
+        var sentinel = new TestStateSource(new Person(context));
+        monitor.Register(sentinel);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)));
+        Assert.Single(received, e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, source));
     }
 
     [Fact]
-    public void WhenUnregisteringAnUnknownSource_ThenNothingHappens()
+    public async Task WhenUnregisteringAnUnknownSource_ThenNothingHappens()
     {
         // Arrange
         var context = CreateContext();
         var monitor = context.GetSourceMonitor();
         var source = new TestStateSource(new Person(context));
+        var received = new ConcurrentQueue<SourceEvent>();
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
 
-        // Act & Assert
+        // Act
         monitor.Unregister(source);
+
+        // Assert
+        // Sources staying empty is true whether or not the "is it actually registered" guard ran:
+        // removing an absent item from an ImmutableArray is already a no-op. Without the guard,
+        // Unregister would still publish a spurious SourceUnregistered for a source nobody ever
+        // registered - that is the part only a subscriber can catch.
         Assert.Empty(monitor.Sources);
+        var sentinel = new TestStateSource(new Person(context));
+        monitor.Register(sentinel);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)));
+        Assert.DoesNotContain(received, e => e.Kind == SourceEventKind.SourceUnregistered);
     }
 
     [Fact]
@@ -369,6 +400,34 @@ public class SourceMonitorTests
     }
 
     [Fact]
+    public async Task WhenDisposeRacesStartAsync_ThenTheSourceDoesNotStayRegisteredForever()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var reachedRootRead = new ManualResetEventSlim(false);
+        var releaseRootRead = new ManualResetEventSlim(false);
+        var source = new GatedRootSubjectSource(new Person(context), reachedRootRead, releaseRootRead);
+
+        // Act - pause StartAsync exactly where it reads RootSubject to resolve which monitors to
+        // register with, so Dispose can run to completion (transitioning to Stopped and finding
+        // nothing yet in _registeredMonitors to unregister) before StartAsync ever registers.
+        var startTask = Task.Run(() => source.StartAsync(CancellationToken.None));
+        Assert.True(reachedRootRead.Wait(TimeSpan.FromSeconds(10)));
+
+        source.Dispose();
+        Assert.Equal(SourceState.Stopped, source.State);
+
+        releaseRootRead.Set();
+        await startTask;
+
+        // Assert - without StartAsync's post-registration re-check, this already-disposed, Stopped
+        // source would register successfully (Register does not check State) and stay registered
+        // forever, since Dispose already ran and will not run again.
+        Assert.DoesNotContain(source, monitor.Sources);
+    }
+
+    [Fact]
     public void WhenASubjectIsAttachedToASecondTree_ThenOnlyTheFirstTreesMonitorIsReachable()
     {
         // Arrange
@@ -459,4 +518,35 @@ internal sealed class GatedStateSource : ISubjectSource
     public ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         => new(WriteResult.Success);
+}
+
+/// <summary>
+/// A source whose RootSubject getter blocks until released. Used to pin StartAsync at the exact
+/// point where it reads RootSubject to resolve which monitors to register with, so a test can make
+/// Dispose race the registration loop.
+/// </summary>
+internal sealed class GatedRootSubjectSource : TestStateSource
+{
+    private readonly ManualResetEventSlim _reachedRootRead;
+    private readonly ManualResetEventSlim _releaseRootRead;
+    private readonly IInterceptorSubject _rootSubject;
+
+    public GatedRootSubjectSource(
+        IInterceptorSubject rootSubject, ManualResetEventSlim reachedRootRead, ManualResetEventSlim releaseRootRead)
+        : base(rootSubject)
+    {
+        _rootSubject = rootSubject;
+        _reachedRootRead = reachedRootRead;
+        _releaseRootRead = releaseRootRead;
+    }
+
+    public override IInterceptorSubject RootSubject
+    {
+        get
+        {
+            _reachedRootRead.Set();
+            _releaseRootRead.Wait(TimeSpan.FromSeconds(10));
+            return _rootSubject;
+        }
+    }
 }

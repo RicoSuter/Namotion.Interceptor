@@ -206,17 +206,21 @@ public class SourceEventEmissionTests
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var source = new TestStateSource(person);
-        source.ReportSynchronized();
         property.SetSource(source);
+        // Captured while the source is still Connecting, so NewState here is Connecting - a
+        // regression that made CurrentState just return NewState instead of re-resolving fresh
+        // would still pass if the source never moved on after capture. It does, below.
         var sourceEvent = new SourceEvent(
             SourceEventKind.PropertyClaimed, source, property,
-            SourceState.Unclaimed, SourceState.Synchronized, DateTimeOffset.UtcNow) { Monitor = monitor };
+            SourceState.Unclaimed, SourceState.Connecting, DateTimeOffset.UtcNow) { Monitor = monitor };
 
-        // Act
+        // Act - the source synchronizes after the event was captured.
+        source.ReportSynchronized();
         var current = sourceEvent.CurrentState;
 
         // Assert
         Assert.Equal(SourceState.Synchronized, current);
+        Assert.Equal(SourceState.Connecting, sourceEvent.NewState);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Monitoring;
@@ -249,7 +250,7 @@ public class SourceWaitTests
         // Assert
         Assert.False(wait.IsCompleted);
         monitor.CompleteSourceRegistration();
-        await wait;
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -269,7 +270,7 @@ public class SourceWaitTests
         source.ReportSynchronized();
 
         // Assert
-        await wait;
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -291,14 +292,14 @@ public class SourceWaitTests
         healthy.ReportSynchronized();
 
         // Act
-        await left.WaitForSynchronizationAsync(CancellationToken.None);
+        await left.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
         // Assert
         Assert.Equal(SourceState.Connecting, broken.State);
     }
 
     [Fact]
-    public async Task WhenNoInScopeSourceIsRegistered_ThenTheWaitBlocks()
+    public async Task WhenNoInScopeSourceIsRegistered_ThenTheWaitCompletesVacuously()
     {
         // Arrange
         var context = CreateContext();
@@ -306,16 +307,40 @@ public class SourceWaitTests
         var root = new Person(context);
         monitor.CompleteSourceRegistration();
 
+        // Act - once registration is complete, an empty scope is no longer ambiguous between "no
+        // source yet" and "no source ever": it definitively means this branch is local-only, so the
+        // wait completes immediately instead of blocking forever (consistent with the all-Stopped
+        // rule, which already completes vacuously rather than hanging).
+        var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+
+        // Assert
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task WhenNoInScopeSourceIsRegisteredAndRegistrationIsIncomplete_ThenTheWaitStillBlocks()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        // Registration is deliberately left incomplete here: only the post-signal case changes to
+        // vacuous completion. Before the signal, an empty scope is still ambiguous between "no
+        // source yet" and "no source ever", so it must keep blocking - this is the startup
+        // protection the empty-scope rule cannot give up.
+
         // Act
         var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
 
         // Assert
         await Task.Yield();
         Assert.False(wait.IsCompleted);
+        monitor.CompleteSourceRegistration();
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
-    public void WhenScopeBecomesEmptyAfterUnrelatedReEvaluations_ThenTheEmptyScopeWarningStillFires()
+    public async Task WhenScopeBecomesEmptyAfterUnrelatedReEvaluations_ThenTheEmptyScopeWarningStillFires()
     {
         // Arrange
         var context = CreateContext();
@@ -345,11 +370,20 @@ public class SourceWaitTests
         Assert.Empty(recordingLogger.Warnings);
 
         // Now make the wait's own branch genuinely scope-empty: precisely the reparent scenario this
-        // warning exists to diagnose.
+        // warning exists to diagnose. Registration is already complete, so this also makes the wait
+        // vacuously satisfied (see IsSatisfied), not just warned.
         monitor.Unregister(source);
 
+        // Immediately, on the same thread and before awaiting anything, trigger another
+        // re-evaluation pass. wait.Complete() above scheduled its continuation asynchronously
+        // (RunContinuationsAsynchronously), so the wait can still be sitting in _waits, not yet
+        // removed, when this second pass runs - exactly the window in which a regression that
+        // dropped the MarkWarned guard would log the same empty-scope warning a second time.
+        monitor.Register(new TestStateSource(new Person()));
+
         // Assert
-        Assert.Contains(recordingLogger.Warnings, message => message.Contains("has no in-scope source"));
+        Assert.Single(recordingLogger.Warnings, message => message.Contains("has no in-scope source"));
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -368,14 +402,13 @@ public class SourceWaitTests
 
         var anchor = new Person(context);
 
-        // Act
+        // Act - the pending wait is constructed before WaitForSynchronizationAsync's fast-path
+        // check, so IsSatisfied's empty-scope warning fires right here, on the very first
+        // evaluation, without ever calling Subscribe and without needing a later re-evaluation.
         var wait = anchor.WaitForSynchronizationAsync(CancellationToken.None);
-        Assert.False(wait.IsCompleted);
-        // Registering an unrelated source triggers a re-evaluation pass over every pending wait,
-        // including this one, without ever calling Subscribe.
-        monitor.Register(new TestStateSource(new Person(context)));
 
         // Assert
+        Assert.True(wait.IsCompletedSuccessfully);
         Assert.Contains(recordingLogger.Warnings, message => message.Contains("has no in-scope source"));
     }
 
@@ -386,28 +419,46 @@ public class SourceWaitTests
         var context = CreateContext();
         context.AddService<ILoggerFactory>(new ThrowingLoggerFactory());
         var monitor = context.GetSourceMonitor();
-        monitor.CompleteSourceRegistration();
 
         var healthyRoot = new Person(context);
         var healthySource = new TestStateSource(healthyRoot);
         monitor.Register(healthySource);
 
+        var stoppedRoot = new Person(context);
+        var stoppedSource = new TestStateSource(stoppedRoot);
+        monitor.Register(stoppedSource);
+        stoppedSource.ReportStopped();
+
+        // A hold keeps registration incomplete while both waits below are created, so their
+        // fast-path IsSatisfied check short-circuits on IsRegistrationComplete without ever
+        // reaching the all-Stopped warning - that only happens on the re-evaluation pass triggered
+        // by disposing the hold, further down. (An empty-scope wait cannot be used for this instead:
+        // since registration-complete now makes an empty scope vacuously satisfied, such a wait
+        // could never stay pending long enough to be re-evaluated a second time.)
+        var hold = monitor.DeferWaitCompletion();
+        monitor.CompleteSourceRegistration();
+
         // Added to _waits before the healthy wait below, so a loop with no per-wait isolation
-        // reaches this one first. Its scope is empty, which makes its re-evaluation log the
-        // empty-scope warning - and the logger this test installs throws from LogWarning, so
-        // re-evaluating this wait is what throws.
-        var emptyScopeRoot = new Person(context);
-        var emptyScopeWait = emptyScopeRoot.WaitForSynchronizationAsync(CancellationToken.None);
-        Assert.False(emptyScopeWait.IsCompleted);
+        // reaches this one first. Its only in-scope source is Stopped, which makes its
+        // re-evaluation log the all-Stopped warning (unconditional, unlike the once-per-wait
+        // empty-scope one) - and the logger this test installs throws from LogWarning, so
+        // re-evaluating this wait is what throws, every time it is reached.
+        var stoppedWait = stoppedRoot.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(stoppedWait.IsCompleted);
 
         // A second, later wait whose own re-evaluation never touches the logger: it has an
-        // in-scope source that is not yet synchronized, so IsSatisfied returns false without
-        // hitting either warning branch.
+        // in-scope source that is not yet synchronized, so IsSatisfied returns false without ever
+        // reaching a warning branch - stoppedSource is not in healthyRoot's scope at all.
         var healthyWait = healthyRoot.WaitForSynchronizationAsync(CancellationToken.None);
         Assert.False(healthyWait.IsCompleted);
 
-        // Act - transitioning healthySource triggers a single re-evaluation pass over every
-        // pending wait. Without per-wait isolation, the throw while re-evaluating emptyScopeWait
+        // Releasing the hold makes registration complete and triggers a single re-evaluation pass
+        // over every pending wait, including stoppedWait, whose all-Stopped warning throws.
+        var releaseException = Assert.Throws<InvalidOperationException>(() => hold.Dispose());
+        Assert.Equal("logging is broken", releaseException.Message);
+
+        // Act - transitioning healthySource triggers a further re-evaluation pass over every
+        // pending wait. Without per-wait isolation, the throw while re-evaluating stoppedWait
         // (first in the list) would abort the pass before healthyWait (second) is ever looked at
         // again, which would leave it pending forever - a lost wakeup.
         healthySource.ReportSynchronized();
@@ -428,7 +479,7 @@ public class SourceWaitTests
         monitor.CompleteSourceRegistration();
         first.ReportSynchronized();
         var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
-        await wait;
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
 
         // Act
         var second = new TestStateSource(root);
@@ -438,7 +489,7 @@ public class SourceWaitTests
         // Assert
         Assert.False(secondWait.IsCompleted);
         second.ReportSynchronized();
-        await secondWait;
+        await secondWait.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -456,7 +507,7 @@ public class SourceWaitTests
         source.ReportStopped();
 
         // Assert
-        await root.WaitForSynchronizationAsync(CancellationToken.None);
+        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -464,8 +515,13 @@ public class SourceWaitTests
     {
         // Arrange
         var context = CreateContext();
-        context.GetSourceMonitor().CompleteSourceRegistration();
+        var monitor = context.GetSourceMonitor();
         var root = new Person(context);
+        // An in-scope, unsynchronized source keeps the wait genuinely pending: an empty scope would
+        // instead complete vacuously once registration is complete (see IsSatisfied), leaving
+        // nothing for cancellation to interrupt.
+        monitor.Register(new TestStateSource(root));
+        monitor.CompleteSourceRegistration();
         using var cancellation = new CancellationTokenSource();
 
         // Act
@@ -486,6 +542,14 @@ public class SourceWaitTests
         var right = new Person(context);
         var moving = new Person();
         left.Mother = moving;
+
+        // Keeps moving's scope non-empty (so the wait below genuinely blocks instead of completing
+        // vacuously - see IsSatisfied's empty-scope rule) while moving sits under left: rooted at
+        // left, this source drops out of moving's scope the instant the reparent below moves it
+        // away, the same reparent that brings the real source into scope.
+        var keepAlive = new TestStateSource(left);
+        monitor.Register(keepAlive);
+
         var source = new TestStateSource(right);
         monitor.Register(source);
         monitor.CompleteSourceRegistration();
@@ -502,7 +566,7 @@ public class SourceWaitTests
         // neither IsContextAttach nor IsContextDetach, and if the monitor runs before
         // ParentTrackingHandler it re-evaluates against stale parents, decides nothing changed, and
         // never looks again. The wait would then hang forever.
-        await wait;
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -528,6 +592,52 @@ public class SourceWaitTests
     }
 
     [Fact]
+    public async Task WhenASourceRegistersAndImmediatelyTransitions_ThenSourceRegisteredPrecedesStateChanged()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var received = new ConcurrentQueue<SourceEvent>();
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+        var source = new TestStateSource(new Person(context));
+
+        // Act
+        monitor.Register(source);
+        source.ReportSynchronized();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.StateChanged));
+        var kinds = received.Select(e => e.Kind).ToList();
+        var registeredIndex = kinds.FindIndex(k => k == SourceEventKind.SourceRegistered);
+        var stateChangedIndex = kinds.FindIndex(k => k == SourceEventKind.StateChanged);
+        Assert.True(registeredIndex >= 0 && registeredIndex < stateChangedIndex);
+    }
+
+    [Fact]
+    public async Task WhenAHoldIsTakenWhileABranchIsAlreadySynchronized_ThenANewWaitBlocksUntilTheHoldIsDisposed()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var source = new TestStateSource(root);
+        monitor.Register(source);
+        monitor.CompleteSourceRegistration();
+        source.ReportSynchronized();
+
+        // Act - DeferWaitCompletion re-arms IsRegistrationComplete even though the branch itself has
+        // nothing left to synchronize: a wait created while the hold is outstanding must still block
+        // purely on the hold, and only unblock once it is disposed.
+        var hold = monitor.DeferWaitCompletion();
+        var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(wait.IsCompleted);
+        hold.Dispose();
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task WhenASourceIsConstructedButNeverStarted_ThenItDoesNotAffectAWait()
     {
         // Arrange
@@ -543,7 +653,7 @@ public class SourceWaitTests
         started.ReportSynchronized();
 
         // Assert
-        await root.WaitForSynchronizationAsync(CancellationToken.None);
+        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.DoesNotContain(neverStarted, monitor.Sources);
     }
 
@@ -730,3 +840,4 @@ internal sealed class ThrowingLoggerFactory : ILoggerFactory
     {
     }
 }
+
