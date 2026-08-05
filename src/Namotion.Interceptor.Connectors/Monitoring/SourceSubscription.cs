@@ -19,6 +19,7 @@ public sealed class SourceSubscription : IDisposable
     private readonly Action<SourceEvent> _handler;
     private readonly Action<SourceSubscription> _onDisposed;
     private readonly ILogger? _logger;
+    private readonly Action _drain;
 
     private int _draining;
     private volatile bool _disposed;
@@ -33,6 +34,9 @@ public sealed class SourceSubscription : IDisposable
         Sources = sources;
         _onDisposed = onDisposed;
         _logger = logger;
+        // Cached rather than a Task.Run(Drain) method-group conversion at each call site: that
+        // allocates a fresh Action delegate on every wakeup, and Drain is only ever run this way.
+        _drain = Drain;
     }
 
     /// <summary>
@@ -55,7 +59,7 @@ public sealed class SourceSubscription : IDisposable
         // subscription owns no task.
         if (Interlocked.CompareExchange(ref _draining, 1, 0) == 0)
         {
-            _ = Task.Run(Drain);
+            _ = Task.Run(_drain);
         }
     }
 
@@ -83,7 +87,15 @@ public sealed class SourceSubscription : IDisposable
                 }
             }
 
-            Volatile.Write(ref _draining, 0);
+            // Must be Interlocked.Exchange, not Volatile.Write: Volatile.Write is a release only, so
+            // the !_queue.IsEmpty read right after it can be satisfied before this write is globally
+            // visible (StoreLoad reordering). A concurrent Enqueue that lands in that window sees
+            // _draining still 1 and declines to schedule a new drain, while this thread's own
+            // reordered read observes an empty queue and exits the loop - the event is then stranded
+            // forever, since nothing else is scheduled to look at it. Interlocked.Exchange is a full
+            // fence, so the write is visible to every other thread before this read runs, making the
+            // two misses mutually exclusive. Do not "simplify" this back to Volatile.Write.
+            Interlocked.Exchange(ref _draining, 0);
         }
         while (!_queue.IsEmpty && Interlocked.CompareExchange(ref _draining, 1, 0) == 0);
     }

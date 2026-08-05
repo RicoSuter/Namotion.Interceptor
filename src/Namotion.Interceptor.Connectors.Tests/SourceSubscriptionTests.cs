@@ -89,6 +89,59 @@ public class SourceSubscriptionTests
         Assert.Equal(1, deliveredCount);
     }
 
+    [Fact]
+    public async Task WhenManyProducersEnqueueConcurrentlyWhileDraining_ThenEveryEventIsEventuallyDelivered()
+    {
+        // Arrange
+        // Best-effort regression coverage for the drain handoff fixed by using Interlocked.Exchange
+        // instead of Volatile.Write when clearing _draining (see Drain's comment on that line): the
+        // actual store-load reordering defect reproduced only once in roughly 501 million aligned
+        // attempts on ARM64, far beyond what a unit test can afford to run, so this cannot reliably
+        // force that exact hardware race. It does exercise the same enqueue-during-drain-exit
+        // handoff under heavy concurrency, many times over, which would also catch a logical
+        // regression in the re-check loop (e.g. dropping the CompareExchange re-check, or reverting
+        // to a plain read) - stranding an event here fails the test instead of hanging it, because
+        // the wait below is bounded.
+        const int producerCount = 8;
+        const int eventsPerProducer = 20_000;
+        const int totalEvents = producerCount * eventsPerProducer;
+
+        var delivered = 0;
+        using var allDelivered = new ManualResetEventSlim(false);
+
+        var subscription = new SourceSubscription(
+            _ =>
+            {
+                if (Interlocked.Increment(ref delivered) == totalEvents)
+                {
+                    allDelivered.Set();
+                }
+            },
+            ImmutableArray<ISubjectSource>.Empty,
+            _ => { },
+            null);
+
+        var producers = Enumerable.Range(0, producerCount)
+            .Select(_ => Task.Run(() =>
+            {
+                for (var i = 0; i < eventsPerProducer; i++)
+                {
+                    subscription.Enqueue(CreateEvent());
+                }
+            }))
+            .ToArray();
+
+        // Act
+        await Task.WhenAll(producers);
+
+        // Assert
+        Assert.True(allDelivered.Wait(TimeSpan.FromSeconds(60)),
+            $"Expected all {totalEvents} events to be delivered; only {Volatile.Read(ref delivered)} were - " +
+            "an event was stranded.");
+
+        subscription.Dispose();
+    }
+
     private static bool IsInternalQueueEmpty(SourceSubscription subscription)
     {
         var field = typeof(SourceSubscription).GetField("_queue", BindingFlags.NonPublic | BindingFlags.Instance)!;
