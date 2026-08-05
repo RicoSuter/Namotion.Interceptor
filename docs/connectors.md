@@ -139,21 +139,17 @@ If that repair write fails, the source keeps the older value and the subject kee
 
 ### Known Limitations
 
-Failure and conflict modes that are inherent to synchronizing with an external system, rather than defects. Each states what happens and what, if anything, recovers it.
-
-**A conflict during the connect window resolves source-wins, and the dropped write is only logged.** A local write captured while the source is connecting is reconciled against the value the initial-state load reveals. If the source has moved on, the write is dropped and the reconcile logs `dropped (source wins)`. This is deliberate: the two changes cannot be ordered (see [#373](https://github.com/RicoSuter/Namotion.Interceptor/issues/373)), and replaying a command based on a baseline the source never confirmed is the more dangerous direction against a system that actuates outputs. The application sees the source's value in the model and can retry against a state it now knows. Post-connect writes are always sent, so write after the connection has settled, or use [source transactions](tracking-transactions.md), when a deterministic result matters.
-
-**Buffered delivery coalesces, so intermediate values can be dropped.** With a `bufferTime` above zero, each flush collapses to one change per property and a change the model has since moved past is dropped. Only the settled value is guaranteed to arrive. A source that needs every intermediate value must run with `bufferTime` at zero, which is lossless.
+Gaps that are not closed: cases where local and remote can stay out of sync, or where a write is lost without an error. Designed behaviour is documented above, under [Change Batching and Merging](#change-batching-and-merging) and [Initialization](#initialization).
 
 **A failed write leaves local and remote diverged until the property is written again.** The [write retry queue](#write-retry-queue) retries it, but the queue is a bounded ring buffer that drops its oldest entries when full, and with it disabled the change is logged and dropped immediately. Nothing actively reconciles the difference; it lasts until the next write to that property or the next reconnect. Tracked as [#342](https://github.com/RicoSuter/Namotion.Interceptor/issues/342).
 
 **Disabling the retry queue discards connect-window writes silently.** With `writeRetryQueueSize: 0` there is no queue to park captured writes in, so the drain empties the subscription and returns. The queue's own "buffering is disabled" warning never fires, because there is no queue object to emit it.
 
-**Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state directly without running the connect-window reconciliation, so a write queued before such a reconnect is flushed afterwards rather than being judged against what the source changed during the outage. This is the opposite of the source-wins rule the pump applies. Pre-existing; tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
+**Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state directly without running the connect-window reconciliation, so a write queued before such a reconnect is flushed afterwards rather than being judged against what the source changed during the outage. This is the opposite of the source-wins rule the pump applies, so the two ends can settle on different values. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
 
-**A source that neither answers reads nor echoes writes is unobservable.** If it clamps or rejects a written value internally and sends no notification, nothing local can reveal the difference. Convergence then depends on reconciliation rather than on the write path.
+**Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the connect-window drain must empty the subscription to keep it bounded, so a write it cannot attribute to a source is dropped without an error. This affects the first connection only, since ownership persists across reconnects.
 
-**Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the connect-window drain must empty the subscription to keep it bounded, so a write it cannot attribute to a source is dropped. This affects the first connection only, since ownership persists across reconnects.
+**A source that neither answers reads nor echoes writes is unobservable.** If it clamps or rejects a written value internally and sends no notification, nothing local can reveal the difference, so the two ends stay diverged. Convergence then depends on reconciliation rather than on the write path. See [#373](https://github.com/RicoSuter/Namotion.Interceptor/issues/373).
 
 ### Write Retry Queue
 
