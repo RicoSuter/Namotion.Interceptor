@@ -70,13 +70,20 @@ public class OutageStateTests
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
 
             // Fast detection/recovery so the test observes the outage window without waiting minutes.
+            // SubscriptionHealthCheckInterval is set well above KeepAliveInterval on purpose: the health
+            // check loop has its own independent dead-session detection (HandleDeadSessionAsync), which
+            // sets IsReconnecting via SetReconnecting(true) BEFORE StartBuffering() in ReconnectSessionAsync
+            // - the opposite order from OnKeepAlive's ReportConnectionLost-before-IsReconnecting. A wide
+            // margin makes it overwhelmingly unlikely for that independent path to race ahead of OnKeepAlive
+            // and win, which would make the IsReconnecting-timing assertion below flake for reasons unrelated
+            // to the fix under test.
             ReconnectInterval = TimeSpan.FromSeconds(1),
             ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
-            MaxReconnectDuration = TimeSpan.FromSeconds(15),
-            SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(2),
+            MaxReconnectDuration = TimeSpan.FromSeconds(20),
+            SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10),
 
             SessionTimeout = TimeSpan.FromSeconds(30),
-            KeepAliveInterval = TimeSpan.FromSeconds(2),
+            KeepAliveInterval = TimeSpan.FromSeconds(1),
             OperationTimeout = TimeSpan.FromSeconds(30),
 
             BufferTime = TimeSpan.FromMilliseconds(100),
