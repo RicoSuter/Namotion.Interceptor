@@ -225,7 +225,7 @@ The count moved off `subject.Data` and onto `InterceptorExecutor`, alongside two
 
 The move is not only an allocation saving. On `master` the count was **global**, living on the subject, while `IsContextAttach` and `IsContextDetach` were **per-graph**, deriving from one interceptor's `_attachedSubjects`. Two graphs holding the same subject therefore disagreed about it by construction, and that mismatch is what produced #207. There, the edge released at reference count zero was the one named by whichever property-removal event happened to fire, so a subject whose edge came from somewhere else, a constructor context or a different parent, kept its edge and its reverse registration forever. The fix is to release whatever edge the subject actually holds when it leaves the graph, which is only expressible once the count and the graph refer to the same thing. One graph per subject collapses the distinction, because the two now describe the same graph and can never disagree.
 
-Ownership is claimed against the **attaching context**, not by interceptor reference identity: an aggregated context resolves more than one `ILifecycleInterceptor` and every one of them attaches, so identity would reject the second one. A claim is refused only when the standing owner does not resolve from the context the new claim arrives through, which a genuinely disjoint graph never can. Two consequences follow, both confined to aggregated configurations that already share an interceptor: the predicate is asymmetric, since a context that resolves the standing owner may claim while one that does not may not, and the re-attach-during-detach rejection is enforced only by the owning interceptor, because that guard is gated on ownership.
+Ownership is claimed against the **attaching context**, not by interceptor reference identity: an aggregated context resolves more than one `ILifecycleInterceptor` and every one of them attaches, so identity would reject the second one. A claim is refused only when the standing owner does not resolve from the context the new claim arrives through, which a genuinely disjoint graph never can. Two consequences follow, both confined to aggregated configurations that already share an interceptor: the predicate is asymmetric, since a context that resolves the standing owner may claim while one that does not may not, and the re-attach-during-detach rejection is enforced only by the owning interceptor, because that guard is gated on ownership. The second of those is a property of the guard rather than an observable bypass: in the aggregated shape both interceptors unwind inside the same write, so the owner's own guard still raises. See "The aggregated two-interceptor configuration" under "Known Gaps" for what the tests actually measured.
 
 Reads of the count use `Volatile.Read`, because the `ConcurrentDictionary` it replaced supplied that ordering for free and a plain field does not. The public `GetReferenceCount()` stays a snapshot.
 
@@ -255,7 +255,8 @@ Behaviours this design leaves broken on purpose. Most of them are pinned by a te
 tests **assert the undesirable outcome**. A reader who finds one failing must not weaken the
 assertion to make it pass. A failure means one of two things: either someone improved the behaviour,
 in which case update the test and the matching entry here deliberately, or someone regressed it and
-the assertion is doing its job. The two entries at the end have no test, and say why.
+the assertion is doing its job. The aggregated-context entry is pinned in its own file instead, and
+the entry before it has no test and says why.
 
 ### Root attach racing root detach on the same subject
 
@@ -422,7 +423,7 @@ interceptor pass, and the rendezvous that would pin it sits inside `LifecycleInt
 which no public seam reaches. A test that cannot hit the window would assert only that the ordinary
 sequential path works, which is coverage in appearance and not in substance.
 
-### The aggregated two-interceptor configuration, which has no test
+### The aggregated two-interceptor configuration
 
 Ownership is claimed and released on **graph membership**, not interceptor identity. `ClaimOwnership`
 accepts when the attaching context resolves the standing owner, and `ReleaseOwnership` releases when
@@ -433,19 +434,67 @@ release would be a permanent no-op whenever the interceptor that claimed first i
 brings the count to zero, leaving the subject owned with no references, reporting attached and
 unable to join any other graph.
 
-Two consequences follow, both confined to aggregated configurations that already share an
-interceptor. Rejection of genuinely distinct graphs is unaffected, because a disjoint context cannot
-resolve the standing owner.
+The consequences below are confined to aggregated configurations that already share an interceptor.
+Rejection of genuinely distinct graphs is unaffected, because a disjoint context cannot resolve the
+standing owner.
 
-- **The predicate is asymmetric.** A context that resolves the standing owner may claim, one that
-  does not may not. Since the owner is whoever claims first among co-resolved interceptors, which of
-  the two outcomes a configuration gets depends on resolved interceptor order.
-- **Only the owning interceptor enforces the re-attach-during-detach rejection**, because
-  `ThrowIfDetachIsUnwinding` is gated on `IsOwnedBy(this)`. In a two-interceptor aggregate a
-  re-attach during the non-owner's unwind passes both that guard and the claim.
+The configuration is legal, it has no user in this repository, and it is now covered by
+`src/Namotion.Interceptor.Tracking.Tests/Lifecycle/AggregatedContextLifecycleTests.cs` rather than by
+`KnownGapTests`, because two of the behaviours pinned there are guarantees rather than gaps. What
+those tests found:
 
-**No test.** The configuration is legal but has no user in this repository, so the gap is recorded at
-the call site and here rather than closed.
+- **Ownership survives the double attach and the double detach.** Exactly one of the two co-resolved
+  interceptors holds the claim while the subject is in the graph, nobody holds it afterwards, and the
+  subject can then join a third, disjoint graph. The reference count is one per interceptor, so an
+  ordinary single-parent child sits at two rather than one. A guarantee, pinned by
+  `WhenAggregatedContextAttachesAndDetachesASubject_ThenOwnershipIsClaimedOnceAndReleasedOnce`.
+- **The predicate is asymmetric, and which way it falls depends on the route in.** A context that
+  resolves the standing owner may claim, one that does not may not, and the owner is whoever claims
+  first among co-resolved interceptors. `AttachToContext` walks the resolved set in order, so a root
+  attach through the aggregated context is claimed by that context's own interceptor and a later
+  reference from a subject living in the parent context alone is rejected
+  (`WhenSubjectIsRootAttachedThroughTheAggregatedContext_ThenAReferenceFromTheParentContextIsRejected`).
+  The reverse direction is accepted, because the aggregate does resolve the parent's interceptor
+  (`WhenSubjectIsRootAttachedThroughTheParentContext_ThenAReferenceFromTheAggregatedContextIsAccepted`).
+  The property route inverts the first answer: there the claim is taken by the innermost interceptor
+  in the write chain, which is the parent context's, so the same pair of contexts accepts what the
+  root route rejects
+  (`WhenSubjectIsOwnedThroughAnAggregatedParentProperty_ThenAReferenceFromTheParentContextIsAccepted`).
+- **The re-attach-during-detach rejection is not actually bypassed here.** `ThrowIfDetachIsUnwinding`
+  is gated on `IsOwnedBy(this)`, which predicts that a re-attach during the non-owner's unwind passes.
+  It does not, because both co-resolved interceptors unwind inside the same write and the re-attach
+  runs through both of them, so the owning interceptor, which has already removed the subject from its
+  own ledger, raises. The bypass is unreachable through the public write path, and the comment on
+  `ClaimOwnership` overstates it. A guarantee, pinned by
+  `WhenALifecycleHandlerReattachesDuringDetach_ThenTheReattachIsStillRejected`, which also pins the
+  residue the rejection cannot undo: `next()` committed the re-attach write before the guard ran, so
+  the new parent's backing store points at a detached subject.
+- **The doubled descent is idempotent.** Two `ContextInheritanceHandler` instances each descend into
+  both interceptors, so a subtree is walked four times, yet each subject collects exactly one context
+  attach per interceptor and one reference per interceptor, the registry holds one entry per subject,
+  and a second attach and detach cycle produces the same numbers. A guarantee, pinned by
+  `WhenBothInheritanceHandlersDescend_ThenTheSubtreeAttachesOncePerInterceptorAndUnwindsCompletely`.
+- **A single registry lists one parent reference once per interceptor.** `AttachToProperty` invokes
+  the lifecycle handlers once per interceptor, so `RegisteredSubject.Parents` holds two identical
+  entries for one property reference where a single-interceptor context holds one. Not introduced by
+  this design, and it unwinds completely, so it is a doubling and not a leak. Pinned by
+  `WhenTwoInterceptorsAttachOneParentReference_ThenTheRegistryRecordsThatParentTwice`.
+- **One of a grandchild's two context attaches carries a null `Property`.** The descent calls
+  `AttachSubjectToContext` on every resolved interceptor, and an interceptor that has not yet seen the
+  subtree root falls through to `AttachRootSubject` for the grandchild it discovers, so a handler sees
+  that subject announced once as a root and once through the property that actually holds it. Pinned
+  by `WhenTheDescentReachesAChildBeforeItsParent_ThenOneContextAttachCarriesNoProperty`.
+- **`TryGetLifecycleInterceptor()` throws in this shape.** It resolves through `TryGetService<T>()`,
+  which raises when two services of a type resolve, so `SourceOwnershipManager`, `OpcUaSubjectServer`
+  and `MqttSubjectServer` cannot be constructed against an aggregated context at all. Pinned by
+  `WhenTheContextIsAggregated_ThenTryGetLifecycleInterceptorThrows`.
+- **An attach context below the graph's context loses its extra interceptor's detach.** A subject
+  attached through a context that itself falls back to the graph's context records that context's
+  whole interceptor set, including one the graph never resolves. `ReleaseAttachEdge` removes the edge
+  without calling anyone and the descent resolves only from the parent's context, so the extra
+  interceptor is told about the attach and never about the detach, and cannot recover it afterwards
+  because the record is already gone and `DetachFromContext` is then a silent no-op. Pinned by
+  `WhenTheAttachContextSitsBelowTheGraphContext_ThenItsExtraInterceptorNeverSeesTheDetach`.
 
 ## Rejected Alternatives
 

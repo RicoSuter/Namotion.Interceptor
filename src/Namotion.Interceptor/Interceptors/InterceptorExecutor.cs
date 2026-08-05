@@ -353,10 +353,14 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// interceptor; the rejection of genuinely distinct graphs is unaffected. The predicate is
     /// asymmetric: a context that resolves the standing owner may claim, one that does not resolve
     /// it may not, and since the owner is whoever claims first among co-resolved
-    /// interceptors the outcome depends on resolved interceptor order. And because
-    /// <c>ThrowIfDetachIsUnwinding</c> is gated on ownership, only the owning interceptor enforces
-    /// the re-attach-during-detach rejection, so in a two-interceptor aggregate a re-attach during
-    /// the non-owner's unwind passes both that guard and this claim.
+    /// interceptors the outcome depends on resolved interceptor order, and the root route and the
+    /// property route claim in opposite directions, so the same context pair accepts one and rejects
+    /// the other. Both are pinned by AggregatedContextLifecycleTests.
+    ///
+    /// <c>ThrowIfDetachIsUnwinding</c> is gated on ownership, which reads as though only the owning
+    /// interceptor enforces the re-attach rejection. Measured, it is not a hole: co-resolved
+    /// interceptors unwind inside the same write, so the owner's own guard fires whichever unwind
+    /// the handler re-attaches from.
     /// </summary>
     internal void ClaimOwnership(ILifecycleInterceptor owner, IInterceptorSubjectContext context)
     {
