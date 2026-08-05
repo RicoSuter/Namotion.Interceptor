@@ -71,6 +71,13 @@ namespace Namotion.Interceptor.Connectors
         public static bool SetSource(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Connectors.ISubjectSource source) { }
         public static bool TryGetSource(this Namotion.Interceptor.PropertyReference property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Connectors.ISubjectSource? source) { }
     }
+    public enum SourceState
+    {
+        Unclaimed = 0,
+        Connecting = 1,
+        Synchronized = 2,
+        Stopped = 3,
+    }
     public static class SubjectFactoryExtensions
     {
         public static Namotion.Interceptor.IInterceptorSubject CreateCollectionSubject(this Namotion.Interceptor.Connectors.ISubjectFactory subjectFactory, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object? index) { }
