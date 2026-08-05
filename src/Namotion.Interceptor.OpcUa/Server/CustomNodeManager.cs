@@ -393,14 +393,15 @@ internal class CustomNodeManager : CustomNodeManager2
             variableNode.Timestamp = writeTimestamp.Value.UtcDateTime;
         }
 
+        // Assigning the value above leaves a pending change mask that nothing else clears, so the next
+        // flush of this node reports the creation value as if a client had written it. Cleared here,
+        // during CreateAddressSpace and before the handler is attached, so nothing observes it.
+        variableNode.ClearChangeMasks(SystemContext, false);
+
         variableNode.StateChanged += (_, _, changes) =>
         {
-            // Node removal flushes the value mask set at creation, which is not a client write.
-            if (changes.HasFlag(NodeStateChangeMasks.Value) &&
-                !changes.HasFlag(NodeStateChangeMasks.Deleted))
+            if (changes.HasFlag(NodeStateChangeMasks.Value))
             {
-                // No lock needed: StateChanged fires from ClearChangeMasks which is always
-                // called under NodeManager.Lock (from WriteChangesAsync or SDK write handling).
                 _serverService.UpdateProperty(property.Reference, variableNode.Timestamp, variableNode.Value);
             }
         };
