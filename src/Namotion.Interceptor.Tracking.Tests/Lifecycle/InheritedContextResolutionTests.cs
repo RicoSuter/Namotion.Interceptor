@@ -48,7 +48,7 @@ public class InheritedContextResolutionTests
         var item = new Person { FirstName = "Item" };
 
         // Act
-        ((IInterceptorSubject)item).Context.AddFallbackContext(((IInterceptorSubject)parent).Context);
+        ((IInterceptorSubject)item).AttachToContext(((IInterceptorSubject)parent).Context);
         var registeredBeforeAssignment = ((IInterceptorSubject)item).TryGetRegisteredSubject();
 
         parent.Mother = item;

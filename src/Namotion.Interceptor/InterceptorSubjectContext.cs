@@ -68,10 +68,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // Written via Interlocked rather than declared volatile, which would raise CS0420 when passed
     // by ref under warnings-as-errors. Every context builds its own initial state because caches
     // live on the state: one shared empty instance would let contexts contaminate each other.
-    private ContextState _state = new(ImmutableArray<object>.Empty, ImmutableArray<InterceptorSubjectContext>.Empty);
+    private ContextState _state = new(ImmutableArray<object>.Empty, ImmutableArray<InterceptorSubjectContext>.Empty, null);
 
-    // Serializes mutators; never held on a query path.
-    private readonly object _mutationLock = new();
+    // Serializes mutators; never held on a query path. Reachable from InterceptorExecutor so that a
+    // guard and the publish it protects are one critical section.
+    private protected readonly object _mutationLock = new();
 
     // Contexts that resolve through this context, lazily allocated because most contexts are
     // never used as a fallback. The set instance is its own lock: it is created once via CAS and
@@ -115,30 +116,39 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return resolved.GetServicesFromState<TInterface>(state);
     }
 
+    /// <summary>
+    /// Called inside the mutation critical section before a fallback edge is added, so a subclass
+    /// can reject the call while holding the same lock that publishes the edge. Reading the state,
+    /// releasing the lock and then calling the base would be check-then-act across a lock boundary.
+    /// </summary>
+    protected virtual void OnAddingFallbackContext(IInterceptorSubjectContext context)
+    {
+    }
+
+    /// <summary>
+    /// Called inside the mutation critical section before a fallback edge is removed. See
+    /// <see cref="OnAddingFallbackContext"/>.
+    /// </summary>
+    protected virtual void OnRemovingFallbackContext(IInterceptorSubjectContext context)
+    {
+    }
+
     public virtual bool AddFallbackContext(IInterceptorSubjectContext context)
     {
         var contextImpl = (InterceptorSubjectContext)context;
 
         lock (_mutationLock)
         {
+            OnAddingFallbackContext(context);
+
             var state = Volatile.Read(ref _state);
             if (state.FallbackContexts.Contains(contextImpl))
             {
                 return false;
             }
 
-            // R4: register into the fallback BEFORE publishing, so its _usedByContexts is always a
-            // superset of the true using set. A missing entry leaves a compiled chain above
-            // permanently stale. An extra entry costs a spurious invalidation and lets the
-            // invalidation walk arrive out of chain order, which is why no walk may trust what a
-            // context further down recorded (see ResolveDelegationChain).
-            var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
-            lock (usedByContexts)
-            {
-                usedByContexts.Add(this);
-            }
-
-            PublishState(new ContextState(state.Services, state.FallbackContexts.Add(contextImpl)));
+            RegisterUsedBy(contextImpl);
+            PublishState(new ContextState(state.Services, state.FallbackContexts.Add(contextImpl), state.Parent));
         }
 
         InvalidateUsingContexts();
@@ -153,10 +163,30 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     public virtual bool RemoveFallbackContext(IInterceptorSubjectContext context)
     {
+        return RemoveFallbackContextCore(context, runGuard: true);
+    }
+
+    /// <summary>
+    /// Removes an edge the library owns, bypassing the guard that rejects a consumer removing the
+    /// attach edge. The public guard cannot distinguish the library's own cleanup from a consumer's
+    /// call, and either answer would be wrong for the other.
+    /// </summary>
+    internal bool RemoveAttachEdge(IInterceptorSubjectContext context)
+    {
+        return RemoveFallbackContextCore(context, runGuard: false);
+    }
+
+    private bool RemoveFallbackContextCore(IInterceptorSubjectContext context, bool runGuard)
+    {
         var contextImpl = (InterceptorSubjectContext)context;
 
         lock (_mutationLock)
         {
+            if (runGuard)
+            {
+                OnRemovingFallbackContext(context);
+            }
+
             var state = Volatile.Read(ref _state);
             var index = state.FallbackContexts.IndexOf(contextImpl);
             if (index < 0)
@@ -164,19 +194,82 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 return false;
             }
 
-            PublishState(new ContextState(state.Services, state.FallbackContexts.RemoveAt(index)));
+            var newState = new ContextState(state.Services, state.FallbackContexts.RemoveAt(index), state.Parent);
+            PublishState(newState);
 
-            // R4: unregister from the fallback only AFTER publishing so that its _usedByContexts
-            // stays a superset of the true using set for the whole transition (see
-            // AddFallbackContext).
-            var usedByContexts = Volatile.Read(ref contextImpl._usedByContexts);
-            if (usedByContexts is not null)
+            // R4: unregister only AFTER publishing so the using set stays a superset for the whole
+            // transition, and only when no remaining edge targets the same context.
+            UnregisterUsedByIfUnreferenced(newState, contextImpl);
+        }
+
+        InvalidateUsingContexts();
+        return true;
+    }
+
+    /// <summary>Whether this context currently inherits from a parent subject's context.</summary>
+    internal bool HasParentContext => Volatile.Read(ref _state).Parent is not null;
+
+    /// <summary>
+    /// Whether this context inherits from a parent other than the given one. Two co-resolved
+    /// <c>ContextInheritanceHandler</c> instances both publish the same link for the same reference,
+    /// which is idempotent and not the violation the link assertion is looking for.
+    /// </summary>
+    // Feeds a Debug.Assert only, so it has no caller in a Release build.
+    internal bool HasOtherParentContext(IInterceptorSubjectContext parent)
+    {
+        var current = Volatile.Read(ref _state).Parent;
+        return current is not null && !ReferenceEquals(current, parent);
+    }
+
+    /// <summary>
+    /// Publishes the inherited parent context. The single write site is
+    /// <c>ContextInheritanceHandler</c> at reference count one, and the cycle argument in
+    /// docs/superpowers/specs/2026-08-04-context-inheritance-design.md section 4 depends on it
+    /// staying single and on three guards holding together: the attach edge surviving while the
+    /// subject is referenced, RemoveFallbackContext rejecting the attach edge, and
+    /// DetachFromContext rejecting a non-zero reference count. Relax any one and a root can become
+    /// a pure delegator while holding a link, at which point this becomes cycle-capable.
+    ///
+    /// A fourth relaxation exists on the error path: ClearAttachContext removes the attach edge with
+    /// no reference-count check, so a subject that is already a property child, is root-attached
+    /// within the same graph and whose attach then throws is left parent-only. Closing a delegation
+    /// cycle from there still takes a reference cycle in the subject graph, of any length: the
+    /// mutual pair is one shape of it, not the requirement.
+    /// </summary>
+    internal bool TrySetParentContext(IInterceptorSubjectContext parent)
+    {
+        var parentImpl = (InterceptorSubjectContext)parent;
+
+        lock (_mutationLock)
+        {
+            var state = Volatile.Read(ref _state);
+            if (state.Parent is not null)
             {
-                lock (usedByContexts)
-                {
-                    usedByContexts.Remove(this);
-                }
+                return false;
             }
+
+            RegisterUsedBy(parentImpl);
+            PublishState(new ContextState(state.Services, state.FallbackContexts, parentImpl));
+        }
+
+        InvalidateUsingContexts();
+        return true;
+    }
+
+    internal bool TryClearParentContext()
+    {
+        lock (_mutationLock)
+        {
+            var state = Volatile.Read(ref _state);
+            var parent = state.Parent;
+            if (parent is null)
+            {
+                return false;
+            }
+
+            var newState = new ContextState(state.Services, state.FallbackContexts, null);
+            PublishState(newState);
+            UnregisterUsedByIfUnreferenced(newState, parent);
         }
 
         InvalidateUsingContexts();
@@ -202,7 +295,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // the state to not lose it. Mutating a different context from here is forbidden, see
             // the lock order note at the top of the class.
             state = Volatile.Read(ref _state);
-            PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts));
+            PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts, state.Parent));
         }
 
         InvalidateUsingContexts();
@@ -214,7 +307,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (_mutationLock)
         {
             var state = Volatile.Read(ref _state);
-            PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts));
+            PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts, state.Parent));
         }
 
         InvalidateUsingContexts();
@@ -624,17 +717,22 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             var fallbackContexts = frame.State.FallbackContexts;
 
             var entered = false;
-            while (frame.NextFallbackIndex < fallbackContexts.Length)
+            var edgeCount = fallbackContexts.Length + (frame.State.Parent is not null ? 1 : 0);
+            while (frame.NextFallbackIndex < edgeCount)
             {
-                var fallbackContext = fallbackContexts[frame.NextFallbackIndex++];
-                if (!TryEnterContext(fallbackContext, Volatile.Read(ref fallbackContext._state), visited, out var fallbackState))
+                var edgeIndex = frame.NextFallbackIndex++;
+                var nextContext = edgeIndex < fallbackContexts.Length
+                    ? fallbackContexts[edgeIndex]
+                    : frame.State.Parent!;
+
+                if (!TryEnterContext(nextContext, Volatile.Read(ref nextContext._state), visited, out var nextState))
                 {
                     continue;
                 }
 
                 // The advanced cursor has to survive the push, the frame is a struct.
                 frames[frameIndex] = frame;
-                PushFrame(frames, collected, type, fallbackState);
+                PushFrame(frames, collected, type, nextState);
                 entered = true;
                 break;
             }
@@ -820,6 +918,48 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
+    /// R4: register into the target BEFORE publishing, so its using set is always a superset of the
+    /// true using set. A missing entry leaves a compiled chain above permanently stale. An extra
+    /// entry costs a spurious invalidation and lets the invalidation walk arrive out of chain order,
+    /// which is why no walk may trust what a context further down recorded.
+    /// </summary>
+    private void RegisterUsedBy(InterceptorSubjectContext target)
+    {
+        var usedByContexts = target.GetOrCreateUsedByContexts();
+        lock (usedByContexts)
+        {
+            usedByContexts.Add(this);
+        }
+    }
+
+    /// <summary>
+    /// Drops the reverse entry only when no remaining edge of this context targets
+    /// <paramref name="target"/>. Two edge kinds make two edges to one target possible, and
+    /// unregistering unconditionally would unregister the sole reverse entry while the other edge
+    /// still resolves through it, so invalidation would never reach this context again and its
+    /// compiled chain would silently keep an interceptor set the graph no longer has. That is
+    /// #400's defect 6, unreachable on master where one edge kind plus dedup rules it out.
+    /// </summary>
+    private void UnregisterUsedByIfUnreferenced(ContextState state, InterceptorSubjectContext target)
+    {
+        if (state.FallbackContexts.Contains(target) || ReferenceEquals(state.Parent, target))
+        {
+            return;
+        }
+
+        var usedByContexts = Volatile.Read(ref target._usedByContexts);
+        if (usedByContexts is null)
+        {
+            return;
+        }
+
+        lock (usedByContexts)
+        {
+            usedByContexts.Remove(this);
+        }
+    }
+
+    /// <summary>
     /// Invalidates every context that resolves through this one, with an explicit worklist rather
     /// than recursion: the using graph is the fallback graph reversed and therefore as deep as the
     /// subject graph, where recursion died on an uncatchable <see cref="StackOverflowException"/>.
@@ -945,7 +1085,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         internal readonly ImmutableArray<object> Services;
         internal readonly ImmutableArray<InterceptorSubjectContext> FallbackContexts;
 
-        // Derived in the constructor from the two fields above, so no reader can ever observe
+        // The inherited context of a subject held by a parent property. A separate slot rather than
+        // an entry in FallbackContexts because it is owned by the lifecycle system and must not be
+        // reachable from RemoveFallbackContext. Resolution visits it last, so explicit composition
+        // beats inheritance.
+        internal readonly InterceptorSubjectContext? Parent;
+
+        // Derived in the constructor from the three fields above, so no reader can ever observe
         // it disagreeing with them.
         internal readonly InterceptorSubjectContext? DelegationTarget;
 
@@ -965,14 +1111,28 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // one's caches.
         private InterceptorSubjectContext? _resolvedTerminal;
 
-        internal ContextState(ImmutableArray<object> services, ImmutableArray<InterceptorSubjectContext> fallbackContexts)
+        internal ContextState(
+            ImmutableArray<object> services,
+            ImmutableArray<InterceptorSubjectContext> fallbackContexts,
+            InterceptorSubjectContext? parent)
         {
             Services = services;
             FallbackContexts = fallbackContexts;
-            DelegationTarget = services.IsEmpty && fallbackContexts.Length == 1 ? fallbackContexts[0] : null;
+            Parent = parent;
+
+            // A context with no own service and exactly one outgoing edge resolves everything
+            // through it, whichever kind that edge is. The parent-only case is the dominant
+            // topology after this change, so it has to qualify or every child pays a full walk.
+            DelegationTarget = services.IsEmpty
+                ? fallbackContexts.Length == 1 && parent is null ? fallbackContexts[0]
+                : fallbackContexts.IsEmpty && parent is not null ? parent
+                : null
+                : null;
         }
 
-        internal bool IsEmpty => Services.IsEmpty && FallbackContexts.IsEmpty;
+        // Parent counts: without it a parent-only state would be "empty" and resolve nothing,
+        // and today that only works by accident because such a state has a DelegationTarget.
+        internal bool IsEmpty => Services.IsEmpty && FallbackContexts.IsEmpty && Parent is null;
 
         internal InterceptorSubjectContext? ResolvedTerminal
         {
@@ -999,7 +1159,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         /// </summary>
         internal ContextState WithoutCaches()
         {
-            return new ContextState(Services, FallbackContexts);
+            return new ContextState(Services, FallbackContexts, Parent);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

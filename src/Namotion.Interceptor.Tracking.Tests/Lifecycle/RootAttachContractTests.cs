@@ -37,7 +37,7 @@ public class RootAttachContractTests
         // Act
         try
         {
-            ((IInterceptorSubject)subject).Context.AddFallbackContext(loopA);
+            ((IInterceptorSubject)subject).AttachToContext(loopA);
         }
         catch (InvalidOperationException)
         {
@@ -69,18 +69,20 @@ public class RootAttachContractTests
         attachContext.AddFallbackContext(midContext);
 
         var subject = new Person { FirstName = "Subject" };
-        ((IInterceptorSubject)subject).Context.AddFallbackContext(attachContext);
-
-        var attachedCount = UsedByContextsProbe.Count(attachContext);
+        ((IInterceptorSubject)subject).AttachToContext(attachContext);
 
         // attachContext -> midContext -> attachContext, both pure delegators, so resolving raises.
         midContext.RemoveFallbackContext(graphContext);
         midContext.AddFallbackContext(attachContext);
 
+        // Counted after the rewiring, because closing the circle registers midContext into
+        // attachContext's reverse set as well, and only the subject's own edge is expected to go.
+        var attachedCount = UsedByContextsProbe.Count(attachContext);
+
         // Act: the detach raises either way, because the descent resolves handlers through the
         // subject's own now-cyclic chain. What this pins is that the edge comes out regardless.
         Assert.ThrowsAny<InvalidOperationException>(
-            () => ((IInterceptorSubject)subject).Context.RemoveFallbackContext(attachContext));
+            () => ((IInterceptorSubject)subject).DetachFromContext(attachContext));
 
         // Assert
         Assert.Equal(attachedCount - 1, UsedByContextsProbe.Count(attachContext));
@@ -136,7 +138,7 @@ public class RootAttachContractTests
             .WithContextInheritance();
 
         var subject = new Person { FirstName = "Subject" };
-        ((IInterceptorSubject)subject).Context.AddFallbackContext(contextA);
+        ((IInterceptorSubject)subject).AttachToContext(contextA);
 
         var parentB = new Person(contextB) { FirstName = "ParentB" };
 

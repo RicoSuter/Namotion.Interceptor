@@ -85,7 +85,7 @@ namespace YourDefaultNamespace
 
         public Person(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         private string _FirstName;
@@ -239,7 +239,7 @@ namespace YourDefaultNamespace
 
         public Teacher(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         private string _MainCourse;

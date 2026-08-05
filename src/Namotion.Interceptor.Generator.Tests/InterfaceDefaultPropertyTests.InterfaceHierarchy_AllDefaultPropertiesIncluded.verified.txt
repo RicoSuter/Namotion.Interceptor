@@ -94,7 +94,7 @@ namespace YourDefaultNamespace
 
         public Implementation(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         private double _Value;

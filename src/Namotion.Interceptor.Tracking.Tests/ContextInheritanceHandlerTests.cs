@@ -133,10 +133,12 @@ public class ContextInheritanceHandlerTests
         child2.Mother = child3;
         child3.Mother = child1;
 
-        // Assert
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child1.GetServices<ILifecycleInterceptor>());
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child2.GetServices<ILifecycleInterceptor>());
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child3.GetServices<ILifecycleInterceptor>());
+        // Assert: compared as sequences, not as ImmutableArray values. Closing the circle gives
+        // child1 a parent link on top of its attach edge, so it stops being a pure delegator and
+        // computes its own array instead of sharing the one the root context cached.
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>().ToArray(), child1.GetServices<ILifecycleInterceptor>().ToArray());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>().ToArray(), child2.GetServices<ILifecycleInterceptor>().ToArray());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>().ToArray(), child3.GetServices<ILifecycleInterceptor>().ToArray());
     }
     
     [Fact]

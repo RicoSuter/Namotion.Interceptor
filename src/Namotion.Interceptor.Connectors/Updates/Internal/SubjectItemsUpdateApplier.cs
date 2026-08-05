@@ -226,7 +226,7 @@ internal static class SubjectItemsUpdateApplier
         SubjectUpdateApplyContext context)
     {
         var newItem = context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
-        newItem.Context.AddFallbackContext(parent.Context);
+        newItem.AttachToContext(parent.Context);
         if (context.TryMarkAsProcessed(subjectId))
         {
             SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);

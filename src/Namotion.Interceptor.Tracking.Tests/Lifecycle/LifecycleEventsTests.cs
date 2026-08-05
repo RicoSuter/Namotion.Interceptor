@@ -337,7 +337,7 @@ public class LifecycleEventsTests
         var person = new Person(context) { FirstName = "Person" };
 
         // Act
-        ((IInterceptorSubject)person).Context.RemoveFallbackContext(context);
+        ((IInterceptorSubject)person).DetachFromContext(context);
 
         // Assert
         Assert.Single(detachedEvents);
@@ -445,7 +445,7 @@ public class LifecycleEventsTests
         events.Clear();
 
         // Act - detach
-        ((IInterceptorSubject)person).Context.RemoveFallbackContext(context);
+        ((IInterceptorSubject)person).DetachFromContext(context);
 
         // Assert - SubjectDetaching fires BEFORE HandleLifecycleChange(detach)
         Assert.Equal(2, events.Count);

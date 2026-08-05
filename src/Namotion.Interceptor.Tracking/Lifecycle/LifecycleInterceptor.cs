@@ -46,7 +46,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 if (!_attachedSubjects.ContainsKey(subject))
                 {
-                    AttachToContext(subject, subject.Context);
+                    AttachRootSubject(subject, subject.Context);
                 }
             }
         }
@@ -70,7 +70,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     DetachFromProperty(child.subject, subject.Context, child.property, child.index);
                 }
 
-                DetachFromContext(subject, subject.Context);
+                DetachRootSubject(subject, subject.Context);
             }
         }
         finally
@@ -83,8 +83,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// Attaches a subject directly to a context (root subject, no property reference).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AttachToContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
+    private void AttachRootSubject(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
+        ThrowIfDetachIsUnwinding(subject);
+
+        // Both attach entry points claim ownership. This one is the only code that runs for a
+        // childless root, and without it such a root carries an attach record with no owner, so a
+        // second graph's property attach finds _owner null and claims it: the subject then holds an
+        // attach edge into one graph and a parent link into another and resolves both. That is the
+        // half-attached state behaviour change 5 exists to make unreachable.
+        subject.GetExecutor().ClaimOwnership(this, context);
+
         var isFirstAttach = _attachedSubjects.TryAdd(subject, default);
         if (!isFirstAttach)
         {
@@ -116,6 +125,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private void AttachToProperty(IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference property, object? index)
     {
+        ThrowIfDetachIsUnwinding(subject);
+
+        // Before any mutation, so a cross-graph rejection leaves this subject's bookkeeping clean.
+        // What it cannot undo is the property write itself, which WriteProperty already committed
+        // through next(), nor earlier items of the same batch. That partial batch is #384's shape.
+        subject.GetExecutor().ClaimOwnership(this, context);
+
         ref var set = ref CollectionsMarshal.GetValueRefOrAddDefault(_attachedSubjects, subject, out var existed);
         var isFirstAttach = !existed;
         if (!set.Add(property))
@@ -148,6 +164,33 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
     
+    /// <summary>
+    /// Within one graph, absent from the ledger while holding a parent link is exactly and only a
+    /// detach still unwinding: DetachFromProperty removes the entry before the handlers run and
+    /// clears the link afterwards. Re-attaching there would set a link on a subject that is
+    /// currently a link source with no attach edge, which the cycle argument assumes impossible,
+    /// and the resulting parent-only cycle is unrecoverable because the detach path itself would
+    /// then throw and the link is internal.
+    ///
+    /// The ledger is per-interceptor, so the condition also matches a live child that another
+    /// interceptor attached, whether a co-resolved one in the same graph or one in a different
+    /// graph. Restricting the check to the owner separates them: a co-resolved interceptor is not
+    /// the owner and passes, and a different graph is rejected one line later by ClaimOwnership,
+    /// which is the accurate diagnosis there. The message still names both causes because the owner
+    /// of a subject mid-detach cannot tell which of the two the caller meant.
+    /// </summary>
+    private void ThrowIfDetachIsUnwinding(IInterceptorSubject subject)
+    {
+        var executor = subject.GetExecutor();
+        if (!_attachedSubjects.ContainsKey(subject) && executor.IsOwnedBy(this) && executor.HasParentContext)
+        {
+            throw new InvalidOperationException(
+                $"Subject '{subject.GetType().FullName}' cannot be attached here: it is either being detached right now, " +
+                "in which case it cannot be re-attached from inside a lifecycle callback, or it is a live child of another " +
+                "lifecycle graph, in which case it must leave that graph first.");
+        }
+    }
+
     private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
     {
         var array = context.GetServices<ILifecycleHandler>();
@@ -167,7 +210,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// Detaches a subject from a context (root subject, no property reference).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void DetachFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
+    private void DetachRootSubject(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
         if (!_attachedSubjects.Remove(subject))
         {
@@ -193,6 +236,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         SubjectDetaching?.Invoke(change);
         InvokeRemovedLifecycleHandlers(subject, context, change);
+
+        // Paired with the claim in AttachRootSubject. Without it a detached root stays owned
+        // forever: IsAttached() keeps reporting true and any later attach to a different graph is
+        // rejected by an owner that no longer means anything. It sits after the handlers for the
+        // same reason the property path's release does, and it is unreachable for a subject the
+        // descent already removed from the ledger, because the guard at the top of this method
+        // returns first.
+        subject.GetExecutor().ReleaseOwnership(this);
     }
 
     /// <summary>
@@ -250,12 +301,31 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsContextDetach = isLastDetach
         };
 
-        if (isLastDetach)
+        try
         {
-            SubjectDetaching?.Invoke(change);
-        }
+            if (isLastDetach)
+            {
+                SubjectDetaching?.Invoke(change);
+            }
 
-        InvokeRemovedLifecycleHandlers(subject, context, change);
+            InvokeRemovedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            // After the handlers, never before. The descent resolves the next level's handlers
+            // through the child's own context, and a property-attached subject has no other edge,
+            // so releasing first would make grandchildren get bookkeeping but no handler
+            // invocation, and would lose this subject's own per-property deregistration too.
+            // It also closes the window in which the subject is unowned while its graph is still
+            // mid-detach, during which another graph could claim it.
+            if (count == 0)
+            {
+                var executor = subject.GetExecutor();
+                executor.TryClearParentContext();
+                executor.ReleaseAttachEdge();
+                executor.ReleaseOwnership(this);
+            }
+        }
 
         if (children is not null)
         {

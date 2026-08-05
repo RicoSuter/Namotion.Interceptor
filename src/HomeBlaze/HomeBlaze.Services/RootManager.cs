@@ -82,7 +82,7 @@ public class RootManager : BackgroundService, IConfigurationWriter
 
         // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
         Root = root as IInterceptorSubject ?? throw new InvalidOperationException("Failed to deserialize root configuration");
-        Root.Context.AddFallbackContext(_context);
+        Root.AttachToContext(_context);
 
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);
         _context.AddService(Root);

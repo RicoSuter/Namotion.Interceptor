@@ -12,7 +12,7 @@ public class DynamicSubject : IInterceptorSubject
 
     public DynamicSubject(IInterceptorSubjectContext context) : this()
     {
-        ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)this).AttachToContext(context);
     }
 
     public DynamicSubject()

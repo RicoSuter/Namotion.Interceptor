@@ -47,7 +47,7 @@ public class LifecycleInterceptorTests
 
         mother.Children = [child1, child2];
 
-        ((IInterceptorSubject)mother).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)mother).AttachToContext(context);
 
         // Assert
         return Verify(handler.GetEvents());
@@ -99,7 +99,7 @@ public class LifecycleInterceptorTests
         mother1.Mother = mother2;
         mother2.Mother = mother3;
 
-        ((IInterceptorSubject)mother1).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)mother1).AttachToContext(context);
 
         // Assert
         return Verify(handler.GetEvents());
@@ -121,7 +121,7 @@ public class LifecycleInterceptorTests
         var child2 = new Person { FirstName = "Child2" };
 
         mother.Children = [child1, child2];
-        ((IInterceptorSubject)mother).Context.RemoveFallbackContext(context);
+        ((IInterceptorSubject)mother).DetachFromContext(context);
 
         // Assert
         return Verify(handler.GetEvents());
@@ -145,7 +145,7 @@ public class LifecycleInterceptorTests
 
         mother1.Mother = mother2;
         mother2.Mother = mother3;
-        ((IInterceptorSubject)mother1).Context.RemoveFallbackContext(context);
+        ((IInterceptorSubject)mother1).DetachFromContext(context);
 
         // Assert
         return Verify(handler.GetEvents());
@@ -172,7 +172,7 @@ public class LifecycleInterceptorTests
         Assert.Empty(car.Detachements);
 
         var subject = (IInterceptorSubject)car;
-        subject.Context.RemoveFallbackContext(context);
+        subject.DetachFromContext(context);
         Assert.Single(car.Attachements);
         Assert.Single(car.Detachements);
     }
@@ -194,7 +194,7 @@ public class LifecycleInterceptorTests
             LastName = "Doe"
         };
 
-        ((IInterceptorSubject)person).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)person).AttachToContext(context);
 
         var father = new Person
         {

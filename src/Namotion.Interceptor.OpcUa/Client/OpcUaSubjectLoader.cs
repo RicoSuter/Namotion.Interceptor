@@ -277,7 +277,7 @@ internal class OpcUaSubjectLoader
 
         if (isNewSubject)
         {
-            subjectToLoad.Context.AddFallbackContext(subject.Context);
+            subjectToLoad.AttachToContext(subject.Context);
         }
 
         // Pre-attached children participate in the dedup cache too: any later sibling

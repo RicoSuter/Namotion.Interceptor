@@ -463,9 +463,10 @@ public class ContextConcurrencyFuzzTests
             }
             catch (InvalidOperationException exception) when (IsDelegationCycle(exception))
             {
-                // Closing a circle underneath a subject executor makes its attach callbacks fail
-                // to resolve, after the fallback context is registered. The edge is in place, so
-                // the topology stays exactly as declared.
+                // A subject executor's guard resolves the target's lifecycle interceptors before
+                // the edge is published, so closing a circle underneath one leaves no edge behind
+                // and the declared topology has to drop it too.
+                edge.IsPresent = false;
             }
         }
 
@@ -520,14 +521,19 @@ public class ContextConcurrencyFuzzTests
             var edge = ownedEdges[random.Next(ownedEdges.Length)];
             if (random.Next(2) == 0)
             {
-                // Recorded before the call, not after: the executor override registers the
-                // fallback context first and only then resolves the lifecycle interceptors to run
-                // the attach callbacks, and that resolution raises when the chain is a circle at
-                // that instant. The edge exists either way, so recording it after the call would
-                // lose it. Removal is the other way round, it resolves first and unregisters
-                // afterwards, so a raise there means the edge is still in place.
-                edge.IsPresent = true;
-                edge.Source.Context.AddFallbackContext(edge.Target.Context);
+                // Recorded after the call, not before: the executor's guard resolves the target's
+                // lifecycle interceptors before the edge is published, and that resolution raises
+                // when the chain is a circle at that instant, so a raise means nothing was
+                // published and the edge stays whatever it already was. Removal resolves nothing
+                // and therefore cannot raise.
+                try
+                {
+                    edge.Source.Context.AddFallbackContext(edge.Target.Context);
+                    edge.IsPresent = true;
+                }
+                catch (InvalidOperationException exception) when (IsDelegationCycle(exception))
+                {
+                }
             }
             else
             {

@@ -3,6 +3,7 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETStandard,Version=v2.0", FrameworkDisplayName=".NET Standard 2.0")]
 namespace Namotion.Interceptor.Attributes
 {
@@ -85,6 +86,8 @@ namespace Namotion.Interceptor
         public void AddService<TService>(TService service) { }
         public System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>() { }
         protected bool HasFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        protected virtual void OnAddingFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        protected virtual void OnRemovingFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public virtual bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public bool TryAddService<TService>(System.Func<TService> factory, System.Func<TService, bool> exists) { }
         public TInterface? TryGetService<TInterface>() { }
@@ -138,6 +141,13 @@ namespace Namotion.Interceptor
     {
         public static Namotion.Interceptor.PropertyReference GetPropertyReference(this Namotion.Interceptor.IInterceptorSubject subject, string propertyName) { }
         public static void SetPropertyValueWithInterception(this Namotion.Interceptor.PropertyReference property, object? newValue, object? currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?> writeValue) { }
+    }
+    public static class SubjectAttachmentExtensions
+    {
+        public static void AttachToContext(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public static void DetachFromContext(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public static bool IsAttached(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static Namotion.Interceptor.IInterceptorSubjectContext? TryGetAttachContext(this Namotion.Interceptor.IInterceptorSubject subject) { }
     }
     public readonly struct SubjectChangeContext
     {
@@ -195,10 +205,10 @@ namespace Namotion.Interceptor.Interceptors
     public sealed class InterceptorExecutor : Namotion.Interceptor.InterceptorSubjectContext, Namotion.Interceptor.IInterceptorSubjectContext, Namotion.Interceptor.Interceptors.IInterceptorExecutor
     {
         public InterceptorExecutor(Namotion.Interceptor.IInterceptorSubject subject) { }
-        public override bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         public object? InvokeMethod(string methodName, object?[] parameters, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod) { }
-        public override bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        protected override void OnAddingFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        protected override void OnRemovingFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
     }
     public delegate object? InvokeMethodInterceptionDelegate(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context);

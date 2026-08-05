@@ -77,7 +77,7 @@ public class AttachOrderCharacterizationTests
         var root = new Person { FirstName = "Root", Mother = child };
 
         // Act
-        ((IInterceptorSubject)root).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)root).AttachToContext(context);
 
         // Assert
         Assert.Equal(["Child", "Root"], attached);
