@@ -493,14 +493,15 @@ public class SubjectSourceExtensionsTests
     }
 
     /// <summary>
-    /// Test source that implements ISupportsConcurrentWrites to opt-out of automatic synchronization.
+    /// Shared State/LastSynchronizedAt/PendingWriteCount/StateChanged implementation for the two
+    /// hand-rolled ISubjectSource test doubles below, which differ only in RootSubject and
+    /// WriteChangesAsync.
     /// </summary>
-    private sealed class ConcurrentTestSource(Func<Task<WriteResult>> writeCallback) : ISubjectSource, ISupportsConcurrentWrites
+    private abstract class StateTrackingTestSource : ISubjectSource
     {
         public IInterceptorSubject RootSubject => throw new NotSupportedException();
         public int WriteBatchSize => 0;
-        public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-            => await writeCallback();
+        public abstract ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
         public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
 
         public SourceState State { get; private set; } = SourceState.Connecting;
@@ -532,17 +533,24 @@ public class SubjectSourceExtensionsTests
     }
 
     /// <summary>
+    /// Test source that implements ISupportsConcurrentWrites to opt-out of automatic synchronization.
+    /// </summary>
+    private sealed class ConcurrentTestSource(Func<Task<WriteResult>> writeCallback)
+        : StateTrackingTestSource, ISupportsConcurrentWrites
+    {
+        public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+            => await writeCallback();
+    }
+
+    /// <summary>
     /// Test source that blocks on write until explicitly unblocked.
     /// </summary>
-    private sealed class BlockingTestSource : ISubjectSource
+    private sealed class BlockingTestSource : StateTrackingTestSource
     {
         private readonly TaskCompletionSource _writeStarted = new();
         private readonly TaskCompletionSource _canComplete = new();
 
-        public IInterceptorSubject RootSubject => throw new NotSupportedException();
-        public int WriteBatchSize => 0;
-
-        public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             _writeStarted.TrySetResult();
             await _canComplete.Task;
@@ -550,34 +558,5 @@ public class SubjectSourceExtensionsTests
         }
 
         public void UnblockWrite() => _canComplete.TrySetResult();
-
-        public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
-
-        public SourceState State { get; private set; } = SourceState.Connecting;
-
-        public DateTimeOffset? LastSynchronizedAt { get; private set; }
-
-        public int PendingWriteCount => 0;
-
-        public event EventHandler<SourceEvent>? StateChanged;
-
-        /// <summary>Test hook: drives the state the way a real source's pump would.</summary>
-        public void SetState(SourceState state)
-        {
-            var oldState = State;
-            if (oldState == state)
-            {
-                return;
-            }
-
-            State = state;
-            if (state == SourceState.Synchronized)
-            {
-                LastSynchronizedAt = DateTimeOffset.UtcNow;
-            }
-
-            StateChanged?.Invoke(this, new SourceEvent(
-                SourceEventKind.StateChanged, this, null, oldState, state, DateTimeOffset.UtcNow));
-        }
     }
 }
