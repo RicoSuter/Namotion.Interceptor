@@ -57,6 +57,20 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
+    /// Adds the property data for the specified key only if the key is not already present.
+    /// This operation is atomic and thread-safe, and is the add-if-absent counterpart to
+    /// <see cref="TryRemovePropertyData"/>. Use it when the caller must distinguish a first
+    /// write from a subsequent one, which <see cref="GetOrSetPropertyData"/> cannot express.
+    /// </summary>
+    /// <param name="key">The key to add.</param>
+    /// <param name="value">The value to store when the key is absent.</param>
+    /// <returns><c>true</c> if the value was stored; <c>false</c> if a value was already present, which is left untouched.</returns>
+    public bool TryAddPropertyData(string key, object? value)
+    {
+        return Subject.Data.TryAdd((Name, key), value);
+    }
+
+    /// <summary>
     /// Removes the property data for the specified key only if it matches the expected value.
     /// This operation is atomic and thread-safe.
     /// </summary>
