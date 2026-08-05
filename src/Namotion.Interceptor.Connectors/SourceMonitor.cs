@@ -154,4 +154,64 @@ public class SourceMonitor : ILifecycleHandler
             subscription.Enqueue(sourceEvent);
         }
     }
+
+    // Born at 1. The monitor takes this hold at WithSourceMonitoring time, during context
+    // configuration, before the host is even built, which is what makes signalling
+    // order-independent without any argument about hosted service construction order.
+    private int _registrationHolds = 1;
+    private int _initialHoldReleased;
+
+    /// <summary>True when no registration hold is outstanding, so waits may complete.</summary>
+    public bool IsRegistrationComplete => Volatile.Read(ref _registrationHolds) == 0;
+
+    /// <summary>
+    /// Releases the initial hold, declaring that every source this application intends to start has
+    /// been started and registered. Idempotent, so a re-entrant loader guard is safe.
+    /// </summary>
+    public void CompleteSourceRegistration()
+    {
+        if (Interlocked.Exchange(ref _initialHoldReleased, 1) == 1)
+        {
+            return;
+        }
+
+        ReleaseHold();
+    }
+
+    /// <summary>
+    /// Takes a further hold for the duration of a later batch of source creation. Counted, so
+    /// concurrent holders compose. Taking a hold blocks pending waits but never un-completes an
+    /// already-completed one.
+    /// </summary>
+    public IDisposable DeferWaitCompletion()
+    {
+        Interlocked.Increment(ref _registrationHolds);
+        return new RegistrationHold(this);
+    }
+
+    private void ReleaseHold()
+    {
+        if (Interlocked.Decrement(ref _registrationHolds) == 0)
+        {
+            OnWaitConditionChanged();
+        }
+    }
+
+    /// <summary>Re-evaluates every pending wait. Task 11 gives this a body; it is a deliberate no-op until then.</summary>
+    private void OnWaitConditionChanged()
+    {
+    }
+
+    private sealed class RegistrationHold(SourceMonitor monitor) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                monitor.ReleaseHold();
+            }
+        }
+    }
 }

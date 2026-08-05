@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -70,5 +72,67 @@ public static class SourceMonitoringExtensions
     internal static ImmutableArray<SourceMonitor> GetSourceMonitors(this IInterceptorSubjectContext context)
     {
         return context.GetServices<SourceMonitor>();
+    }
+
+    /// <summary>
+    /// Declares that source registration is complete on every reachable monitor. Idempotent.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No monitor is reachable.</exception>
+    public static void CompleteSourceRegistration(this IInterceptorSubjectContext context)
+    {
+        var monitors = ResolveMonitorsOrThrow(context);
+        foreach (var monitor in monitors)
+        {
+            monitor.CompleteSourceRegistration();
+        }
+    }
+
+    /// <summary>
+    /// Blocks wait completion on every reachable monitor until the returned handle is disposed.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No monitor is reachable.</exception>
+    public static IDisposable DeferWaitCompletion(this IInterceptorSubjectContext context)
+    {
+        var monitors = ResolveMonitorsOrThrow(context);
+        var holds = monitors.Select(monitor => monitor.DeferWaitCompletion()).ToArray();
+        return new CompositeDisposable(holds);
+    }
+
+    private static ImmutableArray<SourceMonitor> ResolveMonitorsOrThrow(IInterceptorSubjectContext context)
+    {
+        var monitors = context.GetSourceMonitors();
+        if (monitors.IsEmpty)
+        {
+            throw new InvalidOperationException(
+                "No SourceMonitor is reachable from this context. Call WithSourceMonitoring() on the tree root context.");
+        }
+
+        return monitors;
+    }
+
+    private sealed class CompositeDisposable(IDisposable[] disposables) : IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (var disposable in disposables)
+            {
+                disposable.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds source monitoring and registers a hosted service that completes source registration when
+    /// IHostApplicationLifetime.ApplicationStarted fires. Use this when every source is a
+    /// DI-registered hosted service. Applications that create sources at runtime use the
+    /// parameterless overload and call CompleteSourceRegistration themselves.
+    /// </summary>
+    public static IInterceptorSubjectContext WithSourceMonitoring(
+        this IInterceptorSubjectContext context, IServiceCollection services)
+    {
+        context.WithSourceMonitoring();
+        services.AddHostedService(serviceProvider => new SourceRegistrationGate(
+            context, serviceProvider.GetRequiredService<IHostApplicationLifetime>()));
+        return context;
     }
 }
