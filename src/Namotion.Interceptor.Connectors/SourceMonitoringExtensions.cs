@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Connectors;
 
@@ -28,8 +30,23 @@ public static class SourceMonitoringExtensions
     /// </summary>
     public static IInterceptorSubjectContext WithSourceMonitoring(this IInterceptorSubjectContext context)
     {
-        context.TryAddService(() => new SourceMonitor(), _ => true);
-        return context.WithParents();
+        // WithParents FIRST, so ParentTrackingHandler is registered before the monitor. Ordering
+        // among lifecycle handlers is a stable topological sort, and registration order breaks ties.
+        context.WithParents();
+
+        context.TryAddService<SourceMonitor>(() =>
+        {
+            // Lazy logger: the context is configured before any logging provider exists. This is the
+            // same Func<ILogger?> idiom HostedServiceHandler uses. Without it every warning the wait
+            // engine emits is a silent no-op, and those warnings are the only thing distinguishing a
+            // vacuous completion from a live tree.
+            var monitor = new SourceMonitor(() =>
+                context.TryGetService<ILoggerFactory>()?.CreateLogger<SourceMonitor>());
+            context.AddService<ILifecycleHandler>(monitor);
+            return monitor;
+        }, _ => true);
+
+        return context;
     }
 
     /// <summary>

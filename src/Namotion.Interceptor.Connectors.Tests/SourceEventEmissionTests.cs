@@ -145,4 +145,63 @@ public class SourceEventEmissionTests
         // Assert
         Assert.Equal(SourceState.Synchronized, current);
     }
+
+    [Fact]
+    public async Task WhenAClaimedSubjectAttaches_ThenPropertyEnteredViewIsPublished()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var child = new Person();
+        var property = new PropertyReference(child, nameof(Person.FirstName));
+        property.SetSource(new TestStateSource(root));
+        var received = new ConcurrentQueue<SourceEvent>();
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+
+        // Act
+        root.Mother = child;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.PropertyEnteredView));
+    }
+
+    [Fact]
+    public async Task WhenAStillClaimedSubjectDetaches_ThenPropertyLeftViewReportsUnclaimed()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var child = new Person();
+        root.Mother = child;
+        var property = new PropertyReference(child, nameof(Person.FirstName));
+        property.SetSource(new TestStateSource(root));
+        var received = new ConcurrentQueue<SourceEvent>();
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+
+        // Act
+        root.Mother = null;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.PropertyLeftView));
+        var leftEvent = received.First(e => e.Kind == SourceEventKind.PropertyLeftView);
+        Assert.Equal(SourceState.Unclaimed, leftEvent.CurrentState);
+        // Ownership is deliberately left intact so a re-attached subject still reaches its source.
+        Assert.True(property.TryGetSource(out _));
+    }
+
+    [Fact]
+    public void WhenThereAreNoSubscribers_ThenTheCatchUpScanIsSkipped()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new Person(context);
+        var child = new Person();
+        new PropertyReference(child, nameof(Person.FirstName)).SetSource(new TestStateSource(root));
+
+        // Act & Assert
+        root.Mother = child;
+        root.Mother = null;
+    }
 }

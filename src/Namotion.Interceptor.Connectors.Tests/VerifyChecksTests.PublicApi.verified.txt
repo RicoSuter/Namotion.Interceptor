@@ -82,10 +82,14 @@ namespace Namotion.Interceptor.Connectors
         PropertyEnteredView = 5,
         PropertyLeftView = 6,
     }
-    public class SourceMonitor
+    [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
+            typeof(Namotion.Interceptor.Tracking.Lifecycle.ContextInheritanceHandler),
+            typeof(Namotion.Interceptor.Tracking.Parent.ParentTrackingHandler)})]
+    public class SourceMonitor : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
-        public SourceMonitor(Microsoft.Extensions.Logging.ILogger? logger = null) { }
+        public SourceMonitor(System.Func<Microsoft.Extensions.Logging.ILogger?>? loggerResolver = null) { }
         public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Connectors.ISubjectSource> Sources { get; }
+        public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
         public void Register(Namotion.Interceptor.Connectors.ISubjectSource source) { }
         public Namotion.Interceptor.Connectors.SourceSubscription Subscribe(System.Action<Namotion.Interceptor.Connectors.SourceEvent> handler) { }
         public void Unregister(Namotion.Interceptor.Connectors.ISubjectSource source) { }
