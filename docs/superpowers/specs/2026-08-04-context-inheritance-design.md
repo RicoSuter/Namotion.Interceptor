@@ -502,7 +502,8 @@ edge is removed and no other route can remove it: `RemoveFallbackContext` reject
 `DetachSubjectFromContext` skips the cleanup. Recording the set at attach removes the resolution from the
 detach path entirely.
 
-It also makes attach and detach pair exactly, which is strictly more correct than re-resolving in both
+It also makes attach and detach pair exactly on the root path, which is strictly more correct than
+re-resolving in both
 directions. Services can never be removed from a context, since no `RemoveService` API exists and
 `ContextState.Services` is only appended to, so the resolved set shrinks only when a whole fallback
 context leaves the chain. Re-resolving then gives an interceptor registered after the attach an unpaired
@@ -515,9 +516,10 @@ Only the root path uses the record, and the pairing claim is therefore about tha
 path also releases an attach edge, at reference count zero on the #207 shape, and it does so through the
 internal removal, so no interceptor is notified there. `master` routes that same removal through
 `InterceptorExecutor.RemoveFallbackContext` and notifies everything resolved. The graph's own interceptor
-does not lose anything, because the descent has already detached the subject. Whether any interceptor
-loses anything at all was behaviour change 15, and section 8 now records that no observable shape for it
-could be constructed.
+does not lose anything, because the descent has already detached the subject. An interceptor that
+resolves only from the attach context does lose its detach, because `ReleaseAttachEdge` discards the
+recorded set without notifying anything and the descent resolves from the parent's context instead.
+That is behaviour change 15, restored in section 8 with the shape that produces it.
 
 The reference-count guard reads the count directly, which it can because that field moved to the executor,
 and it reads it inside `TryClearAttachContext`, under the lock that clears the record.
@@ -600,7 +602,7 @@ root attach in the same window is rejected too.
 `WriteProperty` calls `next(ref context)` before taking the lock (`LifecycleInterceptor.cs:294`), so the
 parent property retains the subject while the lifecycle refuses it, leaving a live reference with a
 reference count of zero. That is the same partially applied state the cross-graph rejection produces two
-paragraphs above, it is #384's shape, and it is classified rather than fixed. The test for change 15
+paragraphs above, it is #384's shape, and it is classified rather than fixed. The test for change 17
 asserts it explicitly: the throw propagates, the backing store keeps the value, the count stays zero, and
 the detach completes.
 
@@ -1026,21 +1028,41 @@ The complete list. Anything discovered beyond these nineteen is escalated, not a
     returning `false` and then losing its edge. That is #411's silent wrong answer, made loud as an
     emergent consequence of the guard rather than by a rule written for it: the record is cleared before
     the interceptor window, so the re-add is no longer naming the recorded attach context.
-15. **Struck: no observable shape could be constructed.** The claim was that the attach edge released on
-    the property path at reference count zero is released silently, where `master` routes it through
-    `InterceptorExecutor.RemoveFallbackContext` and notifies every resolved `ILifecycleInterceptor`, so a
-    second interceptor co-registered on the attach context would lose that notification. Traced during
-    implementation, the difference disappears: the handler's descent at reference count zero notifies
-    everything resolved from the *parent's* context, and in every reachable shape that set is a superset
-    of the attach context's, because the parent's context resolves the attach context. The one shape
-    where the two could differ is an attach context not reachable from the parent's context, which is
-    the cross-graph case change 5 now rejects. On `master` the #207 shape never releases the attach edge
-    at all, so the "where master notifies" clause described a path that does not run. The number is kept
-    rather than reused, so that references to changes 16 and 17 elsewhere stay valid.
-16. Detach notifies exactly the interceptors the attach resolved, rather than whatever resolves at
-    detach time. An interceptor registered after the attach no longer receives an unpaired detach, and
-    one whose context has since left the chain now receives the detach it was owed instead of leaking
-    the state it took at attach.
+15. The attach edge released on the property path at reference count zero is released silently, where
+    `master` routes it through `InterceptorExecutor.RemoveFallbackContext` and notifies every resolved
+    `ILifecycleInterceptor`. An interceptor that resolves from the attach context but not from the
+    parent's context therefore loses that notification.
+    An earlier version struck this change on the reasoning that the descent's interceptor set is always
+    a superset of the attach context's, because the parent's context resolves the attach context. That
+    holds when the attach context sits at or above the parent's, and fails when it sits *below* it:
+
+    ```csharp
+    var shared = InterceptorSubjectContext.Create().WithContextInheritance();   // L1
+    var ctxX = InterceptorSubjectContext.Create();
+    ctxX.AddFallbackContext(shared);
+    ctxX.WithService(() => new SecondInterceptor());                            // L2
+    var child = new Person(ctxX);                 // record holds [L2, L1]
+    var parent = new Person(shared);
+    parent.Mother = child;                        // count 1
+    parent.Mother = null;                         // count 0
+    ```
+
+    `ctxX` resolves `shared`, so the child's attach records `[L2, L1]`, and the cross-graph rule does
+    not reject anything because both attaches claim ownership through a context resolving `L1`. At count
+    zero `ContextInheritanceHandler` descends with the interceptors of `parent.Context`, which reaches
+    `[L1]` only, and `InterceptorExecutor.ReleaseAttachEdge` then drops the recorded `[L2, L1]` without
+    notifying `L2`. So `L2` sees the attach and never the detach.
+    On `master` the #207 shape never releases the attach edge at all, so the "where master notifies"
+    clause describes a path that does not run there either; what the change records is that neither
+    design notifies `L2`, and that this one drops an edge `master` leaves in place.
+16. `DetachFromContext` notifies exactly the interceptors the attach resolved, rather than whatever
+    resolves at detach time. An interceptor registered after the attach no longer receives an unpaired
+    detach, and one whose context has since left the chain now receives the detach it was owed instead
+    of leaking the state it took at attach. Attach and detach therefore pair exactly on the root path
+    and only there: a subject that reaches reference count zero by the property route releases its
+    attach edge through `ReleaseAttachEdge`, which notifies nothing and discards the recorded set, so
+    an interceptor in that set which the descent does not reach gets no detach at all. That is
+    change 15.
 17. Re-attaching a subject *that holds a parent link* from inside a lifecycle handler, while its own
     detach is still unwinding, now throws. The guard fires only when all three of its conditions hold:
     the subject is absent from the ledger, it is owned by the interceptor running the check, and it has
@@ -1168,8 +1190,8 @@ someone improved the behaviour and the test should be updated deliberately, or s
 | 12 | register a service on a parent's own executor, then place a constructor-attached child under it; assert the child now resolves it |
 | 13 | reference counts still behave identically across attach, multi-parent and detach, and `subject.Data` no longer carries the entry |
 | 14 | rendezvous: pause a root detach inside its interceptor loop, call `AddFallbackContext` naming the attach context, assert it throws |
-| 15 | **nothing, and nothing can.** The change is struck: no shape exists in which the notification differs, so there is no test to write. An earlier version of this row promised one, which is what forced the trace that struck the change |
-| 16 | register an interceptor after an attach and remove a fallback carrying another before the detach; assert the first gets nothing and the second gets its detach |
+| 15 | **not pinned by a test.** The shape is recorded in section 8 instead: an attach context that resolves the parent's context, so that the recorded set is a strict superset of what the descent reaches, and a second interceptor on the attach context which therefore sees the attach and never the detach. It is a documented loss rather than a fix, and pinning it would pin the loss |
+| 16 | register an interceptor after an attach and remove a fallback carrying another before the detach; assert the first gets nothing and the second gets its detach. Root path only, which is the only path the change claims |
 | 17 | a handler that re-attaches the subject it is being notified about throws, through both attach entry points; the backing store keeps the written value and the reference count stays zero. The test's handler catches the exception so the outer detach still completes; an uncaught one propagates and leaves the detach partial, which is #384's rule and not a separate outcome |
 | 18 | **no test.** The throw is stated at `SubjectAttachmentExtensions.GetExecutor` and every subject in the repository supplies an executor, so a test would have to hand-write an `IInterceptorSubject` with a plain context purely to assert the message. The requirement is pinned indirectly: nothing compiles or runs without it |
 | 19 | `Registry.Tests/GraphBehavior/CycleTests.WhenBreakingCycle_ThenBothDetach.verified.txt`, whose two lines swap, plus `KnownGapTests.WhenConstructorAttachedSubtreeIsRemovedFromItsParent_ThenTheCascadeIsBottomUp`, which pins the new order deliberately rather than incidentally |

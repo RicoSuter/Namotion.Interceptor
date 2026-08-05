@@ -287,6 +287,48 @@ public class RootAttachContractTests
     }
 
     [Fact]
+    public void WhenTwoInterceptorsAreCoResolved_ThenOwnershipIsStillReleasedOnFullDetach()
+    {
+        // Ownership is claimed by the FIRST interceptor to reach AttachToProperty and released by
+        // whichever one observes count == 0, which is the LAST to decrement. With two co-resolved
+        // interceptors those are never the same instance, so releasing on interceptor identity
+        // leaves the subject owned forever: it reports IsAttached() with a reference count of zero
+        // and can never join another graph, and no consumer call can clear it because
+        // DetachFromContext finds no attach record.
+
+        // Arrange
+        var parentContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var childContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        // After both are configured, so each keeps its own LifecycleInterceptor and the child
+        // context resolves two of them.
+        childContext.AddFallbackContext(parentContext);
+
+        var parent = new Person(childContext) { FirstName = "Parent" };
+        var child = new Person { FirstName = "Child" };
+
+        // Act
+        parent.Mother = child;
+        parent.Mother = null;
+
+        // Assert
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.False(((IInterceptorSubject)child).IsAttached());
+
+        var otherGraph = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        ((IInterceptorSubject)child).AttachToContext(otherGraph);
+        Assert.Same(otherGraph, ((IInterceptorSubject)child).TryGetAttachContext());
+    }
+
+    [Fact]
     public void WhenSubjectIsStillReferenced_ThenDetachFromContextThrowsAndLeavesTheCountIntact()
     {
         // Behaviour change 8.

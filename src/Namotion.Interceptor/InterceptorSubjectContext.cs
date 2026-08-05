@@ -121,7 +121,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// can reject the call while holding the same lock that publishes the edge. Reading the state,
     /// releasing the lock and then calling the base would be check-then-act across a lock boundary.
     /// </summary>
-    protected virtual void OnAddingFallbackContext(IInterceptorSubjectContext context)
+    private protected virtual void OnAddingFallbackContext(IInterceptorSubjectContext context)
     {
     }
 
@@ -129,7 +129,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// Called inside the mutation critical section before a fallback edge is removed. See
     /// <see cref="OnAddingFallbackContext"/>.
     /// </summary>
-    protected virtual void OnRemovingFallbackContext(IInterceptorSubjectContext context)
+    private protected virtual void OnRemovingFallbackContext(IInterceptorSubjectContext context)
     {
     }
 
@@ -153,12 +153,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         InvalidateUsingContexts();
         return true;
-    }
-
-    protected bool HasFallbackContext(IInterceptorSubjectContext context)
-    {
-        return context is InterceptorSubjectContext contextImpl &&
-               Volatile.Read(ref _state).FallbackContexts.Contains(contextImpl);
     }
 
     public virtual bool RemoveFallbackContext(IInterceptorSubjectContext context)
@@ -1130,8 +1124,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 : null;
         }
 
-        // Parent counts: without it a parent-only state would be "empty" and resolve nothing,
-        // and today that only works by accident because such a state has a DelegationTarget.
+        // The Parent term is defensive rather than load bearing: the only reader is reached with
+        // states whose DelegationTarget is null, and the constructor gives such a state a null
+        // Parent whenever services and fallbacks are both empty. It is kept so that a future change
+        // to the delegation rule cannot make a parent-only state report empty and resolve nothing.
         internal bool IsEmpty => Services.IsEmpty && FallbackContexts.IsEmpty && Parent is null;
 
         internal InterceptorSubjectContext? ResolvedTerminal

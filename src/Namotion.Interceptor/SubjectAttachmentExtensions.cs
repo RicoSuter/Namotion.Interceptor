@@ -18,7 +18,9 @@ public static class SubjectAttachmentExtensions
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// The subject is already attached through a different context, or already belongs to another
-    /// lifecycle graph. A subject belongs to at most one graph.
+    /// lifecycle graph. A subject belongs to at most one graph. Also thrown when the subject's own
+    /// context is not an <see cref="InterceptorExecutor"/>, since there is then nowhere to record
+    /// its position in the graph.
     /// </exception>
     public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
@@ -84,7 +86,9 @@ public static class SubjectAttachmentExtensions
     /// The subject is still referenced from parent properties, or was attached through a different
     /// context. Both are decided inside <see cref="InterceptorExecutor.TryClearAttachContext"/>,
     /// under the same lock that clears the record, so a rejection leaves the subject exactly as it
-    /// was and cannot race the property attach that would invalidate it.
+    /// was and cannot race the property attach that would invalidate it. Also thrown when the
+    /// subject's own context is not an <see cref="InterceptorExecutor"/>, since it can then hold no
+    /// attach record.
     /// </exception>
     public static void DetachFromContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
     {

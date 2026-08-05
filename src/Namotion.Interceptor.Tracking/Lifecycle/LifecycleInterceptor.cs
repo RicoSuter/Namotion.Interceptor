@@ -240,10 +240,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         // Paired with the claim in AttachRootSubject. Without it a detached root stays owned
         // forever: IsAttached() keeps reporting true and any later attach to a different graph is
         // rejected by an owner that no longer means anything. It sits after the handlers for the
-        // same reason the property path's release does, and it is unreachable for a subject the
-        // descent already removed from the ledger, because the guard at the top of this method
-        // returns first.
-        subject.GetExecutor().ReleaseOwnership(this);
+        // same reason the property path's release does. The descent cannot reach it for a subject
+        // it already removed from the ledger, because the guard at the top of this method returns
+        // first, and reaching it after the property path released finds no owner and no-ops. A
+        // consumer calling DetachSubjectFromContext directly can still reach it for a referenced
+        // subject, which is one more way that documented low-level call bypasses the guards.
+        subject.GetExecutor().ReleaseOwnership(this, context);
     }
 
     /// <summary>
@@ -323,7 +325,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 var executor = subject.GetExecutor();
                 executor.TryClearParentContext();
                 executor.ReleaseAttachEdge();
-                executor.ReleaseOwnership(this);
+                executor.ReleaseOwnership(this, context);
             }
         }
 

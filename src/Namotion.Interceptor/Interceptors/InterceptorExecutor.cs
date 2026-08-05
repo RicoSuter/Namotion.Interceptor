@@ -85,7 +85,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// </summary>
     internal int ReferenceCount => Volatile.Read(ref _referenceCount);
 
-    protected override void OnAddingFallbackContext(IInterceptorSubjectContext context)
+    private protected override void OnAddingFallbackContext(IInterceptorSubjectContext context)
     {
         // The predicate is "not the recorded attach context", not "no record": testing only for a
         // non-null record would accept AttachToContext(A) followed by AddFallbackContext(B) where B
@@ -106,7 +106,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
         }
     }
 
-    protected override void OnRemovingFallbackContext(IInterceptorSubjectContext context)
+    private protected override void OnRemovingFallbackContext(IInterceptorSubjectContext context)
     {
         if (ReferenceEquals(context, Volatile.Read(ref _attachContext)))
         {
@@ -136,7 +136,8 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             {
                 throw new InvalidOperationException(
                     $"Subject '{_subject.GetType().FullName}' is already attached through a different context. Detach it " +
-                    $"with {nameof(SubjectAttachmentExtensions.DetachFromContext)} before attaching it elsewhere.");
+                    $"with {nameof(SubjectAttachmentExtensions.DetachFromContext)}, passing the context that " +
+                    $"{nameof(SubjectAttachmentExtensions.TryGetAttachContext)} returns, before attaching it elsewhere.");
             }
 
             // A check rather than a claim, so it races a concurrent claim. It is what makes the
@@ -297,14 +298,28 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     }
 
     /// <summary>
-    /// Conditional on the caller being the owner, so a detach in one graph can never clear a claim
-    /// another graph holds.
+    /// Released on graph membership, mirroring <see cref="ClaimOwnership"/>: the caller may be the
+    /// owner, or the context it detaches through may resolve the standing owner. Identity alone is
+    /// not enough, because the claim is taken by the first co-resolved interceptor to attach while
+    /// the release is driven by the last one to bring the reference count to zero, and in an
+    /// aggregated configuration those are two different instances. Releasing on identity there is a
+    /// permanent no-op, which leaves the subject owned with no references, reporting attached and
+    /// unable to join any other graph.
+    ///
+    /// A disjoint graph still cannot resolve the owner, so a detach in one graph can never clear a
+    /// claim another graph holds.
     /// </summary>
-    internal void ReleaseOwnership(ILifecycleInterceptor owner)
+    internal void ReleaseOwnership(ILifecycleInterceptor owner, IInterceptorSubjectContext context)
     {
         lock (_mutationLock)
         {
-            if (ReferenceEquals(_owner, owner))
+            var currentOwner = _owner;
+            if (currentOwner is null)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(currentOwner, owner) || context.GetServices<ILifecycleInterceptor>().Contains(currentOwner))
             {
                 _owner = null;
             }

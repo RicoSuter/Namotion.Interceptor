@@ -280,7 +280,7 @@ car.Tire = tire; // tire's own context now inherits from car's
 
 This ensures that all objects in the subject graph resolve the same services, enabling consistent tracking, validation, and other interceptor features.
 
-The child keeps its own context object. What it gains is an internal parent link to the parent's context, published by the lifecycle system when the child gains its first parent reference and cleared when it loses its last one. The link resolves after anything you composed onto the child yourself, so explicit composition wins, and it is not reachable through `AddFallbackContext` or `RemoveFallbackContext`. See [Joining and Leaving a Graph](#joining-and-leaving-a-graph).
+The child keeps its own context object. What it gains is an internal parent link to the parent's context, published by `ContextInheritanceHandler` when the child gains its first parent reference and cleared when it loses its last one. The handler is registered by `WithContextInheritance()` and by nothing else, so a context configured with `WithLifecycle()` alone tracks attach and detach without ever publishing a link, and its children resolve no services from their parent. The link resolves after anything you composed onto the child yourself, so explicit composition wins, and it is not reachable through `AddFallbackContext` or `RemoveFallbackContext`. See [Joining and Leaving a Graph](#joining-and-leaving-a-graph).
 
 ## Subject Lifecycle Tracking
 
@@ -455,7 +455,7 @@ context:
 | Kind | Created by | Released by | Owner |
 |---|---|---|---|
 | Attach edge | `AttachToContext` | `DetachFromContext`, or the subject's last property detach | the library |
-| Parent link | the lifecycle system, when a subject gains its first parent reference | the subject's last property detach | the library |
+| Parent link | `WithContextInheritance()`'s handler, when a subject gains its first parent reference | the subject's last property detach | the library |
 | Explicit fallback | `AddFallbackContext` | the caller | you |
 
 ```csharp
@@ -558,8 +558,10 @@ If `Root.A = null`:
 This is the classic reference counting limitation. **Workarounds:**
 1. Break all cycle references before removing the parent. This is the supported route.
 2. For a cycle that is already orphaned, call `DetachSubjectFromContext(subject)` on the
-   `ILifecycleInterceptor` (`context.TryGetLifecycleInterceptor()`), naming one subject inside the
-   cycle. That call is the low-level descent operation: it removes that subject's own outgoing
+   `LifecycleInterceptor` that `context.TryGetLifecycleInterceptor()` returns, naming one subject
+   inside the cycle. That extension resolves the concrete `LifecycleInterceptor` and returns null
+   when none is registered; it throws when the context resolves more than one, which an aggregated
+   configuration can produce. That call is the low-level descent operation: it removes that subject's own outgoing
    references, which is what drops the rest of the cycle to zero, and it deliberately ignores the
    reference-count and attach-record guards. Use it only on subjects that were never root-attached,
    since it bypasses the attach edge cleanup that `DetachFromContext` performs.

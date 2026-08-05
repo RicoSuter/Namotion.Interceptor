@@ -194,7 +194,7 @@ The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may t
 
 ## The Parent Link
 
-A subject that is attached through a property does not get its parent's context as a fallback edge. It gets an internal `Parent` field on the context's immutable state, published by `ContextInheritanceHandler` through `TrySetParentContext` and cleared through `TryClearParentContext`. Both are internal, both run no callbacks, and consumer code can neither add nor remove the link. Service resolution visits own services, then fallback contexts in registration order, then the parent, so explicit composition beats inheritance.
+A subject that is attached through a property does not get its parent's context as a fallback edge. It gets an internal `Parent` field on the context's immutable state, published by `ContextInheritanceHandler` through `TrySetParentContext` and cleared by `LifecycleInterceptor.DetachFromProperty` through `TryClearParentContext`. Both are internal, both run no callbacks, and consumer code can neither add nor remove the link. Service resolution visits own services, then fallback contexts in registration order, then the parent, so explicit composition beats inheritance.
 
 **Who publishes it and when.** The handler, not `LifecycleInterceptor`, and only at reference count one:
 
@@ -242,7 +242,9 @@ handler resolved AFTER  inheritance:  M3, M2, M1     (bottom-up)
 
 No issue records this. The parent-link design preserves it deliberately, which is the reason the link is published by the handler rather than by `LifecycleInterceptor`, and characterization tests cover both registration orders so that a future change to the resolver has to move a snapshot rather than move this quietly.
 
-**One detach order did move, and in the direction of consistency.** The detach descent used to run only when the inherited edge was present, so a subject whose edge was absent, such as one attached in its own constructor and then placed under a parent, fell through to the explicit child recursion that runs after the whole handler chain. That produced a top-down cascade for exactly that shape while every other shape cascaded bottom-up. The descent now runs unconditionally at reference count zero, so there is one mechanism and the cascade is bottom-up everywhere.
+**One detach order did move, and in the direction of consistency.** The detach descent used to run only when the inherited edge was present, so a subject whose edge was absent, such as one attached in its own constructor and then placed under a parent, fell through to the explicit child recursion that runs after the whole handler chain. That produced a top-down cascade for exactly that shape while every other shape cascaded bottom-up. The descent now runs unconditionally at reference count zero, so every shape whose parent context carries `ContextInheritanceHandler` cascades bottom-up.
+
+The explicit child recursion at the end of `DetachFromProperty` still runs. Where the descent already detached a child, that child no longer has a ledger entry and the recursion returns immediately, so it costs a lookup and changes nothing. Where inheritance is not registered it is the only cascade there is, and it produces the top-down order, because a subject's own handlers run before its children are recursed into.
 
 ## Invariants
 

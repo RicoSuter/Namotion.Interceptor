@@ -85,9 +85,6 @@ namespace Namotion.Interceptor
         public virtual bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public void AddService<TService>(TService service) { }
         public System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>() { }
-        protected bool HasFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
-        protected virtual void OnAddingFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
-        protected virtual void OnRemovingFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public virtual bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public bool TryAddService<TService>(System.Func<TService> factory, System.Func<TService, bool> exists) { }
         public TInterface? TryGetService<TInterface>() { }
@@ -207,8 +204,6 @@ namespace Namotion.Interceptor.Interceptors
         public InterceptorExecutor(Namotion.Interceptor.IInterceptorSubject subject) { }
         public TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         public object? InvokeMethod(string methodName, object?[] parameters, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod) { }
-        protected override void OnAddingFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
-        protected override void OnRemovingFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
     }
     public delegate object? InvokeMethodInterceptionDelegate(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context);

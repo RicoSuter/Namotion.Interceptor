@@ -26,8 +26,9 @@ public class KnownGapTests
         //
         // So this test deliberately does NOT assert that the record and the edge agree. That
         // agreement is exactly what defect 1 breaks, and asserting it would be asserting a fix we
-        // did not make. What it pins is the weaker set that must survive: the reference count stays
-        // zero, nothing but InvalidOperationException escapes, and the subject is still usable.
+        // did not make. What it pins is the weaker property that must survive: whatever the race
+        // leaves behind, the subject is still cleanly re-attachable, so no round can wedge it in a
+        // state no consumer call can leave.
 
         for (var round = 0; round < 50; round++)
         {
@@ -61,11 +62,14 @@ public class KnownGapTests
             start.Set();
             await Task.WhenAll(racers);
 
-            // Assert
-            Assert.Equal(0, subject.GetReferenceCount());
+            // Assert: whichever of the four record/edge combinations the round produced, a full
+            // attach and detach round still completes and leaves the subject in a graph-free state.
+            // A wedged residue throws out of one of these two calls.
+            ((IInterceptorSubject)subject).AttachToContext(context);
+            ((IInterceptorSubject)subject).DetachFromContext(context);
 
-            subject.LastName = "written after the race";
-            Assert.Equal("written after the race", subject.LastName);
+            Assert.Null(((IInterceptorSubject)subject).TryGetAttachContext());
+            Assert.False(((IInterceptorSubject)subject).IsAttached());
         }
     }
 
