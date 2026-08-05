@@ -55,6 +55,8 @@ Be aware of what that does and does not tell you. An empty scope is the correct 
 
 A scope whose sources are all `Stopped` behaves the same way: instead of blocking, it completes. `Stopped` is terminal (see [The State Model, Transitions, and Delivery Contract](#the-state-model-transitions-and-delivery-contract)), so it is tempting to assume a fully stopped branch hangs a wait, but it does not: a scope where every in-scope source has stopped is treated as satisfied, and the wait returns successfully. A consumer that treats a completed wait as proof the branch is live can walk straight into a dead one - the same caution applies to the empty-scope case just above, since both complete vacuously rather than because the branch actually finished loading.
 
+A subject referenced from two trees only fully participates in the first one. The context machinery that lets a subject's own context reach its tree's services adds that fallback the first time the subject attaches, and leaves it alone on a second attach from a different tree, so the subject's context keeps resolving through the first tree only. In practice that means a source claiming a property on such a subject publishes to the first tree's stream, and a wait anchored on the subject through the second tree sees only the first tree's sources, not the second tree's. Avoid sharing a subject instance across two independently-monitored trees if you need it to fully participate in both.
+
 ## Reading Per-Property State
 
 `property.GetSourceState()` reads a property's synchronization state, derived from its owning source with no per-property storage:
@@ -132,6 +134,10 @@ using var subscription = context.GetSourceMonitor().Subscribe(sourceEvent =>
 Delivery here is queued per subscription and runs outside every lock, so a slower or mutating handler only delays its own subscription, never the transitioning thread or other subscribers. `Subscribe` also returns the source snapshot at the moment of subscribing (`SourceSubscription.Sources`), captured atomically with the subscription, so a consumer that seeds its own state from that snapshot and then processes the stream sees every source exactly once.
 
 `SourceEvent.OldState` and `NewState` record one specific transition and must not be applied blindly to a derived view: events for the same property can be enqueued out of order, because the ownership compare-and-set and the stream enqueue are not atomic, so a release can be delivered before the claim it followed. Use `SourceEvent.CurrentState` instead, which re-resolves the authoritative state at read time rather than replaying what the event captured.
+
+Because of that, the stream is not a ledger: it cannot be replayed to reconstruct a history of transitions for a property, even in principle, since the order events arrive in is not the order the transitions actually happened in. A consumer built on it maintains a view of current state, kept up to date by whichever events arrive, not a log of what happened and when.
+
+`CurrentState` has its own limit: it decides whether a property has left the tree by checking whether the subject's context still reaches the event's monitor, and that check lags true tree membership in two cases. A subject constructed directly with a context keeps that context reachable forever, because the generated constructor adds it as a fallback and detach never removes it. A subject that has had two parents only gets the parent-tree fallback from the first attach, not the second (the multi-tree caveat above). In both cases a `PropertyLeftView` event's `CurrentState` keeps reporting the owning source's state instead of `Unclaimed`, even after the subject has actually left the tree.
 
 ## The State Model, Transitions, and Delivery Contract
 
