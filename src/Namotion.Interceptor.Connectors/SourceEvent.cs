@@ -54,6 +54,12 @@ public readonly record struct SourceEvent(
     /// </remarks>
     public SourceState CurrentState => ResolveCurrentState();
 
+    /// <summary>
+    /// The monitor this event was published to. Used to decide whether the property is still inside
+    /// that monitor's tree. Internal: consumers reach the monitor through the context.
+    /// </summary>
+    internal SourceMonitor? Monitor { get; init; }
+
     private SourceState ResolveCurrentState()
     {
         if (Property is null)
@@ -61,6 +67,16 @@ public readonly record struct SourceEvent(
             return Source.State;
         }
 
-        return Property.Value.GetSourceState();
+        var property = Property.Value;
+
+        // A property whose subject has left this monitor's tree has no state within it, whatever the
+        // ownership data still says. Detach deliberately leaves ownership intact, so without this a
+        // claim delivered after a detach would permanently undo the release.
+        if (Monitor is not null && !property.Subject.Context.GetSourceMonitors().Contains(Monitor))
+        {
+            return SourceState.Unclaimed;
+        }
+
+        return property.GetSourceState();
     }
 }

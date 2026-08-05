@@ -29,8 +29,16 @@ public static class SourcePropertyExtensions
     /// </returns>
     public static bool SetSource(this PropertyReference property, ISubjectSource source)
     {
-        var existingOrNew = property.GetOrSetPropertyData(SourceKey, source);
-        return ReferenceEquals(existingOrNew, source);
+        // TryAddPropertyData rather than GetOrSetPropertyData: only the atomic add-if-absent tells a
+        // fresh claim from a re-claim, and the stream must publish exactly the real transitions.
+        if (property.TryAddPropertyData(SourceKey, source))
+        {
+            PublishOwnershipChange(property, source, SourceEventKind.PropertyClaimed,
+                SourceState.Unclaimed, source.State);
+            return true;
+        }
+
+        return property.TryGetPropertyData(SourceKey, out var existing) && ReferenceEquals(existing, source);
     }
 
     /// <summary>
@@ -63,6 +71,35 @@ public static class SourcePropertyExtensions
     /// <returns><c>true</c> if the source was removed; <c>false</c> if the property had no source or a different source.</returns>
     public static bool RemoveSource(this PropertyReference property, ISubjectSource expectedSource)
     {
-        return property.TryRemovePropertyData(SourceKey, expectedSource);
+        if (!property.TryRemovePropertyData(SourceKey, expectedSource))
+        {
+            return false;
+        }
+
+        PublishOwnershipChange(property, expectedSource, SourceEventKind.PropertyReleased,
+            expectedSource.State, SourceState.Unclaimed);
+        return true;
+    }
+
+    private static void PublishOwnershipChange(
+        PropertyReference property, ISubjectSource source, SourceEventKind kind,
+        SourceState oldState, SourceState newState)
+    {
+        // Usually length 0 or 1 and cached on the context's copy-on-write state snapshot, so a tree
+        // without monitoring pays one array check per claim and nothing else.
+        var monitors = property.Subject.Context.GetSourceMonitors();
+        if (monitors.IsEmpty)
+        {
+            return;
+        }
+
+        var timestamp = DateTimeOffset.UtcNow;
+        foreach (var monitor in monitors)
+        {
+            monitor.Publish(new SourceEvent(kind, source, property, oldState, newState, timestamp)
+            {
+                Monitor = monitor
+            });
+        }
     }
 }
