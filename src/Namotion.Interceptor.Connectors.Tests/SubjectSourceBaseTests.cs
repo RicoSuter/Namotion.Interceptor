@@ -22,6 +22,12 @@ public class SubjectSourceBaseTests
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
 
+        // The source creates its change-queue subscription before it starts listening, so the
+        // stub context has to provide the change interceptor the subscription is taken from.
+        subjectContextMock
+            .Setup(s => s.TryGetService<PropertyChangeInterceptor>())
+            .Returns(new PropertyChangeInterceptor());
+
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock
             .Setup(s => s.Context)
@@ -428,7 +434,7 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { FirstName = "Original" };
 
         var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.FirstName = "Original"; }); // Server didn't change it
+            initialStateAction: s => ApplyFromSource(s, subject, nameof(Person.FirstName), "Original")); // Server didn't change it
 
         // Pre-fill retry queue: client changed "Original" -> "ClientChange"
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "ClientChange");
@@ -455,7 +461,7 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { FirstName = "Original" };
 
         var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.FirstName = "ServerChanged"; }); // Server DID change it
+            initialStateAction: s => ApplyFromSource(s, subject, nameof(Person.FirstName), "ServerChanged")); // Server DID change it
 
         // Pre-fill retry queue: client changed "Original" -> "ClientChange"
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "ClientChange");
@@ -483,7 +489,7 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { Father = personA };
 
         var (source, _, writeTcs) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.Father = personA; }); // Server didn't change it
+            initialStateAction: s => ApplyFromSource(s, subject, nameof(Person.Father), personA)); // Server didn't change it
 
         // Pre-fill retry queue: client changed Father from personA -> personB
         EnqueueRetryChange<Person?>(source, subject, nameof(Person.Father), personA, personB);
@@ -510,7 +516,7 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { Father = personA };
 
         var (source, _, _) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.Father = personC; }); // Server replaced with C
+            initialStateAction: s => ApplyFromSource(s, subject, nameof(Person.Father), personC)); // Server replaced with C
 
         // Pre-fill retry queue: client changed Father from personA -> personB
         EnqueueRetryChange<Person?>(source, subject, nameof(Person.Father), personA, personB);
@@ -537,7 +543,7 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { Children = listA };
 
         var (source, _, writeTcs) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.Children = listA; }); // Server didn't replace it
+            initialStateAction: s => ApplyFromSource(s, subject, nameof(Person.Children), listA)); // Server didn't replace it
 
         // Pre-fill retry queue: client replaced collection listA -> listB
         EnqueueRetryChange(source, subject, nameof(Person.Children), listA, listB);
@@ -564,7 +570,7 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { Children = listA };
 
         var (source, _, _) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.Children = listC; }); // Server replaced collection
+            initialStateAction: s => ApplyFromSource(s, subject, nameof(Person.Children), listC)); // Server replaced collection
 
         // Pre-fill retry queue: client replaced listA -> listB
         EnqueueRetryChange(source, subject, nameof(Person.Children), listA, listB);
@@ -591,8 +597,8 @@ public class SubjectSourceBaseTests
         var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
             initialStateAction: s =>
             {
-                subject.FirstName = "ServerFirst"; // Server changed this -> conflict
-                subject.LastName = "OrigLast";     // Server didn't change this -> no conflict
+                ApplyFromSource(s, subject, nameof(Person.FirstName), "ServerFirst"); // Server changed this -> conflict
+                ApplyFromSource(s, subject, nameof(Person.LastName), "OrigLast");     // Server didn't change this -> no conflict
             });
 
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
@@ -624,8 +630,8 @@ public class SubjectSourceBaseTests
         var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
             initialStateAction: s =>
             {
-                subject.FirstName = "ServerFirst";
-                subject.LastName = "ServerLast";
+                ApplyFromSource(s, subject, nameof(Person.FirstName), "ServerFirst");
+                ApplyFromSource(s, subject, nameof(Person.LastName), "ServerLast");
             });
 
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
@@ -680,7 +686,7 @@ public class SubjectSourceBaseTests
         var subject = new Person(context); // FirstName starts as null
 
         var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
-            initialStateAction: s => { subject.FirstName = "ServerValue"; }); // Server set it
+            initialStateAction: s => ApplyFromSource(s, subject, nameof(Person.FirstName), "ServerValue")); // Server set it
 
         // Pre-fill retry queue: client changed null -> "ClientValue"
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), null, "ClientValue");
@@ -781,6 +787,78 @@ public class SubjectSourceBaseTests
         Assert.Contains(writtenChanges, c =>
             c.Property.Name == nameof(Person.LastName) &&
             c.GetNewValue<string?>() == "ClientLast");
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsWrittenWhileSourceIsStillStarting_ThenChangeIsStillSentToSource()
+    {
+        // A source signals readiness to the outside world before its processing loop runs:
+        // it claims properties and (for OPC UA) creates monitored items inside StartListeningAsync,
+        // and applies initial state right after. A write landing in that window must survive,
+        // otherwise it is lost with no error, no retry and no log (issue #416).
+
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "Initial" };
+
+        var writtenChanges = new ConcurrentBag<SubjectPropertyChange>();
+        var claimed = new TaskCompletionSource();
+        var writeMade = new TaskCompletionSource();
+
+        TestSubjectSource? source = null;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(10))
+        {
+            StartListeningOverride = async (_, _) =>
+            {
+                new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source!);
+                claimed.SetResult();
+
+                // Hold the source inside startup until the test has written, reproducing the
+                // scheduler starvation that widens this window on a loaded CI machine.
+                await writeMade.Task.ConfigureAwait(false);
+                return null;
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenChanges.Add(change);
+                }
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            },
+        };
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await claimed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        subject.FirstName = "WrittenDuringStartup";
+        writeMade.SetResult();
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => writtenChanges.Any(c => c.Property.Name == nameof(Person.FirstName)),
+            timeout: TimeSpan.FromSeconds(5),
+            message: "Expected the write made during source startup to reach the source");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.FirstName) &&
+            c.GetNewValue<string?>() == "WrittenDuringStartup");
+    }
+
+    /// <summary>
+    /// Applies a value the way a real source applies loaded initial state: stamped with the source
+    /// origin, so the change queue recognizes it as an echo instead of writing it straight back.
+    /// A plain local write here would model the source incorrectly.
+    /// </summary>
+    private static void ApplyFromSource(
+        ISubjectSource source, IInterceptorSubject subject, string propertyName, object? value)
+    {
+        new PropertyReference(subject, propertyName).SetValueFromSource(source, null, null, value);
     }
 
     private static (TestSubjectSource source,
@@ -894,6 +972,12 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+
+        // The source creates its change-queue subscription before it starts listening, so the
+        // stub context has to provide the change interceptor the subscription is taken from.
+        subjectContextMock
+            .Setup(s => s.TryGetService<PropertyChangeInterceptor>())
+            .Returns(new PropertyChangeInterceptor());
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock

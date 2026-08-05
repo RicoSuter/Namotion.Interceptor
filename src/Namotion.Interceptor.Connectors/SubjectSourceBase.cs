@@ -79,11 +79,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         {
             try
             {
-                _propertyWriter.StartBuffering();
-                await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
-
-                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
-
+                // The processor's change subscription must exist before the source signals readiness
+                // to the outside world. StartListeningAsync claims properties and creates monitored
+                // items, and LoadInitialStateAndResumeAsync applies the initial state; a local write
+                // between either of those and the subscription would have no subscriber and would be
+                // dropped silently (not queued, not retried, not logged).
                 using var processor = new ChangeQueueProcessor(
                     this,
                     _context,
@@ -93,8 +93,13 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     maxQueueDepth: null,
                     logger: _logger);
 
-                // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
-                // re-apply queued changes locally if the source hasn't changed the property.
+                _propertyWriter.StartBuffering();
+                await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
+
+                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+
+                // Optimistic retry re-apply: after initial state load, re-apply queued changes locally
+                // if the source hasn't changed the property.
                 // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
                 ReapplyRetryQueue();
 
