@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Testing;
@@ -7,14 +8,10 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
 /// <summary>
-/// The server pushes a local change onto its node and then calls <c>ClearChangeMasks</c>, which raises
-/// <c>StateChanged</c> synchronously on the same thread. That handler is how a client write reaches the
-/// subject, so without a guard the server also applies its own writes back to the subject as if a client
-/// had sent them.
-///
-/// Normally invisible, because the value it applies is the one just written and the equality check drops
-/// it. It stops being invisible when the subject moved on between the batch being assembled and the node
-/// write: the reflection then carries the older value and overwrites the newer commit.
+/// The server must never apply its own node state back to the subject. Two paths reach the
+/// <c>StateChanged</c> handler that carries client writes: the flush loop's own <c>ClearChangeMasks</c>,
+/// and node removal flushing the value mask set at creation. Both are masked by the equality check until
+/// the subject has moved on, at which point they overwrite the newer commit with an older value.
 /// </summary>
 [Trait("Category", "Integration")]
 public class OpcUaServerSelfWriteTests
@@ -55,10 +52,60 @@ public class OpcUaServerSelfWriteTests
         // IncomingChangesPerSecond is documented as "client writes to server", and no client exists.
         Assert.Equal(0d, serverService.Diagnostics.IncomingChangesPerSecond);
     }
+
+    /// <summary>
+    /// The value mask set when a variable node is created is never cleared, so removing the node ORs in
+    /// Deleted and flushes both, which reaches the same handler carrying the node's creation value.
+    /// </summary>
+    [Fact]
+    public async Task WhenASubjectIsDetached_ThenNothingIsAppliedBackToTheSubject()
+    {
+        // Arrange
+        var logger = new TestLogger(_output);
+        using var port = await OpcUaTestPortPool.AcquireAsync();
+
+        await using var server = new OpcUaTestServer<SelfWriteTestParent>(logger);
+        await server.StartAsync(
+            createRoot: context => new SelfWriteTestParent(context),
+            initializeDefaults: (context, root) =>
+                root.Child = new SelfWriteTestChild(context) { Value = "initial" },
+            baseAddress: port.BaseAddress,
+            certificateStoreBasePath: port.CertificateStoreBasePath);
+
+        var serverService = server.Server!;
+        var property = new PropertyReference(server.Root!.Child!, nameof(SelfWriteTestChild.Value));
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverService.TryGetVariableNode(property, out _),
+            message: "the child's variable node should exist");
+
+        Assert.Equal(0d, serverService.Diagnostics.IncomingChangesPerSecond);
+
+        // Act: detaching runs the removal synchronously on this thread.
+        server.Root.Child = null;
+
+        // Assert
+        Assert.Equal(0d, serverService.Diagnostics.IncomingChangesPerSecond);
+    }
 }
 
 [InterceptorSubject]
 public partial class SelfWriteTestRoot
+{
+    [Path("opc", "Value")]
+    public partial string? Value { get; set; }
+}
+
+[InterceptorSubject]
+public partial class SelfWriteTestParent
+{
+    [Path("opc", "Child")]
+    [OpcUaReference("HasComponent")]
+    public partial SelfWriteTestChild? Child { get; set; }
+}
+
+[InterceptorSubject]
+public partial class SelfWriteTestChild
 {
     [Path("opc", "Value")]
     public partial string? Value { get; set; }

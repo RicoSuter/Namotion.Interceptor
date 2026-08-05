@@ -395,7 +395,9 @@ internal class CustomNodeManager : CustomNodeManager2
 
         variableNode.StateChanged += (_, _, changes) =>
         {
-            if (changes.HasFlag(NodeStateChangeMasks.Value))
+            // Node removal flushes the value mask set at creation, which is not a client write.
+            if (changes.HasFlag(NodeStateChangeMasks.Value) &&
+                !changes.HasFlag(NodeStateChangeMasks.Deleted))
             {
                 // No lock needed: StateChanged fires from ClearChangeMasks which is always
                 // called under NodeManager.Lock (from WriteChangesAsync or SDK write handling).
