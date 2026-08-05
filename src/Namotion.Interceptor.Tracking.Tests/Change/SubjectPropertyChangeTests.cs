@@ -193,9 +193,9 @@ public class SubjectPropertyChangeTests
             .GetMethod(nameof(SubjectPropertyChange.Create))!
             .MakeGenericMethod(oldValue.GetType());
 
-        // Act
+        // Act - reflection does not fill in the optional revision parameter, so it is passed explicitly
         var change = (SubjectPropertyChange)method.Invoke(null,
-            [_property, null, _changedTimestamp, _receivedTimestamp, oldValue, newValue])!;
+            [_property, null, _changedTimestamp, _receivedTimestamp, oldValue, newValue, 0L])!;
 
         // Assert
         var getOldMethod = typeof(SubjectPropertyChange)
@@ -748,14 +748,74 @@ public class SubjectPropertyChangeTests
     private readonly record struct SmallStructWithReference(object? Reference);
 
     [Fact]
-    public void WhenMeasuringSubjectPropertyChange_ThenSizeStaysWithinOneAlignmentSlotOfMaster()
+    public void WhenCreatedWithRevision_ThenRevisionIsExposedAndSurvivesMergeAndOrigin()
     {
-        // The plain ChangeOrigin field may cost one alignment slot (8 bytes) versus master's
-        // object? Source. That growth is accepted. If the benchmark gate later shows it matters
-        // on the hot path, flatten the origin into a padding-folded kind byte plus the existing
-        // source reference slot; that is the known optimization, not applied preemptively.
-        // Master measured at 192 bytes; the accepted bound is master + one alignment slot.
+        // Arrange
+        var source = new object();
+
+        // Act
+        var earlier = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            "a", "b", 5L);
+        var later = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            "b", "c", 6L);
+        var merged = earlier.MergeWithNewer(later);
+        var reoriginated = later.WithOrigin(ChangeOrigin.Confirmed(source));
+        var withoutRevision = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            "a", "b");
+
+        // Assert
+        Assert.Equal(5L, earlier.Revision);
+        Assert.Equal(6L, later.Revision);
+        Assert.Equal(6L, merged.Revision);
+        Assert.Equal("a", merged.GetOldValue<string>());
+        Assert.Equal("c", merged.GetNewValue<string>());
+        Assert.Equal(6L, reoriginated.Revision);
+        Assert.Equal(0L, withoutRevision.Revision);
+    }
+
+    [Fact]
+    public void WhenCreatedWithRevisionOnEveryStoragePath_ThenRevisionIsPreserved()
+    {
+        // Arrange: each Create return path passes the revision separately, so all three are covered:
+        // inline storage, the string fast path and the boxed holder.
+        const long revision = 42L;
+
+        // Act
+        var inlineChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            1, 2, revision);
+        var stringChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            "old", "new", revision);
+        var referenceChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new CustomClass { Id = 1 }, new CustomClass { Id = 2 }, revision);
+        var oversizedStructChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new OversizedCustomStruct { Value1 = 1L }, new OversizedCustomStruct { Value1 = 2L }, revision);
+
+        // Assert
+        Assert.Equal(revision, inlineChange.Revision);
+        Assert.Equal(1, inlineChange.GetOldValue<int>());
+        Assert.Equal(revision, stringChange.Revision);
+        Assert.Equal("old", stringChange.GetOldValue<string>());
+        Assert.Equal(revision, referenceChange.Revision);
+        Assert.Equal(1, referenceChange.GetOldValue<CustomClass>().Id);
+        Assert.Equal(revision, oversizedStructChange.Revision);
+        Assert.Equal(1L, oversizedStructChange.GetOldValue<OversizedCustomStruct>().Value1);
+    }
+
+    [Fact]
+    public void WhenMeasuringSubjectPropertyChange_ThenSizeStaysWithinTheAcceptedBudget()
+    {
+        // The struct is copied on every publish, so growth is a hot-path cost that has to be a decision
+        // rather than a side effect. The commit revision took it up by one alignment slot, to the 144
+        // bytes measured here, and that growth is accepted. The bound is the exact measurement: slack
+        // would let the next field through unnoticed.
         var size = System.Runtime.CompilerServices.Unsafe.SizeOf<SubjectPropertyChange>();
-        Assert.True(size <= 200, $"SubjectPropertyChange grew to {size} bytes");
+        Assert.True(size <= 144, $"SubjectPropertyChange grew to {size} bytes");
     }
 }
