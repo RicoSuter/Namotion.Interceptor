@@ -10,8 +10,15 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// <summary>
 /// Per-load staged context. All claims and root mutations are queued during
 /// discovery and committed via <see cref="Apply"/> on success. If <see cref="Dispose"/>
-/// runs before <see cref="Apply"/>, the rollback path detaches staged subjects from
-/// the root context so the registry sheds them and the next load starts on a clean slate.
+/// runs before <see cref="Apply"/>, the rollback path detaches the staged subjects that
+/// nothing references, so the registry sheds them.
+/// <para>
+/// Rollback is deliberately not all-or-nothing. A staged subject that was bound to a property
+/// during the load is left attached, because the model references it and it is no longer an
+/// orphan. Detaching it would evict it from the registry while its parent property still pointed
+/// at it, and nothing reconciles those two. So a failed load can leave a partially populated
+/// subtree in place, registered and monitored, which the next successful load completes.
+/// </para>
 /// Unrelated to <c>Namotion.Interceptor.Tracking.Transactions.SubjectTransaction</c>,
 /// which captures property-change scopes for the tracking layer.
 /// </summary>
@@ -159,12 +166,19 @@ internal sealed class OpcUaLoadContext : IDisposable
 
     /// <summary>
     /// Registers a newly constructed subject and adds the parent context as fallback so
-    /// the subject can resolve services (registry, interceptors) during discovery. Uses
-    /// the immediate parent context rather than the root context so the link is symmetric
-    /// with <c>ContextInheritanceHandler</c>: when the subject is later attached normally
-    /// via <c>SetValueFromSource</c>, the handler adds the same parent fallback (deduped),
-    /// and when the subject is eventually detached the handler removes it cleanly. On
-    /// rollback, we undo our manual add against the same parent context.
+    /// the subject can resolve services (registry, interceptors) during discovery. Uses the
+    /// immediate parent context rather than the root context, so that in the ordinary tree case
+    /// the link matches the one <c>ContextInheritanceHandler</c> removes when the subject's last
+    /// property reference goes away.
+    /// <para>
+    /// The handler does not add a link of its own for a staged subject: its add is gated on the
+    /// subject not already being context-attached, and staging makes that false. So this link is
+    /// the only one, and whoever removes it must use this same parent context. That holds for a
+    /// tree. In a graph-shaped address space the per-load NodeId cache can bind the subject under a
+    /// different parent, and the handler's removal is then keyed to that other parent and does
+    /// nothing, which <see cref="Dispose"/>'s second pass exists to clean up.
+    /// </para>
+    /// On rollback we undo this add, but only for subjects that no property references by then.
     /// </summary>
     public void RegisterStagedSubject(IInterceptorSubject subject, IInterceptorSubjectContext parentContext)
     {
