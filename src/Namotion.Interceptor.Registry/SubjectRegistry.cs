@@ -1,10 +1,21 @@
 ﻿using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry;
 
+/// <summary>
+/// Registers subjects and their property edges as they enter the object graph.
+/// </summary>
+/// <remarks>
+/// Ordered ahead of <see cref="ContextInheritanceHandler"/>, which drives the descent into the next
+/// level: a subject attaching deep in a subtree resolves its ancestors through the registry from its
+/// own callbacks, so every ancestor has to be registered before the descent reaches it. See "Handler
+/// Order Around the Descent" in docs/design/tracking-lifecycle.md.
+/// </remarks>
+[RunsBefore(typeof(ContextInheritanceHandler))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();

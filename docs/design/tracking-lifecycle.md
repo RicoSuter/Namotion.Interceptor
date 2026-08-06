@@ -176,6 +176,16 @@ Acquisition order is always: `_attachedSubjects` → `_knownSubjects`. The `Subj
 
 The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled — this is a documented contract requirement.
 
+## Handler Order Around the Descent
+
+`ContextInheritanceHandler` drives the descent into the next level of the object graph, so it splits the `ILifecycleHandler` chain in two: handlers ahead of it record facts about the level currently attaching, handlers behind it run only once the whole subtree below has attached and fired its own callbacks.
+
+A handler that records something descendants read during their own attach belongs ahead of it and must say so with `[RunsBefore(typeof(ContextInheritanceHandler))]`, because a resolved position left to the registration index is not stable against unrelated handlers being registered. `ParentTrackingHandler` and `SubjectRegistry` both carry it.
+
+Detach is not the mirror. A subject's own handler runs before the context handlers that deregister it, but its ancestors were processed further up the descent and are already gone, so `GetParents()` still answers during a detach callback while resolving those parents through the registry does not.
+
+Pinned by `RegistryHandlerOrderTests` and `RegistryAncestorResolutionTests`.
+
 ## Invariants
 
 After all concurrent `WriteProperty` / `DetachFromProperty` / `AttachSubjectToContext` / `DetachSubjectFromContext` operations complete:
