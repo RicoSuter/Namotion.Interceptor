@@ -24,6 +24,8 @@ builder.Services.AddOpcUaSubjectClientSource<Root>("opc.tcp://localhost:4840", "
 builder.Services.AddHostedService<Worker>();
 ```
 
+Call `WithSourceMonitoring()` before constructing any subject in the tree, as the sample above does: tree membership is learned only from lifecycle events (attach and detach) that fire after the monitor is registered as a handler on the context, not resolved retroactively for subjects that already exist. Adding source monitoring to a context whose tree is already built leaves every subject constructed before that call, including the root, a permanent non-member: `CurrentState` then reports `Unclaimed` for their properties even though the properties are genuinely claimed and in the tree, with no way to recover afterward short of rebuilding the tree under a newly-monitored context.
+
 ```csharp
 using Namotion.Interceptor.Connectors.Monitoring;
 
@@ -207,9 +209,9 @@ public event EventHandler<SourceEvent>? StateChanged
 }
 ```
 
-A direct `ISubjectSource` implementer must also call `SourceMonitor.Register(this)` when it starts and `SourceMonitor.Unregister(this)` when it stops or is disposed (obtain the monitor through `subject.Context.GetSourceMonitor()` or `GetSourceMonitors()`). `SubjectSourceBase` does this automatically around its pump lifecycle (see [The State Model, Transitions, and Delivery Contract](#the-state-model-transitions-and-delivery-contract)); without it, a hand-rolled source is invisible to the monitor entirely: it never appears in `SourceMonitor.Sources`, no `SourceRegistered`/`SourceUnregistered` events are ever published for it, and any branch-scoped wait whose scope depends on it hangs forever, since the wait engine never learns the source exists.
+A direct `ISubjectSource` implementer must also register with every monitor reachable from the subject's context: call `Register(this)` when it starts and `Unregister(this)` when it stops or is disposed, on each monitor returned by looping `subject.Context.GetServices<SourceMonitor>()`. Use that call specifically, not `GetSourceMonitor()`: the singular convenience method throws when no monitor is reachable, so an implementer that calls it directly crashes at startup in any application that has not called `WithSourceMonitoring()`, whereas `SubjectSourceBase` itself tolerates zero monitors by looping the same way. (The plural extension the base class actually uses internally, `GetSourceMonitors()`, is `internal` to this library and not callable from another assembly.) `SubjectSourceBase` does this registration automatically around its pump lifecycle (see [The State Model, Transitions, and Delivery Contract](#the-state-model-transitions-and-delivery-contract)); without it, a hand-rolled source is invisible to the monitor entirely: it never appears in `SourceMonitor.Sources`, no `SourceRegistered`/`SourceUnregistered` events are ever published for it, and once registration is complete, any branch-scoped wait whose scope depends on it completes immediately instead of blocking - the wait engine has no way to distinguish "no source registered for this branch" from "no source for this branch, ever" (see [Waiting on Part of the Tree](#waiting-on-part-of-the-tree)). That silent early completion, not a hang, is the actual failure mode: a consumer sees the wait succeed and treats the branch as live while the unregistered source may still be loading, or may never load at all.
 
-Deriving from `SubjectSourceBase` is recommended instead of implementing `ISubjectSource` directly: it implements all four members, drives the connection-phase transitions automatically through `SubjectPropertyWriter`, registers and unregisters with the monitor around its pump lifecycle, and is what every built-in connector (OPC UA, MQTT, WebSocket) already does. See [Implementing a Source](connectors.md#implementing-a-source) for the base class's hooks.
+Deriving from `SubjectSourceBase` is recommended instead of implementing `ISubjectSource` directly: it implements all four members, drives the connection-phase transitions automatically through `SubjectPropertyWriter`, registers and unregisters with every reachable monitor around its pump lifecycle, and is what every built-in connector (OPC UA, MQTT, WebSocket) already does. See [Implementing a Source](connectors.md#implementing-a-source) for the base class's hooks.
 
 ## Worked Sample: Availability Attributes
 
@@ -240,9 +242,15 @@ using Namotion.Interceptor.Connectors.Monitoring;
 public sealed class DeviceAvailabilityUpdater : IDisposable
 {
     // Add-only, and only ever a record of claims this updater actually observed (see the
-    // construction-order requirement above). Within that limit, a stale entry left behind by a
-    // release, or by a subject leaving the tree, is harmless: Apply always re-reads through
-    // GetSourceState(), so once a property is in the index it never needs to be removed again.
+    // construction-order requirement above). A stale entry left behind by a genuine ownership
+    // release is harmless: GetSourceState() then reports Unclaimed for it directly. A stale entry
+    // left behind because its subject left the tree while the source still holds the claim - the
+    // case PropertyLeftView exists to report - is NOT harmless here: the StateChanged handler below
+    // re-reads through the property-level GetSourceState(), which has no notion of tree membership
+    // (only sourceEvent.CurrentState does, for the other four event kinds), so it would report the
+    // source's live state for a property that is no longer actually in the tree. Built-in connectors
+    // release their claims when a subject detaches, which is why this gap never surfaces with them;
+    // see the StateChanged case in Handle below for the qualification.
     private readonly ConcurrentDictionary<ISubjectSource, ImmutableHashSet<PropertyReference>> _bySource = new();
     private readonly SourceSubscription _subscription;
 
@@ -296,4 +304,4 @@ public sealed class DeviceAvailabilityUpdater : IDisposable
 }
 ```
 
-For the four property-kind events, `sourceEvent.CurrentState` already resolves through `GetSourceState()` for that specific property, so `Apply` can use it directly. `StateChanged` carries no property at all, `sourceEvent.CurrentState` there is the source's own state and says nothing about any individual property, so the handler instead walks its own index of properties this source has claimed and calls `property.GetSourceState()` on each one. That per-property re-read is what makes the index safe to keep imprecise about *removal*: even a property the index still lists after a release resolves to its actual current state rather than a stale one, so once a claim has been observed, the index never needs to drop it again. It does not make the index safe to keep imprecise about *addition*: a claim this updater never observed, because it subscribed after the claim happened, is missing from the index permanently, with no later event to fill the gap.
+For the four property-kind events, `sourceEvent.CurrentState` checks tree membership first and then resolves through `GetSourceState()` for that specific property (see [Observing Changes](#observing-changes)), so `Apply` can use it directly. `StateChanged` carries no property at all, `sourceEvent.CurrentState` there is the source's own state and says nothing about any individual property, so the handler instead walks its own index of properties this source has claimed and calls `property.GetSourceState()` on each one directly - skipping the membership check `CurrentState` applies for the other four kinds. That per-property re-read is what makes the index safe to keep imprecise about *removal by ownership release*: even a property the index still lists after a release resolves to `Unclaimed` through `GetSourceState()`'s own ownership check, so once a claim has been observed, a release never needs the index to drop it. It does **not** make the index safe against a property whose subject has left the tree while the source still retains the claim - exactly what `PropertyLeftView` reports: `GetSourceState()` has no notion of tree membership the way `CurrentState` does, and `IsMember` is internal, so a consumer cannot replicate that check itself. Built-in connectors release their claims when a subject detaches, which is why this gap is invisible with them; a custom source that does not would leave `IsAvailable` reporting the source's live state, via this `StateChanged` path specifically, for a property that is no longer in the tree. It also does not make the index safe to keep imprecise about *addition*: a claim this updater never observed, because it subscribed after the claim happened, is missing from the index permanently, with no later event to fill the gap.
