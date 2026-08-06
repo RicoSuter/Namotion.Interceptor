@@ -49,7 +49,9 @@ A source is in scope for an anchor when its root subject and the anchor lie on t
 
 Two edge cases in that scoping matter before you rely on a wait.
 
-Before source registration is complete, an empty scope (nothing has matched yet) is ambiguous: it could mean "no source for this branch, ever" or just "not registered yet", so the wait blocks rather than guessing. Once registration is complete, that ambiguity is gone: the application has declared its source set complete, so a scope that still matches no source means the branch is local-only, and the wait completes immediately, the same way an all-`Stopped` scope does below.
+No wait can complete before source registration is complete, whatever its scope: that is the first condition checked, ahead of any scope evaluation. So until `CompleteSourceRegistration()` has run (and any `DeferWaitCompletion()` holds are released), every wait blocks.
+
+What registration completion changes is the meaning of an empty scope. Before it, a scope that matches nothing is ambiguous: it could mean "no source for this branch, ever" or merely "not registered yet". After it, the application has declared its source set complete, so a scope that still matches no source means the branch is local-only, and the wait completes immediately, the same way an all-`Stopped` scope does below.
 
 Be aware of what that does and does not tell you. An empty scope is the correct and expected answer for a branch that genuinely has no external source, such as configuration or computed state. It is also what you get if the source for that branch was never created, or if you anchored on a branch unrelated to any source. Those are application bugs, and this library cannot distinguish them from the legitimate case, because both look identical from the inside: nothing claims here. A one-time warning is logged the first time an empty scope is detected for a wait, as a hint rather than a verdict. If a branch you expected a source to drive completes immediately, check that log line first.
 
