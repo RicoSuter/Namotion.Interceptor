@@ -1,6 +1,5 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Benchmark")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking")]
@@ -123,6 +122,7 @@ namespace Namotion.Interceptor
         public object? GetOrSetPropertyData(string key, object? value) { }
         public void RemovePropertyData(string key) { }
         public void SetPropertyData(string key, object? value) { }
+        public bool TryGetCommittedRevision(out long revision) { }
         public bool TryGetPropertyData(string key, out object? value) { }
         public System.DateTimeOffset? TryGetWriteTimestamp() { }
         public bool TryRemovePropertyData(string key, object? expectedValue) { }

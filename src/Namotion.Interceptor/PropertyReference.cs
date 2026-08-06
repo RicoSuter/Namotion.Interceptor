@@ -73,7 +73,10 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     // slots are written by the same terminal on the same write, so keeping them in one array is what
     // holds the hot path to a single dictionary lookup. The slots are independent: nothing reads them
     // as a pair, so the two exchanges below need no mutual ordering.
-    private const string WriteStateKey = "Namotion.Interceptor.WriteState";
+    // Short by convention, and load-bearing here: the revision slot is read on every delivered change,
+    // string hash codes are not cached, so key length is per-call work. Matches the "ni.*" keys the
+    // tracking and connector layers use.
+    private const string WriteStateKey = "ni.wstate";
     private const int TimestampSlot = 0;
     private const int RevisionSlot = 1;
 
@@ -106,7 +109,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// (a derived recomputation, for instance).
     /// </para>
     /// </remarks>
-    internal bool TryGetCommittedRevision(out long revision)
+    public bool TryGetCommittedRevision(out long revision)
     {
         if (Subject.Data.TryGetValue((Name, WriteStateKey), out var value) && value is long[] holder)
         {
