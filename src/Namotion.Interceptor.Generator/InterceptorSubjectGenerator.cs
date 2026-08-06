@@ -72,26 +72,35 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
         {
             if (cls is null) return;
 
-            string fileName;
             try
             {
-                var metadata = SubjectMetadataExtractor.Extract(
+                var extraction = SubjectMetadataExtractor.Extract(
                     cls.TypeSymbol,
                     cls.ClassNode,
                     cls.Model,
                     spc.CancellationToken);
 
-                fileName = SubjectCodeGenerator.GetFileName(metadata);
-                var generatedCode = SubjectCodeGenerator.Generate(metadata);
+                foreach (var diagnostic in extraction.Diagnostics)
+                {
+                    spc.ReportDiagnostic(diagnostic);
+                }
+
+                if (extraction.Metadata is null)
+                {
+                    return;
+                }
+
+                var fileName = SubjectCodeGenerator.GetFileName(extraction.Metadata);
+                var generatedCode = SubjectCodeGenerator.Generate(extraction.Metadata);
 
                 spc.AddSource(fileName, SourceText.From(generatedCode, Encoding.UTF8));
             }
             catch (Exception ex)
             {
-                // Fallback filename using available info
+                // The full stack is preserved in the emitted file; Task 11 adds NI0004 so the
+                // failure is also visible in the build output.
                 var className = cls.ClassNode.Identifier.ValueText;
-                fileName = $"{className}.g.cs";
-                spc.AddSource(fileName, SourceText.From($"/* {ex} */", Encoding.UTF8));
+                spc.AddSource($"{className}.g.cs", SourceText.From($"/* {ex} */", Encoding.UTF8));
             }
         });
     }

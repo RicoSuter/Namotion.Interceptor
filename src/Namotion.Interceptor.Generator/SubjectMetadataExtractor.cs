@@ -15,12 +15,14 @@ internal static class SubjectMetadataExtractor
     /// <summary>
     /// Extracts metadata from a class declaration with the InterceptorSubject attribute.
     /// </summary>
-    public static SubjectMetadata Extract(
+    public static ExtractionResult Extract(
         INamedTypeSymbol typeSymbol,
         ClassDeclarationSyntax classDeclaration,
         SemanticModel semanticModel,
         CancellationToken cancellationToken)
     {
+        var diagnostics = new List<Diagnostic>();
+
         var className = classDeclaration.Identifier.ValueText;
 
         // Use the symbol rather than the syntax modifiers: a top-level class without a modifier
@@ -69,19 +71,21 @@ internal static class SubjectMetadataExtractor
         var (needsGeneratedParameterlessConstructor, hasOrWillHaveParameterlessConstructor) =
             DetectConstructorState(allClassDeclarations);
 
-        return new SubjectMetadata(
-            className,
-            accessModifier,
-            namespaceName,
-            fullTypeName,
-            containingTypes,
-            needsGeneratedParameterlessConstructor,
-            hasOrWillHaveParameterlessConstructor,
-            baseClassTypeName,
-            baseClassHasInterceptorSubject,
-            baseClassHasInpc,
-            properties,
-            methods);
+        return new ExtractionResult(
+            new SubjectMetadata(
+                className,
+                accessModifier,
+                namespaceName,
+                fullTypeName,
+                containingTypes,
+                needsGeneratedParameterlessConstructor,
+                hasOrWillHaveParameterlessConstructor,
+                baseClassTypeName,
+                baseClassHasInterceptorSubject,
+                baseClassHasInpc,
+                properties,
+                methods),
+            diagnostics);
     }
 
     private static string? GetNamespace(ClassDeclarationSyntax classDeclaration)
