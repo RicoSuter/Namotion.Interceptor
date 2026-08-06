@@ -56,33 +56,24 @@ using System.Text.Json.Serialization;
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Value",
-                    new SubjectPropertyMetadata(
+                    ["Value"] = new SubjectPropertyMetadata(
                         typeof(Implementation).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((Implementation)o).Value,
                         (o, v) => ((Implementation)o).Value = (double)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "DerivedStatus",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["DerivedStatus"] = new SubjectPropertyMetadata(
                         typeof(global::IDerived).GetProperty(nameof(global::IDerived.DerivedStatus), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((global::IDerived)o).DerivedStatus,
                         null,
                         isIntercepted: false,
-                        isDynamic: false)
-                },
-                {
-                    "BaseStatus",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["BaseStatus"] = new SubjectPropertyMetadata(
                         typeof(global::IBase).GetProperty(nameof(global::IBase.BaseStatus), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((global::IBase)o).BaseStatus,
                         null,
                         isIntercepted: false,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 

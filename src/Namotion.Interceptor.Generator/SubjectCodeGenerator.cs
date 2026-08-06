@@ -198,15 +198,12 @@ internal static class SubjectCodeGenerator
                     ? $"(o, v) => (({property.InterfaceTypeName})o).{property.Name} = ({property.FullTypeName})v"
                     : "null";
 
-                builder.AppendLine("                {");
-                builder.AppendLine($"                    \"{property.Name}\",");
-                builder.AppendLine("                    new SubjectPropertyMetadata(");
+                builder.AppendLine($"                    [\"{property.Name}\"] = new SubjectPropertyMetadata(");
                 builder.AppendLine($"                        typeof({property.InterfaceTypeName}).GetProperty(nameof({property.InterfaceTypeName}.{property.Name}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,");
                 builder.AppendLine($"                        {getterLambda},");
                 builder.AppendLine($"                        {setterLambda},");
                 builder.AppendLine("                        isIntercepted: false,");
-                builder.AppendLine("                        isDynamic: false)");
-                builder.AppendLine("                },");
+                builder.AppendLine("                        isDynamic: false),");
             }
             else
             {
@@ -218,15 +215,12 @@ internal static class SubjectCodeGenerator
                     ? $"(o, v) => (({metadata.ClassName})o).{property.Name} = ({property.FullTypeName})v"
                     : "null";
 
-                builder.AppendLine("                {");
-                builder.AppendLine($"                    \"{property.Name}\",");
-                builder.AppendLine("                    new SubjectPropertyMetadata(");
+                builder.AppendLine($"                    [\"{property.Name}\"] = new SubjectPropertyMetadata(");
                 builder.AppendLine($"                        typeof({metadata.ClassName}).GetProperty(nameof({property.Name}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,");
                 builder.AppendLine($"                        {getterLambda},");
                 builder.AppendLine($"                        {setterLambda},");
                 builder.AppendLine($"                        isIntercepted: {(property.IsPartial ? "true" : "false")},");
-                builder.AppendLine("                        isDynamic: false)");
-                builder.AppendLine("                },");
+                builder.AppendLine("                        isDynamic: false),");
             }
         }
 

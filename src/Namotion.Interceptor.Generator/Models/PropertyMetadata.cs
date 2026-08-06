@@ -15,4 +15,5 @@ internal sealed record PropertyMetadata(
     bool IsFromInterface,
     string? GetterAccessModifier,
     string? SetterAccessModifier,
-    string? InterfaceTypeName = null);
+    string? InterfaceTypeName = null,
+    string? ExplicitInterfaceTypeName = null);

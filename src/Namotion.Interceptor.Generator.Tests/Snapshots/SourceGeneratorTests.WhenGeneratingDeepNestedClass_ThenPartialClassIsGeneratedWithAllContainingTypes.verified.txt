@@ -62,15 +62,12 @@ namespace TestNamespace
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Value",
-                    new SubjectPropertyMetadata(
+                    ["Value"] = new SubjectPropertyMetadata(
                         typeof(DeepNestedSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((DeepNestedSubject)o).Value,
                         (o, v) => ((DeepNestedSubject)o).Value = (int)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 

@@ -49,7 +49,7 @@ internal static class SubjectMetadataExtractor
             .ToArray();
 
         // Collect properties from all partial declarations
-        var classProperties = CollectProperties(typeSymbol, semanticModel, cancellationToken);
+        var classProperties = DeduplicateByName(CollectProperties(typeSymbol, semanticModel, cancellationToken));
 
         // Collect interface properties with default implementations
         var interfaceProperties = ExtractInterfaceDefaultProperties(typeSymbol, classProperties);
@@ -127,6 +127,13 @@ internal static class SubjectMetadataExtractor
                 var fullyQualifiedName = typeInfo.Type?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ?? "object";
                 var propertyName = property.Identifier.ValueText;
 
+                var explicitInterfaceTypeName = property.ExplicitInterfaceSpecifier is { } explicitSpecifier
+                    ? declarationModel
+                        .GetTypeInfo(explicitSpecifier.Name, cancellationToken)
+                        .Type?
+                        .ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                    : null;
+
                 var accessModifier = GetAccessModifier(property.Modifiers);
                 var isPartial = property.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword));
                 var isVirtual = property.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
@@ -157,11 +164,42 @@ internal static class SubjectMetadataExtractor
                     hasInit,
                     IsFromInterface: false,
                     getterAccessModifier,
-                    setterAccessModifier));
+                    setterAccessModifier,
+                    InterfaceTypeName: null,
+                    ExplicitInterfaceTypeName: explicitInterfaceTypeName));
             }
         }
 
         return properties;
+    }
+
+    /// <summary>
+    /// Two declarations can share a name when a class declares a property and also explicitly
+    /// implements the same interface member. Emitting both produces duplicate dictionary keys,
+    /// so the non-explicit declaration wins, matching what the runtime resolves.
+    /// </summary>
+    private static IReadOnlyList<PropertyMetadata> DeduplicateByName(IReadOnlyList<PropertyMetadata> properties)
+    {
+        var result = new List<PropertyMetadata>();
+        var indexByName = new Dictionary<string, int>();
+
+        foreach (var property in properties)
+        {
+            if (!indexByName.TryGetValue(property.Name, out var index))
+            {
+                indexByName[property.Name] = result.Count;
+                result.Add(property);
+                continue;
+            }
+
+            if (result[index].ExplicitInterfaceTypeName is not null &&
+                property.ExplicitInterfaceTypeName is null)
+            {
+                result[index] = property;
+            }
+        }
+
+        return result;
     }
 
     private static IReadOnlyList<MethodMetadata> CollectMethods(

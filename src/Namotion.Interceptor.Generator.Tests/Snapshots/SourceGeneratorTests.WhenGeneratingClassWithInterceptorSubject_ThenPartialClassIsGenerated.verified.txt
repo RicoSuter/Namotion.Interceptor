@@ -56,24 +56,18 @@ using System.Text.Json.Serialization;
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Value",
-                    new SubjectPropertyMetadata(
+                    ["Value"] = new SubjectPropertyMetadata(
                         typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((SampleSubject)o).Value,
                         (o, v) => ((SampleSubject)o).Value = (int)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Name",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["Name"] = new SubjectPropertyMetadata(
                         typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((SampleSubject)o).Name,
                         (o, v) => ((SampleSubject)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 

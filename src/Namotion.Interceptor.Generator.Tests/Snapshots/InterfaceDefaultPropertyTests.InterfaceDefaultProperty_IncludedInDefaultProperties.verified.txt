@@ -56,24 +56,18 @@ using System.Text.Json.Serialization;
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Value",
-                    new SubjectPropertyMetadata(
+                    ["Value"] = new SubjectPropertyMetadata(
                         typeof(Sensor).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((Sensor)o).Value,
                         (o, v) => ((Sensor)o).Value = (double)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Status",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["Status"] = new SubjectPropertyMetadata(
                         typeof(global::ISensor).GetProperty(nameof(global::ISensor.Status), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((global::ISensor)o).Status,
                         null,
                         isIntercepted: false,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 

@@ -56,24 +56,18 @@ using System.Text.Json.Serialization;
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "FirstName",
-                    new SubjectPropertyMetadata(
+                    ["FirstName"] = new SubjectPropertyMetadata(
                         typeof(Person).GetProperty(nameof(FirstName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((Person)o).FirstName,
                         (o, v) => ((Person)o).FirstName = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "LastName",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["LastName"] = new SubjectPropertyMetadata(
                         typeof(Person).GetProperty(nameof(LastName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((Person)o).LastName,
                         (o, v) => ((Person)o).LastName = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 
@@ -215,15 +209,12 @@ using System.Text.Json.Serialization;
         public new static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "MainCourse",
-                    new SubjectPropertyMetadata(
+                    ["MainCourse"] = new SubjectPropertyMetadata(
                         typeof(Teacher).GetProperty(nameof(MainCourse), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((Teacher)o).MainCourse,
                         (o, v) => ((Teacher)o).MainCourse = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .Concat(global::Person.DefaultProperties)
             .ToFrozenDictionary();

@@ -56,15 +56,12 @@ using System.Text.Json.Serialization;
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Name",
-                    new SubjectPropertyMetadata(
+                    ["Name"] = new SubjectPropertyMetadata(
                         typeof(BaseEntity).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((BaseEntity)o).Name,
                         (o, v) => ((BaseEntity)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 
@@ -181,24 +178,18 @@ using System.Text.Json.Serialization;
         public new static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Name",
-                    new SubjectPropertyMetadata(
+                    ["Name"] = new SubjectPropertyMetadata(
                         typeof(Person).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((Person)o).Name,
                         (o, v) => ((Person)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Age",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["Age"] = new SubjectPropertyMetadata(
                         typeof(Person).GetProperty(nameof(Age), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((Person)o).Age,
                         (o, v) => ((Person)o).Age = (int)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .Concat(global::BaseEntity.DefaultProperties)
             .ToFrozenDictionary();
@@ -341,15 +332,12 @@ using System.Text.Json.Serialization;
         public new static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Age",
-                    new SubjectPropertyMetadata(
+                    ["Age"] = new SubjectPropertyMetadata(
                         typeof(Employee).GetProperty(nameof(Age), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((Employee)o).Age,
                         (o, v) => ((Employee)o).Age = (int)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .Concat(global::Person.DefaultProperties)
             .ToFrozenDictionary();

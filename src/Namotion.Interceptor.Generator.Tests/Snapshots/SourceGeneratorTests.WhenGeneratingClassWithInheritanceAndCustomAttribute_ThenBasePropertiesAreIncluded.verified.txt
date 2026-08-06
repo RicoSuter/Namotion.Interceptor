@@ -56,24 +56,18 @@ using System.Text.Json.Serialization;
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Name",
-                    new SubjectPropertyMetadata(
+                    ["Name"] = new SubjectPropertyMetadata(
                         typeof(Light).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((Light)o).Name,
                         (o, v) => ((Light)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "On",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["On"] = new SubjectPropertyMetadata(
                         typeof(Light).GetProperty(nameof(On), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((Light)o).On,
                         (o, v) => ((Light)o).On = (bool)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 
@@ -215,15 +209,12 @@ using System.Text.Json.Serialization;
         public new static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Brightness",
-                    new SubjectPropertyMetadata(
+                    ["Brightness"] = new SubjectPropertyMetadata(
                         typeof(DimmableLight).GetProperty(nameof(Brightness), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((DimmableLight)o).Brightness,
                         (o, v) => ((DimmableLight)o).Brightness = (double)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .Concat(global::Light.DefaultProperties)
             .ToFrozenDictionary();

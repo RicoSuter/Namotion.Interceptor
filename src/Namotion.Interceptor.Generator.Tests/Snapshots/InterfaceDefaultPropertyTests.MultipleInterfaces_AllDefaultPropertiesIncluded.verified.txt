@@ -56,42 +56,30 @@ using System.Text.Json.Serialization;
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Temperature",
-                    new SubjectPropertyMetadata(
+                    ["Temperature"] = new SubjectPropertyMetadata(
                         typeof(WeatherStation).GetProperty(nameof(Temperature), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((WeatherStation)o).Temperature,
                         (o, v) => ((WeatherStation)o).Temperature = (double)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Humidity",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["Humidity"] = new SubjectPropertyMetadata(
                         typeof(WeatherStation).GetProperty(nameof(Humidity), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((WeatherStation)o).Humidity,
                         (o, v) => ((WeatherStation)o).Humidity = (double)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "IsHot",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["IsHot"] = new SubjectPropertyMetadata(
                         typeof(global::IHasTemperature).GetProperty(nameof(global::IHasTemperature.IsHot), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((global::IHasTemperature)o).IsHot,
                         null,
                         isIntercepted: false,
-                        isDynamic: false)
-                },
-                {
-                    "IsHumid",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["IsHumid"] = new SubjectPropertyMetadata(
                         typeof(global::IHasHumidity).GetProperty(nameof(global::IHasHumidity.IsHumid), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((global::IHasHumidity)o).IsHumid,
                         null,
                         isIntercepted: false,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 

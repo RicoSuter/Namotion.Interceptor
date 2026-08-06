@@ -56,24 +56,18 @@ using System.Text.Json.Serialization;
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Celsius",
-                    new SubjectPropertyMetadata(
+                    ["Celsius"] = new SubjectPropertyMetadata(
                         typeof(TemperatureSensor).GetProperty(nameof(Celsius), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((TemperatureSensor)o).Celsius,
                         (o, v) => ((TemperatureSensor)o).Celsius = (double)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Fahrenheit",
-                    new SubjectPropertyMetadata(
+                        isDynamic: false),
+                    ["Fahrenheit"] = new SubjectPropertyMetadata(
                         typeof(global::ITemperatureSensor).GetProperty(nameof(global::ITemperatureSensor.Fahrenheit), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((global::ITemperatureSensor)o).Fahrenheit,
                         null,
                         isIntercepted: false,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 
