@@ -26,7 +26,7 @@ internal static class SubjectCodeGenerator
         EmitHelperMethods(builder);
         EmitClassClosing(builder);
         EmitContainingTypeClosing(builder, metadata.ContainingTypes);
-        EmitNamespaceClosing(builder);
+        EmitNamespaceClosing(builder, metadata.NamespaceName);
 
         return builder.ToString();
     }
@@ -39,7 +39,11 @@ internal static class SubjectCodeGenerator
         var containingTypesPath = metadata.ContainingTypes.Length > 0
             ? string.Join(".", metadata.ContainingTypes) + "."
             : "";
-        return $"{metadata.NamespaceName}.{containingTypesPath}{metadata.ClassName}.g.cs";
+        var namespacePrefix = metadata.NamespaceName is null
+            ? ""
+            : metadata.NamespaceName + ".";
+
+        return $"{namespacePrefix}{containingTypesPath}{metadata.ClassName}.g.cs";
     }
 
     private static void EmitFileHeader(StringBuilder builder)
@@ -70,14 +74,24 @@ internal static class SubjectCodeGenerator
             """);
     }
 
-    private static void EmitNamespaceOpening(StringBuilder builder, string namespaceName)
+    private static void EmitNamespaceOpening(StringBuilder builder, string? namespaceName)
     {
+        if (namespaceName is null)
+        {
+            return;
+        }
+
         builder.AppendLine($"namespace {namespaceName}");
         builder.AppendLine("{");
     }
 
-    private static void EmitNamespaceClosing(StringBuilder builder)
+    private static void EmitNamespaceClosing(StringBuilder builder, string? namespaceName)
     {
+        if (namespaceName is null)
+        {
+            return;
+        }
+
         builder.AppendLine("}");
     }
 

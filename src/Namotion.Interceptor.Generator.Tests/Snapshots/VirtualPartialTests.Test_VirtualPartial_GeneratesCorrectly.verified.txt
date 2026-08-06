@@ -19,8 +19,6 @@ using System.Text.Json.Serialization;
 #pragma warning disable CS0649
 #pragma warning disable CS0067
 
-namespace YourDefaultNamespace
-{
     public partial class BaseClass : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -130,4 +128,3 @@ namespace YourDefaultNamespace
             return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
-}

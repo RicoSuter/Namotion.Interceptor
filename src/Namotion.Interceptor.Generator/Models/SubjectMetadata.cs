@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Generator.Models;
 
 internal sealed record SubjectMetadata(
     string ClassName,
-    string NamespaceName,
+    string? NamespaceName,
     string FullTypeName,
     string[] ContainingTypes,
     bool NeedsGeneratedParameterlessConstructor,

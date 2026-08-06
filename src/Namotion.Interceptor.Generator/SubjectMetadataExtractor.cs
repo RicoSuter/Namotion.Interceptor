@@ -78,7 +78,7 @@ internal static class SubjectMetadataExtractor
             methods);
     }
 
-    private static string GetNamespace(ClassDeclarationSyntax classDeclaration)
+    private static string? GetNamespace(ClassDeclarationSyntax classDeclaration)
     {
         // Walk up past containing types to find namespace
         SyntaxNode? current = classDeclaration.Parent;
@@ -87,9 +87,9 @@ internal static class SubjectMetadataExtractor
             current = current.Parent;
         }
 
+        // null means the global namespace: the generated file must not declare one.
         return (current as NamespaceDeclarationSyntax)?.Name.ToString() ??
-               (current as FileScopedNamespaceDeclarationSyntax)?.Name.ToString() ??
-               "YourDefaultNamespace";
+               (current as FileScopedNamespaceDeclarationSyntax)?.Name.ToString();
     }
 
     private static string[] GetContainingTypes(SyntaxNode node)
