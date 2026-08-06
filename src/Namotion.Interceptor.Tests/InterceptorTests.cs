@@ -98,7 +98,7 @@ public class InterceptorTests
         
         // Act
         var car = new Car(context);
-        ((IInterceptorSubject)car).Context.RemoveFallbackContext(context);
+        ((IInterceptorSubject)car).DetachFromContext(context);
 
         // Assert
         return Verify(logs);

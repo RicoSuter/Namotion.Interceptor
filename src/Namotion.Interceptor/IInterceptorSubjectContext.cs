@@ -62,9 +62,21 @@ public interface IInterceptorSubjectContext
     /// <summary>
     /// Adds a fallback context for service resolution.
     /// Services not found in this context will be looked up in fallback contexts.
+    /// This is composition only: it publishes an edge and runs no lifecycle callback.
     /// </summary>
     /// <param name="context">The fallback context to add.</param>
     /// <returns>True if the fallback context was added, false if it was already present.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// This context belongs to a subject, <paramref name="context"/> takes part in a lifecycle
+    /// graph, and it is not the context that subject was <em>root-attached</em> through. A subject
+    /// held only by a parent property has no such record, so composing a lifecycle-bearing context
+    /// onto it throws even when it names the graph it already belongs to. Composing that edge would
+    /// leave the subject resolving the graph's interceptors while being absent from its registry, so
+    /// <see cref="SubjectAttachmentExtensions.AttachToContext"/> must be used instead: it publishes
+    /// the edge and runs the attach callbacks together. This method also resolves services to make
+    /// that decision, so a cyclic delegation chain raises the same exception type for that reason.
+    /// </exception>
+    /// <seealso cref="SubjectAttachmentExtensions.AttachToContext"/>
     bool AddFallbackContext(IInterceptorSubjectContext context);
 
     /// <summary>
@@ -72,5 +84,12 @@ public interface IInterceptorSubjectContext
     /// </summary>
     /// <param name="context">The fallback context to remove.</param>
     /// <returns>True if the fallback context was removed, false if it was not present.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// This context belongs to a subject and <paramref name="context"/> is the context the subject
+    /// was attached through. Removing that edge here would strand the subject in its lifecycle
+    /// graph, so <see cref="SubjectAttachmentExtensions.DetachFromContext"/> must be used instead:
+    /// it runs the detach callbacks and then removes the edge.
+    /// </exception>
+    /// <seealso cref="SubjectAttachmentExtensions.DetachFromContext"/>
     bool RemoveFallbackContext(IInterceptorSubjectContext context);
 }

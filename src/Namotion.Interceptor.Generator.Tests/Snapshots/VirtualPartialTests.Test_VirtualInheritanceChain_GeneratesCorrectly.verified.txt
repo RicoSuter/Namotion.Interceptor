@@ -76,7 +76,7 @@ namespace YourDefaultNamespace
 
         public BaseEntity(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         private string _Name;
@@ -214,7 +214,7 @@ namespace YourDefaultNamespace
 
         public Person(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         private string _Name;
@@ -368,7 +368,7 @@ namespace YourDefaultNamespace
 
         public Employee(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         private int _Age;

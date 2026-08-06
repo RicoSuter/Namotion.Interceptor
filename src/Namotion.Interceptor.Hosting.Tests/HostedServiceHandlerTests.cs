@@ -99,7 +99,7 @@ public class HostedServiceHandlerTests
             Assert.Single(attachedHostedServices);
 
             // Act
-            ((IInterceptorSubject)person).Context.RemoveFallbackContext(context);
+            ((IInterceptorSubject)person).DetachFromContext(context);
             attachedHostedServices = person.GetAttachedHostedServices();
 
             // Assert

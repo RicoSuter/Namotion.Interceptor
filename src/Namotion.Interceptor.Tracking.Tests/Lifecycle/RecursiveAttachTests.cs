@@ -270,8 +270,10 @@ public class RecursiveAttachTests
     public void WhenReattachedChildWritesSameValue_ThenGrandchildIsRediscovered()
     {
         // Arrange — WithLifecycle() only (no context inheritance, no equality check).
-        // Child has context from constructor, so its property writes go through
-        // the lifecycle interceptor.
+        // The child carries the interceptor as its own service rather than inheriting it from an
+        // attach edge, because reaching reference count zero releases that edge and there is no
+        // context inheritance here to give the child one back. Its property writes must keep going
+        // through the lifecycle interceptor after the re-attach, which is what this test is about.
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle();
@@ -279,7 +281,8 @@ public class RecursiveAttachTests
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
 
         var parent = new Person(context) { FirstName = "Parent" };
-        var child = new Person(context) { FirstName = "Child" };
+        var child = new Person { FirstName = "Child" };
+        ((IInterceptorSubject)child).Context.AddService(lifecycleInterceptor);
         var grandmother = new Person(context) { FirstName = "Grandmother" };
 
         // Build hierarchy: parent → child → grandmother

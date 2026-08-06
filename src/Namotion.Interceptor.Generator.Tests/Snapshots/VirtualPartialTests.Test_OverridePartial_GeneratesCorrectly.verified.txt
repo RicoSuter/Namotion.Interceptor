@@ -76,7 +76,7 @@ namespace YourDefaultNamespace
 
         public DerivedClass(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         private string _VirtualProp;

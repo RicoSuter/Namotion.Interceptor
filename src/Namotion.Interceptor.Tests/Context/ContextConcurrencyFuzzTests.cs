@@ -9,13 +9,13 @@ namespace Namotion.Interceptor.Tests.Context;
 /// <summary>
 /// Randomized, model based concurrency fuzzing for <see cref="InterceptorSubjectContext"/>.
 ///
-/// Each round builds a random fallback graph (including cycles, self references and multi parent
-/// shapes), hammers it from several threads with topology mutations, service registrations,
-/// service queries and intercepted property and method access, and then checks quiescent
-/// consistency: once every worker joined, what each context resolves must equal what a
-/// single threaded walk of the final graph says it should resolve. A mismatch means a cache
-/// survived a topology change, which is the defect class that silently drops an interceptor from
-/// a compiled chain.
+/// Each round builds a random graph of both mutable edge kinds, fallback edges and the inherited
+/// parent link (including cycles, self references and multi parent shapes), hammers it from
+/// several threads with topology mutations, service registrations, service queries and intercepted
+/// property and method access, and then checks quiescent consistency: once every worker joined,
+/// what each context resolves must equal what a single threaded walk of the final graph says it
+/// should resolve. A mismatch means a cache survived a topology change, which is the defect class
+/// that silently drops an interceptor from a compiled chain.
 ///
 /// The subject executors take part in the graph as ordinary nodes, so the caches of
 /// <see cref="InterceptorExecutor"/> are fuzzed the same way as the caches of a plain context.
@@ -63,13 +63,16 @@ public class ContextConcurrencyFuzzTests
         var rejectedQueries = 0;
         var maximumDepth = 0;
         var checkedCaches = 0;
+        var survivingParentLinks = 0;
+        var parentOnlyDelegators = 0;
+        var doublyLinkedTargets = 0;
 
         for (var round = 0; round < Rounds; round++)
         {
             // Arrange: the round seed fully determines the topology and every worker operation, so
             // a reported failure can be replayed by running this seed alone.
             var roundSeed = unchecked(seed * 7919 + round);
-            var topology = BuildTopology(new Random(roundSeed));
+            var topology = BuildTopology(new Random(roundSeed), roundSeed);
 
             using var start = new ManualResetEventSlim(false);
             var workers = Enumerable
@@ -106,7 +109,17 @@ public class ContextConcurrencyFuzzTests
                 }
 
                 maximumDepth = Math.Max(maximumDepth, depth);
+
+                if (topology.DelegatesThroughParentLink(node))
+                {
+                    parentOnlyDelegators++;
+                }
             }
+
+            survivingParentLinks += topology.Edges.Count(edge => edge.IsPresent && edge.IsParentLink);
+            doublyLinkedTargets += topology.Edges.Count(edge => edge.IsPresent && edge.IsParentLink &&
+                topology.Edges.Any(other => other.IsPresent && !other.IsParentLink &&
+                                            other.Source == edge.Source && other.Target == edge.Target));
         }
 
         // Assert: the corpus has to contain the shapes this test claims to cover, otherwise it
@@ -126,6 +139,23 @@ public class ContextConcurrencyFuzzTests
         Assert.True(checkedCaches > 0,
             "No context ended a round with a resolved delegation chain in its cache, so the oracle for that " +
             "cache compared nothing.");
+
+        // The same guard for the third edge kind. Without these the parent link would be modelled
+        // and never present in a final topology, and every oracle above would pass on the fallback
+        // graph alone.
+        Assert.True(survivingParentLinks > 0,
+            "No final topology contained a parent link, so the corpus does not cover the edge kind the " +
+            "lifecycle system publishes.");
+
+        Assert.True(parentOnlyDelegators > 0,
+            "No final topology contained a context whose only edge is its parent link, so the corpus does " +
+            "not cover the delegation shape an attached child has.");
+
+        Assert.True(doublyLinkedTargets > 0,
+            "No final topology contained a context reached by both a fallback edge and a parent link of the " +
+            "same source, so the corpus does not cover the shape in which one target carries two edges from " +
+            "one source at once. It counts that coexistence in the final topology only, not a removal of one " +
+            "edge performed while the other stood.");
     }
 
     /// <summary>
@@ -293,8 +323,17 @@ public class ContextConcurrencyFuzzTests
         return $"[{string.Join(", ", indices)}]";
     }
 
-    private static Topology BuildTopology(Random random)
+    private static Topology BuildTopology(Random random, int roundSeed)
     {
+        // Its own stream, so that adding the parent link does not shift the main stream's draws for
+        // fallback edges, service seeding and edge ownership. That is not a guarantee that the
+        // corpus is unchanged: declaredEdges is keyed by edge kind, so in a round where the swinging
+        // edge names the same source and target as a chain hop that became a link, the swinging edge
+        // is no longer deduplicated and every later draw moves with it. What is checked is the
+        // outcome, that the six corpus assertions hold on all eight seeds, and drawing these from
+        // the main stream instead cost seed 65537 the delegation cycles its assertion requires.
+        var linkRandom = new Random(unchecked(roundSeed * 6151 + 11));
+
         var contextCount = random.Next(2, MaxContextCount + 1);
         var nodes = new List<ContextNode>();
 
@@ -354,13 +393,16 @@ public class ContextConcurrencyFuzzTests
         var targetNodes = contextNodes.Concat(proxyNodes).ToArray();
 
         var edges = new List<Edge>();
-        var declaredEdges = new HashSet<(ContextNode Source, ContextNode Target)>();
+        var declaredEdges = new HashSet<(ContextNode Source, ContextNode Target, bool IsParentLink)>();
 
-        void DeclareEdge(ContextNode source, ContextNode target, bool isPresent)
+        void DeclareEdge(ContextNode source, ContextNode target, bool isPresent, bool isParentLink = false)
         {
-            if (declaredEdges.Add((source, target)))
+            // Keyed by kind as well, so a parent link may target a context a fallback edge of the
+            // same source already names. That is the two-edges-to-one-target shape whose reverse
+            // registration UnregisterUsedByIfUnreferenced has to keep.
+            if (declaredEdges.Add((source, target, isParentLink)))
             {
-                edges.Add(new Edge(source, target, isPresent));
+                edges.Add(new Edge(source, target, isPresent, isParentLink));
             }
         }
 
@@ -381,9 +423,15 @@ public class ContextConcurrencyFuzzTests
         // The proxy chain, head to tail. The tail is left open on purpose: whether it reaches a
         // context with services, runs back into the chain as a pure cycle, or gains a second
         // fallback and stops delegating is left to the candidate edges and to the workers.
+        //
+        // Each hop is a fallback edge or a parent link, decided by the link stream so the choice
+        // costs the main stream no draw and the chain stays exactly one edge deep either way. This
+        // is where the parent-only delegation shape comes from: a proxy never receives a service,
+        // so a proxy whose single edge is a link is precisely an attached child, which is what the
+        // production graph is made of almost entirely.
         for (var index = 0; index + 1 < proxyNodes.Count; index++)
         {
-            DeclareEdge(proxyNodes[index], proxyNodes[index + 1], true);
+            DeclareEdge(proxyNodes[index], proxyNodes[index + 1], true, isParentLink: linkRandom.Next(2) == 0);
         }
 
         if (proxyNodes.Count != 0)
@@ -447,6 +495,25 @@ public class ContextConcurrencyFuzzTests
             DeclareEdge(source, target, random.Next(5) != 0);
         }
 
+        // The parent link, the third mutable edge kind. Only a subject executor carries one, which
+        // is where ContextInheritanceHandler publishes it, and at most one per source, because the
+        // slot holds a single context and TrySetParentContext refuses to replace an occupied one.
+        // The position in the list carries no meaning: a proxy chain hop declared far above may
+        // already be a link, and the oracle walks the two edge kinds as separate passes rather than
+        // relying on the order they were declared in.
+        foreach (var subjectNode in nodes.Where(node => node.Subject is not null))
+        {
+            if (linkRandom.Next(3) == 0)
+            {
+                continue;
+            }
+
+            // Never itself: a self link makes the context delegate to itself, and the lifecycle
+            // system refuses to publish one for exactly that reason.
+            var candidates = nodes.Where(node => node != subjectNode).ToArray();
+            DeclareEdge(subjectNode, candidates[linkRandom.Next(candidates.Length)], linkRandom.Next(2) == 0, isParentLink: true);
+        }
+
         // Each edge belongs to at most one worker, so no two threads toggle the same edge and the
         // final edge set stays exactly known without weakening the concurrency.
         foreach (var edge in edges)
@@ -457,15 +524,25 @@ public class ContextConcurrencyFuzzTests
                 continue;
             }
 
+            if (edge.IsParentLink)
+            {
+                // Cannot raise: the parent setter runs no guard and resolves nothing, so unlike
+                // AddFallbackContext it cannot discover a delegation cycle. It is the only declared
+                // link for this source, so it always takes.
+                edge.Source.Context.TrySetParentContext(edge.Target.Context);
+                continue;
+            }
+
             try
             {
                 edge.Source.Context.AddFallbackContext(edge.Target.Context);
             }
             catch (InvalidOperationException exception) when (IsDelegationCycle(exception))
             {
-                // Closing a circle underneath a subject executor makes its attach callbacks fail
-                // to resolve, after the fallback context is registered. The edge is in place, so
-                // the topology stays exactly as declared.
+                // A subject executor's guard resolves the target's lifecycle interceptors before
+                // the edge is published, so closing a circle underneath one leaves no edge behind
+                // and the declared topology has to drop it too.
+                edge.IsPresent = false;
             }
         }
 
@@ -518,16 +595,41 @@ public class ContextConcurrencyFuzzTests
         if (choice < 18 && ownedEdges.Length != 0)
         {
             var edge = ownedEdges[random.Next(ownedEdges.Length)];
+
+            if (edge.IsParentLink)
+            {
+                // Recorded unconditionally either way, unlike the fallback edge above. Setting
+                // resolves nothing and so cannot raise, and it is the only declared link for this
+                // source, so a false return means the link this worker set is already in place.
+                if (random.Next(2) == 0)
+                {
+                    edge.Source.Context.TrySetParentContext(edge.Target.Context);
+                    edge.IsPresent = true;
+                }
+                else
+                {
+                    edge.Source.Context.TryClearParentContext();
+                    edge.IsPresent = false;
+                }
+
+                return;
+            }
+
             if (random.Next(2) == 0)
             {
-                // Recorded before the call, not after: the executor override registers the
-                // fallback context first and only then resolves the lifecycle interceptors to run
-                // the attach callbacks, and that resolution raises when the chain is a circle at
-                // that instant. The edge exists either way, so recording it after the call would
-                // lose it. Removal is the other way round, it resolves first and unregisters
-                // afterwards, so a raise there means the edge is still in place.
-                edge.IsPresent = true;
-                edge.Source.Context.AddFallbackContext(edge.Target.Context);
+                // Recorded after the call, not before: the executor's guard resolves the target's
+                // lifecycle interceptors before the edge is published, and that resolution raises
+                // when the chain is a circle at that instant, so a raise means nothing was
+                // published and the edge stays whatever it already was. Removal resolves nothing
+                // and therefore cannot raise.
+                try
+                {
+                    edge.Source.Context.AddFallbackContext(edge.Target.Context);
+                    edge.IsPresent = true;
+                }
+                catch (InvalidOperationException exception) when (IsDelegationCycle(exception))
+                {
+                }
             }
             else
             {
@@ -613,7 +715,7 @@ public class ContextConcurrencyFuzzTests
 
         /// <summary>
         /// The single threaded model of the resolution semantics: the services a context resolves
-        /// are the own services of every context reachable over the present fallback edges. A
+        /// are the own services of every context reachable over the present edges of either kind. A
         /// delegating context contributes nothing of its own, so modeling delegation separately
         /// would produce the same set and is left out.
         /// </summary>
@@ -631,12 +733,9 @@ public class ContextConcurrencyFuzzTests
                     continue;
                 }
 
-                foreach (var edge in Edges)
+                foreach (var target in OutgoingTargets(current))
                 {
-                    if (edge.IsPresent && edge.Source == current)
-                    {
-                        pending.Push(edge.Target);
-                    }
+                    pending.Push(target);
                 }
             }
 
@@ -644,9 +743,36 @@ public class ContextConcurrencyFuzzTests
         }
 
         /// <summary>
+        /// The present outgoing edges of a context, fallback edges first and the parent link last,
+        /// which is the order <c>CollectServices</c> walks them in. The reachable set does not
+        /// depend on the order, but the model has to state the same walk the production code
+        /// performs or a later oracle that does depend on it would silently disagree.
+        /// </summary>
+        private IEnumerable<ContextNode> OutgoingTargets(ContextNode node)
+        {
+            foreach (var edge in Edges)
+            {
+                if (edge.IsPresent && !edge.IsParentLink && edge.Source == node)
+                {
+                    yield return edge.Target;
+                }
+            }
+
+            foreach (var edge in Edges)
+            {
+                if (edge.IsPresent && edge.IsParentLink && edge.Source == node)
+                {
+                    yield return edge.Target;
+                }
+            }
+        }
+
+        /// <summary>
         /// Models <c>ContextState.DelegationTarget</c>: a context without own services and with
-        /// exactly one fallback context contributes nothing itself and resolves everything through
-        /// that one context.
+        /// exactly one outgoing edge contributes nothing itself and resolves everything through
+        /// that one context, whichever kind the edge is. A fallback edge and a parent link that
+        /// name the same context are two edges here, exactly as they are two slots there, so such a
+        /// context does not delegate.
         /// </summary>
         private ContextNode? DelegationTarget(ContextNode node)
         {
@@ -656,6 +782,33 @@ public class ContextConcurrencyFuzzTests
             }
 
             ContextNode? target = null;
+            foreach (var edgeTarget in OutgoingTargets(node))
+            {
+                if (target is not null)
+                {
+                    return null;
+                }
+
+                target = edgeTarget;
+            }
+
+            return target;
+        }
+
+        /// <summary>
+        /// Whether this context resolves everything through its parent link, which is the topology
+        /// an attached child has: no own services, no fallback edge, one inherited parent. It is
+        /// the dominant shape in production and the one <c>ContextState</c> had to be taught to
+        /// treat as delegation, so a corpus without it would leave that branch unfuzzed.
+        /// </summary>
+        internal bool DelegatesThroughParentLink(ContextNode node)
+        {
+            if (node.HasAnyService)
+            {
+                return false;
+            }
+
+            Edge? single = null;
             foreach (var edge in Edges)
             {
                 if (!edge.IsPresent || edge.Source != node)
@@ -663,15 +816,15 @@ public class ContextConcurrencyFuzzTests
                     continue;
                 }
 
-                if (target is not null)
+                if (single is not null)
                 {
-                    return null;
+                    return false;
                 }
 
-                target = edge.Target;
+                single = edge;
             }
 
-            return target;
+            return single is { IsParentLink: true };
         }
 
         /// <summary>
@@ -737,11 +890,13 @@ public class ContextConcurrencyFuzzTests
             var shape = string.Join("; ", Nodes.Select(node =>
                 $"{node.Name}{(node.HasOwnService ? "" : "*")}+{node.MarkerCount}" +
                 $"{(DelegationDepth(node) is var depth && depth < 0 ? "!" : depth == 0 ? "" : $"~{depth}")}->" +
-                $"[{string.Join(",", Edges.Where(edge => edge.IsPresent && edge.Source == node).Select(edge => edge.Target.Name))}]"));
+                $"[{string.Join(",", Edges.Where(edge => edge.IsPresent && edge.Source == node)
+                    .Select(edge => $"{edge.Target.Name}{(edge.IsParentLink ? "^" : "")}"))}]"));
 
             return $"Seed {roundSeed}, final topology ('c' is a context, 's' a subject executor, 'p' a proxy that " +
                    $"never receives services, '*' a node seeded without services, '+n' its added marker services, " +
-                   $"'~n' the length of its delegation chain, '!' a chain that is a cycle): {shape}";
+                   $"'~n' the length of its delegation chain, '!' a chain that is a cycle, '^' an edge that is the " +
+                   $"inherited parent link rather than a fallback): {shape}";
         }
     }
 
@@ -786,11 +941,18 @@ public class ContextConcurrencyFuzzTests
         internal ContextProbeSubject? Subject { get; } = subject;
     }
 
-    private sealed class Edge(ContextNode source, ContextNode target, bool isPresent)
+    private sealed class Edge(ContextNode source, ContextNode target, bool isPresent, bool isParentLink = false)
     {
         internal ContextNode Source { get; } = source;
 
         internal ContextNode Target { get; } = target;
+
+        /// <summary>
+        /// Set for the inherited parent link rather than a fallback edge. Both resolve the same way
+        /// and both take part in the reverse registration, so the oracle treats them alike; they
+        /// differ only in the API that publishes them and in the slot that holds them.
+        /// </summary>
+        internal bool IsParentLink { get; } = isParentLink;
 
         /// <summary>Written only by the owning worker and read after it joined.</summary>
         internal bool IsPresent { get; set; } = isPresent;

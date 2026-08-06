@@ -52,7 +52,7 @@ public class DynamicSubjectTests
             .WithRegistry();
 
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
-        subject.Context.AddFallbackContext(context);
+        subject.AttachToContext(context);
 
         // Act
         var registeredSubject = subject.TryGetRegisteredSubject()!;
@@ -75,7 +75,7 @@ public class DynamicSubjectTests
             .WithService(() => new TestInterceptor("b", logs), _ => false);
 
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
-        subject.Context.AddFallbackContext(context);
+        subject.AttachToContext(context);
 
         var motor = (IMotor)subject;
         var sensor = (ISensor)subject;
@@ -86,7 +86,7 @@ public class DynamicSubjectTests
         var speed = motor.Speed;
         var temperature = sensor.Temperature;
         
-        subject.Context.RemoveFallbackContext(context);
+        subject.DetachFromContext(context);
 
         // Assert & Act (read)
         Assert.Equal(102, motor.Speed);

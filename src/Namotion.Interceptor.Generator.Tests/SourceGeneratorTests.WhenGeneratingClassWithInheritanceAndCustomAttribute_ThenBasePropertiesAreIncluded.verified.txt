@@ -85,7 +85,7 @@ namespace YourDefaultNamespace
 
         public Light(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         private string _Name;
@@ -239,7 +239,7 @@ namespace YourDefaultNamespace
 
         public DimmableLight(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         private double _Brightness;

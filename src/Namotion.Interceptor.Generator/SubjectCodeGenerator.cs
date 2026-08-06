@@ -243,7 +243,7 @@ internal static class SubjectCodeGenerator
         {
             builder.AppendLine($"        public {metadata.ClassName}(IInterceptorSubjectContext context) : this()");
             builder.AppendLine("        {");
-            builder.AppendLine("            ((IInterceptorSubject)this).Context.AddFallbackContext(context);");
+            builder.AppendLine("            ((IInterceptorSubject)this).AttachToContext(context);");
             builder.AppendLine("        }");
             builder.AppendLine();
         }

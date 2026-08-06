@@ -1,10 +1,9 @@
+using Namotion.Interceptor.Interceptors;
+
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public static class LifecycleInterceptorExtensions
 {
-    // Must match LifecycleInterceptor.ReferenceCountKey (private implementation detail)
-    private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
-
     /// <summary>
     /// Gets the lifecycle interceptor from the context, if configured.
     /// </summary>
@@ -19,11 +18,9 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     public static int GetReferenceCount(this IInterceptorSubject subject)
     {
-        if (subject.Data.TryGetValue((null, ReferenceCountKey), out var count))
-        {
-            return (int)(count ?? 0);
-        }
-        return 0;
+        // Still a snapshot, and still 0 for a subject whose context cannot carry the count, which is
+        // what this method has always returned for an unattached subject.
+        return subject.Context is InterceptorExecutor executor ? executor.ReferenceCount : 0;
     }
 
     /// <summary>
@@ -31,15 +28,16 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     internal static int IncrementReferenceCount(this IInterceptorSubject subject)
     {
-        return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 1, (_, count) => (int)(count ?? 0) + 1) ?? 1);
+        return subject.GetExecutor().IncrementReferenceCount();
     }
 
     /// <summary>
-    /// Decrements the reference count and returns the new value.
+    /// Decrements the reference count and returns the new value, along with the attach record
+    /// observed at that instant.
     /// </summary>
-    internal static int DecrementReferenceCount(this IInterceptorSubject subject)
+    internal static int DecrementReferenceCount(this IInterceptorSubject subject, out IInterceptorSubjectContext? attachContext)
     {
-        return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, (_, count) => Math.Max(0, (int)(count ?? 0) - 1)) ?? 0);
+        return subject.GetExecutor().DecrementReferenceCount(out attachContext);
     }
 
     public static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)

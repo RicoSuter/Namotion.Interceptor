@@ -80,7 +80,7 @@ namespace TestNamespace
 
         public DeepNestedSubject(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         private int _Value;

@@ -293,12 +293,14 @@ var context = InterceptorSubjectContext
     .WithContextInheritance();
 
 var car = new Car(context);
-var tire = new Tire(); // No context assigned yet
+var tire = new Tire(); // Not in any graph yet
 
-car.Tire = tire; // tire.Context is automatically set to context
+car.Tire = tire; // tire's own context now inherits from car's
 ```
 
-This ensures that all objects in the subject graph share the same context, enabling consistent tracking, validation, and other interceptor features.
+This ensures that all objects in the subject graph resolve the same services, enabling consistent tracking, validation, and other interceptor features.
+
+The child keeps its own context object. What it gains is an internal parent link to the parent's context, published by `ContextInheritanceHandler` when the child gains its first parent reference and cleared when it loses its last one. The handler is registered by `WithContextInheritance()` and by nothing else, so a context configured with `WithLifecycle()` alone tracks attach and detach without ever publishing a link, and its children resolve no services from their parent. The link resolves after anything you composed onto the child yourself, so explicit composition wins, and it is not reachable through `AddFallbackContext` or `RemoveFallbackContext`. See [Joining and Leaving a Graph](#joining-and-leaving-a-graph).
 
 ## Subject Lifecycle Tracking
 
@@ -464,6 +466,97 @@ public void HandleLifecycleChange(SubjectLifecycleChange change)
 
 This enables proper cleanup when subjects are removed from all parent references, even when referenced by multiple properties or collections.
 
+### Joining and Leaving a Graph
+
+A subject enters a lifecycle graph in one of two ways, as a root through `AttachToContext` or as a
+child when a parent property starts referencing it, and there are three kinds of edge on a subject's
+context:
+
+| Kind | Created by | Released by | Owner |
+|---|---|---|---|
+| Attach edge | `AttachToContext` | `DetachFromContext`, or the subject's last property detach | the library |
+| Parent link | `WithContextInheritance()`'s handler, when a subject gains its first parent reference | the subject's last property detach | the library |
+| Explicit fallback | `AddFallbackContext` | the caller | you |
+
+```csharp
+subject.AttachToContext(context);     // joins the graph, attaches the whole subtree
+subject.DetachFromContext(context);   // leaves it, detaching the subtree
+
+subject.IsAttached();                 // is this subject in a graph at all
+subject.TryGetAttachContext();        // which context DetachFromContext would accept, or null
+```
+
+**A root can leave the graph without you detaching it.** Root-attach a subject, reference it from a
+tracked property, then clear that reference: the last property detach releases the attach edge and
+the ownership with it, so the subject is fully out with no `DetachFromContext` call anywhere.
+`IsAttached()` is false, `TryGetAttachContext()` is null, and the subject's own context resolves
+nothing, so writes to it are no longer tracked. Call `AttachToContext` again to bring it back. This
+is the "or the subject's last property detach" clause in the table above.
+
+`AddFallbackContext(X)` on a subject's own context is not a first step towards `AttachToContext(X)`.
+The guard runs before the deduplication check, so if `X` already carries an `ILifecycleInterceptor`
+that first call throws and names `AttachToContext` (see the table below). If `X` carries none,
+`AttachToContext(X)` writes no attach record, so there is nothing that could adopt the composed edge
+and `DetachFromContext` never removes it.
+
+An explicit fallback does become library-owned in one ordering: compose `X` onto the subject's
+context while `X` still carries no lifecycle service, register the lifecycle services onto `X`
+afterwards, then call `AttachToContext(X)`. The guard saw no interceptor at composition time, so the
+edge was published; the later attach records `X` first and then finds that edge already there, so the
+single edge is now the attach edge and `DetachFromContext(X)` removes it. That is the one case where
+an explicit fallback becomes library-owned.
+
+`AttachToContext` with a context that carries no lifecycle interceptor records nothing and
+degenerates to plain composition, because there is no graph to join. Its inverse is then
+`RemoveFallbackContext`, not `DetachFromContext`. Once the subject holds no parent references,
+`DetachFromContext` finds no record, does nothing and leaves the composed edge in place. While a
+parent property still references the subject, the reference-count guard runs first and throws, just
+as it does for any other subject. This is what keeps `new Person(InterceptorSubjectContext.Create())`
+usable, since the subject is not marked as belonging to a graph that does not exist and can still
+join a real one later.
+
+**One graph per subject.** A subject belongs to at most one lifecycle graph, and may be referenced
+from any number of parents inside it. This is the model Entity Framework uses for tracked entities.
+Attaching a subject that another graph already owns throws rather than half-attaching it.
+
+**What throws:**
+
+| Condition | Result |
+|---|---|
+| Attaching a subject another graph owns | `InvalidOperationException`; earlier items of the same batch stay attached |
+| `AttachToContext` on a subject already attached through a different context | `InvalidOperationException`; detach it first |
+| `AttachToContext` while a parent property already references the subject | `InvalidOperationException`; attach it before referencing it from a parent, or let it inherit the graph through that parent. This guard runs before the attach-record checks but after the empty-interceptor early return, so a context that carries no lifecycle interceptor is still composed onto a referenced subject |
+| `AddFallbackContext` on a *subject's* context, with a lifecycle-bearing context that is not the recorded attach context | `InvalidOperationException` naming `AttachToContext` |
+| `RemoveFallbackContext` aimed at the attach edge | `InvalidOperationException` naming `DetachFromContext` |
+| `DetachFromContext` while the subject is still referenced from a parent property | `InvalidOperationException`; remove the references first. This guard runs before the attach-record checks, so it also applies to a subject whose context carries no lifecycle interceptor |
+| `DetachFromContext` naming a context other than the recorded attach context | `InvalidOperationException`; pass what `TryGetAttachContext()` returns. With no record at all and no parent references it does nothing instead |
+| Re-attaching a subject that holds a parent link, from a lifecycle callback, while its own detach is unwinding | `InvalidOperationException`. A root holds no parent link, so re-attaching a root during a root detach's unwind does not throw |
+
+**Taking part in a graph at all** needs the subject's context to be an `InterceptorExecutor`, which
+is what `[InterceptorSubject]` classes and `DynamicSubject` provide. The reference count and the
+graph records live on the executor, so this covers the four methods above and the property route
+too: a hand-written `IInterceptorSubject` returning some other context gets an
+`InvalidOperationException` naming the requirement on plain assignment into a tracked property, not
+only from the four methods. That assignment used to work, because the count lived in `subject.Data`.
+`GetReferenceCount()` returns 0 for such a subject rather than a stored count.
+
+**The root attach records its interceptor set.** `AttachToContext` resolves `ILifecycleInterceptor`
+once, before it publishes anything, and `DetachFromContext` notifies exactly that recorded set
+instead of resolving again. Two consequences if you implement `ILifecycleInterceptor` yourself:
+
+- An interceptor registered after a root has attached receives neither that attach nor a later
+  detach for that root. It sees only the roots attached from its registration onwards, so there is
+  no unpaired detach to defend against.
+- An interceptor whose context has since left the subject's chain still receives the detach it was
+  owed, so per-subject state it took at attach can always be released.
+
+Attach and detach through the property route resolve per operation from the parent's context, so
+neither applies there.
+
+`AttachToContext` and `DetachFromContext` are not atomic against each other. Calling them
+concurrently on the same subject is not supported; roots are normally attached at startup and
+detached at shutdown.
+
 ### Object Graph Behavior
 
 Understanding how the lifecycle system handles different graph topologies:
@@ -495,6 +588,16 @@ Root
 Removing A reduces Shared's refs to 1 - it stays attached via B.
 Removing B after A detaches Shared (refs: 0).
 
+**Limitation**: staying attached is not the same as staying tracked. With `WithContextInheritance()`,
+the internal parent link names whichever parent referenced the subject first, and nothing repoints
+it. When that parent leaves the graph while another parent still holds the subject, the subject keeps
+its remaining reference count and still reports `IsAttached()` as true, but its context now resolves
+zero interceptors, so writes to it are silently untracked. In the diagram above, removing A is
+exactly that case if A referenced Shared first. Removing B instead, or clearing only A's reference
+(`A.Shared = null`) while A stays in the graph, is unaffected. Where a shared subject's writes have
+to stay tracked, let the longest-lived parent take the first reference, or keep the subject
+single-parent. See [Known Gaps](design/tracking-lifecycle.md#known-gaps).
+
 **Cycles (Limitation)**
 
 Nodes that only reference each other stay attached due to reference counting:
@@ -508,8 +611,19 @@ If `Root.A = null`:
 - B and C **stay attached** (they keep each other alive with refs: 1 each)
 
 This is the classic reference counting limitation. **Workarounds:**
-1. Call `DetachSubjectFromContext(subject)` explicitly
-2. Break all cycle references before removing the parent
+1. Break all cycle references before removing the parent. This is the supported route.
+2. For a cycle that is already orphaned, call `DetachSubjectFromContext(subject)` on the
+   `LifecycleInterceptor` that `context.TryGetLifecycleInterceptor()` returns, naming one subject
+   inside the cycle. That extension resolves the concrete `LifecycleInterceptor` and returns null
+   when none is registered; it throws when the context resolves more than one, which an aggregated
+   configuration can produce. That call is the low-level descent operation: it removes that subject's own outgoing
+   references, which is what drops the rest of the cycle to zero, and it deliberately ignores the
+   reference-count and attach-record guards. Use it only on subjects that were never root-attached,
+   since it bypasses the attach edge cleanup that `DetachFromContext` performs.
+
+`subject.DetachFromContext(context)` is not a way out of this. It rejects a subject that parent
+properties still reference, and calling it on the graph root leaves the orphaned cycle attached,
+because the cascade stops at the first subject whose reference count does not reach zero.
 
 ## Parent-Child Relationship Tracking
 
