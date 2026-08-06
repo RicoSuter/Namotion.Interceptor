@@ -50,9 +50,18 @@ public partial class ClassWithoutInterceptorSubject
 ";
 
         // Act
-        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+        var generated = GeneratorTestHost.Run(source);
 
         // Assert
+        // The source is deliberately invalid: ClassWithoutInterceptorSubject declares partial
+        // properties with no attribute, so nothing generates their implementation. Assert the
+        // expected CS9248 pair and nothing else, so a generator-caused error would still fail here.
+        Assert.All(generated.CompilationErrors, error =>
+        {
+            Assert.Equal("CS9248", error.Id);
+            Assert.Contains("ClassWithoutInterceptorSubject", error.GetMessage());
+        });
+
         return Verify(generated.SingleSource()).UseDirectory("Snapshots");
     }
 
