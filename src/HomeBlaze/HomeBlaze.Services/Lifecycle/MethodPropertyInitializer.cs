@@ -82,8 +82,11 @@ public class MethodPropertyInitializer : ILifecycleHandler
             : method.Name;
 
         // discoveredMethods only dedupes within one pass (a method declared on both the class and an
-        // interface); re-attach runs this handler again over properties still on the subject.
-        if (registeredSubject.TryGetProperty(propertyName) is not null)
+        // interface); re-attach runs this handler again over properties still on the subject. Only a
+        // method property counts as already done, so a real name clash with a declared property
+        // still reaches AddProperty and throws instead of being dropped.
+        if (registeredSubject.TryGetProperty(propertyName) is { Type: var existingType }
+            && existingType == typeof(MethodMetadata))
         {
             return;
         }

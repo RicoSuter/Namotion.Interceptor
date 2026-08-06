@@ -329,6 +329,11 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
+        // Before the subject is touched: AddProperties is last-wins, so throwing after it would
+        // leave a declared property carrying the caller's dynamic getter. AddPropertyInternal
+        // repeats the check under the lock, where it also covers a concurrent add.
+        ThrowIfPropertyExists(name);
+
         Subject.AddProperties(new SubjectPropertyMetadata(
             name,
             type,
@@ -351,19 +356,24 @@ public class RegisteredSubject
         return property;
     }
 
+    private void ThrowIfPropertyExists(string name)
+    {
+        if (_properties.ContainsKey(name))
+        {
+            throw new InvalidOperationException(
+                $"Property '{name}' already exists on '{Subject.GetType().Name}'. " +
+                "If this is an ISubjectPropertyInitializer, check for the property before adding it: " +
+                "initializers run again whenever a subject is re-attached.");
+        }
+    }
+
     private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
     {
         var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
 
         lock (_lock)
         {
-            if (_properties.ContainsKey(subjectProperty.Name))
-            {
-                throw new InvalidOperationException(
-                    $"Property '{subjectProperty.Name}' already exists on '{Subject.GetType().Name}'. " +
-                    "If this is an ISubjectPropertyInitializer, check for the property before adding it: " +
-                    "initializers run again whenever a subject is re-attached.");
-            }
+            ThrowIfPropertyExists(subjectProperty.Name);
 
             var newProperties = _properties
                 .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))

@@ -110,6 +110,28 @@ public class SubjectPropertyInitializerIdempotencyTests
         Assert.Contains(nameof(ISubjectPropertyInitializer), exception.Message);
     }
 
+    [Fact]
+    public void WhenAddingAPropertyThatAlreadyExists_ThenTheSubjectMetadataIsLeftUnchanged()
+    {
+        // Arrange
+        var (context, _) = CreateContext();
+        var subject = new MeasurementNode(context) { Name = "subject" };
+        var interceptorSubject = (IInterceptorSubject)subject;
+        var registered = interceptorSubject.TryGetRegisteredSubject()!;
+        var declaredBefore = interceptorSubject.Properties[nameof(MeasurementNode.Value)];
+
+        // Act & Assert: the name collides with a declared property, so the add is rejected.
+        Assert.Throws<InvalidOperationException>(() =>
+            registered.AddProperty(nameof(MeasurementNode.Value), typeof(string), _ => "hijacked", null));
+
+        // Assert: the rejection has to happen before the subject is written to. Adding properties is
+        // last-wins, so a check placed after it would leave the declared property carrying the
+        // caller's dynamic getter.
+        var declaredAfter = interceptorSubject.Properties[nameof(MeasurementNode.Value)];
+        Assert.False(declaredAfter.IsDynamic);
+        Assert.Equal(declaredBefore.Type, declaredAfter.Type);
+    }
+
     private sealed class IdempotentInitializer : ISubjectPropertyInitializer
     {
         public int InvocationCount { get; private set; }
