@@ -178,11 +178,42 @@ The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may t
 
 ## Handler Order Around the Descent
 
-`ContextInheritanceHandler` drives the descent into the next level of the object graph, so it splits the `ILifecycleHandler` chain in two: handlers ahead of it record facts about the level currently attaching, handlers behind it run only once the whole subtree below has attached and fired its own callbacks.
+`ContextInheritanceHandler` is the handler that walks down into a newly attached subtree. Handlers ordered before it run for a subject *before* its children are visited. Handlers ordered after it run only once the entire subtree underneath has already attached.
 
-A handler that records something descendants read during their own attach belongs ahead of it and must say so with `[RunsBefore(typeof(ContextInheritanceHandler))]`, because a resolved position left to the registration index is not stable against unrelated handlers being registered. `ParentTrackingHandler` and `SubjectRegistry` both carry it.
+That ordering decides what a lifecycle handler can look up while it runs. Say a subtree is built first and attached in one assignment:
 
-Detach is not the mirror. A subject's own handler runs before the context handlers that deregister it, but its ancestors were processed further up the descent and are already gone, so `GetParents()` still answers during a detach callback while resolving those parents through the registry does not.
+```csharp
+var child = new Node();
+var middle = new Node { Child = child };
+var top = new Node { Child = middle };
+
+root.Child = top;   // attaches top, middle and child in one go
+```
+
+Attach callbacks fire deepest first: `child`, then `middle`, then `top`. So when a handler is called for `child`, its ancestors have not run their own callbacks yet, but the recorders ahead of the descent have already run for them:
+
+```csharp
+public void HandleLifecycleChange(SubjectLifecycleChange change)
+{
+    if (!change.IsContextAttach) return;
+
+    // Called for "child". Every ancestor above it (middle, top, root) is
+    // already registered, because SubjectRegistry runs ahead of the descent,
+    // so resolving them here, one level or all the way up, works.
+    foreach (var parent in change.Subject.GetParents())
+    {
+        var registered = parent.Property.Subject.TryGetRegisteredSubject();
+    }
+}
+```
+
+(`GetParents()` needs `WithParents()` on the context. Without it the same walk goes over `RegisteredSubject.Parents`, the registry's own parent edges.)
+
+Were the registry ordered after the descent, `child` would see only part of that chain, `TryGetRegisteredSubject()` would return null for the rest, and anything computed from the walk would be silently wrong rather than failing. Derived getters are exposed to this too, because `DerivedPropertyChangeHandler` evaluates them while the property attaches.
+
+So a handler that records something other handlers read during attach has to say so with `[RunsBefore(typeof(ContextInheritanceHandler))]`. Leaving it to registration order is not enough, because an unrelated handler's ordering constraint can move it. `SubjectRegistry` and `ParentTrackingHandler` both carry the attribute.
+
+Detach is not the mirror of this. A subject is still registered while its own detach callback runs, but its ancestors were processed further up the descent and are already deregistered. `GetParents()` still answers there; `TryGetRegisteredSubject()` on those parents returns null. A handler that needs ancestor state while detaching has to use `GetParents()` or state it captured at attach.
 
 Pinned by `RegistryHandlerOrderTests` and `RegistryAncestorResolutionTests`.
 

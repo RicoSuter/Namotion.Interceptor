@@ -10,10 +10,12 @@ namespace Namotion.Interceptor.Registry;
 /// Registers subjects and their property edges as they enter the object graph.
 /// </summary>
 /// <remarks>
-/// Ordered ahead of <see cref="ContextInheritanceHandler"/>, which drives the descent into the next
-/// level: a subject attaching deep in a subtree resolves its ancestors through the registry from its
-/// own callbacks, so every ancestor has to be registered before the descent reaches it. See "Handler
-/// Order Around the Descent" in docs/design/tracking-lifecycle.md.
+/// Runs before <see cref="ContextInheritanceHandler"/>, which is the handler that walks down into a
+/// newly attached subtree. Attaching a subtree fires callbacks deepest first, so running the
+/// registry first is what lets a handler called for a deep subject walk up and find every ancestor
+/// already registered. Ordered the other way round, only part of that chain would be registered and
+/// <c>TryGetRegisteredSubject()</c> would return null for the rest. See "Handler Order Around the
+/// Descent" in docs/design/tracking-lifecycle.md.
 /// </remarks>
 [RunsBefore(typeof(ContextInheritanceHandler))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
