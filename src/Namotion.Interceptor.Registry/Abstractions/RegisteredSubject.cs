@@ -351,17 +351,6 @@ public class RegisteredSubject
         return property;
     }
 
-    private void ThrowIfPropertyExists(string name)
-    {
-        if (_properties.ContainsKey(name))
-        {
-            throw new InvalidOperationException(
-                $"Property '{name}' already exists on '{Subject.GetType().Name}'. " +
-                "If this is an ISubjectPropertyInitializer, check for the property before adding it: " +
-                "initializers run again whenever a subject is re-attached.");
-        }
-    }
-
     private RegisteredSubjectProperty AddPropertyInternal(
         string name, Type type, SubjectPropertyMetadata metadata, Attribute[] attributes)
     {
@@ -369,11 +358,13 @@ public class RegisteredSubject
 
         lock (_lock)
         {
-            // The rejection and both writes are one step. The rebuild below would reject a duplicate
-            // on its own, but only after the subject had been written to, and the subject's own add
-            // is last-wins, so a rejected call would still have replaced what was there. Checking
-            // outside the lock instead would leave the same hole open to a second thread.
-            ThrowIfPropertyExists(subjectProperty.Name);
+            if (_properties.ContainsKey(subjectProperty.Name))
+            {
+                throw new InvalidOperationException(
+                    $"Property '{subjectProperty.Name}' already exists on '{Subject.GetType().Name}'. " +
+                    "If this is an ISubjectPropertyInitializer, check for the property before adding it: " +
+                    "initializers run again whenever a subject is re-attached.");
+            }
 
             Subject.AddProperties(metadata);
 
