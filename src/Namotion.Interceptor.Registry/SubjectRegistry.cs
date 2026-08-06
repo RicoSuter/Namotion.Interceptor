@@ -11,11 +11,11 @@ namespace Namotion.Interceptor.Registry;
 /// </summary>
 /// <remarks>
 /// Runs before <see cref="ContextInheritanceHandler"/>, which is the handler that walks down into a
-/// newly attached subtree. Attaching a subtree fires callbacks deepest first, so running the
-/// registry first is what lets a handler called for a deep subject walk up and find every ancestor
-/// already registered. Ordered the other way round, only part of that chain would be registered and
-/// <c>TryGetRegisteredSubject()</c> would return null for the rest. See "Handler Order Around the
-/// Descent" in docs/design/tracking-lifecycle.md.
+/// newly attached subtree. Running first means a subject is registered before the descent reaches
+/// its children, and because that holds at every level, every ancestor of a subject is registered by
+/// the time any handler runs for it. Ordered the other way round, only part of that chain would be
+/// registered and <c>TryGetRegisteredSubject()</c> would return null for the rest. See "Handler
+/// Order Around the Descent" in docs/design/tracking-lifecycle.md.
 /// </remarks>
 [RunsBefore(typeof(ContextInheritanceHandler))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
