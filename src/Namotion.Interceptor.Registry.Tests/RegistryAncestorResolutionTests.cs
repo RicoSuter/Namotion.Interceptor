@@ -12,9 +12,11 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// <summary>
 /// Covers the second way a consumer meets the ordering: not from a lifecycle handler, but from a
 /// derived attribute created by an <see cref="ISubjectPropertyInitializer"/>, whose getter
-/// <c>DerivedPropertyChangeHandler</c> first evaluates while the property attaches. That path also
-/// depends on where <c>SubjectRegistry</c> sits in the <c>IPropertyLifecycleHandler</c> chain, which
-/// <see cref="RegistryHandlerOrderTests"/> does not constrain.
+/// <c>DerivedPropertyChangeHandler</c> first evaluates while the property attaches. Reaching the
+/// ancestors that late is a different route to them than <see cref="RegistryHandlerOrderTests"/>
+/// takes, and the last of these also pins a consequence visibility alone does not: an ancestor the
+/// getter never reached is never recorded as a dependency, so a later write to it does not correct
+/// the value.
 ///
 /// Only the composition that registers parents before the registry is covered, because it is the
 /// only one whose resolved order the attribute changes. The assertions read what the getter computed
