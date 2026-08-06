@@ -1332,4 +1332,115 @@ public class SubjectSourceBaseTests
         Assert.True(spawnedTaskCancelled, "Spawned task should observe cancellation from the cleanup helper.");
         Assert.True(spawnedTaskCompleted, "Spawned task should run to completion (cancelled), not be left dangling.");
     }
+
+    [Fact]
+    public async Task WhenOnePropertyBurstsDuringTheConnectWindow_ThenAnotherPropertysWindowWriteIsNotEvicted()
+    {
+        // Arrange: the retry queue is a bounded ring buffer that drops its oldest entries, so parking
+        // window writes raw lets a burst on one property push every other property's write out before
+        // the reconcile ever sees it. The queue is sized well below the burst to make that the only
+        // way the LastName write can be lost.
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context) { FirstName = "seed", LastName = "seed" };
+
+        var written = new ConcurrentQueue<string>();
+        TestSubjectSource source = null!;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance, writeRetryQueueSize: 4)
+        {
+            // Writing inside the load, rather than from the resume action, is what puts these in the
+            // connect window: the drain that parks them runs after the load returns.
+            LoadInitialStateOverride = _ =>
+            {
+                subject.LastName = "OwedLastName";
+                for (var i = 0; i < 20; i++)
+                {
+                    subject.FirstName = "F" + i;
+                }
+
+                return Task.FromResult<Action?>(null);
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.Property.Name + "=" + change.GetNewValue<string?>());
+                }
+
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => written.Contains("FirstName=F19"),
+            message: "Expected the burst property's final value to reach the source");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains("LastName=OwedLastName", written);
+    }
+
+    [Fact]
+    public async Task WhenReconcileSendsAnAlreadyCurrentWrite_ThenALaterConfirmationOnThatPropertyIsWrittenBack()
+    {
+        // Arrange: the reconcile's "already current" branch flushes the retry queue directly instead of
+        // going through the processor, so it has to record the write-out itself. A transaction writes to
+        // the source and then applies locally, and that apply arrives as a confirmation which is only
+        // sent on when a connector has also written the property, which is exactly this case.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        // Set before the source starts, so the source-lifetime subscription never sees this write and
+        // only the reconcile can mark the property.
+        var subject = new Person(context) { FirstName = "ClientValue" };
+
+        var written = new ConcurrentQueue<string?>();
+        TestSubjectSource source = null!;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(8))
+        {
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.GetNewValue<string?>());
+                }
+
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        property.SetSource(source);
+
+        // A parked write whose new value the model already holds: the reconcile sends it rather than
+        // restoring or dropping it.
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "ClientValue");
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => written.Contains("ClientValue"),
+            message: "Expected the reconcile to send the already-current window write");
+
+        using (PendingOrigin.Set(property, ChangeOrigin.Confirmed(source), "Confirmed"))
+        {
+            subject.FirstName = "Confirmed";
+        }
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => written.Contains("Confirmed"),
+            message: "Expected the confirmation to be written back to repair the source");
+
+        await source.StopAsync(CancellationToken.None);
+    }
 }
