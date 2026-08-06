@@ -13,8 +13,9 @@ namespace Namotion.Interceptor.Registry;
 /// <remarks>
 /// Runs before <see cref="ContextInheritanceHandler"/>, which walks down into a newly attached
 /// subtree, so a subject is registered before the descent reaches its children. That holds at every
-/// level, so any handler running at or behind this one finds every ancestor of a subject already
-/// registered. Also ordered ahead of <see cref="ParentTrackingHandler"/>, which fixes the order of
+/// level, so while attaching, any handler running at or behind this one finds every ancestor of a
+/// subject already registered. Detach does not mirror that; see the design doc. Also ordered ahead
+/// of <see cref="ParentTrackingHandler"/>, which fixes the order of
 /// the two recorders instead of leaving it to registration order. See "Handler Order Around the
 /// Descent" in docs/design/tracking-lifecycle.md.
 /// </remarks>

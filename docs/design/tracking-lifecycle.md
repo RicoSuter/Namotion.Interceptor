@@ -225,9 +225,9 @@ A handler that records something other handlers read during attach therefore has
 
 There is a second boundary inside attach that the handler ordering cannot cross. A subject's `ILifecycleHandler` chain runs to completion first, and only then do its properties attach, which is where `SubjectRegistry` invokes every `ISubjectPropertyInitializer`. So a lifecycle handler never sees properties an initializer adds to the same subject, at any ordering position. A handler that needs initializer output has to observe `IPropertyLifecycleHandler` instead, ordered with `[RunsAfter(typeof(SubjectRegistry))]` so it resolves behind the registry.
 
-Detach is not the mirror of attach. Ancestors are deregistered further up the descent before the callback reaches a descendant, so ancestor state is not resolvable through the registry while detaching. `GetParents()` is not a substitute, because it yields at most the immediate parent there, and only for the subject's own handler or one ordered ahead of `ParentTrackingHandler`. A handler that needs ancestor state on detach has to capture it at attach.
+Detach is not the mirror of attach. Below the root of the detached subtree, ancestors are deregistered further up the descent before the callback reaches a descendant, so their state is not resolvable through the registry while detaching. `GetParents()` is not a substitute, because it yields at most the immediate parent there, and only for the subject's own handler or one ordered ahead of `ParentTrackingHandler`. A handler that needs ancestor state on detach has to capture it at attach.
 
-Pinned by `RegistryHandlerOrderTests`.
+Pinned by `RegistryHandlerOrderTests`, and for the derived-getter path by `RegistryAncestorResolutionTests`. The initializer phase boundary above is measured but not pinned by a test.
 
 ## Invariants
 
