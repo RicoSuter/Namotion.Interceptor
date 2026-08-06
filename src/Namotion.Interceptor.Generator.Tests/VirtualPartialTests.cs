@@ -1,6 +1,3 @@
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-
 namespace Namotion.Interceptor.Generator.Tests;
 
 public class VirtualPartialTests
@@ -19,14 +16,14 @@ public partial class BaseClass
 }";
 
         // Act
-        var generated = GenerateCode(source);
+        var generated = GeneratorTestHost.Run(source);
 
         // Assert - Should generate virtual property implementation
-        var generatedSource = generated.Single().SourceText.ToString();
+        var generatedSource = generated.SingleSource();
         Assert.Contains("public virtual partial string VirtualProp", generatedSource);
         return Verify(generatedSource).UseDirectory("Snapshots");
     }
-    
+
     [Fact]
     public Task Test_OverridePartial_GeneratesCorrectly()
     {
@@ -46,14 +43,14 @@ public partial class DerivedClass : BaseClass
 }";
 
         // Act
-        var generated = GenerateCode(source);
+        var generated = GeneratorTestHost.Run(source);
 
         // Assert - Should generate override property implementation
-        var generatedSource = generated.Single().SourceText.ToString();
+        var generatedSource = generated.SingleSource();
         Assert.Contains("public override partial string VirtualProp", generatedSource);
         return Verify(generatedSource).UseDirectory("Snapshots");
     }
-    
+
     [Fact]
     public Task Test_VirtualInheritanceChain_GeneratesCorrectly()
     {
@@ -81,10 +78,10 @@ public partial class Employee : Person
 }";
 
         // Act
-        var generated = GenerateCode(source);
+        var generated = GeneratorTestHost.Run(source);
 
         // Assert - Should generate all three classes correctly
-        var generatedSource = string.Join("\n\n", generated.Select(g => g.SourceText.ToString()));
+        var generatedSource = generated.AllSources();
         Assert.Contains("public virtual partial string Name", generatedSource);
         Assert.Contains("public override partial string Name", generatedSource);
         Assert.Contains("public virtual partial int Age", generatedSource);
@@ -111,12 +108,10 @@ public partial class ExplicitImpl : IHasName
 }";
 
         // Act
-        var compilation = CreateCompilation(source);
-        var diagnostics = compilation.GetDiagnostics();
+        var generated = GeneratorTestHost.Run(source);
 
         // Assert - Should have compiler error
-        var errors = diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
-        Assert.NotEmpty(errors);
+        Assert.NotEmpty(generated.CompilationErrors);
     }
 
     [Fact]
@@ -138,37 +133,9 @@ public partial class ImplicitImpl : IHasName
 }";
 
         // Act
-        var generated = GenerateCode(source);
+        var generated = GeneratorTestHost.Run(source);
 
         // Assert - Should compile successfully
-        Assert.NotEmpty(generated);
-    }
-
-    private static Compilation CreateCompilation(string source)
-    {
-        var syntaxTree = CSharpSyntaxTree.ParseText(source);
-        var references = AppDomain.CurrentDomain
-            .GetAssemblies()
-            .Where(a => !a.IsDynamic && !string.IsNullOrWhiteSpace(a.Location))
-            .Select(a => MetadataReference.CreateFromFile(a.Location))
-            .ToList();
-
-        return CSharpCompilation.Create(
-            assemblyName: "TestAssembly",
-            syntaxTrees: [syntaxTree],
-            references: references,
-            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-    }
-
-    private static IEnumerable<Microsoft.CodeAnalysis.GeneratedSourceResult> GenerateCode(string source)
-    {
-        var compilation = CreateCompilation(source);
-        var generator = new InterceptorSubjectGenerator();
-        
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var diagnostics);
-
-        var runResult = driver.GetRunResult();
-        return runResult.Results.SelectMany(r => r.GeneratedSources);
+        Assert.NotEmpty(generated.Sources);
     }
 }
