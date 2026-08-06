@@ -20,6 +20,24 @@ namespace Namotion.Interceptor.Connectors;
 /// <see cref="SubjectSourceBase"/> is safe because these getters are lock-free (Volatile.Read /
 /// Interlocked.Read / a stored reference); a custom implementer overriding them, or wrapping a
 /// property with its own synchronization, must preserve that.
+/// <para>
+/// A source implementing this interface directly, rather than deriving from
+/// <see cref="SubjectSourceBase"/>, is otherwise invisible to source monitoring: it must register
+/// itself with every monitor reachable from the subject's context, calling
+/// <see cref="SourceMonitor.Register(ISubjectSource)"/> when it starts and
+/// <see cref="SourceMonitor.Unregister(ISubjectSource)"/> when it stops or is disposed, once for
+/// each monitor returned by looping <c>subject.Context.GetServices&lt;SourceMonitor&gt;()</c>. Use
+/// that general service lookup, not <see cref="SourceMonitoringExtensions.GetSourceMonitor"/>: the
+/// singular convenience method throws when no monitor is reachable, which would crash a direct
+/// implementer calling it in any application that has not called <c>WithSourceMonitoring()</c>.
+/// Skipping registration is silent, not a hang: the source never appears in
+/// <see cref="SourceMonitor.Sources"/>, no <see cref="SourceEventKind.SourceRegistered"/> or
+/// <see cref="SourceEventKind.SourceUnregistered"/> event is ever published for it, and once
+/// registration is complete, any branch-scoped wait whose scope depends on it completes
+/// vacuously instead of blocking, since the wait engine cannot distinguish "no source registered
+/// for this branch" from "no source for this branch, ever". <see cref="SubjectSourceBase"/>
+/// performs this registration automatically around its pump lifecycle.
+/// </para>
 /// </remarks>
 public interface ISubjectSource : ISubjectConnector
 {
@@ -83,6 +101,11 @@ public interface ISubjectSource : ISubjectConnector
     /// (directly or indirectly), since the lock is reentrant and a nested transition would publish
     /// out of order. Mutating consumers belong on the SourceMonitor stream, where delivery is
     /// queued outside all locks.
+    /// <para>
+    /// A stub implementation that declares this event but does not yet raise it must still give it
+    /// an explicit body, <c>{ add { } remove { } }</c>, rather than a plain auto-event: an event
+    /// that is never raised is otherwise flagged as unused under warnings-as-errors (CS0067).
+    /// </para>
     /// </remarks>
     event EventHandler<SourceEvent>? StateChanged;
 }

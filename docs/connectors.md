@@ -194,7 +194,7 @@ public interface ISubjectSource : ISubjectConnector
 }
 ```
 
-Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See [Breaking Change for Custom ISubjectSource Implementers](connectors-monitoring.md#breaking-change-for-custom-isubjectsource-implementers).
+Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See the XML docs on `ISubjectSource` for their exact contract, including the lock-free requirement on `State`/`LastSynchronizedAt`/`RootSubject` and the obligation to register with every reachable `SourceMonitor`.
 
 #### Custom Source Example
 
