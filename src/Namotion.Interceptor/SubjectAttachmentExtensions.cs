@@ -16,15 +16,20 @@ public static class SubjectAttachmentExtensions
     /// Attaches the subject and its whole subtree to the lifecycle graph the given context takes
     /// part in, and adds that context to the subject's resolution chain.
     /// </summary>
+    /// <remarks>
+    /// A context that resolves no <see cref="ILifecycleInterceptor"/> is not a lifecycle graph, so
+    /// this call records nothing and degenerates to plain composition. Its inverse is then
+    /// <see cref="IInterceptorSubjectContext.RemoveFallbackContext"/>, not
+    /// <see cref="DetachFromContext"/>, which finds no record and does nothing.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// The subject is already referenced from parent properties, is already attached through a
     /// different context, or already belongs to another lifecycle graph. A subject belongs to at most
-    /// one graph. All three are decided inside <see cref="InterceptorExecutor.TryRecordAttachContext"/>,
-    /// under the same lock that writes the record, so a rejection records nothing. The reference-count
-    /// rejection does not apply to a context resolving no <see cref="ILifecycleInterceptor"/>, because
-    /// the early return below precedes it. Also thrown when the subject's own context is not an
-    /// <see cref="InterceptorExecutor"/>, since there is then nowhere to record its position in the
-    /// graph.
+    /// one graph. All three are decided under the same lock that writes the attach record, so a
+    /// rejection records nothing and publishes no edge. The reference-count rejection does not apply
+    /// to a context resolving no <see cref="ILifecycleInterceptor"/>, which records nothing at all.
+    /// Also thrown when the subject's own context is not an <see cref="InterceptorExecutor"/>, since
+    /// there is then nowhere to record its position in the graph.
     /// </exception>
     public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
@@ -88,9 +93,9 @@ public static class SubjectAttachmentExtensions
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// The subject is still referenced from parent properties, or was attached through a different
-    /// context. Both are decided inside <see cref="InterceptorExecutor.TryClearAttachContext"/>,
-    /// under the same lock that clears the record, so a rejection leaves the subject exactly as it
-    /// was and cannot race the property attach that would invalidate it. Also thrown when the
+    /// context. Both are decided under the same lock that clears the attach record, so a rejection
+    /// leaves the subject exactly as it was and cannot race the property attach that would
+    /// invalidate it. Pass the context <see cref="TryGetAttachContext"/> returns. Also thrown when the
     /// subject's own context is not an <see cref="InterceptorExecutor"/>, since it can then hold no
     /// attach record.
     /// </exception>

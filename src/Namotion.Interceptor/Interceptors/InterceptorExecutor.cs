@@ -238,7 +238,10 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             {
                 throw new InvalidOperationException(
                     $"Subject '{_subject.GetType().FullName}' already belongs to another lifecycle graph. A subject belongs " +
-                    "to at most one graph; remove it from its current graph before attaching it to this one.");
+                    "to at most one graph; remove it from its current graph before attaching it to this one, by clearing " +
+                    "the parent properties that reference it there or, if it is a root of that graph, by calling " +
+                    $"{nameof(SubjectAttachmentExtensions.DetachFromContext)} with the context " +
+                    $"{nameof(SubjectAttachmentExtensions.TryGetAttachContext)} returns.");
             }
 
             _attachContext = context;
@@ -397,7 +400,10 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             {
                 throw new InvalidOperationException(
                     $"Subject '{_subject.GetType().FullName}' already belongs to another lifecycle graph. A subject belongs " +
-                    "to at most one graph; remove it from its current graph before referencing it from this one.");
+                    "to at most one graph; remove it from its current graph before referencing it from this one, by clearing " +
+                    "the parent properties that reference it there or, if it is a root of that graph, by calling " +
+                    $"{nameof(SubjectAttachmentExtensions.DetachFromContext)} with the context " +
+                    $"{nameof(SubjectAttachmentExtensions.TryGetAttachContext)} returns.");
             }
 
             var coClaimants = _coClaimants ??= new List<ILifecycleInterceptor>(1);

@@ -486,6 +486,13 @@ subject.IsAttached();                 // is this subject in a graph at all
 subject.TryGetAttachContext();        // which context DetachFromContext would accept, or null
 ```
 
+**A root can leave the graph without you detaching it.** Root-attach a subject, reference it from a
+tracked property, then clear that reference: the last property detach releases the attach edge and
+the ownership with it, so the subject is fully out with no `DetachFromContext` call anywhere.
+`IsAttached()` is false, `TryGetAttachContext()` is null, and the subject's own context resolves
+nothing, so writes to it are no longer tracked. Call `AttachToContext` again to bring it back. This
+is the "or the subject's last property detach" clause in the table above.
+
 `AddFallbackContext(X)` on a subject's own context is not a first step towards `AttachToContext(X)`.
 The guard runs before the deduplication check, so if `X` already carries an `ILifecycleInterceptor`
 that first call throws and names `AttachToContext` (see the table below). If `X` carries none,
@@ -525,9 +532,26 @@ Attaching a subject that another graph already owns throws rather than half-atta
 | `DetachFromContext` naming a context other than the recorded attach context | `InvalidOperationException`; pass what `TryGetAttachContext()` returns. With no record at all and no parent references it does nothing instead |
 | Re-attaching a subject that holds a parent link, from a lifecycle callback, while its own detach is unwinding | `InvalidOperationException`. A root holds no parent link, so re-attaching a root during a root detach's unwind does not throw |
 
-All four methods need the subject's context to be an `InterceptorExecutor`, which is what
-`[InterceptorSubject]` classes and `DynamicSubject` provide. A hand-written `IInterceptorSubject`
-returning some other context gets an `InvalidOperationException` naming the requirement.
+**Taking part in a graph at all** needs the subject's context to be an `InterceptorExecutor`, which
+is what `[InterceptorSubject]` classes and `DynamicSubject` provide. The reference count and the
+graph records live on the executor, so this covers the four methods above and the property route
+too: a hand-written `IInterceptorSubject` returning some other context gets an
+`InvalidOperationException` naming the requirement on plain assignment into a tracked property, not
+only from the four methods. That assignment used to work, because the count lived in `subject.Data`.
+`GetReferenceCount()` returns 0 for such a subject rather than a stored count.
+
+**The root attach records its interceptor set.** `AttachToContext` resolves `ILifecycleInterceptor`
+once, before it publishes anything, and `DetachFromContext` notifies exactly that recorded set
+instead of resolving again. Two consequences if you implement `ILifecycleInterceptor` yourself:
+
+- An interceptor registered after a root has attached receives neither that attach nor a later
+  detach for that root. It sees only the roots attached from its registration onwards, so there is
+  no unpaired detach to defend against.
+- An interceptor whose context has since left the subject's chain still receives the detach it was
+  owed, so per-subject state it took at attach can always be released.
+
+Attach and detach through the property route resolve per operation from the parent's context, so
+neither applies there.
 
 `AttachToContext` and `DetachFromContext` are not atomic against each other. Calling them
 concurrently on the same subject is not supported; roots are normally attached at startup and
@@ -563,6 +587,16 @@ Root
 
 Removing A reduces Shared's refs to 1 - it stays attached via B.
 Removing B after A detaches Shared (refs: 0).
+
+**Limitation**: staying attached is not the same as staying tracked. With `WithContextInheritance()`,
+the internal parent link names whichever parent referenced the subject first, and nothing repoints
+it. When that parent leaves the graph while another parent still holds the subject, the subject keeps
+its remaining reference count and still reports `IsAttached()` as true, but its context now resolves
+zero interceptors, so writes to it are silently untracked. In the diagram above, removing A is
+exactly that case if A referenced Shared first. Removing B instead, or clearing only A's reference
+(`A.Shared = null`) while A stays in the graph, is unaffected. Where a shared subject's writes have
+to stay tracked, let the longest-lived parent take the first reference, or keep the subject
+single-parent. See [Known Gaps](design/tracking-lifecycle.md#known-gaps).
 
 **Cycles (Limitation)**
 
