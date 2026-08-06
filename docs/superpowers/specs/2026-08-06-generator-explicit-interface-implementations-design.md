@@ -171,6 +171,38 @@ required part of phase 1 rather than a refinement.
 never implements `IInterceptorSubject`, so any use of it as a subject already fails to compile, and a
 green build means the attribute is dead intent.
 
+## Impact
+
+### Breaking changes
+
+Two, both intentional.
+
+1. **`[InterceptorSubject]` on a `record` becomes a build error (NI0003).** Green today while silently
+   generating nothing. Justified above: a green build means the attribute is dead intent.
+2. **Cases AE and AF now warn (NI0008).** Both compile green today. Runtime behaviour is unchanged,
+   since first-wins is preserved, but a consumer who sets `TreatWarningsAsErrors` will see a build
+   failure until they suppress the rule or disambiguate the names.
+
+No property key changes for anything that compiles today, because dotted keys arise only from explicit
+implementations, and those never compiled.
+
+### Verified non-regressions
+
+The following work today and were measured to confirm the design does not disturb them.
+
+| Shape | Evidence |
+|-------|----------|
+| `internal` default interface member | Works today (`InternalStatus = "internal-3"`). The 1.5 guard is scoped to `Private`, `Protected` and `ProtectedAndInternal` specifically so this keeps working |
+| `protected internal` default interface member | Works today, same guard scoping |
+| Inheritance with an `override` partial property | `RDerived` yields a single `Name` key. `ToFrozenDictionary` tolerates duplicates across the `Concat` with the base dictionary, so only the within-class collection initializer can throw. That is exactly case Z, and 1.2's indexer assignment is consistent with the existing `Concat` behaviour |
+| Non-explicit interface default properties | `ExplicitInterfaceImplementations` is empty, so `resolvedName` is `property.Name` and `accessorInterface` is `interfaceType`. Identical values, identical output |
+| Nested classes in a plain `class` | 1.6 emits `partial class Outer`, byte identical to today. Existing snapshots do not change |
+| `[Derived]` on a non-explicit interface property | Unaffected. The `PropertyInfo` is still the declaring interface's property, which carries the attribute |
+| Case G, I, N, AD | Correct today, untouched |
+
+The layer 1 snapshots for every currently-passing test are the standing guard: any unintended change to
+generated output for a supported shape shows up as a snapshot diff.
+
 ## Phase 1: correctness
 
 ### 1.1 Explicit interface implementations (A, B, C, D, F)
@@ -244,7 +276,14 @@ Two changes:
   `TypeInitializationException`. This is defence in depth; the extractor should already have prevented it.
 
 Collisions the extractor cannot resolve, that is two explicit implementations with no non-explicit
-declaration to prefer (case AA), are reported by NI0008 and both entries are dropped.
+declaration to prefer (case AA), keep **deterministic first-wins by declaration order** and are reported
+by NI0008. Nothing is dropped.
+
+Dropping the colliding entries was considered and rejected. Cases AE and AF compile today and rely on
+first-wins, so dropping would remove a property that currently exists, and a connector would lose a node
+with only a build warning to explain it. The diagnostic is the fail-fast signal; runtime behaviour must
+not silently regress underneath it. Keeping first-wins also makes AA consistent with AE and AF rather
+than special-casing it.
 
 ### 1.3 Global namespace (J)
 
@@ -283,7 +322,18 @@ NI0006 in phase 2, so nothing is dropped silently.
 - **Static interface properties (V).** The `hasDefaultImplementation` test at
   `SubjectMetadataExtractor.cs:245-247` passes for a `static` property with a body, because
   `IsAbstract` is false. Add an `IsStatic` guard. `static abstract` is already correctly skipped.
-- **Non-public default interface members (W).** Skip when `DeclaredAccessibility` is not `Public`.
+- **Inaccessible default interface members (W).** Skip only `Private`, `Protected` and
+  `ProtectedAndInternal` (`private protected`). **`Internal` and `ProtectedOrInternal`
+  (`protected internal`) must not be skipped: they work today and are covered by regression tests.**
+  The generated code lives in the same assembly, so those members are reachable. Measured:
+
+  ```
+  internal string InternalStatus => ...            ->  works, "internal-3"
+  protected internal string ProtectedInternalStatus  ->  works
+  private / protected                              ->  CS0122
+  ```
+
+  The guard is "not accessible from the generated code in this assembly", not "not public".
 - **`WithoutInterceptor` methods (O, Y).** `CollectMethods` at `:184-206` checks only the name suffix.
   Skip when the trimmed name is empty (O), and when the method is `static`, generic, an explicit
   interface implementation, or has a `ref`, `out` or `in` parameter, all of which the emitter drops or
@@ -400,10 +450,10 @@ classes.
 | NI0002 | Containing type is not `partial` (L) | Error |
 | NI0003 | `[InterceptorSubject]` on an unsupported type kind (M) | Error |
 | NI0004 | The generator threw while generating a subject | Error |
-| NI0005 | A derived class re-declares a property already implemented by its base class (AD) | Info |
+| NI0005 | A derived class re-declares a property already implemented by its base class (AD) | Warning |
 | NI0006 | A member was skipped as unsupported (E, O, V, W, Y, AB) | Warning |
-| NI0007 | Attributes on an explicit interface implementation are ignored (AC) | Warning |
-| NI0008 | Two interface members collide on one property name (AA, AE, AF) | Warning |
+| NI0007 | Attributes on an explicit interface implementation are ignored (AC) | Error |
+| NI0008 | Two interface members collide on one property name, first-wins applied (AA, AE, AF) | Warning |
 | NI0009 | Generic subject or containing type is not supported (T, U) | Error |
 | NI0010 | `file` types are not supported (X) | Error |
 
@@ -420,10 +470,31 @@ NI0004 carries a one line summary with the exception type, the message, and the 
 file retains the frames. When the generator throws, the partial class cannot be completed, so consequent
 `CS9248` style errors appear either way; NI0004 puts the real reason at the top.
 
-**NI0005 is `Info`, not `Warning`, deliberately.** Case AD is a legal and supported shape, and it must
-appear as real source in the layer 3 test project. Since `src/Directory.Build.props:4` sets
-`TreatWarningsAsErrors`, a warning there would fail the test assembly's build before any test ran.
-`Info` conveys the same information without that consequence.
+### 2.4 Severity policy
+
+Severities are chosen aggressively: they reflect how wrong a situation is, not how much churn they might
+cause. Failing fast is preferred to hiding a problem, because a consumer can always suppress a rule at
+the point of use, and a suppression that shows up in a real codebase tells us which rule needs a proper
+fix.
+
+Two consequences follow.
+
+**NI0007 is an `Error`.** Losing `[Derived]` is not cosmetic: a derived property gets treated as a normal
+tracked one, which is wrong runtime behaviour. The remedy is to move the attribute to the interface
+member, and the rule only fires on explicit implementations, which do not compile today, so no green
+build is affected.
+
+**NI0005 and NI0008 are `Warning`s that our own test project must suppress.** Cases AD, AE and AF are
+legal, supported shapes that have to exist as real source in the layer 3 test project, and
+`src/Directory.Build.props:4` sets `TreatWarningsAsErrors`, so the test assembly would fail to build
+before any test ran. Those models carry a scoped `#pragma warning disable NI0005` or `NI0008` with a
+comment naming the case. This is the intended opt-out, and it doubles as executable documentation of the
+pattern consumers will use.
+
+**NI0006 stays a `Warning` rather than an error**, as the one deliberate exception to the policy. It
+means "a member we cannot support was skipped" while the rest of the subject works. An interface carrying
+a default indexer alongside subject properties is a reasonable design, and an error would make that
+design unusable rather than surfacing something worth fixing.
 
 ## Phase 3: documentation
 
@@ -490,7 +561,9 @@ assert behaviour through the registry:
 - S: an `internal` subject compiles and works.
 - **Z: `DefaultProperties` is accessed and does not throw, with exactly one `Kind` key.**
 - **AA: two explicit implementations at different instantiations are reported by NI0008.**
-- AD: the base and derived values differ as measured, and NI0005 is `Info` so the build survives.
+- AD: the base and derived values differ as measured, under a scoped `#pragma warning disable NI0005`.
+- W: `internal` and `protected internal` default interface members still resolve and read correctly.
+- Inheritance with an `override` partial property still yields a single key.
 
 A regression here does not produce a failing test, it produces a failing build, because the test project
 cannot compile against a broken generator.
