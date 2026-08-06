@@ -357,12 +357,6 @@ public class RegisteredSubject
 
         lock (_lock)
         {
-            // Checked explicitly because ToFrozenDictionary below would otherwise report the
-            // collision as "An item with the same key has already been added", naming neither this
-            // API nor the subject. The overwhelmingly common cause is a property initializer that
-            // adds unconditionally: initializers run again whenever a subject re-attaches, including
-            // a plain move between parents, while the property they added the first time is still
-            // on the subject. See ISubjectPropertyInitializer.
             if (_properties.ContainsKey(subjectProperty.Name))
             {
                 throw new InvalidOperationException(
