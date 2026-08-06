@@ -236,6 +236,26 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
             Revision);
 
     /// <summary>
+    /// Copies this change with its old and new values swapped, without re-boxing them, so applying the
+    /// result undoes this change. Carries no revision on purpose: it describes a write to perform, not a
+    /// commit that happened. Applying it locally goes through the terminal and takes a fresh, higher
+    /// revision of its own, which is what consumers observe. Copying this change's revision instead would
+    /// give two changes on one property the same revision, the tie the flush merging relies on being
+    /// impossible.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public SubjectPropertyChange ToRollbackChange() =>
+        new(Property,
+            Origin,
+            ChangedTimestamp,
+            ReceivedTimestamp,
+            _newValueStorage,
+            _oldValueStorage,
+            _newBoxedHolder,
+            _oldBoxedHolder,
+            revision: 0);
+
+    /// <summary>
     /// Equality based on PropertyReference only for efficient HashSet/Dictionary usage.
     /// </summary>
     public bool Equals(SubjectPropertyChange other) => Property.Equals(other.Property);

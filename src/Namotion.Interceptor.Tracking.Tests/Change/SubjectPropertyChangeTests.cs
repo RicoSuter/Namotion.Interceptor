@@ -809,6 +809,140 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
+    public void WhenConvertedToRollbackChange_ThenOldAndNewValuesAreSwapped()
+    {
+        // Arrange
+        var change = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            10, 20);
+
+        // Act
+        var rollback = change.ToRollbackChange();
+
+        // Assert
+        Assert.Equal(20, rollback.GetOldValue<int>());
+        Assert.Equal(10, rollback.GetNewValue<int>());
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChange_ThenPropertyOriginAndTimestampsArePreserved()
+    {
+        // Arrange
+        var source = new object();
+        var change = SubjectPropertyChange.Create(
+            _property, ChangeOrigin.FromSource(source), _changedTimestamp, _receivedTimestamp,
+            "old", "new");
+
+        // Act
+        var rollback = change.ToRollbackChange();
+
+        // Assert
+        Assert.Equal(_property, rollback.Property);
+        Assert.Equal(ChangeOriginKind.FromSource, rollback.Origin.Kind);
+        Assert.Same(source, rollback.Origin.Source);
+        Assert.Equal(_changedTimestamp, rollback.ChangedTimestamp);
+        Assert.Equal(_receivedTimestamp, rollback.ReceivedTimestamp);
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChange_ThenRevisionIsReset()
+    {
+        // Arrange: a rollback describes a write to perform, not a commit that happened. Carrying the
+        // committed revision forward would give two changes on one property the same revision, the tie
+        // flush merging relies on being impossible.
+        var change = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            "old", "new", 7L);
+
+        // Act
+        var rollback = change.ToRollbackChange();
+
+        // Assert
+        Assert.Equal(0L, rollback.Revision);
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChangeOnEveryStoragePath_ThenTypedValuesRoundTrip()
+    {
+        // Arrange: the swap moves the storage fields directly, so each of the three storage paths has
+        // to survive it with its stored type intact rather than degrading to a boxed object.
+        var oldReference = new CustomClass { Id = 1 };
+        var newReference = new CustomClass { Id = 2 };
+
+        var inlineChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
+        var stringChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, "old", "new");
+        var referenceChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            oldReference, newReference);
+        var oversizedChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new OversizedCustomStruct { Value1 = 1L }, new OversizedCustomStruct { Value1 = 2L });
+
+        // Act
+        var inlineRollback = inlineChange.ToRollbackChange();
+        var stringRollback = stringChange.ToRollbackChange();
+        var referenceRollback = referenceChange.ToRollbackChange();
+        var oversizedRollback = oversizedChange.ToRollbackChange();
+
+        // Assert
+        Assert.Equal(2, inlineRollback.GetOldValue<int>());
+        Assert.Equal(1, inlineRollback.GetNewValue<int>());
+        Assert.Equal("new", stringRollback.GetOldValue<string>());
+        Assert.Equal("old", stringRollback.GetNewValue<string>());
+        Assert.Same(newReference, referenceRollback.GetOldValue<CustomClass>());
+        Assert.Same(oldReference, referenceRollback.GetNewValue<CustomClass>());
+        Assert.Equal(2L, oversizedRollback.GetOldValue<OversizedCustomStruct>().Value1);
+        Assert.Equal(1L, oversizedRollback.GetNewValue<OversizedCustomStruct>().Value1);
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChangeWithNullString_ThenNullMovesToTheNewValue()
+    {
+        // Arrange
+        var change = SubjectPropertyChange.Create<string?>(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            null, "new");
+
+        // Act
+        var rollback = change.ToRollbackChange();
+
+        // Assert
+        Assert.Equal("new", rollback.GetOldValue<string>());
+        Assert.Null(rollback.GetNewValue<string>());
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChange_ThenNothingIsAllocated()
+    {
+        // Arrange: the conversion moves the storage fields instead of round-tripping both values
+        // through object, so it must not allocate. Rebuilding it through Create<object?> would cost
+        // two boxed holders per reverted change, plus a box per inline value.
+        var change = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
+
+        // Warm up so JIT compilation does not land inside the measured window.
+        var accumulator = 0L;
+        for (var i = 0; i < 100; i++)
+        {
+            accumulator += change.ToRollbackChange().GetNewValue<int>();
+        }
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            accumulator += change.ToRollbackChange().GetNewValue<int>();
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Equal(0L, allocated);
+        Assert.Equal(1100L, accumulator);
+    }
+
+    [Fact]
     public void WhenMeasuringSubjectPropertyChange_ThenSizeStaysWithinTheAcceptedBudget()
     {
         // The struct is copied on every publish, so growth is a hot-path cost that has to be a decision
