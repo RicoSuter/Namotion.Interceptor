@@ -157,6 +157,29 @@ internal static class SubjectMetadataExtractor
                 var setterAccessModifier = GetAccessorModifier(property.AccessorList, SyntaxKind.SetAccessorDeclaration) ??
                                            GetAccessorModifier(property.AccessorList, SyntaxKind.InitAccessorDeclaration);
 
+                // A class-declared explicit interface implementation is reached through the same
+                // cast-through-the-interface pattern as an interface default property, so the
+                // implemented member's accessibility governs reachability here too, not the
+                // (always-effectively-private) accessibility of the implementation itself.
+                if (property.ExplicitInterfaceSpecifier is not null)
+                {
+                    var declaredPropertySymbol = declarationModel.GetDeclaredSymbol(property, cancellationToken);
+                    var implementedMember = declaredPropertySymbol?.ExplicitInterfaceImplementations.FirstOrDefault();
+                    if (implementedMember is not null)
+                    {
+                        var (isGetterAccessible, isSetterAccessible) = GetAccessorAccessibility(
+                            semanticModel.Compilation, implementedMember, typeSymbol, implementedMember.ContainingType);
+                        if (!isGetterAccessible && !isSetterAccessible)
+                        {
+                            continue;
+                        }
+
+                        hasGetter = hasGetter && isGetterAccessible;
+                        hasSetter = hasSetter && isSetterAccessible;
+                        hasInit = hasInit && isSetterAccessible;
+                    }
+                }
+
                 properties.Add(new PropertyMetadata(
                     propertyName,
                     fullyQualifiedName,
@@ -316,33 +339,6 @@ internal static class SubjectMetadataExtractor
                 var resolvedName = explicitImplementation?.Name ?? property.Name;
                 var accessorInterface = explicitImplementation?.ContainingType ?? interfaceType;
 
-                // Roslyn reports an explicit implementation as Private regardless of the implemented
-                // member's real visibility, so the accessibility that matters is the implemented
-                // member's. Ask the compiler directly whether generated code (living inside
-                // typeSymbol, accessing the member through a cast to accessorInterface) can reach
-                // it, instead of hand-rolling the rule: a hardcoded "same assembly" premise breaks
-                // as soon as the interface lives in a referenced assembly (internal and protected
-                // internal members are then unreachable, CS0122/CS1540, unless InternalsVisibleTo
-                // says otherwise), and passing accessorInterface as the qualifying type correctly
-                // rejects protected members, which are never reachable through this cast pattern.
-                var accessibilityMember = explicitImplementation ?? property;
-                if (!compilation.IsSymbolAccessibleWithin(accessibilityMember, typeSymbol, accessorInterface))
-                {
-                    continue;
-                }
-
-                // A getter or setter can be individually less accessible than the property itself
-                // (e.g. `string Probe { get; private set; }`); generated code accesses whichever
-                // accessor it emits directly, so each one needs its own reachability check.
-                var isGetterAccessible = accessibilityMember.GetMethod is { } accessibleGetMethod &&
-                    compilation.IsSymbolAccessibleWithin(accessibleGetMethod, typeSymbol, accessorInterface);
-                var isSetterAccessible = accessibilityMember.SetMethod is { } accessibleSetMethod &&
-                    compilation.IsSymbolAccessibleWithin(accessibleSetMethod, typeSymbol, accessorInterface);
-                if (!isGetterAccessible && !isSetterAccessible)
-                {
-                    continue;
-                }
-
                 // Skip properties already declared in the class
                 if (classPropertyNames.Contains(resolvedName))
                 {
@@ -360,6 +356,25 @@ internal static class SubjectMetadataExtractor
                     property.GetMethod is { IsAbstract: false } ||
                     property.SetMethod is { IsAbstract: false };
                 if (!hasDefaultImplementation)
+                {
+                    continue;
+                }
+
+                // Roslyn reports an explicit implementation as Private regardless of the implemented
+                // member's real visibility, so the accessibility that matters is the implemented
+                // member's. Ask the compiler directly whether generated code (living inside
+                // typeSymbol, accessing the member through a cast to accessorInterface) can reach
+                // it, instead of hand-rolling the rule: a hardcoded "same assembly" premise breaks
+                // as soon as the interface lives in a referenced assembly (internal and protected
+                // internal members are then unreachable, CS0122/CS1540, unless InternalsVisibleTo
+                // says otherwise), and passing accessorInterface as the qualifying type correctly
+                // rejects protected members, which are never reachable through this cast pattern.
+                // This runs after the cheap name-based filters above so the compiler is not asked
+                // about a member that would be discarded anyway.
+                var accessibilityMember = explicitImplementation ?? property;
+                var (isGetterAccessible, isSetterAccessible) = GetAccessorAccessibility(
+                    compilation, accessibilityMember, typeSymbol, accessorInterface);
+                if (!isGetterAccessible && !isSetterAccessible)
                 {
                     continue;
                 }
@@ -395,6 +410,40 @@ internal static class SubjectMetadataExtractor
         }
 
         return interfaceProperties;
+    }
+
+    /// <summary>
+    /// Resolves per-accessor reachability of an interface member from generated code living inside
+    /// <paramref name="typeSymbol"/>, accessed through a receiver cast to <paramref name="throughType"/>.
+    /// Shared by the interface default-implementation path and the class explicit-implementation
+    /// path, since both reach the member through the same "cast to the interface" pattern and are
+    /// governed by the same accessibility rule.
+    /// </summary>
+    private static (bool IsGetterAccessible, bool IsSetterAccessible) GetAccessorAccessibility(
+        Compilation compilation,
+        IPropertySymbol member,
+        INamedTypeSymbol typeSymbol,
+        ITypeSymbol throughType)
+    {
+        if (!compilation.IsSymbolAccessibleWithin(member, typeSymbol, throughType))
+        {
+            return (false, false);
+        }
+
+        // A getter or setter can be individually less accessible than the property itself
+        // (e.g. `string Probe { get; private set; }`); generated code accesses whichever accessor
+        // it emits directly, so each one needs its own reachability check.
+        var isGetterAccessible = member.GetMethod is { } getMethod &&
+            compilation.IsSymbolAccessibleWithin(getMethod, typeSymbol, throughType);
+        var isSetterAccessible = member.SetMethod is { } setMethod &&
+            compilation.IsSymbolAccessibleWithin(setMethod, typeSymbol, throughType);
+
+        // Both false here (with the property-level check above having passed) is believed
+        // unreachable: C# forbids an accessor modifier on both accessors at once, and requires any
+        // accessor modifier to be strictly more restrictive than the property, so the accessor
+        // without a modifier is accessible by construction whenever the property-level check
+        // passed. Kept defensive rather than assumed, in case that invariant stops holding.
+        return (isGetterAccessible, isSetterAccessible);
     }
 
     private static string GetAccessModifierFromAccessibility(Accessibility accessibility)

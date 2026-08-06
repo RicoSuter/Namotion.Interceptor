@@ -172,6 +172,105 @@ namespace Repro
     }
 
     [Fact]
+    public void WhenClassExplicitImplementationTargetsProtectedMember_ThenMemberIsSkipped()
+    {
+        // Arrange: the class-declared sibling of WhenExplicitImplementationTargetsProtectedMember_ThenMemberIsSkipped.
+        // The implementation lives directly on the subject class instead of a sub-interface, so it
+        // is discovered by CollectProperties, not ExtractInterfaceDefaultProperties.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IBase { protected string Probe { get; set; } }
+
+    [InterceptorSubject]
+    public partial class Thing : IBase
+    {
+        string IBase.Probe { get => ""c""; set { } }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.DoesNotContain(@"[""Probe""]", generated.SingleSource());
+    }
+
+    [Fact]
+    public void WhenClassExplicitImplementationTargetsPrivateProtectedMember_ThenMemberIsSkipped()
+    {
+        // Arrange: same shape with `private protected`, which is subject to the same CS1540 rule.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IBase { private protected string Probe { get; set; } }
+
+    [InterceptorSubject]
+    public partial class Thing : IBase
+    {
+        string IBase.Probe { get => ""c""; set { } }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.DoesNotContain(@"[""Probe""]", generated.SingleSource());
+    }
+
+    [Fact]
+    public void WhenClassExplicitImplementationOfGetterOnlyProtectedMember_ThenMemberIsSkipped()
+    {
+        // Arrange: the getter-only form. The interface member itself has no setter to fall back
+        // to, so an inaccessible getter must skip the property entirely, not emit a null-getter shape.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IBase { protected string Probe { get; } }
+
+    [InterceptorSubject]
+    public partial class Thing : IBase
+    {
+        string IBase.Probe => ""c"";
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.DoesNotContain(@"[""Probe""]", generated.SingleSource());
+    }
+
+    [Fact]
+    public void WhenClassExplicitImplementationOfGetterOnlyPrivateProtectedMember_ThenMemberIsSkipped()
+    {
+        // Arrange: getter-only form with `private protected`.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IBase { private protected string Probe { get; } }
+
+    [InterceptorSubject]
+    public partial class Thing : IBase
+    {
+        string IBase.Probe => ""c"";
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.DoesNotContain(@"[""Probe""]", generated.SingleSource());
+    }
+
+    [Fact]
     public void WhenInterfaceDefaultMemberIsInternalInReferencedAssembly_ThenMemberIsSkipped()
     {
         // Arrange: the "same assembly" premise the accessibility check used to rely on does not
@@ -196,6 +295,35 @@ public partial class Thing : IFace
 
         // Assert
         Assert.DoesNotContain(@"[""Probe""]", generated.SingleSource());
+    }
+
+    [Fact]
+    public void WhenInterfaceDefaultMemberIsInternalInReferencedAssemblyWithInternalsVisibleTo_ThenMemberIsKept()
+    {
+        // Arrange: same shape as the previous case, but the library grants InternalsVisibleTo to
+        // the generated assembly (named "TestAssembly" by GeneratorTestHost), which the compiler's
+        // own accessibility check must honor and expose the member.
+        const string librarySource = @"
+using System.Runtime.CompilerServices;
+[assembly: InternalsVisibleTo(""TestAssembly"")]
+
+public interface IFace
+{
+    internal string Probe => ""p"";
+}";
+        const string mainSource = @"
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class Thing : IFace
+{
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunWithLibraryReferenceExpectingCleanCompilation(librarySource, mainSource);
+
+        // Assert
+        Assert.Contains(@"[""Probe""]", generated.SingleSource());
     }
 
     [Fact]
