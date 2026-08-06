@@ -82,9 +82,10 @@ public class SourceWaitTests
     public void WhenCompleteSourceRegistrationIsCalledConcurrentlyFromManyThreads_ThenTheInitialHoldIsReleasedExactlyOnce()
     {
         // Arrange
-        // The idempotency guard (Interlocked.Exchange on _initialHoldReleased) is what must survive
-        // many threads racing into CompleteSourceRegistration at once: if it let more than one
-        // thread through, _registrationHolds would be decremented past zero and IsRegistrationComplete
+        // The idempotency guard (RegistrationHold.Dispose's own Interlocked.Exchange on _disposed,
+        // via the initial hold that CompleteSourceRegistration disposes) is what must survive many
+        // threads racing into CompleteSourceRegistration at once: if it let more than one thread
+        // through, _registrationHolds would be decremented past zero and IsRegistrationComplete
         // would get stuck false, since nothing else would ever bring the count back up.
         var monitor = CreateContext().GetSourceMonitor();
         const int threadCount = 64;
@@ -387,6 +388,44 @@ public class SourceWaitTests
     }
 
     [Fact]
+    public async Task WhenTheSameStoppedWaitIsReEvaluatedBeforeRemoval_ThenTheAllStoppedWarningLogsOnlyOnce()
+    {
+        // Arrange
+        // Mirrors WhenScopeBecomesEmptyAfterUnrelatedReEvaluations_ThenTheEmptyScopeWarningStillFires
+        // above, but for the all-Stopped warning instead of the empty-scope one: unlike the
+        // empty-scope warning, this one had no per-wait one-shot guard, so it could re-log in the
+        // window between a wait completing (Stopped makes the branch vacuously satisfied) and its
+        // continuation actually removing it from _waits.
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var recordingLogger = new RecordingLogger();
+        context.AddService<ILoggerFactory>(new RecordingLoggerFactory(recordingLogger));
+
+        var anchor = new Person(context);
+        var source = new TestStateSource(anchor);
+        monitor.Register(source);
+        monitor.CompleteSourceRegistration();
+
+        // Matched but not yet satisfied (Connecting), so this becomes a real, tracked PendingWait.
+        var wait = anchor.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        // Act - Stopped makes every in-scope source terminal, so the branch is vacuously satisfied
+        // and OnWaitConditionChanged's re-evaluation logs the all-Stopped warning once.
+        source.ReportStopped();
+
+        // Immediately trigger a second re-evaluation pass, on the same thread, before wait.Complete()
+        // above's asynchronously scheduled continuation (RunContinuationsAsynchronously) has had a
+        // chance to remove this wait from _waits - exactly the window in which a regression that
+        // dropped a one-shot guard on this warning would log it a second time.
+        monitor.Register(new TestStateSource(new Person()));
+
+        // Assert
+        Assert.Single(recordingLogger.Warnings, message => message.Contains("every in-scope source stopped"));
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public void WhenNoSubscriptionWasEverMade_ThenTheEmptyScopeWarningStillFires()
     {
         // Arrange
@@ -402,9 +441,11 @@ public class SourceWaitTests
 
         var anchor = new Person(context);
 
-        // Act - the pending wait is constructed before WaitForSynchronizationAsync's fast-path
-        // check, so IsSatisfied's empty-scope warning fires right here, on the very first
-        // evaluation, without ever calling Subscribe and without needing a later re-evaluation.
+        // Act - WaitForSynchronizationAsync's fast-path check passes a null PendingWait to
+        // IsSatisfied, and a null wait always warns (no dedup needed for an evaluation that is
+        // never re-run), so the empty-scope warning fires right here, on the very first evaluation,
+        // without ever calling Subscribe, without allocating a PendingWait, and without needing a
+        // later re-evaluation.
         var wait = anchor.WaitForSynchronizationAsync(CancellationToken.None);
 
         // Assert

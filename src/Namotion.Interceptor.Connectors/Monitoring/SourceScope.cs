@@ -49,13 +49,6 @@ internal static class SourceScope
     /// Nothing enforces that the parent graph is acyclic (two subjects can reference each other,
     /// directly or through a longer chain), so the walk tracks visited subjects and cannot loop.
     /// </remarks>
-    internal static bool IsAncestorOrSelf(IInterceptorSubject candidate, IInterceptorSubject target)
-    {
-        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
-        var pending = new Stack<IInterceptorSubject>();
-        return IsAncestorOrSelf(candidate, target, visited, pending);
-    }
-
     private static bool IsAncestorOrSelf(
         IInterceptorSubject candidate, IInterceptorSubject target,
         HashSet<IInterceptorSubject> visitedScratch, Stack<IInterceptorSubject> pendingScratch)

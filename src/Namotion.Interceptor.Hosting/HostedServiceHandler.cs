@@ -196,7 +196,11 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     /// <remarks>
     /// The drain is FIFO, so a marker posted here runs after everything already queued and does not
     /// wait for actions posted afterward - the right semantics for a loader that has finished
-    /// building its tree. Never completes if the drain loop isn't running.
+    /// building its tree. Never completes if the drain loop isn't running - whether it hasn't
+    /// started yet, or has already exited (for example, at shutdown, after StopAsync cancels
+    /// _stoppingCts): the underlying buffer's Post still accepts the marker in either case, so the
+    /// returned task just hangs until <paramref name="cancellationToken"/> cancels it, rather than
+    /// throwing or completing.
     /// </remarks>
     internal Task WaitForPendingActionsAsync(CancellationToken cancellationToken)
     {

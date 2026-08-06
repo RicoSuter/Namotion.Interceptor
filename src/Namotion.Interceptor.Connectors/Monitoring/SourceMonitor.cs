@@ -49,6 +49,7 @@ public class SourceMonitor : ILifecycleHandler
     public SourceMonitor(Func<ILogger?>? loggerResolver = null)
     {
         _loggerResolver = loggerResolver;
+        _initialHold = new RegistrationHold(this);
     }
 
     /// <summary>The sources registered right now. For a race-free baseline use SourceSubscription.Sources.</summary>
@@ -246,8 +247,11 @@ public class SourceMonitor : ILifecycleHandler
 
     // Born at 1, taken at WithSourceMonitoring time (before the host is built), so no wait can
     // complete until something explicitly releases it, regardless of hosted-service start order.
+    // _initialHold is what CompleteSourceRegistration disposes: its own Interlocked latch (see
+    // RegistrationHold.Dispose) is the idempotence guard, so a re-entrant loader guard calling
+    // CompleteSourceRegistration more than once is safe without a second latch field here.
     private int _registrationHolds = 1;
-    private int _initialHoldReleased;
+    private readonly RegistrationHold _initialHold;
 
     /// <summary>True when no registration hold is outstanding, so waits may complete.</summary>
     public bool IsRegistrationComplete => Volatile.Read(ref _registrationHolds) == 0;
@@ -256,15 +260,7 @@ public class SourceMonitor : ILifecycleHandler
     /// Releases the initial hold, declaring that every source this application intends to start has
     /// been started and registered. Idempotent, so a re-entrant loader guard is safe.
     /// </summary>
-    public void CompleteSourceRegistration()
-    {
-        if (Interlocked.Exchange(ref _initialHoldReleased, 1) == 1)
-        {
-            return;
-        }
-
-        ReleaseHold();
-    }
+    public void CompleteSourceRegistration() => _initialHold.Dispose();
 
     /// <summary>
     /// Takes a further hold for the duration of a later batch of source creation. Counted, so
@@ -312,17 +308,21 @@ public class SourceMonitor : ILifecycleHandler
     {
         ArgumentNullException.ThrowIfNull(subject);
 
-        // Constructed before the fast-path check (not passed as null) so IsSatisfied's empty-scope
-        // warning can fire here too - a quiescent tree that never re-evaluates this wait would
-        // otherwise never see that diagnostic (see IsSatisfied's wait is not null and !wait.MarkWarned() guard).
-        var wait = new PendingWait(subject);
+        PendingWait wait;
         lock (_lock)
         {
-            if (IsSatisfied(subject, wait))
+            // Checked first with no PendingWait allocated: the common case for an application
+            // re-awaiting per operation is already satisfied. A null wait tells IsSatisfied to warn
+            // directly rather than deduplicate through MarkWarned/MarkStoppedWarned, since a single
+            // evaluation that is never re-run has no repeat warning to guard against - so a
+            // quiescent tree still sees its one diagnostic without ever allocating a PendingWait for
+            // it. Only the unsatisfied path below allocates one (and its TaskCompletionSource).
+            if (IsSatisfied(subject, null))
             {
                 return Task.CompletedTask;
             }
 
+            wait = new PendingWait(subject);
             _waits = _waits.Add(wait);
         }
 
@@ -368,8 +368,9 @@ public class SourceMonitor : ILifecycleHandler
         {
             // Warn once per wait, not on every re-evaluation - MarkWarned is called only here, right
             // before the warning fires, so a later pass that finds the branch matched again never
-            // burns the flag.
-            if (wait is not null && !wait.MarkWarned())
+            // burns the flag. A null wait (the one-shot fast-path check) always warns: that
+            // evaluation is never re-run, so there is no repeat to guard against.
+            if (wait is null || !wait.MarkWarned())
             {
                 Logger?.LogWarning(
                     "A synchronization wait on {Subject} has no in-scope source, and source registration is complete. " +
@@ -388,7 +389,12 @@ public class SourceMonitor : ILifecycleHandler
             return true;
         }
 
-        if (allInScopeStopped)
+        // Same one-shot treatment as the empty-scope warning above, and for the same reason: this
+        // wait can be re-evaluated again (e.g. by an unrelated Register/Unregister elsewhere in the
+        // tree) after it has already completed, in the window before its continuation removes it
+        // from _waits, so without a guard here it can log a second time for something that has not
+        // changed.
+        if (allInScopeStopped && (wait is null || !wait.MarkStoppedWarned()))
         {
             // Stopped is terminal, so this branch will never become live. Completing beats hanging,
             // but silence would look like success, so log it.
@@ -454,12 +460,37 @@ public class SourceMonitor : ILifecycleHandler
     {
         private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        private int _warned;
+        // Plain bools, not Interlocked: every caller of IsSatisfied (the only place that reads or
+        // sets these) already holds _lock throughout, so there is no concurrent access to guard
+        // against here.
+        private bool _warned;
+        private bool _stoppedWarned;
 
         public IInterceptorSubject Anchor { get; } = anchor;
 
         /// <summary>True once this wait has already logged its empty-scope warning.</summary>
-        public bool MarkWarned() => Interlocked.Exchange(ref _warned, 1) == 1;
+        public bool MarkWarned()
+        {
+            if (_warned)
+            {
+                return true;
+            }
+
+            _warned = true;
+            return false;
+        }
+
+        /// <summary>True once this wait has already logged its all-Stopped warning.</summary>
+        public bool MarkStoppedWarned()
+        {
+            if (_stoppedWarned)
+            {
+                return true;
+            }
+
+            _stoppedWarned = true;
+            return false;
+        }
 
         public void Complete() => _completion.TrySetResult();
 

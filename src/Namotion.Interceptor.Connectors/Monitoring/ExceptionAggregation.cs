@@ -1,3 +1,5 @@
+using System.Runtime.ExceptionServices;
+
 namespace Namotion.Interceptor.Connectors.Monitoring;
 
 /// <summary>
@@ -16,7 +18,9 @@ internal static class ExceptionAggregation
     {
         if (exceptions is { Count: 1 })
         {
-            throw exceptions[0];
+            // ExceptionDispatchInfo preserves the original stack trace; a bare `throw exceptions[0]`
+            // resets it to this rethrow site, hiding where the exception actually came from.
+            ExceptionDispatchInfo.Capture(exceptions[0]).Throw();
         }
 
         if (exceptions is { Count: > 1 })

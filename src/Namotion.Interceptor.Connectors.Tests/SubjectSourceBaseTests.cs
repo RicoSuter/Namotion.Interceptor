@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Monitoring;
@@ -1050,6 +1051,51 @@ public class SubjectSourceBaseTests
         Assert.True(cleanupRan, "Cleanup-on-failure block should run before re-throwing.");
         Assert.True(spawnedTaskCancelled, "Spawned task should observe cancellation from the cleanup helper.");
         Assert.True(spawnedTaskCompleted, "Spawned task should run to completion (cancelled), not be left dangling.");
+    }
+
+    [Fact]
+    public void WhenSubjectSourceBaseDeclaresState_ThenItReadsLockFreeNotUnderStateLock()
+    {
+        // Arrange
+        // The docs' lock-free getter contract (docs/connectors-monitoring.md: State, LastSynchronizedAt
+        // and RootSubject must not acquire any lock held while StateChanged is raised) has no dynamic
+        // test: SourceMonitor reads source.State while holding its own _lock, and TransitionTo raises
+        // StateChanged while holding _stateLock - a regression that made State take _stateLock too
+        // would only deadlock under a genuinely concurrent, cross-thread interleaving between a
+        // transitioning thread and a monitor read, not something a unit test can force deterministically.
+        // Same not-dynamically-testable shape as the drain fence pinned in SourceSubscriptionTests
+        // (WhenTheDrainLoopClearsTheDrainingFlag...); use the same static-scan technique: pin the
+        // literal implementation actually used, so a regression back to a locking getter is at least
+        // caught here, even though the deadlock it would reintroduce is not independently exercised.
+        var sourceFilePath = GetSubjectSourceBaseFilePath();
+        var source = File.ReadAllText(sourceFilePath);
+        var stateProperty = ExtractExpressionBodiedMember(source, "public SourceState State =>");
+
+        // Act & Assert
+        Assert.Contains("Volatile.Read", stateProperty);
+        Assert.DoesNotContain("_stateLock", stateProperty);
+        Assert.DoesNotContain("lock (", stateProperty);
+    }
+
+    private static string ExtractExpressionBodiedMember(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Expected to find '{signature}' in the source file.");
+
+        var end = source.IndexOf(';', start);
+        Assert.True(end >= 0, $"Expected '{signature}' to end with a ';' (expression-bodied member).");
+
+        return source[start..(end + 1)];
+    }
+
+    private static string GetSubjectSourceBaseFilePath([CallerFilePath] string testFilePath = "")
+    {
+        // CallerFilePath is resolved at this call's compile time, from this test file's own path -
+        // resilient to whatever the test runner's current directory happens to be (bin/Debug/...),
+        // unlike a path built from Environment.CurrentDirectory or the test assembly's location.
+        var testDirectory = Path.GetDirectoryName(testFilePath)!;
+        return Path.GetFullPath(Path.Combine(
+            testDirectory, "..", "Namotion.Interceptor.Connectors", "SubjectSourceBase.cs"));
     }
 
     /// <summary>
