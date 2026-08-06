@@ -809,22 +809,6 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void WhenConvertedToRollbackChange_ThenOldAndNewValuesAreSwapped()
-    {
-        // Arrange
-        var change = SubjectPropertyChange.Create(
-            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
-            10, 20);
-
-        // Act
-        var rollback = change.ToRollbackChange();
-
-        // Assert
-        Assert.Equal(20, rollback.GetOldValue<int>());
-        Assert.Equal(10, rollback.GetNewValue<int>());
-    }
-
-    [Fact]
     public void WhenConvertedToRollbackChange_ThenPropertyOriginAndTimestampsArePreserved()
     {
         // Arrange
@@ -847,9 +831,8 @@ public class SubjectPropertyChangeTests
     [Fact]
     public void WhenConvertedToRollbackChange_ThenRevisionIsReset()
     {
-        // Arrange: a rollback describes a write to perform, not a commit that happened. Carrying the
-        // committed revision forward would give two changes on one property the same revision, the tie
-        // flush merging relies on being impossible.
+        // Arrange: a rollback describes a write to perform, not a commit that happened, and Revision is
+        // only meaningful for the latter. Applying it commits with a revision of its own.
         var change = SubjectPropertyChange.Create(
             _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "old", "new", 7L);
@@ -864,15 +847,19 @@ public class SubjectPropertyChangeTests
     [Fact]
     public void WhenConvertedToRollbackChangeOnEveryStoragePath_ThenTypedValuesRoundTrip()
     {
-        // Arrange: the swap moves the storage fields directly, so each of the three storage paths has
-        // to survive it with its stored type intact rather than degrading to a boxed object.
+        // Arrange: the swap moves the storage fields directly, so every storage path has to survive it
+        // with its stored type intact rather than degrading to a boxed object.
         var oldReference = new CustomClass { Id = 1 };
         var newReference = new CustomClass { Id = 2 };
 
         var inlineChange = SubjectPropertyChange.Create(
             _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
+        var nullableChange = SubjectPropertyChange.Create<int?>(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
         var stringChange = SubjectPropertyChange.Create(
             _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, "old", "new");
+        var nullStringChange = SubjectPropertyChange.Create<string?>(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, null, "new");
         var referenceChange = SubjectPropertyChange.Create(
             _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldReference, newReference);
@@ -882,35 +869,25 @@ public class SubjectPropertyChangeTests
 
         // Act
         var inlineRollback = inlineChange.ToRollbackChange();
+        var nullableRollback = nullableChange.ToRollbackChange();
         var stringRollback = stringChange.ToRollbackChange();
+        var nullStringRollback = nullStringChange.ToRollbackChange();
         var referenceRollback = referenceChange.ToRollbackChange();
         var oversizedRollback = oversizedChange.ToRollbackChange();
 
         // Assert
         Assert.Equal(2, inlineRollback.GetOldValue<int>());
         Assert.Equal(1, inlineRollback.GetNewValue<int>());
+        Assert.Equal(2, nullableRollback.GetOldValue<int?>());
+        Assert.Equal(1, nullableRollback.GetNewValue<int?>());
         Assert.Equal("new", stringRollback.GetOldValue<string>());
         Assert.Equal("old", stringRollback.GetNewValue<string>());
+        Assert.Equal("new", nullStringRollback.GetOldValue<string>());
+        Assert.Null(nullStringRollback.GetNewValue<string>());
         Assert.Same(newReference, referenceRollback.GetOldValue<CustomClass>());
         Assert.Same(oldReference, referenceRollback.GetNewValue<CustomClass>());
         Assert.Equal(2L, oversizedRollback.GetOldValue<OversizedCustomStruct>().Value1);
         Assert.Equal(1L, oversizedRollback.GetNewValue<OversizedCustomStruct>().Value1);
-    }
-
-    [Fact]
-    public void WhenConvertedToRollbackChangeWithNullString_ThenNullMovesToTheNewValue()
-    {
-        // Arrange
-        var change = SubjectPropertyChange.Create<string?>(
-            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
-            null, "new");
-
-        // Act
-        var rollback = change.ToRollbackChange();
-
-        // Assert
-        Assert.Equal("new", rollback.GetOldValue<string>());
-        Assert.Null(rollback.GetNewValue<string>());
     }
 
     [Fact]
@@ -948,9 +925,9 @@ public class SubjectPropertyChangeTests
     [Fact]
     public void WhenConvertedToRollbackChange_ThenValuesKeepTheirDeclaredStorageType()
     {
-        // Arrange: moving the storage rather than re-boxing through object means a rollback answers
-        // typed reads exactly as the change it inverts does, including refusing a narrower type.
-        // A nullable stores its own type inline, so int? does not read back as int on either.
+        // Arrange: moving the storage rather than re-boxing through object means a rollback refuses a
+        // narrower type exactly as the change it inverts does. A nullable stores its own type inline,
+        // so int? does not read back as int on either of them.
         var change = SubjectPropertyChange.Create<int?>(
             _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
 
@@ -958,8 +935,6 @@ public class SubjectPropertyChangeTests
         var rollback = change.ToRollbackChange();
 
         // Assert
-        Assert.Equal(2, rollback.GetOldValue<int?>());
-        Assert.Equal(1, rollback.GetNewValue<int?>());
         Assert.False(rollback.TryGetOldValue<int>(out _));
         Assert.False(change.TryGetOldValue<int>(out _));
     }
