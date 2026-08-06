@@ -24,7 +24,7 @@ builder.Services.AddOpcUaSubjectClientSource<Root>("opc.tcp://localhost:4840", "
 builder.Services.AddHostedService<Worker>();
 ```
 
-Call `WithSourceMonitoring()` before constructing any subject in the tree, as the sample above does: tree membership is learned only from lifecycle events (attach and detach) that fire after the monitor is registered as a handler on the context, not resolved retroactively for subjects that already exist. Adding source monitoring to a context whose tree is already built leaves every subject constructed before that call, including the root, a permanent non-member: `CurrentState` then reports `Unclaimed` for their properties even though the properties are genuinely claimed and in the tree, with no way to recover afterward short of rebuilding the tree under a newly-monitored context.
+`WithSourceMonitoring()` seeds tree membership from every subject already attached to the context at the moment it is called, atomically with the monitor becoming a lifecycle handler. So calling it after part of the tree already exists works correctly: a subject built earlier, including the root, is picked up by the seed rather than left a permanent non-member. The sample above calls it first only because that is the natural place in application startup, not because the order matters here.
 
 ```csharp
 using Namotion.Interceptor.Connectors.Monitoring;

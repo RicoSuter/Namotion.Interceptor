@@ -125,6 +125,14 @@ public class SourceMonitor : ILifecycleHandler
     /// </summary>
     internal bool IsMember(IInterceptorSubject subject) => _membership.TryGetValue(subject, out _);
 
+    /// <summary>
+    /// Marks <paramref name="subject"/> as a tree member with no event published. Used by
+    /// WithSourceMonitoring to seed membership for subjects that attached before this monitor
+    /// registered as a lifecycle handler, so CurrentState resolves correctly for them without ever
+    /// treating the seed itself as an attach.
+    /// </summary>
+    internal void SeedMembership(IInterceptorSubject subject) => _membership.AddOrUpdate(subject, null);
+
     private void ScanSubject(IInterceptorSubject subject, SourceEventKind kind)
     {
         var timestamp = DateTimeOffset.UtcNow;

@@ -80,6 +80,27 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     /// <summary>
+    /// Invokes <paramref name="action"/> for every currently attached subject while holding the lock
+    /// that serializes attach and detach, so no lifecycle change can interleave with the walk.
+    /// Register a handler first, then call this: together they observe every subject exactly once,
+    /// with no gap and no duplicate.
+    /// </summary>
+    /// <remarks>
+    /// The action runs under the lifecycle lock. It must be fast, must not block, and must not cause
+    /// an attach or detach, directly or indirectly.
+    /// </remarks>
+    public void ForEachAttachedSubject(Action<IInterceptorSubject> action)
+    {
+        lock (_attachedSubjects)
+        {
+            foreach (var subject in _attachedSubjects.Keys)
+            {
+                action(subject);
+            }
+        }
+    }
+
+    /// <summary>
     /// Attaches a subject directly to a context (root subject, no property reference).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
