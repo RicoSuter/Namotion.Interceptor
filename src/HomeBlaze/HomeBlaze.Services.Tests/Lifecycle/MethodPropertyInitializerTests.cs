@@ -525,6 +525,33 @@ public class MethodPropertyInitializerTests
         // Assert
         Assert.Empty(methods);
     }
+
+    [Fact]
+    public void WhenSubjectMovesBetweenParents_ThenMethodPropertiesAreNotAddedTwice()
+    {
+        // Arrange
+        var context = CreateContext();
+        var first = new MethodTestSubjectHolder(context);
+        var second = new MethodTestSubjectHolder(context);
+        var subject = new MethodTestSubject();
+
+        // Act: the move detaches the subject, so it is registered again under the new parent and
+        // every lifecycle handler runs a second time over method properties that are already there.
+        first.Child = subject;
+        first.Child = null;
+        second.Child = subject;
+
+        // Assert
+        var registered = ((IInterceptorSubject)subject).TryGetRegisteredSubject();
+        Assert.NotNull(registered);
+        Assert.NotNull(registered.TryGetProperty("Stop"));
+    }
+}
+
+[InterceptorSubject]
+public partial class MethodTestSubjectHolder
+{
+    public partial MethodTestSubject? Child { get; set; }
 }
 
 public interface IMethodTestInterface

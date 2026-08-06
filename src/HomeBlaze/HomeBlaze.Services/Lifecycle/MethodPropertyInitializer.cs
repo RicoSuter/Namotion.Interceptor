@@ -81,6 +81,15 @@ public class MethodPropertyInitializer : ILifecycleHandler
             ? method.Name[..^5]
             : method.Name;
 
+        // discoveredMethods only dedupes within one pass, for a method declared on both the class
+        // and an interface. This handler runs again every time the subject is re-attached, which
+        // includes moving it between parents, and the method property added last time is still on
+        // the subject, so adding it again would throw.
+        if (registeredSubject.TryGetProperty(propertyName) is not null)
+        {
+            return;
+        }
+
         var parameters = method.GetParameters()
             .Select(parameter =>
             {
