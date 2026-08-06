@@ -34,7 +34,7 @@ internal static class Diagnostics
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Records are excluded because the generated plumbing breaks value equality and with-expressions.");
+        description: "Records and record structs are excluded because the generated plumbing breaks value equality and with-expressions.");
 
     public static readonly DiagnosticDescriptor GenericTypeNotSupported = new(
         id: "NI0009",
@@ -44,6 +44,20 @@ internal static class Diagnostics
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "The generated declaration does not carry type parameters or constraints.");
+
+    /// <summary>
+    /// Reported instead of <see cref="GenericTypeNotSupported"/> when the subject itself is not
+    /// generic but a containing type is: Roslyn's <c>INamedTypeSymbol.IsGenericType</c> is true for
+    /// a non-generic type nested inside a generic one, so the subject cannot be blamed by name here.
+    /// </summary>
+    public static readonly DiagnosticDescriptor GenericContainingTypeNotSupported = new(
+        id: "NI0009",
+        title: "Generic interceptor subjects are not supported",
+        messageFormat: "Interceptor subject '{0}' is nested in generic containing type '{1}', which is not supported",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The generated declaration does not carry type parameters or constraints, and neither can any containing type.");
 
     public static readonly DiagnosticDescriptor FileTypeNotSupported = new(
         id: "NI0010",

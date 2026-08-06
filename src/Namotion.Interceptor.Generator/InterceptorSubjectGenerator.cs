@@ -16,7 +16,14 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
     {
         var classWithAttributeProvider = context.SyntaxProvider
             .CreateSyntaxProvider(
-                predicate: (node, _) => node is TypeDeclarationSyntax { AttributeLists.Count: > 0 },
+                // A struct or interface can never be a valid subject (InterceptorSubjectAttribute's
+                // AttributeUsage is Class-only, so the compiler already reports CS0592 on those),
+                // so excluding them here keeps GetDeclaredSymbol and GetSemanticModel below from
+                // running per attributed struct, record and interface on every keystroke in an IDE.
+                // Records still reach NI0003 below, since that case is silent from the compiler.
+                predicate: (node, _) =>
+                    node is ClassDeclarationSyntax { AttributeLists.Count: > 0 } or
+                    RecordDeclarationSyntax { AttributeLists.Count: > 0 },
                 transform: (ctx, ct) =>
                 {
                     var model = ctx.SemanticModel;
@@ -41,7 +48,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                         ? new
                         {
                             Model = model,
-                            ClassNode = typeDeclaration,
+                            TypeDeclaration = typeDeclaration,
                             TypeSymbol = typeSymbol
                         }
                         : null;
@@ -57,7 +64,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                 return new
                 {
                     tuple.Model,
-                    tuple.ClassNode,
+                    tuple.TypeDeclaration,
                     TypeSymbol = typeSymbol,
                     TypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
                 };
@@ -76,7 +83,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
             {
                 var extraction = SubjectMetadataExtractor.Extract(
                     cls.TypeSymbol,
-                    cls.ClassNode,
+                    cls.TypeDeclaration,
                     cls.Model,
                     spc.CancellationToken);
 
@@ -99,7 +106,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
             {
                 // The full stack is preserved in the emitted file; Task 11 adds NI0004 so the
                 // failure is also visible in the build output.
-                var className = cls.ClassNode.Identifier.ValueText;
+                var className = cls.TypeDeclaration.Identifier.ValueText;
                 spc.AddSource($"{className}.g.cs", SourceText.From($"/* {ex} */", Encoding.UTF8));
             }
         });
