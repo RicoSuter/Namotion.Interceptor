@@ -237,12 +237,16 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
 
     /// <summary>
     /// Copies this change with its old and new values swapped, without re-boxing them, so applying the
-    /// result undoes this change. Carries no revision on purpose: it describes a write to perform, not a
-    /// commit that happened. Applying it locally goes through the terminal and takes a fresh, higher
-    /// revision of its own, which is what consumers observe. Copying this change's revision instead would
-    /// give two changes on one property the same revision, the tie the flush merging relies on being
-    /// impossible.
+    /// result undoes this change.
     /// </summary>
+    /// <remarks>
+    /// The result carries no <see cref="Revision"/>: it describes a write to perform, not a commit that
+    /// happened, and a revision only means anything for the latter. Applying it produces a commit of its
+    /// own, with its own revision. This is deliberately unlike <see cref="WithOrigin"/> and
+    /// <see cref="MergeWithNewer"/>, which both carry the revision through.
+    /// Both values keep the type they were stored with, so a typed read of the result needs the same type
+    /// as a typed read of this change: swapping the values does not widen what they can be read as.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public SubjectPropertyChange ToRollbackChange() =>
         new(Property,

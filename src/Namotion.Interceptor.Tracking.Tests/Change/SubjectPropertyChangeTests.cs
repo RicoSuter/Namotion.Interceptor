@@ -914,32 +914,112 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void WhenConvertedToRollbackChange_ThenNothingIsAllocated()
+    public void WhenConvertedToRollbackChangeAndReadAsObject_ThenValuesAreSwapped()
     {
-        // Arrange: the conversion moves the storage fields instead of round-tripping both values
-        // through object, so it must not allocate. Rebuilding it through Create<object?> would cost
-        // two boxed holders per reverted change, plus a box per inline value.
-        var change = SubjectPropertyChange.Create(
+        // Arrange: both revert paths read a rollback through object, so that is the read that has to
+        // hold on every storage path.
+        var inlineChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
+        var nullableChange = SubjectPropertyChange.Create<int?>(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, null, 2);
+        var stringChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, "old", "new");
+        var referenceChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new CustomClass { Id = 1 }, new CustomClass { Id = 2 });
+
+        // Act
+        var inlineRollback = inlineChange.ToRollbackChange();
+        var nullableRollback = nullableChange.ToRollbackChange();
+        var stringRollback = stringChange.ToRollbackChange();
+        var referenceRollback = referenceChange.ToRollbackChange();
+
+        // Assert
+        Assert.Equal(2, inlineRollback.GetOldValue<object?>());
+        Assert.Equal(1, inlineRollback.GetNewValue<object?>());
+        Assert.Equal(2, nullableRollback.GetOldValue<object?>());
+        Assert.Null(nullableRollback.GetNewValue<object?>());
+        Assert.Equal("new", stringRollback.GetOldValue<object?>());
+        Assert.Equal("old", stringRollback.GetNewValue<object?>());
+        Assert.Equal(2, Assert.IsType<CustomClass>(referenceRollback.GetOldValue<object?>()).Id);
+        Assert.Equal(1, Assert.IsType<CustomClass>(referenceRollback.GetNewValue<object?>()).Id);
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChange_ThenValuesKeepTheirDeclaredStorageType()
+    {
+        // Arrange: moving the storage rather than re-boxing through object means a rollback answers
+        // typed reads exactly as the change it inverts does, including refusing a narrower type.
+        // A nullable stores its own type inline, so int? does not read back as int on either.
+        var change = SubjectPropertyChange.Create<int?>(
             _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
 
+        // Act
+        var rollback = change.ToRollbackChange();
+
+        // Assert
+        Assert.Equal(2, rollback.GetOldValue<int?>());
+        Assert.Equal(1, rollback.GetNewValue<int?>());
+        Assert.False(rollback.TryGetOldValue<int>(out _));
+        Assert.False(change.TryGetOldValue<int>(out _));
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChange_ThenNothingIsAllocatedOnAnyStoragePath()
+    {
+        // Arrange: the conversion moves the storage fields instead of round-tripping both values
+        // through object. Rebuilding it through Create<object?> would cost two boxed holders per
+        // reverted change plus a box per inline value, so every storage path has to measure zero:
+        // measuring only the inline one would miss a partial revert on the two holder paths.
+        var inlineChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
+        var stringChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, "old", "new");
+        var referenceChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new CustomClass { Id = 1 }, new CustomClass { Id = 2 });
+        var oversizedChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new OversizedCustomStruct { Value1 = 1L }, new OversizedCustomStruct { Value1 = 2L });
+
+        // Act
+        var inlineAllocated = MeasureRollbackAllocations(inlineChange, c => c.GetNewValue<int>());
+        var stringAllocated = MeasureRollbackAllocations(stringChange, c => c.GetNewValue<string>().Length);
+        var referenceAllocated = MeasureRollbackAllocations(referenceChange, c => c.GetNewValue<CustomClass>().Id);
+        var oversizedAllocated = MeasureRollbackAllocations(
+            oversizedChange, c => (int)c.GetNewValue<OversizedCustomStruct>().Value1);
+
+        // Assert
+        Assert.Equal(0L, inlineAllocated);
+        Assert.Equal(0L, stringAllocated);
+        Assert.Equal(0L, referenceAllocated);
+        Assert.Equal(0L, oversizedAllocated);
+    }
+
+    /// <summary>
+    /// Converts <paramref name="change"/> in a tight loop and returns the bytes allocated. The read is
+    /// passed in as a non-capturing lambda, so its delegate is cached before the measured window and the
+    /// result is consumed, which keeps the conversion from being optimized away.
+    /// </summary>
+    private static long MeasureRollbackAllocations(
+        SubjectPropertyChange change, Func<SubjectPropertyChange, int> read)
+    {
         // Warm up so JIT compilation does not land inside the measured window.
         var accumulator = 0L;
         for (var i = 0; i < 100; i++)
         {
-            accumulator += change.ToRollbackChange().GetNewValue<int>();
+            accumulator += read(change.ToRollbackChange());
         }
 
-        // Act
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var i = 0; i < 1000; i++)
         {
-            accumulator += change.ToRollbackChange().GetNewValue<int>();
+            accumulator += read(change.ToRollbackChange());
         }
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        // Assert
-        Assert.Equal(0L, allocated);
-        Assert.Equal(1100L, accumulator);
+        Assert.NotEqual(0L, accumulator);
+        return allocated;
     }
 
     [Fact]
