@@ -54,9 +54,33 @@ public class RegistryHandlerOrderTests
             .ToArray();
 
         // Assert
-        Assert.True(
-            Array.IndexOf(handlers, nameof(SubjectRegistry)) < Array.IndexOf(handlers, nameof(ContextInheritanceHandler)),
-            $"Expected the registry ahead of the descent but resolved: {string.Join(" -> ", handlers)}");
+        var resolved = string.Join(" -> ", handlers);
+        var registryIndex = Array.IndexOf(handlers, nameof(SubjectRegistry));
+        var descentIndex = Array.IndexOf(handlers, nameof(ContextInheritanceHandler));
+
+        // Both must be present before comparing: IndexOf returns -1 for a missing entry, and -1 is
+        // less than any real index, so a chain that stopped resolving the registry would otherwise
+        // satisfy the ordering assertion.
+        Assert.True(registryIndex >= 0, $"Registry not resolved at all: {resolved}");
+        Assert.True(descentIndex >= 0, $"Inheritance handler not resolved at all: {resolved}");
+        Assert.True(registryIndex < descentIndex, $"Expected the registry ahead of the descent but resolved: {resolved}");
+    }
+
+    [Fact]
+    public void WhenParentTrackingIsAbsent_ThenRegistryParentEdgesResolveTheWholeChainDuringAttach()
+    {
+        // Arrange: tracking before registry with no parent tracking, which is the shape the README
+        // and the connector docs use. GetParents() is empty without ParentTrackingHandler, so the
+        // ancestor chain has to be walked over the registry's own parent edges instead.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new OrderNode(context) { Name = "root" };
+        var top = BuildDetachedSubtree(out var child);
+
+        // Act
+        root.Child = top;
+
+        // Assert
+        Assert.Equal(["middle", "top", "root"], child.AncestorsViaRegistryDuringAttach);
     }
 
     [Theory]
@@ -94,9 +118,8 @@ public class RegistryHandlerOrderTests
         // before the context handlers that deregister it, but its ancestors are processed further up
         // the descent and have already been deregistered by the time the callback reaches this
         // subject. The parent link outlives the registry entry, because ParentTrackingHandler clears
-        // it for this subject only after this callback returns. Both production chains
-        // (HomeBlaze SubjectContextFactory, variables2 ServiceConfiguration) already resolve the
-        // registry ahead, so this is the order they see today; the attribute makes it uniform.
+        // it for this subject only after this callback returns. Consumers that need ancestor state
+        // while detaching must therefore use GetParents() or state captured at attach time.
         Assert.Equal(1, child.ParentLinkCountDuringDetach);
         Assert.Empty(child.AncestorsVisibleDuringDetach);
     }
@@ -110,6 +133,8 @@ public partial class OrderNode : ILifecycleHandler
     public partial OrderNode? Child { get; set; }
 
     public string[] AncestorsVisibleDuringAttach { get; private set; } = [];
+
+    public string[] AncestorsViaRegistryDuringAttach { get; private set; } = [];
 
     public string[] AncestorsVisibleDuringDetach { get; private set; } = [];
 
@@ -125,12 +150,45 @@ public partial class OrderNode : ILifecycleHandler
         if (change.IsContextAttach)
         {
             AncestorsVisibleDuringAttach = CollectRegistryVisibleAncestors(this, []);
+            AncestorsViaRegistryDuringAttach = CollectAncestorsOverRegistryEdges(this, []);
         }
         else if (change.IsContextDetach)
         {
             ParentLinkCountDuringDetach = ((IInterceptorSubject)this).GetParents().Length;
             AncestorsVisibleDuringDetach = CollectRegistryVisibleAncestors(this, []);
         }
+    }
+
+    /// <summary>
+    /// Walks the registry's own parent edges rather than <see cref="ParentsHandlerExtensions.GetParents"/>,
+    /// so the chain is observable on a context that does not register parent tracking.
+    /// </summary>
+    private static string[] CollectAncestorsOverRegistryEdges(IInterceptorSubject subject, HashSet<IInterceptorSubject> visited)
+    {
+        if (!visited.Add(subject))
+        {
+            return [];
+        }
+
+        var registered = subject.TryGetRegisteredSubject();
+        if (registered is null)
+        {
+            return [];
+        }
+
+        var ancestors = new List<string>();
+        foreach (var parent in registered.Parents)
+        {
+            var parentSubject = parent.Property.Parent.Subject;
+            if (parentSubject is OrderNode node)
+            {
+                ancestors.Add(node.Name);
+            }
+
+            ancestors.AddRange(CollectAncestorsOverRegistryEdges(parentSubject, visited));
+        }
+
+        return ancestors.ToArray();
     }
 
     private static string[] CollectRegistryVisibleAncestors(IInterceptorSubject subject, HashSet<IInterceptorSubject> visited)
