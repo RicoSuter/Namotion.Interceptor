@@ -104,8 +104,13 @@ public class AttachOrderCharacterizationTests
     }
 
     [Fact]
-    public void WhenRegistryIsRegisteredLast_ThenItResolvesBehindContextInheritance()
+    public void WhenRegistryIsRegisteredLast_ThenItStillResolvesAheadOfContextInheritance()
     {
+        // The same order as when the registry is registered first. Its position used to be its
+        // registration index, so this configuration resolved it behind the descent; it now carries
+        // [RunsBefore] for both, which is what makes the ancestors-are-registered guarantee hold
+        // however the context was composed.
+
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -118,7 +123,7 @@ public class AttachOrderCharacterizationTests
 
         // Assert
         Assert.Equal(
-            ["ParentTrackingHandler", "ContextInheritanceHandler", "SubjectRegistry"],
+            ["SubjectRegistry", "ParentTrackingHandler", "ContextInheritanceHandler"],
             handlers.Select(handler => handler.GetType().Name).ToArray());
     }
 

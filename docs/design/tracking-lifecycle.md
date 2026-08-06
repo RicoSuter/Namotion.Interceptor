@@ -241,7 +241,9 @@ Reads of the count use `Volatile.Read`, because the `ConcurrentDictionary` it re
 
 ## Handler Order Depends on Resolved Position
 
-A handler's observed position is its **resolved** service position, not its registration position, and the two differ. `ServiceOrderResolver.OrderByDependencies` is Kahn's algorithm with a lowest-index tie-break behind a `[RunsFirst]`/`[RunsLast]` partitioning fast path. `ParentTrackingHandler` carries `[RunsBefore(typeof(ContextInheritanceHandler))]`, so it is always ahead of the inheritance handler. `SubjectRegistry` carries no ordering attribute at all, so where it lands is purely its registration index: ahead when `WithRegistry()` is called first, behind when it is called last.
+A handler's observed position is its **resolved** service position, not its registration position, and the two differ. `ServiceOrderResolver.OrderByDependencies` is Kahn's algorithm with a lowest-index tie-break behind a `[RunsFirst]`/`[RunsLast]` partitioning fast path, so a handler with no ordering attribute lands wherever its registration index puts it, and an unrelated registration elsewhere can move it.
+
+The two handlers this design depends on are pinned rather than left to that. `ParentTrackingHandler` carries `[RunsBefore(typeof(ContextInheritanceHandler))]`, and `SubjectRegistry` carries `[RunsBefore]` for both, so the resolved order is `SubjectRegistry`, `ParentTrackingHandler`, `ContextInheritanceHandler` however the context was composed. See "Handler Order Around the Descent" for what that buys. Characterization tests assert both registration orders, so a resolver change has to move one of them rather than move this quietly.
 
 For a three-level graph the difference is visible in the attach order a handler sees:
 
@@ -250,7 +252,7 @@ handler resolved BEFORE inheritance:  M2, M3, M1     (top-down)
 handler resolved AFTER  inheritance:  M3, M2, M1     (bottom-up)
 ```
 
-No issue records this. The parent-link design preserves it deliberately, which is the reason the link is published by the handler rather than by `LifecycleInterceptor`, and characterization tests cover both registration orders so that a future change to the resolver has to move a snapshot rather than move this quietly.
+The parent-link design preserves that split deliberately, which is the reason the link is published by the handler rather than by `LifecycleInterceptor`: publishing it earlier would give handlers ahead of the descent a child that resolves the graph, which is not what they see today.
 
 **One detach order did move, and in the direction of consistency.** The detach descent used to run only when the inherited edge was present, so a subject whose edge was absent, such as one attached in its own constructor and then placed under a parent, fell through to the explicit child recursion that runs after the whole handler chain. That produced a top-down cascade for exactly that shape while every other shape cascaded bottom-up. The descent now runs unconditionally at reference count zero, so every shape whose parent context carries `ContextInheritanceHandler` cascades bottom-up.
 
