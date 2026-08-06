@@ -221,7 +221,7 @@ public class WriteRetryQueueTests
         var sourceMock = new Mock<ISubjectSource>();
 
         var callCount = 0;
-        var tcs = new TaskCompletionSource();
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
