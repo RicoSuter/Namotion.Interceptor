@@ -49,11 +49,37 @@ public sealed class SubjectPropertyWriter
         {
             _updates = [];
             _generation++;
-        }
 
-        // Buffering starts exactly when the source has stopped trusting its live feed, on first
-        // connect and on every reconnect, including reconnects the base pump never sees.
-        (_source as SubjectSourceBase)?.TransitionTo(SourceState.Connecting);
+            // Buffering starts exactly when the source has stopped trusting its live feed, on first
+            // connect and on every reconnect, including reconnects the base pump never sees. Reported
+            // while still holding _lock, symmetric with LoadInitialStateAndResumeAsync's own
+            // TransitionTo(Synchronized) call below: both transitions are paired with the generation
+            // change that governs them so neither can be observed out of sync with it.
+            (_source as SubjectSourceBase)?.TransitionTo(SourceState.Connecting);
+        }
+    }
+
+    /// <summary>
+    /// Invalidates the current generation without touching the update buffer, for a connection loss
+    /// detected before the reconnect's own <see cref="StartBuffering"/> call runs.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="LoadInitialStateAndResumeAsync"/> call already in flight when the connection
+    /// drops captured the OLD generation before it started awaiting; without this call it has no way
+    /// to learn the connection went away mid-load; it would apply pre-outage data and report
+    /// Synchronized once its await returns, and that false state would persist until the next
+    /// reconnect cycle's own StartBuffering. Bumping the generation here makes that in-flight call's
+    /// own check see itself as superseded, so it discards instead. Deliberately does not reset
+    /// _updates the way StartBuffering does: replacing the buffer here would discard whatever has
+    /// been collected since the outage was detected, and the reconnect's own StartBuffering, which
+    /// runs later, is what actually needs a fresh buffer to start from.
+    /// </remarks>
+    internal void InvalidateGeneration()
+    {
+        lock (_lock)
+        {
+            _generation++;
+        }
     }
 
     /// <summary>
@@ -76,7 +102,6 @@ public sealed class SubjectPropertyWriter
 
         var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
 
-        var superseded = false;
         lock (_lock)
         {
             if (generation != _generation)
@@ -86,50 +111,52 @@ public sealed class SubjectPropertyWriter
                 // the newer cycle has already written (or will write), and reporting Synchronized
                 // would certify that stale data as current. Discard the apply action entirely, don't
                 // touch _updates (the newer cycle owns that buffer), and skip the report below.
-                superseded = true;
                 _logger.LogDebug("LoadInitialStateAndResumeAsync discarded a stale snapshot superseded by a later reconnect.");
+                return;
+            }
+
+            applyAction?.Invoke();
+
+            // Replay previously buffered updates
+            var updates = _updates;
+            if (updates is null)
+            {
+                // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
+                // This is safe - it means another reconnection cycle already loaded state and replayed updates.
+                _logger.LogDebug("LoadInitialStateAndResumeAsync called but updates already replayed by concurrent reconnection.");
             }
             else
             {
-                applyAction?.Invoke();
-
-                // Replay previously buffered updates
-                var updates = _updates;
-                if (updates is null)
+                foreach (var action in updates)
                 {
-                    // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
-                    // This is safe - it means another reconnection cycle already loaded state and replayed updates.
-                    _logger.LogDebug("LoadInitialStateAndResumeAsync called but updates already replayed by concurrent reconnection.");
-                }
-                else
-                {
-                    foreach (var action in updates)
+                    try
                     {
-                        try
-                        {
-                            action();
-                        }
-                        catch (Exception e)
-                        {
-                            _logger.LogError(e, "Failed to apply subject update.");
-                        }
+                        action();
                     }
-
-                    // Must be after replay: Write() reads _updates without lock on the fast path.
-                    _updates = null;
+                    catch (Exception e)
+                    {
+                        _logger.LogError(e, "Failed to apply subject update.");
+                    }
                 }
+
+                // Must be after replay: Write() reads _updates without lock on the fast path.
+                _updates = null;
             }
-        }
 
-        if (superseded)
-        {
-            return;
+            // Reported while still holding _lock, atomically with the generation check above: this
+            // is the only place proven not-superseded. Reporting it after releasing the lock (as
+            // before) left a gap in which a StartBuffering landing between the check and the report
+            // would go unnoticed, so a stale cycle could still certify Synchronized - for the entire
+            // duration of the reconnect that superseded it, since the genuine cycle's own later
+            // transition to the same state is then a silent no-op (see TransitionTo).
+            // Note: this nests SubjectSourceBase's _stateLock inside this writer's _lock, and
+            // TransitionTo can itself synchronously invoke a registered SourceMonitor's
+            // OnSourceStateChanged handler, which takes the monitor's own _lock. That fixed order -
+            // writer._lock -> _stateLock -> monitor._lock - is never reversed anywhere in this
+            // codebase (nothing takes this writer's _lock while holding either of the other two), so
+            // it cannot deadlock.
+            (_source as SubjectSourceBase)?.TransitionTo(SourceState.Synchronized);
         }
-
-        // Both remaining paths mean state has been loaded and replayed, by this call or a concurrent
-        // one at the SAME generation, so both fall through to a single report rather than duplicating
-        // the call.
-        (_source as SubjectSourceBase)?.TransitionTo(SourceState.Synchronized);
     }
 
     /// <summary>

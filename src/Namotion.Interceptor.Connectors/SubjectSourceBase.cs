@@ -64,8 +64,19 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// call this from a helper object outside its own inheritance hierarchy (SessionManager for
     /// OpcUaSubjectClientSource) needs an internal forwarder on that source; see
     /// OpcUaSubjectClientSource for the pattern.
+    /// <para>
+    /// Also invalidates the property writer's generation (see
+    /// <see cref="SubjectPropertyWriter.InvalidateGeneration"/>): an initial load already in flight
+    /// when the connection drops must not apply the pre-outage snapshot it eventually returns, or
+    /// certify it as Synchronized. Without this, that stale report would stand until the reconnect's
+    /// own StartBuffering runs - the whole tail of the in-flight load, not a narrow race.
+    /// </para>
     /// </remarks>
-    protected void ReportConnectionLost() => TransitionTo(SourceState.Connecting);
+    protected void ReportConnectionLost()
+    {
+        _propertyWriter.InvalidateGeneration();
+        TransitionTo(SourceState.Connecting);
+    }
 
     /// <summary>
     /// Moves to <paramref name="newState"/> and publishes the change, or does nothing when the

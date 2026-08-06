@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -222,6 +223,112 @@ public class SubjectPropertyWriterTests
 
         // Assert
         Assert.False(staleApplied, "The superseded cycle's stale snapshot must never be applied.");
+        Assert.Equal(SourceState.Connecting, source.State);
+    }
+
+    [Fact]
+    public async Task WhenLoadInitialStateAndResumeCompletesNonSuperseded_ThenTheSynchronizedReportRunsWhileTheWriterLockIsHeld()
+    {
+        // Arrange
+        // The bug this pins is a narrow window (demonstrated only under a dedicated stress harness,
+        // not reliably within a unit test's runtime) between the generation check passing and the
+        // Synchronized report actually firing: a StartBuffering landing in that gap left the report
+        // unguarded by the very check that was supposed to suppress it for a superseded cycle. The
+        // fix closes the gap structurally by moving the report inside the same lock as the check, so
+        // rather than trying to force the race itself, this test verifies the structural invariant
+        // the fix establishes directly: StateChanged for Synchronized must fire while this writer's
+        // own _lock is held. A background thread's non-blocking TryEnter on that same Lock instance
+        // fails if and only if the reporting thread (running this handler, reentrant on _stateLock
+        // per the documented StateChanged contract) still holds it.
+        var context = InterceptorSubjectContext.Create();
+        var person = new Person(context);
+        var source = new TestSubjectSource(person, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = _ => Task.FromResult<Action?>(null),
+        };
+        var writer = new SubjectPropertyWriter(source, NullLogger.Instance);
+
+        var lockField = typeof(SubjectPropertyWriter).GetField("_lock", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var writerLock = (Lock)lockField.GetValue(writer)!;
+
+        bool? lockWasHeldDuringReport = null;
+        source.StateChanged += (_, sourceEvent) =>
+        {
+            if (sourceEvent.NewState != SourceState.Synchronized)
+            {
+                return;
+            }
+
+            // Probe from another thread: this thread already owns _stateLock (reentrant) and, if the
+            // fix is in place, _lock too, so a same-thread TryEnter would prove nothing either way.
+            var acquiredByOtherThread = false;
+            var probe = new Thread(() => acquiredByOtherThread = writerLock.TryEnter());
+            probe.Start();
+            probe.Join();
+            if (acquiredByOtherThread)
+            {
+                writerLock.Exit();
+            }
+
+            lockWasHeldDuringReport = !acquiredByOtherThread;
+        };
+
+        // Act
+        writer.StartBuffering();
+        await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(lockWasHeldDuringReport,
+            "Expected the Synchronized report to run while the writer's own _lock is held, " +
+            "atomically with the generation check that decides whether to report at all.");
+    }
+
+    [Fact]
+    public async Task WhenConnectionLossIsReportedWhileALoadIsInFlight_ThenTheInFlightLoadIsDiscarded()
+    {
+        // Arrange
+        // ReportConnectionLost fires ahead of the reconnect's own StartBuffering (which is what
+        // would otherwise bump the generation). Without invalidating the generation here too, a load
+        // already in flight when the connection drops has no way to learn that, applies pre-outage
+        // data once it completes, and certifies Synchronized - a false state that would then persist
+        // until the next reconnect cycle actually calls StartBuffering.
+        //
+        // This must drive the SOURCE's own internal writer (reached via reflection), not a
+        // standalone one: ReportConnectionLost calls SubjectSourceBase's own _propertyWriter field
+        // directly, so a separate writer instance would never observe the invalidation and the test
+        // would pass for the wrong reason.
+        var context = InterceptorSubjectContext.Create();
+        var person = new Person(context);
+
+        var loadEntered = new TaskCompletionSource();
+        var releaseLoad = new TaskCompletionSource();
+        var applied = false;
+
+        var source = new TestSubjectSource(person, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = async _ =>
+            {
+                loadEntered.TrySetResult();
+                await releaseLoad.Task;
+                return (Action?)(() => applied = true);
+            },
+        };
+
+        var writerField = typeof(SubjectSourceBase).GetField("_propertyWriter", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var writer = (SubjectPropertyWriter)writerField.GetValue(source)!;
+
+        // Act
+        writer.StartBuffering();                                    // generation 1
+        var loadTask = writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
+        await loadEntered.Task;                                     // load is now blocked mid-flight
+
+        source.SimulateConnectionLost();                             // does NOT call StartBuffering
+
+        releaseLoad.SetResult();
+        await loadTask;
+
+        // Assert
+        Assert.False(applied, "A load that completes after a reported connection loss must not apply pre-outage data.");
         Assert.Equal(SourceState.Connecting, source.State);
     }
 }
