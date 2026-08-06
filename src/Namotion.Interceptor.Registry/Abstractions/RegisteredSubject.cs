@@ -329,21 +329,16 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
-        // Before the subject is touched: AddProperties is last-wins, so throwing after it would
-        // leave a declared property carrying the caller's dynamic getter. AddPropertyInternal
-        // repeats the check under the lock, where it also covers a concurrent add.
-        ThrowIfPropertyExists(name);
-
-        Subject.AddProperties(new SubjectPropertyMetadata(
+        var metadata = new SubjectPropertyMetadata(
             name,
             type,
             attributes,
             getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
             setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue?.Invoke(s), setValue) : null,
             isIntercepted: true,
-            isDynamic: true));
+            isDynamic: true);
 
-        var property = AddPropertyInternal(name, type, attributes);
+        var property = AddPropertyInternal(name, type, metadata, attributes);
 
         // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
         // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
@@ -367,13 +362,20 @@ public class RegisteredSubject
         }
     }
 
-    private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
+    private RegisteredSubjectProperty AddPropertyInternal(
+        string name, Type type, SubjectPropertyMetadata metadata, Attribute[] attributes)
     {
         var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
 
         lock (_lock)
         {
+            // The rejection and both writes are one step. The rebuild below would reject a duplicate
+            // on its own, but only after the subject had been written to, and the subject's own add
+            // is last-wins, so a rejected call would still have replaced what was there. Checking
+            // outside the lock instead would leave the same hole open to a second thread.
             ThrowIfPropertyExists(subjectProperty.Name);
+
+            Subject.AddProperties(metadata);
 
             var newProperties = _properties
                 .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
