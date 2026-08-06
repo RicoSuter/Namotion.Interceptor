@@ -20,7 +20,7 @@ public partial class Sensor : ISensor
     public partial double Value { get; set; }
 }";
 
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
         var generatedSource = generated.SingleSource();
 
         Assert.Contains(@"""Status""", generatedSource);
@@ -47,7 +47,7 @@ public partial class TemperatureSensor : ITemperatureSensor
     public partial double Celsius { get; set; }
 }";
 
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
         var generatedSource = generated.SingleSource();
 
         Assert.Contains(@"""Fahrenheit""", generatedSource);
@@ -77,7 +77,7 @@ public partial class Implementation : IDerived
     public partial double Value { get; set; }
 }";
 
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
         var generatedSource = generated.SingleSource();
 
         Assert.Contains(@"""BaseStatus""", generatedSource);
@@ -102,7 +102,7 @@ public partial class Sensor : ISensor
     public partial string Name { get; set; }
 }";
 
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
         var generatedSource = generated.SingleSource();
 
         // Name should be intercepted (from class), not from interface
@@ -135,7 +135,7 @@ public partial class WeatherStation : IHasTemperature, IHasHumidity
     public partial double Humidity { get; set; }
 }";
 
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
         var generatedSource = generated.SingleSource();
 
         Assert.Contains(@"""IsHot""", generatedSource);
@@ -163,7 +163,7 @@ public partial class Diamond : IA, IB
 }";
 
         // Should not throw, and should include Shared once
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
         var generatedSource = generated.SingleSource();
 
         // Count occurrences of "Shared" in DefaultProperties
@@ -190,7 +190,7 @@ public partial class IntSensor : ISensor<int>
     public partial int Value { get; set; }
 }";
 
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
         var generatedSource = generated.SingleSource();
 
         Assert.Contains(@"""TypeName""", generatedSource);

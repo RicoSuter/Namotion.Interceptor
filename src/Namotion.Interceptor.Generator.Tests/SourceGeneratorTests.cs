@@ -17,7 +17,7 @@ public partial class SampleSubject
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
         return Verify(generated.SingleSource()).UseDirectory("Snapshots");
@@ -50,7 +50,7 @@ public partial class ClassWithoutInterceptorSubject
 ";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
         return Verify(generated.SingleSource()).UseDirectory("Snapshots");
@@ -78,7 +78,7 @@ public partial class Teacher : Person
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
         return Verify(generated.AllSources()).UseDirectory("Snapshots");
@@ -104,7 +104,7 @@ namespace TestNamespace
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
         return Verify(generated.SingleSource()).UseDirectory("Snapshots");
@@ -133,7 +133,7 @@ namespace TestNamespace
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
         return Verify(generated.SingleSource()).UseDirectory("Snapshots");
@@ -153,7 +153,7 @@ public partial class SampleSubject
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
         return Verify(generated.SingleSource()).UseDirectory("Snapshots");
@@ -173,7 +173,7 @@ public partial class SampleSubject
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
         return Verify(generated.SingleSource()).UseDirectory("Snapshots");
@@ -202,7 +202,7 @@ public partial class DimmableLight : Light
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
         return Verify(generated.AllSources()).UseDirectory("Snapshots");

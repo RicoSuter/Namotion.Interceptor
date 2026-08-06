@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Xunit;
 
 namespace Namotion.Interceptor.Generator.Tests;
 
@@ -44,6 +45,23 @@ internal static class GeneratorTestHost
             outputCompilation.GetDiagnostics()
                 .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
                 .ToList());
+    }
+
+    /// <summary>
+    /// Runs the generator and fails the test if the resulting compilation has any error.
+    /// Use for inputs that are themselves valid C#. Inputs that are invalid by construction
+    /// (CS0754, CS0592) must use <see cref="Run"/> and assert on the expected error instead.
+    /// </summary>
+    public static GeneratorRunResult RunExpectingCleanCompilation(string source)
+    {
+        var result = Run(source);
+
+        Assert.True(
+            result.CompilationErrors.Count == 0,
+            "Generated code did not compile:" + Environment.NewLine +
+            string.Join(Environment.NewLine, result.CompilationErrors.Select(d => d.ToString())));
+
+        return result;
     }
 
     /// <summary>

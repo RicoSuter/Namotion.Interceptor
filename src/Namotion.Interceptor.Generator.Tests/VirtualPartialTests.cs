@@ -16,7 +16,7 @@ public partial class BaseClass
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert - Should generate virtual property implementation
         var generatedSource = generated.SingleSource();
@@ -43,7 +43,7 @@ public partial class DerivedClass : BaseClass
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert - Should generate override property implementation
         var generatedSource = generated.SingleSource();
@@ -78,7 +78,7 @@ public partial class Employee : Person
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert - Should generate all three classes correctly
         var generatedSource = generated.AllSources();
@@ -133,7 +133,7 @@ public partial class ImplicitImpl : IHasName
 }";
 
         // Act
-        var generated = GeneratorTestHost.Run(source);
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert - Should compile successfully
         Assert.NotEmpty(generated.Sources);
