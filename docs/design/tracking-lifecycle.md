@@ -221,6 +221,8 @@ Were the registry behind the descent, `child` would see only part of that chain 
 
 A handler that records something other handlers read during attach therefore has to say so with `[RunsBefore(typeof(ContextInheritanceHandler))]`. Registration order alone is not enough, because an unrelated handler's ordering constraint can move it. `SubjectRegistry` and `ParentTrackingHandler` both carry the attribute. Note that `[RunsAfter(typeof(SubjectRegistry))]` does not achieve the same thing: it still leaves the handler behind the descent.
 
+There is a second boundary inside attach that the handler ordering cannot cross. A subject's `ILifecycleHandler` chain runs to completion first, and only then do its properties attach, which is where `SubjectRegistry` invokes every `ISubjectPropertyInitializer`. So a lifecycle handler never sees properties an initializer adds to the same subject, at any ordering position. A handler that needs initializer output has to observe `IPropertyLifecycleHandler` instead, resolved behind the registry. Pinned by `SubjectPropertyInitializerPhaseTests`.
+
 Detach is not the mirror of attach. Ancestors are deregistered further up the descent before the callback reaches a descendant, so ancestor state is not resolvable through the registry while detaching. `GetParents()` is not a substitute, because it yields at most the immediate parent there, and only for the subject's own handler or one ordered ahead of `ParentTrackingHandler`. A handler that needs ancestor state on detach has to capture it at attach.
 
 Pinned by `RegistryHandlerOrderTests` and `RegistryAncestorResolutionTests`.
