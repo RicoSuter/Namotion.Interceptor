@@ -13,6 +13,12 @@ public class RegisteredSubject
 {
     private readonly Lock _lock = new();
 
+    // Serializes AddProperty only, and deliberately not _lock. AddProperty holds this across the
+    // subject's own add, which takes the subject's SyncRoot, while a dynamic property's getter runs
+    // under SyncRoot and can reach _lock through Parents. Sharing _lock would put those two in a
+    // cycle. This one is a leaf: nothing acquired under it takes a lock that leads back here.
+    private readonly Lock _addPropertyLock = new();
+
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
 
     // Most subjects have exactly one parent, so the first is stored inline and the
@@ -340,7 +346,7 @@ public class RegisteredSubject
 
         var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
 
-        lock (_lock)
+        lock (_addPropertyLock)
         {
             if (_properties.ContainsKey(subjectProperty.Name))
             {
