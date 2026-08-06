@@ -172,6 +172,188 @@ namespace Repro
     }
 
     [Fact]
+    public void WhenInterfaceDefaultMemberIsInternalInReferencedAssembly_ThenMemberIsSkipped()
+    {
+        // Arrange: the "same assembly" premise the accessibility check used to rely on does not
+        // hold when the interface is declared in a referenced assembly; the generated code lives
+        // in a different assembly with no InternalsVisibleTo, so an internal member is unreachable
+        // there (CS0122) even though it would be reachable if declared locally.
+        const string librarySource = @"
+public interface IFace
+{
+    internal string Probe => ""p"";
+}";
+        const string mainSource = @"
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class Thing : IFace
+{
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunWithLibraryReferenceExpectingCleanCompilation(librarySource, mainSource);
+
+        // Assert
+        Assert.DoesNotContain(@"[""Probe""]", generated.SingleSource());
+    }
+
+    [Fact]
+    public void WhenInterfaceDefaultMemberIsProtectedInternalInReferencedAssembly_ThenMemberIsSkipped()
+    {
+        // Arrange: cross-assembly, "protected internal" fails both halves of its own rule: the
+        // internal half fails because the generated assembly has no InternalsVisibleTo, and the
+        // protected half fails because the generated code accesses the member through a cast to
+        // the interface type, not through the subject type itself (CS1540).
+        const string librarySource = @"
+public interface IFace
+{
+    protected internal string Probe => ""p"";
+}";
+        const string mainSource = @"
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class Thing : IFace
+{
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunWithLibraryReferenceExpectingCleanCompilation(librarySource, mainSource);
+
+        // Assert
+        Assert.DoesNotContain(@"[""Probe""]", generated.SingleSource());
+    }
+
+    [Fact]
+    public void WhenInterfaceDefaultMemberHasPrivateSetter_ThenSetterIsDroppedButGetterIsKept()
+    {
+        // Arrange: the property itself is public (interface members default to public), but its
+        // setter is individually private, so only the getter is reachable from generated code.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHasPrivateSetter
+    {
+        double Value { get; set; }
+        string Probe { get => ""a""; private set { } }
+    }
+
+    [InterceptorSubject]
+    public partial class Thing : IHasPrivateSetter
+    {
+        public partial double Value { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var generatedSource = generated.SingleSource();
+        Assert.Contains(@"[""Probe""]", generatedSource);
+        Assert.Contains("(o) => ((global::Repro.IHasPrivateSetter)o).Probe", generatedSource);
+        Assert.DoesNotContain(".Probe = ", generatedSource);
+    }
+
+    [Fact]
+    public void WhenInterfaceDefaultMemberHasPrivateGetter_ThenGetterIsDroppedButSetterIsKept()
+    {
+        // Arrange: mirror of the previous case, with the private accessor on the getter instead.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHasPrivateGetter
+    {
+        double Value { get; set; }
+        string Probe { private get => ""a""; set { } }
+    }
+
+    [InterceptorSubject]
+    public partial class Thing : IHasPrivateGetter
+    {
+        public partial double Value { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var generatedSource = generated.SingleSource();
+        Assert.Contains(@"[""Probe""]", generatedSource);
+        Assert.DoesNotContain("(o) => ((global::Repro.IHasPrivateGetter)o).Probe", generatedSource);
+        Assert.Contains(".Probe = ", generatedSource);
+    }
+
+    [Fact]
+    public void WhenInterfaceDefaultMemberHasProtectedSetter_ThenSetterIsDroppedButGetterIsKept()
+    {
+        // Arrange: same reasoning as the protected-member case, but scoped to a single accessor:
+        // generated code accesses the member through a cast to the interface type, which is never
+        // a valid qualifying expression for protected access (CS1540).
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHasProtectedSetter
+    {
+        double Value { get; set; }
+        string Probe { get => ""a""; protected set { } }
+    }
+
+    [InterceptorSubject]
+    public partial class Thing : IHasProtectedSetter
+    {
+        public partial double Value { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var generatedSource = generated.SingleSource();
+        Assert.Contains(@"[""Probe""]", generatedSource);
+        Assert.Contains("(o) => ((global::Repro.IHasProtectedSetter)o).Probe", generatedSource);
+        Assert.DoesNotContain(".Probe = ", generatedSource);
+    }
+
+    [Fact]
+    public void WhenInterfaceDefaultMemberHasInternalSetter_ThenSetterIsKept()
+    {
+        // Arrange (regression guard): an internal setter in the same assembly stays reachable,
+        // same as a whole internal member does.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHasInternalSetter
+    {
+        double Value { get; set; }
+        string Probe { get => ""a""; internal set { } }
+    }
+
+    [InterceptorSubject]
+    public partial class Thing : IHasInternalSetter
+    {
+        public partial double Value { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var generatedSource = generated.SingleSource();
+        Assert.Contains(@"[""Probe""]", generatedSource);
+        Assert.Contains("(o) => ((global::Repro.IHasInternalSetter)o).Probe", generatedSource);
+        Assert.Contains(".Probe = ", generatedSource);
+    }
+
+    [Fact]
     public void WhenMethodIsNamedExactlyWithoutInterceptor_ThenMethodIsSkipped()
     {
         // Arrange (case O)
@@ -196,17 +378,23 @@ namespace Repro
     [Fact]
     public void WhenWithoutInterceptorMethodIsUnsupportedShape_ThenMethodIsSkipped()
     {
-        // Arrange (case Y: static, generic and by-reference parameters)
+        // Arrange (case Y: static, generic, by-reference parameters, and explicit interface implementation)
         const string source = @"
 using Namotion.Interceptor.Attributes;
 namespace Repro
 {
+    public interface IFoo
+    {
+        void DoWithoutInterceptor();
+    }
+
     [InterceptorSubject]
-    public partial class Thing
+    public partial class Thing : IFoo
     {
         public static void StaticWithoutInterceptor() { }
         public void GenericWithoutInterceptor<T>(T value) { }
         public void RefWithoutInterceptor(ref int value) { }
+        void IFoo.DoWithoutInterceptor() { }
     }
 }";
 
@@ -218,5 +406,6 @@ namespace Repro
         Assert.DoesNotContain("public void Static(", generatedSource);
         Assert.DoesNotContain("public void Generic(", generatedSource);
         Assert.DoesNotContain("public void Ref(", generatedSource);
+        Assert.DoesNotContain("public void Do(", generatedSource);
     }
 }

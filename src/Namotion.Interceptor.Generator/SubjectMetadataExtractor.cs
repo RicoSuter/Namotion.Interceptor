@@ -57,7 +57,7 @@ internal static class SubjectMetadataExtractor
         var classProperties = DeduplicateByName(CollectProperties(typeSymbol, semanticModel, cancellationToken));
 
         // Collect interface properties with default implementations
-        var interfaceProperties = ExtractInterfaceDefaultProperties(typeSymbol, classProperties);
+        var interfaceProperties = ExtractInterfaceDefaultProperties(typeSymbol, classProperties, semanticModel.Compilation);
 
         // Combine class properties with interface default properties
         var properties = classProperties.Concat(interfaceProperties).ToList();
@@ -242,13 +242,13 @@ internal static class SubjectMetadataExtractor
 
                 // The emitter drops static, generic and by-reference shapes, and cannot route an
                 // explicit interface implementation through the executor.
-                if (method.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)) ||
+                if (method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword)) ||
                     method.TypeParameterList is not null ||
                     method.ExplicitInterfaceSpecifier is not null ||
-                    method.ParameterList.Parameters.Any(parameter => parameter.Modifiers.Any(m =>
-                        m.IsKind(SyntaxKind.RefKeyword) ||
-                        m.IsKind(SyntaxKind.OutKeyword) ||
-                        m.IsKind(SyntaxKind.InKeyword))))
+                    method.ParameterList.Parameters.Any(parameter => parameter.Modifiers.Any(modifier =>
+                        modifier.IsKind(SyntaxKind.RefKeyword) ||
+                        modifier.IsKind(SyntaxKind.OutKeyword) ||
+                        modifier.IsKind(SyntaxKind.InKeyword))))
                 {
                     continue;
                 }
@@ -278,7 +278,8 @@ internal static class SubjectMetadataExtractor
     /// </summary>
     private static IReadOnlyList<PropertyMetadata> ExtractInterfaceDefaultProperties(
         INamedTypeSymbol typeSymbol,
-        IReadOnlyList<PropertyMetadata> classProperties)
+        IReadOnlyList<PropertyMetadata> classProperties,
+        Compilation compilation)
     {
         var interfaceProperties = new List<PropertyMetadata>();
         var classPropertyNames = new HashSet<string>(classProperties.Select(p => p.Name));
@@ -317,12 +318,27 @@ internal static class SubjectMetadataExtractor
 
                 // Roslyn reports an explicit implementation as Private regardless of the implemented
                 // member's real visibility, so the accessibility that matters is the implemented
-                // member's. Generated code lives in the same assembly, so internal and protected
-                // internal members are reachable; private and protected ones are not.
+                // member's. Ask the compiler directly whether generated code (living inside
+                // typeSymbol, accessing the member through a cast to accessorInterface) can reach
+                // it, instead of hand-rolling the rule: a hardcoded "same assembly" premise breaks
+                // as soon as the interface lives in a referenced assembly (internal and protected
+                // internal members are then unreachable, CS0122/CS1540, unless InternalsVisibleTo
+                // says otherwise), and passing accessorInterface as the qualifying type correctly
+                // rejects protected members, which are never reachable through this cast pattern.
                 var accessibilityMember = explicitImplementation ?? property;
-                if (accessibilityMember.DeclaredAccessibility is Accessibility.Private
-                    or Accessibility.Protected
-                    or Accessibility.ProtectedAndInternal)
+                if (!compilation.IsSymbolAccessibleWithin(accessibilityMember, typeSymbol, accessorInterface))
+                {
+                    continue;
+                }
+
+                // A getter or setter can be individually less accessible than the property itself
+                // (e.g. `string Probe { get; private set; }`); generated code accesses whichever
+                // accessor it emits directly, so each one needs its own reachability check.
+                var isGetterAccessible = accessibilityMember.GetMethod is { } accessibleGetMethod &&
+                    compilation.IsSymbolAccessibleWithin(accessibleGetMethod, typeSymbol, accessorInterface);
+                var isSetterAccessible = accessibilityMember.SetMethod is { } accessibleSetMethod &&
+                    compilation.IsSymbolAccessibleWithin(accessibleSetMethod, typeSymbol, accessorInterface);
+                if (!isGetterAccessible && !isSetterAccessible)
                 {
                     continue;
                 }
@@ -354,9 +370,9 @@ internal static class SubjectMetadataExtractor
                 var accessModifier = GetAccessModifierFromAccessibility(property.DeclaredAccessibility);
                 var interfaceTypeName = accessorInterface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-                var hasGetter = property.GetMethod != null;
-                var hasSetter = property.SetMethod is { IsInitOnly: false };
-                var hasInit = property.SetMethod?.IsInitOnly == true;
+                var hasGetter = property.GetMethod != null && isGetterAccessible;
+                var hasSetter = property.SetMethod is { IsInitOnly: false } && isSetterAccessible;
+                var hasInit = property.SetMethod?.IsInitOnly == true && isSetterAccessible;
 
                 // Interface default properties cannot be partial, virtual is implicit
                 interfaceProperties.Add(new PropertyMetadata(

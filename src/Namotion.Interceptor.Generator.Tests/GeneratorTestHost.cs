@@ -26,12 +26,45 @@ internal static class GeneratorTestHost
 
     public static GeneratorRunResult Run(string source)
     {
+        return RunCore(source, References);
+    }
+
+    /// <summary>
+    /// Runs the generator against <paramref name="mainSource"/> in a compilation that additionally
+    /// references a separate assembly compiled from <paramref name="librarySource"/>. Use this to
+    /// verify accessibility rules that only manifest across an assembly boundary (e.g. an
+    /// <c>internal</c> or <c>protected internal</c> interface default member declared in a
+    /// referenced assembly, where the generated code's own assembly has no InternalsVisibleTo).
+    /// </summary>
+    public static GeneratorRunResult RunWithLibraryReference(string librarySource, string mainSource)
+    {
+        var libraryCompilation = CSharpCompilation.Create(
+            assemblyName: "TestLibrary",
+            syntaxTrees: [CSharpSyntaxTree.ParseText(librarySource)],
+            references: References,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        using var libraryStream = new MemoryStream();
+        var emitResult = libraryCompilation.Emit(libraryStream);
+        Assert.True(
+            emitResult.Success,
+            "Library compilation did not compile:" + Environment.NewLine +
+            string.Join(Environment.NewLine, emitResult.Diagnostics.Select(d => d.ToString())));
+
+        libraryStream.Position = 0;
+        var libraryReference = MetadataReference.CreateFromStream(libraryStream);
+
+        return RunCore(mainSource, References.Append(libraryReference).ToList());
+    }
+
+    private static GeneratorRunResult RunCore(string source, IReadOnlyList<MetadataReference> references)
+    {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);
 
         var compilation = CSharpCompilation.Create(
             assemblyName: "TestAssembly",
             syntaxTrees: [syntaxTree],
-            references: References,
+            references: references,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new InterceptorSubjectGenerator());
@@ -55,6 +88,22 @@ internal static class GeneratorTestHost
     public static GeneratorRunResult RunExpectingCleanCompilation(string source)
     {
         var result = Run(source);
+
+        Assert.True(
+            result.CompilationErrors.Count == 0,
+            "Generated code did not compile:" + Environment.NewLine +
+            string.Join(Environment.NewLine, result.CompilationErrors.Select(d => d.ToString())));
+
+        return result;
+    }
+
+    /// <summary>
+    /// Same contract as <see cref="RunExpectingCleanCompilation"/>, but for
+    /// <see cref="RunWithLibraryReference"/>.
+    /// </summary>
+    public static GeneratorRunResult RunWithLibraryReferenceExpectingCleanCompilation(string librarySource, string mainSource)
+    {
+        var result = RunWithLibraryReference(librarySource, mainSource);
 
         Assert.True(
             result.CompilationErrors.Count == 0,
