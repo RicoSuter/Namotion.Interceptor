@@ -649,33 +649,15 @@ Run: `dotnet test src/Namotion.Interceptor.Generator.Tests --filter "FullyQualif
 
 Expected: PASS.
 
-- [ ] **Step 6b: Pin case AA and the inheritance regression**
+- [ ] **Step 6b: Pin the inheritance regression**
 
-Case AA is the collision with no non-explicit declaration to prefer. It fails to build today, and the
-Task 5 name resolution would turn it into a runtime crash if deduplication were not already in place.
+An `override` partial property puts the same key in the derived dictionary and, through `Concat`, in
+the base one. `ToFrozenDictionary` tolerates that, unlike the within-class collection initializer this
+task replaces, so the guard is that switching to indexer assignment does not disturb it.
+
 Add to `ExplicitInterfaceBehaviorTests.cs`, above the test class:
 
 ```csharp
-#region Case AA: two explicit implementations of one generic interface, at different instantiations
-
-#pragma warning disable NI0008
-
-public interface ICaseAAFoo<T>
-{
-    string Kind { get; }
-}
-
-[InterceptorSubject]
-public partial class CaseAASubject : ICaseAAFoo<int>, ICaseAAFoo<string>
-{
-    string ICaseAAFoo<int>.Kind => "int";
-    string ICaseAAFoo<string>.Kind => "string";
-}
-
-#pragma warning restore NI0008
-
-#endregion
-
 #region Inheritance regression: an override partial property must not duplicate the base key
 
 [InterceptorSubject]
@@ -693,23 +675,9 @@ public partial class OverrideDerived : OverrideBase
 #endregion
 ```
 
-and these tests to the class:
+and this test to the class:
 
 ```csharp
-    [Fact]
-    public void WhenTwoExplicitImplementationsCollideOnName_ThenOneEntryIsExposed()
-    {
-        // Arrange
-        var subject = new CaseAASubject();
-
-        // Act
-        var properties = ((IInterceptorSubject)subject).Properties;
-
-        // Assert: first declaration wins, and accessing DefaultProperties does not throw
-        Assert.Single(properties.Where(p => p.Key == "Kind"));
-        Assert.Equal("int", properties["Kind"].GetValue?.Invoke(subject));
-    }
-
     [Fact]
     public void WhenDerivedOverridesPartialProperty_ThenSingleKeyIsExposed()
     {
@@ -725,14 +693,13 @@ and these tests to the class:
     }
 ```
 
-The `#pragma warning disable NI0008` is inert until Task 11 declares the rule. Leaving it in place from
-here means Task 11 does not break this file's build.
+Case AA, two explicit implementations colliding on one name, is deliberately **not** added here. Its
+model cannot compile until Task 5 routes explicitly implemented class properties through the interface,
+so it belongs to Task 5 Step 8.
 
 Run: `dotnet test src/Namotion.Interceptor.Generator.Tests --filter "FullyQualifiedName~ExplicitInterfaceBehaviorTests"`
 
-Expected: PASS. `CaseAASubject` will not compile until Task 5 lands the name resolution, so if the
-project fails to build here, move this region into Task 5 Step 8 instead and keep only the override
-test at this point.
+Expected: PASS.
 
 - [ ] **Step 7: Re-baseline all snapshots**
 
@@ -812,10 +779,10 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
-        var source_ = generated.SingleSource();
-        Assert.Contains(@"[""Gender""]", source_);
-        Assert.Contains("((global::Repro.IHuman)o).Gender", source_);
-        Assert.DoesNotContain("IHuman.Gender)", source_);
+        var generatedSource = generated.SingleSource();
+        Assert.Contains(@"[""Gender""]", generatedSource);
+        Assert.Contains("((global::Repro.IHuman)o).Gender", generatedSource);
+        Assert.DoesNotContain("IHuman.Gender)", generatedSource);
     }
 
     [Fact]
@@ -866,9 +833,9 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert: the tracked class property wins, so it is intercepted
-        var source_ = generated.SingleSource();
-        Assert.Contains("isIntercepted: true", source_);
-        Assert.Single(System.Text.RegularExpressions.Regex.Matches(source_, @"\[""Gender""\]"));
+        var generatedSource = generated.SingleSource();
+        Assert.Contains("isIntercepted: true", generatedSource);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(generatedSource, @"\[""Gender""\]"));
     }
 
     [Fact]
@@ -913,9 +880,9 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
-        var source_ = generated.SingleSource();
-        Assert.Contains(@"[""Value""]", source_);
-        Assert.Contains("((global::Repro.IHuman<int>)o).Value", source_);
+        var generatedSource = generated.SingleSource();
+        Assert.Contains(@"[""Value""]", generatedSource);
+        Assert.Contains("((global::Repro.IHuman<int>)o).Value", generatedSource);
     }
 }
 ```
@@ -1085,6 +1052,29 @@ public partial class CaseIDerived : CaseIBase
 }
 
 #endregion
+
+#region Case AA: two explicit implementations of one generic interface, at different instantiations
+
+// Deduplication (Task 4) keeps this from emitting duplicate dictionary keys once the name
+// resolution below makes both entries resolve to "Kind". NI0008 reports the collision from
+// Task 11; the suppression is placed now so that task does not break this file's build.
+#pragma warning disable NI0008
+
+public interface ICaseAAFoo<T>
+{
+    string Kind { get; }
+}
+
+[InterceptorSubject]
+public partial class CaseAASubject : ICaseAAFoo<int>, ICaseAAFoo<string>
+{
+    string ICaseAAFoo<int>.Kind => "int";
+    string ICaseAAFoo<string>.Kind => "string";
+}
+
+#pragma warning restore NI0008
+
+#endregion
 ```
 
 and add these tests to the class:
@@ -1115,6 +1105,20 @@ and add these tests to the class:
 
         // Assert
         Assert.Equal("base-class-explicit", value);
+    }
+
+    [Fact]
+    public void WhenTwoExplicitImplementationsCollideOnName_ThenOneEntryIsExposed()
+    {
+        // Arrange (case AA)
+        var subject = new CaseAASubject();
+
+        // Act
+        var properties = ((IInterceptorSubject)subject).Properties;
+
+        // Assert: first declaration wins, and reading DefaultProperties does not throw
+        Assert.Single(properties.Where(p => p.Key == "Kind"));
+        Assert.Equal("int", properties["Kind"].GetValue?.Invoke(subject));
     }
 ```
 
@@ -1505,9 +1509,9 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
-        var source_ = generated.SingleSource();
-        Assert.Contains(@"[""Status""]", source_);
-        Assert.Contains(@"[""Label""]", source_);
+        var generatedSource = generated.SingleSource();
+        Assert.Contains(@"[""Status""]", generatedSource);
+        Assert.Contains(@"[""Label""]", generatedSource);
     }
 
     [Fact]
@@ -1553,10 +1557,10 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
-        var source_ = generated.SingleSource();
-        Assert.DoesNotContain("public void Static(", source_);
-        Assert.DoesNotContain("public void Generic(", source_);
-        Assert.DoesNotContain("public void Ref(", source_);
+        var generatedSource = generated.SingleSource();
+        Assert.DoesNotContain("public void Static(", generatedSource);
+        Assert.DoesNotContain("public void Generic(", generatedSource);
+        Assert.DoesNotContain("public void Ref(", generatedSource);
     }
 ```
 
