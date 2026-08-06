@@ -5,13 +5,8 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Registry.Tests;
 
 /// <summary>
-/// A subject that leaves the graph is dropped from the registry, but the dynamic properties an
-/// <see cref="ISubjectPropertyInitializer"/> added stay on the subject itself. Re-attaching therefore
-/// builds a fresh registration over properties that are already there and runs every initializer
-/// again, so an initializer that adds unconditionally fails the second time.
-///
-/// Re-attaching is not an exotic operation: moving a subject from one parent to another detaches it
-/// and attaches it again, so this is reachable from an ordinary graph edit.
+/// Re-attaching a subject builds a fresh registration over properties that are still on the subject,
+/// so every initializer runs again. See <see cref="ISubjectPropertyInitializer"/>.
 /// </summary>
 public class SubjectPropertyInitializerIdempotencyTests
 {

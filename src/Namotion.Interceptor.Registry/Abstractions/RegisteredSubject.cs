@@ -360,9 +360,9 @@ public class RegisteredSubject
             if (_properties.ContainsKey(subjectProperty.Name))
             {
                 throw new InvalidOperationException(
-                    $"Property '{subjectProperty.Name}' already exists on '{Subject.GetType().Name}' and cannot be added again. " +
-                    "If this is an ISubjectPropertyInitializer, check whether the property or attribute is already " +
-                    "present before adding it, because initializers run again every time a subject is re-attached.");
+                    $"Property '{subjectProperty.Name}' already exists on '{Subject.GetType().Name}'. " +
+                    "If this is an ISubjectPropertyInitializer, check for the property before adding it: " +
+                    "initializers run again whenever a subject is re-attached.");
             }
 
             var newProperties = _properties
