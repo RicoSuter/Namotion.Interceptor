@@ -21,6 +21,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private readonly TimeSpan _retryTime;
     private readonly SubjectPropertyWriter _propertyWriter;
 
+    private static readonly TimeSpan ConnectWindowDrainInterval = TimeSpan.FromSeconds(1);
+
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
     /// <summary>
@@ -110,7 +112,26 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 _propertyWriter.StartBuffering();
                 await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
-                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+                // Loading initial state is the long leg of the window (an OPC UA browse of a large
+                // address space runs for minutes), and the subscription is unbounded, so without this
+                // the window's memory is bounded by nothing but how long the load takes. Draining into
+                // the retry queue caps it at that queue's size instead, which is the bound this class
+                // already owns. Started only once StartListeningAsync has returned, because ownership is
+                // established in there and the drain discards what it cannot attribute to a source.
+                using (var windowDrain = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+                {
+                    var windowDrainTask = DrainConnectWindowPeriodicallyAsync(subscription, windowDrain.Token);
+                    try
+                    {
+                        await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        // Awaited before the drain below runs, so the subscription keeps a single consumer.
+                        await windowDrain.CancelAsync().ConfigureAwait(false);
+                        await windowDrainTask.ConfigureAwait(false);
+                    }
+                }
 
                 // Park connect-window writes captured during listen/load.
                 DrainOwnedWritesToRetryQueue(subscription);
@@ -195,6 +216,28 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         {
             _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Length);
             WriteRetryQueue.Enqueue(changes);
+        }
+    }
+
+    /// <summary>
+    /// Parks owned writes into the retry queue at intervals while the initial state loads, so a slow
+    /// load cannot grow the subscription without bound. Collapsed per property like every other drain,
+    /// so a property written repeatedly costs one slot rather than one per write.
+    /// </summary>
+    private async Task DrainConnectWindowPeriodicallyAsync(
+        PropertyChangeQueueSubscription subscription, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(ConnectWindowDrainInterval);
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                DrainOwnedWritesToRetryQueue(subscription);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected: the load finished, or the source is stopping.
         }
     }
 
