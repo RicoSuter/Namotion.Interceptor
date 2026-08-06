@@ -37,7 +37,7 @@ internal static class SubjectCodeGenerator
     public static string GetFileName(SubjectMetadata metadata)
     {
         var containingTypesPath = metadata.ContainingTypes.Length > 0
-            ? string.Join(".", metadata.ContainingTypes) + "."
+            ? string.Join(".", metadata.ContainingTypes.Select(t => t.Name)) + "."
             : "";
         var namespacePrefix = metadata.NamespaceName is null
             ? ""
@@ -95,16 +95,16 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("}");
     }
 
-    private static void EmitContainingTypeOpening(StringBuilder builder, string[] containingTypes)
+    private static void EmitContainingTypeOpening(StringBuilder builder, ContainingType[] containingTypes)
     {
-        foreach (var type in containingTypes)
+        foreach (var containingType in containingTypes)
         {
-            builder.AppendLine($"    partial class {type}");
+            builder.AppendLine($"    partial {containingType.Keyword} {containingType.Name}");
             builder.AppendLine("    {");
         }
     }
 
-    private static void EmitContainingTypeClosing(StringBuilder builder, string[] containingTypes)
+    private static void EmitContainingTypeClosing(StringBuilder builder, ContainingType[] containingTypes)
     {
         foreach (var _ in containingTypes)
         {

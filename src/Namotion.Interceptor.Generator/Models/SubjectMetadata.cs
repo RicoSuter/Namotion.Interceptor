@@ -7,7 +7,7 @@ internal sealed record SubjectMetadata(
     string AccessModifier,
     string? NamespaceName,
     string FullTypeName,
-    string[] ContainingTypes,
+    ContainingType[] ContainingTypes,
     bool NeedsGeneratedParameterlessConstructor,
     bool HasOrWillHaveParameterlessConstructor,
     string? BaseClassTypeName,

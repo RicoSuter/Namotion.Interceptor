@@ -31,6 +31,19 @@ public partial class AccessibleDefaultsSubject : IAccessibleDefaults
 
 #endregion
 
+#region Case P: a subject nested in a record
+
+public partial record RecordContainer
+{
+    [InterceptorSubject]
+    public partial class NestedSubject
+    {
+        public partial string Name { get; set; }
+    }
+}
+
+#endregion
+
 public class GeneratorShapeBehaviorTests
 {
     [Fact]
@@ -58,5 +71,18 @@ public class GeneratorShapeBehaviorTests
         // Assert
         Assert.Equal("internal-3", properties["InternalStatus"].GetValue?.Invoke(subject));
         Assert.Equal("protected-internal-3", properties["ProtectedInternalStatus"].GetValue?.Invoke(subject));
+    }
+
+    [Fact]
+    public void WhenSubjectIsNestedInRecord_ThenPropertiesAreTracked()
+    {
+        // Arrange
+        var subject = new RecordContainer.NestedSubject { Name = "value" };
+
+        // Act
+        var properties = ((IInterceptorSubject)subject).Properties;
+
+        // Assert
+        Assert.Equal("value", properties["Name"].GetValue?.Invoke(subject));
     }
 }

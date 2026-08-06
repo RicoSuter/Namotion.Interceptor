@@ -98,16 +98,35 @@ internal static class SubjectMetadataExtractor
                (current as FileScopedNamespaceDeclarationSyntax)?.Name.ToString();
     }
 
-    private static string[] GetContainingTypes(SyntaxNode node)
+    private static ContainingType[] GetContainingTypes(SyntaxNode node)
     {
-        var types = new List<string>();
+        var types = new List<ContainingType>();
         var parent = node.Parent;
-        while (parent is TypeDeclarationSyntax typeDecl)
+        while (parent is TypeDeclarationSyntax typeDeclaration)
         {
-            types.Insert(0, typeDecl.Identifier.ValueText);
+            types.Insert(0, new ContainingType(
+                GetTypeKeyword(typeDeclaration),
+                typeDeclaration.Identifier.ValueText));
             parent = parent.Parent;
         }
         return types.ToArray();
+    }
+
+    /// <summary>
+    /// "record" alone is correct for a record class, because record defaults to a class, but a
+    /// record struct needs both tokens or the partial declarations conflict.
+    /// </summary>
+    private static string GetTypeKeyword(TypeDeclarationSyntax typeDeclaration)
+    {
+        if (typeDeclaration is not RecordDeclarationSyntax recordDeclaration)
+        {
+            return typeDeclaration.Keyword.ValueText;
+        }
+
+        var classOrStructKeyword = recordDeclaration.ClassOrStructKeyword.ValueText;
+        return string.IsNullOrEmpty(classOrStructKeyword)
+            ? recordDeclaration.Keyword.ValueText
+            : $"{recordDeclaration.Keyword.ValueText} {classOrStructKeyword}";
     }
 
     private static IReadOnlyList<PropertyMetadata> CollectProperties(

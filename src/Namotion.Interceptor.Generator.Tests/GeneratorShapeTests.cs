@@ -46,6 +46,35 @@ namespace Repro
         Assert.Empty(generated.CompilationErrors);
     }
 
+    [Theory]
+    [InlineData("record")]
+    [InlineData("record struct")]
+    [InlineData("struct")]
+    [InlineData("interface")]
+    public void WhenSubjectIsNestedInNonClassType_ThenGeneratedCodeCompiles(string containerKeyword)
+    {
+        // Arrange (cases P, Q, R)
+        var source = $@"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{{
+    public partial {containerKeyword} Outer
+    {{
+        [InterceptorSubject]
+        public partial class Nested
+        {{
+            public partial string Name {{ get; set; }}
+        }}
+    }}
+}}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.Contains($"partial {containerKeyword} Outer", generated.SingleSource());
+    }
+
     [Fact]
     public void WhenInterfaceHasDefaultIndexer_ThenIndexerIsSkipped()
     {
