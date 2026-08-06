@@ -1,6 +1,6 @@
 # Source Monitoring
 
-Every `ISubjectSource` (OPC UA, MQTT, WebSocket, or a custom source) reports whether it's still connecting, has completed its initial load, or has stopped. The `Namotion.Interceptor.Connectors.Monitoring` namespace, part of the `Namotion.Interceptor.Connectors` package, turns that per-source state into a per-tree registry, a typed event stream, and an awaitable primitive, so an application can ask "is my tree live yet" instead of polling `TryGetSource()` in a loop.
+Every `ISubjectSource` reports whether it's still connecting, has completed its initial load, or has stopped. The `Namotion.Interceptor.Connectors.Monitoring` namespace turns that per-source state into a per-tree registry, a typed event stream, and an awaitable primitive, so an application can ask "is my tree live yet" instead of polling `TryGetSource()` in a loop.
 
 ## Getting Started
 
