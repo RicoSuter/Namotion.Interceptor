@@ -356,7 +356,7 @@ internal partial class InternalSubject
 |------------|------------|
 | Only partial properties are intercepted | Mark properties with `partial` keyword |
 | Records cannot be subjects | Use a class. See NI0003 in [Diagnostics](#diagnostics) |
-| Structs and interfaces cannot be subjects | Use a class. The compiler itself rejects this as CS0592, because `InterceptorSubjectAttribute` only targets classes |
+| Structs and interfaces cannot be subjects | Use a class. The compiler itself rejects a plain struct or interface as CS0592, because `InterceptorSubjectAttribute` only targets classes. A record struct is reported by NI0003 instead |
 | Generic subjects, or subjects nested in a generic containing type, are not supported | Use non-generic types. See NI0009 in [Diagnostics](#diagnostics) |
 | File-local subjects are not supported | Remove the `file` modifier. See NI0010 in [Diagnostics](#diagnostics) |
 | Attributes on an explicit interface implementation are ignored | Declare the attribute on the interface member instead. See NI0007 in [Diagnostics](#diagnostics) |
@@ -372,7 +372,7 @@ The generator reports the following diagnostics, all in the `Namotion.Intercepto
 |----|----------|-------|-----|
 | NI0001 | Error | The subject class is not declared `partial` | Add the `partial` modifier |
 | NI0002 | Error | A containing type of the subject is not declared `partial` | Add `partial` to every containing type |
-| NI0003 | Error | `[InterceptorSubject]` is placed on a record. Structs and interfaces never reach this diagnostic; the compiler already rejects them with CS0592, because the attribute only targets classes | Use a class |
+| NI0003 | Error | `[InterceptorSubject]` is placed on a record or a record struct. A plain struct or interface never reaches this diagnostic; the compiler already rejects those with CS0592, because the attribute only targets classes | Use a class |
 | NI0004 | Error | The generator threw an unhandled exception while processing the subject | Report the issue. The generated file contains the full stack trace |
 | NI0005 | Warning | A derived subject re-declares a property whose interface implementation is already provided by a base class, so reading through the subject and reading through the interface return different values | Rename the property, or suppress the warning if the divergence is intended |
 | NI0006 | Warning | A member was skipped because it cannot be supported: an interface default property is an indexer or a static member, or is not accessible from generated code (only when neither accessor is reachable; a single inaccessible accessor keeps the property and drops just that accessor); or a `WithoutInterceptor` method has no name before the suffix, is static or generic, takes a `ref`, `out`, or `in` parameter, or is itself an explicit interface implementation | Remove or rename the member, widen its accessibility, or adjust the method signature |
