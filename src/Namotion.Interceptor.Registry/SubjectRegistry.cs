@@ -11,22 +11,12 @@ namespace Namotion.Interceptor.Registry;
 /// Registers subjects and their property edges as they enter the object graph.
 /// </summary>
 /// <remarks>
-/// Runs before <see cref="ContextInheritanceHandler"/>, which is the handler that walks down into a
-/// newly attached subtree. Running first means a subject is registered before the descent reaches
-/// its children, and because that holds at every level, every ancestor of a subject is registered by
-/// the time any handler runs for it. Ordered the other way round, only part of that chain would be
-/// registered and <c>TryGetRegisteredSubject()</c> would return null for the rest. See "Handler
-/// Order Around the Descent" in docs/design/tracking-lifecycle.md.
-///
-/// Ordered against <see cref="ParentTrackingHandler"/> as well, so that the pre-descent segment has
-/// one order rather than a registration-dependent one. Neither reads the other, so the direction is
-/// chosen to match what every chain in this repository already resolved. What it changes is that a
-/// handler which would otherwise land between the two, seeing one recorder's output and not the
-/// other's according to how the context was composed, no longer has that position available: a
-/// handler declaring <c>[RunsAfter(ParentTrackingHandler)]</c> together with
-/// <c>[RunsBefore(SubjectRegistry)]</c> now closes a cycle and is rejected when the chain resolves.
-/// That is the intended answer rather than a casualty, because such a handler is asking for an order
-/// that contradicts the one the recorders publish for everyone else.
+/// Runs before <see cref="ContextInheritanceHandler"/>, which walks down into a newly attached
+/// subtree, so a subject is registered before the descent reaches its children. That holds at every
+/// level, so any handler running at or behind this one finds every ancestor of a subject already
+/// registered. Also ordered ahead of <see cref="ParentTrackingHandler"/>, which fixes the order of
+/// the two recorders instead of leaving it to registration order. See "Handler Order Around the
+/// Descent" in docs/design/tracking-lifecycle.md.
 /// </remarks>
 [RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
