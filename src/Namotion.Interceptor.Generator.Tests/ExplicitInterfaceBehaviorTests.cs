@@ -82,6 +82,29 @@ public partial class CaseZSubject : ICaseZKind
 
 #endregion
 
+#region Case AD: base implements, derived re-declares. Intentional, so NI0005 is suppressed.
+
+#pragma warning disable NI0005
+
+public interface ICaseADHuman
+{
+    string Origin => "interface-default";
+}
+
+public class CaseADBase : ICaseADHuman
+{
+}
+
+[InterceptorSubject]
+public partial class CaseADDerived : CaseADBase
+{
+    public partial string Origin { get; set; }
+}
+
+#pragma warning restore NI0005
+
+#endregion
+
 #region Inheritance regression: an override partial property must not duplicate the base key
 
 [InterceptorSubject]
@@ -153,6 +176,20 @@ public class ExplicitInterfaceBehaviorTests
         // Assert
         Assert.Single(properties, p => p.Key == "Kind");
         Assert.Equal("tracked", properties["Kind"].GetValue?.Invoke(subject));
+    }
+
+    [Fact]
+    public void WhenDerivedRedeclaresBaseImplementedProperty_ThenSubjectAndInterfaceDiffer()
+    {
+        // Arrange (case AD): the divergence NI0005 warns about, pinned as behaviour
+        var derived = new CaseADDerived { Origin = "derived" };
+
+        // Act
+        var throughInterface = ((ICaseADHuman)derived).Origin;
+
+        // Assert
+        Assert.Equal("derived", derived.Origin);
+        Assert.Equal("interface-default", throughInterface);
     }
 
     [Fact]

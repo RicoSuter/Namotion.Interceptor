@@ -111,16 +111,22 @@ internal static class SubjectMetadataExtractor
             .ToArray();
 
         // Collect properties from all partial declarations
-        var classProperties = DeduplicateByName(CollectProperties(typeSymbol, semanticModel, cancellationToken));
+        var classProperties = DeduplicateByName(
+            CollectProperties(typeSymbol, semanticModel, location, diagnostics, cancellationToken),
+            location,
+            diagnostics);
+
+        ReportPropertiesShadowingABaseImplementation(typeSymbol, classProperties, location, diagnostics);
 
         // Collect interface properties with default implementations
-        var interfaceProperties = ExtractInterfaceDefaultProperties(typeSymbol, classProperties, semanticModel.Compilation);
+        var interfaceProperties = ExtractInterfaceDefaultProperties(
+            typeSymbol, classProperties, semanticModel.Compilation, location, diagnostics);
 
         // Combine class properties with interface default properties
         var properties = classProperties.Concat(interfaceProperties).ToList();
 
         // Collect methods from all partial declarations
-        var methods = CollectMethods(typeSymbol, semanticModel, cancellationToken);
+        var methods = CollectMethods(typeSymbol, semanticModel, location, diagnostics, cancellationToken);
 
         // Detect constructor state
         var (needsGeneratedParameterlessConstructor, hasOrWillHaveParameterlessConstructor) =
@@ -191,6 +197,8 @@ internal static class SubjectMetadataExtractor
     private static IReadOnlyList<PropertyMetadata> CollectProperties(
         INamedTypeSymbol typeSymbol,
         SemanticModel semanticModel,
+        Location location,
+        List<Diagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
         var properties = new List<PropertyMetadata>();
@@ -249,7 +257,19 @@ internal static class SubjectMetadataExtractor
                             semanticModel.Compilation, implementedMember, typeSymbol, implementedMember.ContainingType);
                         if (!isGetterAccessible && !isSetterAccessible)
                         {
+                            diagnostics.Add(Diagnostic.Create(
+                                Diagnostics.MemberSkipped, location,
+                                $"{typeSymbol.Name}.{implementedMember.ContainingType.Name}.{implementedMember.Name}",
+                                "the member is not accessible from generated code"));
                             continue;
+                        }
+
+                        // The emitted metadata reflects the interface member's PropertyInfo, not
+                        // this declaration's, so anything declared here never reaches the runtime.
+                        if (property.AttributeLists.Count > 0)
+                        {
+                            diagnostics.Add(Diagnostic.Create(
+                                Diagnostics.ExplicitImplementationAttributesIgnored, location, propertyName));
                         }
 
                         hasGetter = hasGetter && isGetterAccessible;
@@ -286,7 +306,10 @@ internal static class SubjectMetadataExtractor
     /// implements the same interface member. Emitting both produces duplicate dictionary keys,
     /// so the non-explicit declaration wins, matching what the runtime resolves.
     /// </summary>
-    private static IReadOnlyList<PropertyMetadata> DeduplicateByName(IReadOnlyList<PropertyMetadata> properties)
+    private static IReadOnlyList<PropertyMetadata> DeduplicateByName(
+        IReadOnlyList<PropertyMetadata> properties,
+        Location location,
+        List<Diagnostic> diagnostics)
     {
         var result = new List<PropertyMetadata>();
         var indexByName = new Dictionary<string, int>();
@@ -298,6 +321,17 @@ internal static class SubjectMetadataExtractor
                 indexByName[property.Name] = result.Count;
                 result.Add(property);
                 continue;
+            }
+
+            // Two explicit implementations of one simple name (typically one generic interface at
+            // two instantiations) is the class-declared form of the NI0008 collision. A class
+            // property colliding with an explicit implementation of the same name is not: only one
+            // of the two comes from an interface, and the class property is the documented winner.
+            if (result[index].ExplicitInterfaceTypeName is not null &&
+                property.ExplicitInterfaceTypeName is not null)
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    Diagnostics.PropertyNameCollision, location, property.Name));
             }
 
             if (result[index].ExplicitInterfaceTypeName is not null &&
@@ -313,6 +347,8 @@ internal static class SubjectMetadataExtractor
     private static IReadOnlyList<MethodMetadata> CollectMethods(
         INamedTypeSymbol typeSymbol,
         SemanticModel semanticModel,
+        Location location,
+        List<Diagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
         var methods = new List<MethodMetadata>();
@@ -335,9 +371,17 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
+                // The postfix is an explicit opt-in to interception, so a method that carries it and
+                // still gets dropped is worth reporting: the user asked for a wrapper and silently
+                // did not get one.
+
                 // A method named exactly "WithoutInterceptor" would yield an empty wrapper name.
                 if (fullMethodName.Length == InterceptedMethodPostfix.Length)
                 {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.MemberSkipped, location,
+                        $"{typeSymbol.Name}.{fullMethodName}",
+                        $"the name has no prefix before '{InterceptedMethodPostfix}'"));
                     continue;
                 }
 
@@ -351,6 +395,10 @@ internal static class SubjectMetadataExtractor
                         modifier.IsKind(SyntaxKind.OutKeyword) ||
                         modifier.IsKind(SyntaxKind.InKeyword))))
                 {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.MemberSkipped, location,
+                        $"{typeSymbol.Name}.{fullMethodName}",
+                        "the method shape is not supported (static, generic, by-reference parameters or an explicit interface implementation)"));
                     continue;
                 }
 
@@ -380,7 +428,9 @@ internal static class SubjectMetadataExtractor
     private static IReadOnlyList<PropertyMetadata> ExtractInterfaceDefaultProperties(
         INamedTypeSymbol typeSymbol,
         IReadOnlyList<PropertyMetadata> classProperties,
-        Compilation compilation)
+        Compilation compilation,
+        Location location,
+        List<Diagnostic> diagnostics)
     {
         var interfaceProperties = new List<PropertyMetadata>();
         var classPropertyNames = new HashSet<string>(classProperties.Select(p => p.Name));
@@ -395,16 +445,35 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
-                // An indexer has no usable name and is parameterised.
-                if (property.IsIndexer)
+                // A property has a default implementation if any accessor is not abstract. This
+                // runs before every other guard so that the guards below only ever fire on a
+                // member the subject could plausibly have adopted: an abstract interface member is
+                // implemented by the class itself, so nothing about it is skipped and reporting on
+                // it would put a warning on every interface a subject implements.
+                var hasDefaultImplementation =
+                    property.GetMethod is { IsAbstract: false } ||
+                    property.SetMethod is { IsAbstract: false };
+                if (!hasDefaultImplementation)
                 {
                     continue;
                 }
 
+                // An indexer has no usable name and is parameterised.
+                if (property.IsIndexer)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.MemberSkipped, location,
+                        $"{interfaceType.Name}.{property.Name}", "indexers cannot be subject properties"));
+                    continue;
+                }
+
                 // A static property with a body is not abstract, so it passes the default
-                // implementation test below, but it cannot be read from an instance.
+                // implementation test above, but it cannot be read from an instance.
                 if (property.IsStatic)
                 {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.MemberSkipped, location,
+                        $"{interfaceType.Name}.{property.Name}", "static members cannot be read from an instance"));
                     continue;
                 }
 
@@ -417,7 +486,8 @@ internal static class SubjectMetadataExtractor
                 var resolvedName = explicitImplementation?.Name ?? property.Name;
                 var accessorInterface = explicitImplementation?.ContainingType ?? interfaceType;
 
-                // Skip properties already declared in the class
+                // Skip properties already declared in the class. The class declaration is the
+                // implementation, so nothing diverges and nothing is reported.
                 if (classPropertyNames.Contains(resolvedName))
                 {
                     continue;
@@ -426,15 +496,8 @@ internal static class SubjectMetadataExtractor
                 // Skip properties already processed from another interface (diamond inheritance)
                 if (processedPropertyNames.Contains(resolvedName))
                 {
-                    continue;
-                }
-
-                // A property has a default implementation if any accessor is not abstract
-                var hasDefaultImplementation =
-                    property.GetMethod is { IsAbstract: false } ||
-                    property.SetMethod is { IsAbstract: false };
-                if (!hasDefaultImplementation)
-                {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.PropertyNameCollision, location, resolvedName));
                     continue;
                 }
 
@@ -454,7 +517,20 @@ internal static class SubjectMetadataExtractor
                     compilation, accessibilityMember, typeSymbol, accessorInterface);
                 if (!isGetterAccessible && !isSetterAccessible)
                 {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.MemberSkipped, location,
+                        $"{accessorInterface.Name}.{resolvedName}",
+                        "the member is not accessible from generated code"));
                     continue;
+                }
+
+                // The emitted metadata reflects the implemented member's PropertyInfo, not the
+                // explicit implementation's, so anything declared on the implementation (a Derived
+                // or validation attribute in particular) never reaches the runtime.
+                if (explicitImplementation is not null && property.GetAttributes().Length > 0)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.ExplicitImplementationAttributesIgnored, location, resolvedName));
                 }
 
                 processedPropertyNames.Add(resolvedName);
@@ -488,6 +564,65 @@ internal static class SubjectMetadataExtractor
         }
 
         return interfaceProperties;
+    }
+
+    /// <summary>
+    /// Reports a class-declared property whose name matches an interface member that resolves to an
+    /// implementation outside this type, so that reading through the interface and reading through
+    /// the subject return different values.
+    /// </summary>
+    /// <remarks>
+    /// Interface implementation is fixed where the interface joins the base list, so a property
+    /// declared further down the hierarchy does not take over the slot. This must not fire on the
+    /// ordinary shape, where the subject itself declares support for the interface and its own
+    /// property is the implementation, nor on an override, which shares the base member's slot.
+    /// </remarks>
+    private static void ReportPropertiesShadowingABaseImplementation(
+        INamedTypeSymbol typeSymbol,
+        IReadOnlyList<PropertyMetadata> classProperties,
+        Location location,
+        List<Diagnostic> diagnostics)
+    {
+        // Without a base class the subject's own declarations own every interface slot it has.
+        if (typeSymbol.BaseType is not { } baseType || baseType.SpecialType == SpecialType.System_Object)
+        {
+            return;
+        }
+
+        foreach (var property in classProperties)
+        {
+            // An explicit implementation is by definition the implementation, and an override
+            // shares the slot of the base member it overrides.
+            if (property.ExplicitInterfaceTypeName is not null || property.IsOverride)
+            {
+                continue;
+            }
+
+            foreach (var interfaceType in typeSymbol.AllInterfaces)
+            {
+                var interfaceMember = interfaceType
+                    .GetMembers(property.Name)
+                    .OfType<IPropertySymbol>()
+                    .FirstOrDefault();
+
+                if (interfaceMember is null)
+                {
+                    continue;
+                }
+
+                var implementation = typeSymbol.FindImplementationForInterfaceMember(interfaceMember);
+                if (implementation is null ||
+                    SymbolEqualityComparer.Default.Equals(implementation.ContainingType, typeSymbol))
+                {
+                    continue;
+                }
+
+                diagnostics.Add(Diagnostic.Create(
+                    Diagnostics.ShadowsBaseImplementation, location,
+                    typeSymbol.Name, property.Name));
+                break;
+            }
+        }
     }
 
     /// <summary>

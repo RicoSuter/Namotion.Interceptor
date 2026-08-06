@@ -36,6 +36,53 @@ internal static class Diagnostics
         isEnabledByDefault: true,
         description: "Records and record structs are excluded because the generated plumbing breaks value equality and with-expressions.");
 
+    public static readonly DiagnosticDescriptor GeneratorFailed = new(
+        id: "NI0004",
+        title: "Interceptor subject generation failed",
+        // One sentence with no trailing period, because RS1032 rejects anything else, and the
+        // exception message interpolated at {2} usually ends in a period of its own.
+        messageFormat: "Generating '{0}' failed with {1}: {2} (the generated file contains the full stack trace)",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "An unhandled exception in the generator. Please report it.");
+
+    public static readonly DiagnosticDescriptor ShadowsBaseImplementation = new(
+        id: "NI0005",
+        title: "Property re-declares a member already implemented by the base class",
+        messageFormat: "'{0}' re-declares '{1}', which the base class already implements, so the subject and the interface report different values",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Reading through the interface resolves to the base class implementation, not this property.");
+
+    public static readonly DiagnosticDescriptor MemberSkipped = new(
+        id: "NI0006",
+        title: "Unsupported member skipped",
+        messageFormat: "'{0}' was skipped because {1}",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "The member is not part of the subject's properties.");
+
+    public static readonly DiagnosticDescriptor ExplicitImplementationAttributesIgnored = new(
+        id: "NI0007",
+        title: "Attributes on an explicit interface implementation are ignored",
+        messageFormat: "Attributes on the explicit implementation of '{0}' are ignored; declare them on the interface member instead",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Property metadata reflects the interface member, so a Derived or validation attribute on the implementation would be silently lost.");
+
+    public static readonly DiagnosticDescriptor PropertyNameCollision = new(
+        id: "NI0008",
+        title: "Two interface members collide on one property name",
+        messageFormat: "'{0}' is provided by more than one interface member; the first declaration wins",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Subject properties are keyed by simple name, so only one of the colliding members is reachable.");
+
     public static readonly DiagnosticDescriptor GenericTypeNotSupported = new(
         id: "NI0009",
         title: "Generic interceptor subjects are not supported",

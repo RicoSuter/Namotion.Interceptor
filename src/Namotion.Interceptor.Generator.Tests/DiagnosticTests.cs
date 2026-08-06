@@ -252,4 +252,459 @@ namespace Repro
         Assert.Empty(generated.GeneratorDiagnostics);
         Assert.Single(generated.Sources);
     }
+
+    [Fact]
+    public void WhenInterfaceDefaultMemberIsAnIndexer_ThenNI0006IsReported()
+    {
+        // Arrange (case E)
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IBag { string this[int index] => ""x""; }
+
+    [InterceptorSubject]
+    public partial class Bag : IBag { }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("indexers cannot be subject properties", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public void WhenInterfaceDefaultMemberIsStatic_ThenNI0006IsReported()
+    {
+        // Arrange (case V)
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHasStatic { static string Version => ""1.0""; }
+
+    [InterceptorSubject]
+    public partial class Thing : IHasStatic { }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Contains("static members cannot be read from an instance", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public void WhenInterfaceDefaultMemberIsInaccessible_ThenNI0006IsReported()
+    {
+        // Arrange (case W)
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHasPrivate
+    {
+        double Value { get; set; }
+        private string Hidden => ""h"";
+    }
+
+    [InterceptorSubject]
+    public partial class Thing : IHasPrivate
+    {
+        public partial double Value { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Contains("the member is not accessible from generated code", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public void WhenClassExplicitImplementationIsInaccessible_ThenNI0006IsReported()
+    {
+        // Arrange: the class-declared sibling of the previous case. A protected interface member
+        // is unreachable through the cast the emitter uses, so the implementation is dropped by
+        // CollectProperties rather than by the interface-default loop.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IBase { protected string Probe { get; set; } }
+
+    [InterceptorSubject]
+    public partial class Thing : IBase
+    {
+        string IBase.Probe { get => ""c""; set { } }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Contains("the member is not accessible from generated code", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public void WhenInterfaceMembersAreAbstract_ThenNI0006IsNotReported()
+    {
+        // Arrange: the overwhelmingly common shape. An abstract interface member (indexer
+        // included) is implemented by the class itself, so nothing is skipped and the advisory
+        // rules must stay silent rather than firing on every interface a subject implements.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IBag
+    {
+        string this[int index] { get; }
+        string Name { get; }
+    }
+
+    [InterceptorSubject]
+    public partial class Bag : IBag
+    {
+        public string this[int index] => ""x"";
+
+        public partial string Name { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.Empty(generated.GeneratorDiagnostics);
+    }
+
+    [Fact]
+    public void WhenMethodIsNamedExactlyWithoutInterceptor_ThenNI0006IsReported()
+    {
+        // Arrange (case O)
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    [InterceptorSubject]
+    public partial class Thing
+    {
+        public void WithoutInterceptor() { }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Contains("the name has no prefix before 'WithoutInterceptor'", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public void WhenWithoutInterceptorMethodIsUnsupportedShape_ThenNI0006IsReportedPerMethod()
+    {
+        // Arrange (case Y: static, generic, by-reference parameters, explicit implementation)
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IFoo
+    {
+        void DoWithoutInterceptor();
+    }
+
+    [InterceptorSubject]
+    public partial class Thing : IFoo
+    {
+        public static void StaticWithoutInterceptor() { }
+        public void GenericWithoutInterceptor<T>(T value) { }
+        public void RefWithoutInterceptor(ref int value) { }
+        void IFoo.DoWithoutInterceptor() { }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.Equal(4, generated.GeneratorDiagnostics.Count(d => d.Id == "NI0006"));
+    }
+
+    [Fact]
+    public void WhenAttributeIsOnExplicitImplementationInInterface_ThenNI0007IsReported()
+    {
+        // Arrange (case AC)
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHuman { string Label { get; } }
+    public interface IMale : IHuman { [Derived] string IHuman.Label => ""m""; }
+
+    [InterceptorSubject]
+    public partial class John : IMale { }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0007");
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+    }
+
+    [Fact]
+    public void WhenAttributeIsOnExplicitImplementationInClass_ThenNI0007IsReported()
+    {
+        // Arrange: the class-declared sibling of the case AC shape. The emitter reflects the
+        // interface member's PropertyInfo in both, so an attribute on the implementation is lost
+        // in both, and the rule must not stop at the interface-declared form.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHuman { string Label { get; } }
+
+    [InterceptorSubject]
+    public partial class John : IHuman
+    {
+        [Derived]
+        string IHuman.Label => ""m"";
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0007");
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+    }
+
+    [Fact]
+    public void WhenExplicitImplementationHasNoAttributes_ThenNI0007IsNotReported()
+    {
+        // Arrange: nothing is lost when there is no attribute to lose.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHuman { string Label { get; } }
+    public interface IMale : IHuman { string IHuman.Label => ""m""; }
+
+    [InterceptorSubject]
+    public partial class John : IMale { }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.Empty(generated.GeneratorDiagnostics);
+    }
+
+    [Fact]
+    public void WhenTwoInterfaceDefaultMembersCollideOnName_ThenNI0008IsReported()
+    {
+        // Arrange (case AE)
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IFoo<T> { string Kind => ""k""; }
+
+    [InterceptorSubject]
+    public partial class Impl : IFoo<int>, IFoo<string> { }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0008");
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains(@"[""Kind""]", generated.SingleSource());
+    }
+
+    [Fact]
+    public void WhenTwoExplicitImplementationsInClassCollideOnName_ThenNI0008IsReported()
+    {
+        // Arrange (case AA): the collision is resolved by DeduplicateByName rather than by the
+        // interface-default loop, but the user-visible consequence is identical.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IFoo<T> { string Kind { get; } }
+
+    [InterceptorSubject]
+    public partial class Impl : IFoo<int>, IFoo<string>
+    {
+        string IFoo<int>.Kind => ""int"";
+        string IFoo<string>.Kind => ""string"";
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0008");
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+    }
+
+    [Fact]
+    public void WhenClassDeclaresAndExplicitlyImplementsSameProperty_ThenNI0008IsNotReported()
+    {
+        // Arrange (case Z): only one of the two declarations comes from an interface, so this is
+        // not the "two interface members collide" shape NI0008 describes.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IKind { string Kind { get; } }
+
+    [InterceptorSubject]
+    public partial class Impl : IKind
+    {
+        public partial string Kind { get; set; }
+
+        string IKind.Kind => ""explicit"";
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.DoesNotContain(generated.GeneratorDiagnostics, d => d.Id == "NI0008");
+    }
+
+    [Fact]
+    public void WhenDerivedRedeclaresBaseImplementedProperty_ThenNI0005IsReported()
+    {
+        // Arrange (case AD): the base class fixed the interface mapping to the default
+        // implementation, so the derived property is reachable only through the subject.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHuman { string Origin => ""interface""; }
+    public class BaseSubject : IHuman { }
+
+    [InterceptorSubject]
+    public partial class DerivedSubject : BaseSubject
+    {
+        public partial string Origin { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0005");
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+    }
+
+    [Fact]
+    public void WhenDerivedRedeclaresPropertyTheBaseClassItselfImplements_ThenNI0005IsReported()
+    {
+        // Arrange: the same divergence with a concrete base implementation instead of a default
+        // interface member, so the rule is not tied to default implementations. The re-declaration
+        // is not partial because the emitter cannot repeat a 'new' modifier on a partial property.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHuman { string Origin { get; } }
+    public class BaseSubject : IHuman { public string Origin => ""base""; }
+
+    [InterceptorSubject]
+    public partial class DerivedSubject : BaseSubject
+    {
+        public new string Origin => ""derived"";
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0005");
+    }
+
+    [Theory]
+    [InlineData(@"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHuman { string Origin { get; } }
+
+    [InterceptorSubject]
+    public partial class Subject : IHuman
+    {
+        public partial string Origin { get; set; }
+    }
+}")]
+    [InlineData(@"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHuman { string Origin { get; } }
+    public class BaseSubject { }
+
+    [InterceptorSubject]
+    public partial class DerivedSubject : BaseSubject, IHuman
+    {
+        public partial string Origin { get; set; }
+    }
+}")]
+    public void WhenClassImplementsTheInterfaceMemberItself_ThenNI0005IsNotReported(string source)
+    {
+        // Arrange: the ordinary implicit-implementation shape, once without a base class and once
+        // with one. The class property IS the implementation, so reading through the interface and
+        // through the subject agree. This is the shape NI0005 is most at risk of over-firing on.
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.DoesNotContain(generated.GeneratorDiagnostics, d => d.Id == "NI0005");
+    }
+
+    [Fact]
+    public void WhenDerivedOverridesBaseInterfaceImplementation_ThenNI0005IsNotReported()
+    {
+        // Arrange: an override shares the base member's interface slot, so reading through the
+        // interface lands on the derived property and the two readings agree.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHuman { string Origin { get; set; } }
+    public class BaseSubject : IHuman { public virtual string Origin { get; set; } = ""base""; }
+
+    [InterceptorSubject]
+    public partial class DerivedSubject : BaseSubject
+    {
+        public override partial string Origin { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.DoesNotContain(generated.GeneratorDiagnostics, d => d.Id == "NI0005");
+    }
 }

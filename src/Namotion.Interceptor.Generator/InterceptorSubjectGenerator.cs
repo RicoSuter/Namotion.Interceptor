@@ -19,8 +19,9 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                 // A struct or interface can never be a valid subject (InterceptorSubjectAttribute's
                 // AttributeUsage is Class-only, so the compiler already reports CS0592 on those),
                 // so excluding them here keeps GetDeclaredSymbol and GetSemanticModel below from
-                // running per attributed struct, record and interface on every keystroke in an IDE.
-                // Records still reach NI0003 below, since that case is silent from the compiler.
+                // running per attributed struct and interface on every keystroke in an IDE.
+                // Records are deliberately kept: the compiler accepts the attribute on a record
+                // class, so NI0003 below is the only report that case gets.
                 predicate: (node, _) =>
                     node is ClassDeclarationSyntax { AttributeLists.Count: > 0 } or
                     RecordDeclarationSyntax { AttributeLists.Count: > 0 },
@@ -102,12 +103,19 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
 
                 spc.AddSource(fileName, SourceText.From(generatedCode, Encoding.UTF8));
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                // The full stack is preserved in the emitted file; Task 11 adds NI0004 so the
-                // failure is also visible in the build output.
                 var className = cls.TypeDeclaration.Identifier.ValueText;
-                spc.AddSource($"{className}.g.cs", SourceText.From($"/* {ex} */", Encoding.UTF8));
+
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    Diagnostics.GeneratorFailed,
+                    cls.TypeDeclaration.Identifier.GetLocation(),
+                    className,
+                    exception.GetType().Name,
+                    exception.Message));
+
+                // The file keeps the full frames; a diagnostic message renders as one line.
+                spc.AddSource($"{className}.g.cs", SourceText.From($"/* {exception} */", Encoding.UTF8));
             }
         });
     }
