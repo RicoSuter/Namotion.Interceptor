@@ -276,6 +276,47 @@ public class ChangeMergerTests
         return subjects;
     }
 
+    [Fact]
+    public void WhenValueTypedSurvivorsAreCheckedForSupersession_ThenNothingIsAllocated()
+    {
+        // Arrange: generated int properties, written through the terminal so each carries a committed
+        // revision, and changes stamped with that same revision so every survivor is kept and every
+        // check runs to the end rather than short-circuiting. This is the flush path every buffered
+        // connector runs, and it is meant to be allocation free.
+        using var merger = new ChangeMerger();
+
+        var changes = new SubjectPropertyChange[16];
+        for (var index = 0; index < changes.Length; index++)
+        {
+            var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = index };
+            var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
+
+            Assert.True(property.TryGetCommittedRevision(out var revision),
+                "The write did not reach a terminal, so this measures the wrong path.");
+            Assert.NotEqual(0, revision);
+
+            changes[index] = SubjectPropertyChange.Create(
+                property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, 0, index, revision);
+        }
+
+        // Warm up: the JIT, the property index capacity, the pooled buffer and the sticky written-out
+        // mark are all one-time costs that would otherwise land inside the measurement.
+        for (var warmup = 0; warmup < 5; warmup++)
+        {
+            merger.Merge(changes, suppressSupersededChanges: true);
+            merger.Reset();
+        }
+
+        // Act
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var merged = merger.Merge(changes, suppressSupersededChanges: true);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        // Assert
+        Assert.Equal(changes.Length, merged.Length);
+        Assert.Equal(0, allocated);
+    }
+
     private static SubjectPropertyChange[] CreateBatch(int size)
     {
         // One subject per change, so every change is the only root of a subject of its own.
@@ -336,17 +377,25 @@ public class ChangeMergerTests
     {
         // Arrange: collapsing a batch cannot see across flushes, so a change enqueued late enough to
         // land in the next batch would otherwise overwrite the source with an older commit's value.
-        // The model is what settles it: FirstName has moved on, LastName has not.
+        // The property's own commit revision settles it: FirstName has moved on, LastName has not.
         using var merger = new ChangeMerger();
 
-        var subject = new Person { FirstName = "Newest", LastName = "Newer" };
+        var subject = new Person(InterceptorSubjectContext.Create());
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
+        subject.FirstName = "Stale";
+        Assert.True(firstName.TryGetCommittedRevision(out var stragglerRevision));
+
+        subject.LastName = "Newer";
+        Assert.True(lastName.TryGetCommittedRevision(out var lastNameRevision));
+
+        subject.FirstName = "Newest";
+
         SubjectPropertyChange[] straggler =
         [
-            CreateChange(firstName, "Old", "Stale", revision: 8),
-            CreateChange(lastName, "Newest", "Newer", revision: 12)
+            CreateChange(firstName, "Old", "Stale", stragglerRevision),
+            CreateChange(lastName, "Newest", "Newer", lastNameRevision)
         ];
 
         // Act
@@ -369,13 +418,21 @@ public class ChangeMergerTests
         // Arrange
         using var merger = new ChangeMerger();
 
-        var subject = new Person { FirstName = "Newest", LastName = "Newer" };
+        var subject = new Person(InterceptorSubjectContext.Create());
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
+        subject.FirstName = "Stale";
+        Assert.True(firstName.TryGetCommittedRevision(out var stragglerRevision));
+
+        subject.LastName = "Newer";
+        Assert.True(lastName.TryGetCommittedRevision(out var lastNameRevision));
+
+        subject.FirstName = "Newest";
+
         // Act: the first is superseded and dropped, the second survives.
         var merged = merger.Merge(
-            [CreateChange(firstName, "Old", "Stale", revision: 8), CreateChange(lastName, "Newest", "Newer", revision: 12)],
+            [CreateChange(firstName, "Old", "Stale", stragglerRevision), CreateChange(lastName, "Newest", "Newer", lastNameRevision)],
             suppressSupersededChanges: true);
 
         // Assert

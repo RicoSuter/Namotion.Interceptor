@@ -165,6 +165,97 @@ public class CurrentValueFilterTests
         await StopAsync(cancellation, processing);
     }
 
+    [Fact]
+    public void WhenARuntimeRegisteredPropertyHasCommittedANewerWrite_ThenTheEarlierChangeIsSuperseded()
+    {
+        // Arrange: a property registered at runtime, which is the shape the OPC UA client loader
+        // creates for every node it browses. Its getter is caller supplied and need not read what the
+        // write stored, so comparing values could never establish staleness here. Comparing the
+        // property's own commit revision can.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var subject = new Person(context);
+
+        object? stored = null;
+        var property = subject
+            .TryGetRegisteredSubject()!
+            .AddProperty("Dynamic", typeof(int), _ => stored, (_, value) => stored = value);
+
+        property.SetValue(1);
+        Assert.True(property.Reference.TryGetCommittedRevision(out var earlierRevision));
+
+        property.SetValue(2);
+        Assert.True(property.Reference.TryGetCommittedRevision(out var settledRevision));
+        Assert.True(settledRevision > earlierRevision);
+
+        var earlier = CreateChange(property.Reference, 0, 1, earlierRevision);
+        var settled = CreateChange(property.Reference, 1, 2, settledRevision);
+
+        // Act & Assert
+        Assert.False(CurrentValueFilter.IsCurrent(in earlier));
+        Assert.True(CurrentValueFilter.IsCurrent(in settled));
+    }
+
+    [Fact]
+    public void WhenAGeneratedPropertyHasCommittedANewerWrite_ThenTheEarlierChangeIsSuperseded()
+    {
+        // Arrange
+        var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = 1 };
+        var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
+
+        Assert.True(property.TryGetCommittedRevision(out var earlierRevision));
+
+        subject.First = 2;
+        Assert.True(property.TryGetCommittedRevision(out var settledRevision));
+
+        var earlier = CreateChange(property, 0, 1, earlierRevision);
+        var settled = CreateChange(property, 1, 2, settledRevision);
+
+        // Act & Assert
+        Assert.False(CurrentValueFilter.IsCurrent(in earlier));
+        Assert.True(CurrentValueFilter.IsCurrent(in settled));
+    }
+
+    [Fact]
+    public void WhenAChangeCarriesNoRevision_ThenItIsDelivered()
+    {
+        // Arrange: constructed outside a write terminal, so it orders against nothing. A derived
+        // recomputation is the common case, and dropping one would be permanent.
+        var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = 1 };
+        var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
+
+        subject.First = 2;
+
+        var change = CreateChange(property, 0, 1, revision: 0);
+
+        // Act & Assert
+        Assert.True(CurrentValueFilter.IsCurrent(in change));
+    }
+
+    [Fact]
+    public void WhenThePropertyHasNeverBeenWritten_ThenItsChangeIsDelivered()
+    {
+        // Arrange: nothing has committed, so nothing can have superseded the change.
+        var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create());
+        var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
+
+        Assert.False(property.TryGetCommittedRevision(out _));
+
+        var change = CreateChange(property, 0, 1, revision: 7);
+
+        // Act & Assert
+        Assert.True(CurrentValueFilter.IsCurrent(in change));
+    }
+
+    private static SubjectPropertyChange CreateChange(
+        PropertyReference property, int oldValue, int newValue, long revision)
+    {
+        return SubjectPropertyChange.Create(
+            property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, oldValue, newValue, revision);
+    }
+
     private static ChangeQueueProcessor CreateProcessor(
         IInterceptorSubjectContext context, Action<SubjectPropertyChange> onWritten)
     {

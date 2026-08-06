@@ -3,19 +3,19 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
-/// Delivers a property's current value and nothing else.
+/// Delivers a property's settled state and nothing else.
 ///
 /// A change is enqueued after its commit and outside the subject lock, so a writer preempted between the
 /// two can present revision 8 after revision 10 has already gone out. Nothing bounds that preemption, so
-/// no amount of buffering closes it. What does close it is that the subject is the authority on its own
-/// state and every transition to that state is enqueued: a change whose new value is no longer the
-/// current value has been superseded by one that is still to come, or has already gone out, so dropping
-/// it can never lose the settled state.
+/// no amount of buffering closes it. What does close it is that every committed write stamps its revision
+/// on the property it wrote: a change whose revision the property has moved past was superseded by a
+/// commit that is still to come, or has already gone out, so dropping it can never lose the settled state.
 ///
 /// This also decides the cases no local ordering can (see #373, #346). An inbound notification is stamped
 /// with a revision when it is applied here, not when the source produced it, so revisions cannot rank it
-/// against our writes. Against the current value the question does not arise: whatever the model holds
-/// once writes settle is what the source is owed.
+/// against our writes across systems. That question does not arise here: the comparison is between a
+/// change and the property it belongs to, both stamped by the same terminal under the same lock, which
+/// asks only whether this subject has committed something newer.
 /// </summary>
 internal static class CurrentValueFilter
 {
@@ -53,40 +53,30 @@ internal static class CurrentValueFilter
     }
 
     /// <summary>
-    /// Whether the change still carries the property's current value.
+    /// Whether the property has not committed anything newer than this change.
     /// </summary>
     public static bool IsCurrent(in SubjectPropertyChange change)
     {
-        var property = change.Property;
-
-        // Not via PropertyReference.Metadata: that throws when the property is not registered, which
-        // happens transiently while a concurrent structural mutation moves the subject. Undeliverable
-        // state is not the same as a stale change, so the change is admitted and the write handler
-        // decides.
-        if (!property.Subject.Properties.TryGetValue(property.Name, out var metadata) ||
-            metadata.GetValue is null ||
-            metadata.IsDerived ||
-            metadata.IsDynamic)
+        // A change constructed outside a write terminal, which orders against nothing. A derived
+        // recomputation is the common case: it produces a change without committing a write, so
+        // staleness is unprovable and the change is delivered. A redundant write costs one message,
+        // while a wrong drop is permanent, because the transition that would re-enqueue the value is
+        // the very change being dropped.
+        if (change.Revision == 0)
         {
-            // The comparison is only meaningful when the getter returns what the write stored, which
-            // holds for generated properties and nothing else. A derived getter recomputes and can hand
-            // back a fresh instance that is never equal to the value the change carries; a runtime
-            // registered property carries a caller supplied getter that need not read the stored value
-            // at all. Neither can establish staleness, so the change is delivered: a redundant write
-            // costs one message, while a wrong drop is permanent, because the transition that would
-            // re-enqueue the value is the very change being dropped.
             return true;
         }
 
-        try
+        // No write has reached a terminal on this property, so nothing can have superseded the change.
+        if (!change.Property.TryGetCommittedRevision(out var committedRevision))
         {
-            return Equals(metadata.GetValue(property.Subject), change.GetNewValue<object?>());
-        }
-        catch
-        {
-            // A user getter that throws says nothing about whether the change is stale, so it is
-            // admitted and the write handler decides, rather than the change being lost here.
             return true;
         }
+
+        // Not equality: the property's revision is stamped inside the write lock and the change is
+        // enqueued after it, so a terminal-stamped change can never exceed it. The inequality can only
+        // trigger on a path that stamps a change without advancing the property, and delivering there
+        // keeps the bias above.
+        return change.Revision >= committedRevision;
     }
 }
