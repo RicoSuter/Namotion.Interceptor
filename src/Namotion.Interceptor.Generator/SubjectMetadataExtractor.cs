@@ -234,6 +234,25 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
+                // A method named exactly "WithoutInterceptor" would yield an empty wrapper name.
+                if (fullMethodName.Length == InterceptedMethodPostfix.Length)
+                {
+                    continue;
+                }
+
+                // The emitter drops static, generic and by-reference shapes, and cannot route an
+                // explicit interface implementation through the executor.
+                if (method.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)) ||
+                    method.TypeParameterList is not null ||
+                    method.ExplicitInterfaceSpecifier is not null ||
+                    method.ParameterList.Parameters.Any(parameter => parameter.Modifiers.Any(m =>
+                        m.IsKind(SyntaxKind.RefKeyword) ||
+                        m.IsKind(SyntaxKind.OutKeyword) ||
+                        m.IsKind(SyntaxKind.InKeyword))))
+                {
+                    continue;
+                }
+
                 var methodName = fullMethodName.Substring(0, fullMethodName.Length - InterceptedMethodPostfix.Length);
                 var returnType = GetFullTypeName(method.ReturnType, declarationModel);
 
@@ -274,6 +293,19 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
+                // An indexer has no usable name and is parameterised.
+                if (property.IsIndexer)
+                {
+                    continue;
+                }
+
+                // A static property with a body is not abstract, so it passes the default
+                // implementation test below, but it cannot be read from an instance.
+                if (property.IsStatic)
+                {
+                    continue;
+                }
+
                 // For an explicit implementation, IPropertySymbol.Name is the fully qualified
                 // "Namespace.IHuman.Gender". The implemented member carries the simple name, and
                 // its containing type is the interface the accessor must cast through: reflection
@@ -282,6 +314,19 @@ internal static class SubjectMetadataExtractor
                 var explicitImplementation = property.ExplicitInterfaceImplementations.FirstOrDefault();
                 var resolvedName = explicitImplementation?.Name ?? property.Name;
                 var accessorInterface = explicitImplementation?.ContainingType ?? interfaceType;
+
+                // The generated code lives in the same assembly, so internal and protected
+                // internal members are reachable. Private and protected ones are not. Explicit
+                // interface implementations report Private regardless of their actual visibility
+                // (the CLR requires it), so they are exempt: the cast through accessorInterface
+                // above is what makes them reachable, not their declared accessibility.
+                if (explicitImplementation is null &&
+                    property.DeclaredAccessibility is Accessibility.Private
+                        or Accessibility.Protected
+                        or Accessibility.ProtectedAndInternal)
+                {
+                    continue;
+                }
 
                 // Skip properties already declared in the class
                 if (classPropertyNames.Contains(resolvedName))
