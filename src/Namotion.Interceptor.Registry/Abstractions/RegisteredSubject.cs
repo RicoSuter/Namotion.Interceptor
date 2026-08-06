@@ -338,22 +338,6 @@ public class RegisteredSubject
             isIntercepted: true,
             isDynamic: true);
 
-        var property = AddPropertyInternal(name, type, metadata, attributes);
-
-        // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
-        // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
-        // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
-        // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
-        // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
-        property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
-            null, delegate { });
-
-        return property;
-    }
-
-    private RegisteredSubjectProperty AddPropertyInternal(
-        string name, Type type, SubjectPropertyMetadata metadata, Attribute[] attributes)
-    {
         var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
 
         lock (_lock)
@@ -381,6 +365,15 @@ public class RegisteredSubject
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);
+
+        // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
+        // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
+        // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
+        // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
+        // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
+        subjectProperty.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
+            null, delegate { });
+
         return subjectProperty;
     }
 }
