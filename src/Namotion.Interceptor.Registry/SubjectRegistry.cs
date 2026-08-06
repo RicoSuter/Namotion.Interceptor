@@ -20,9 +20,13 @@ namespace Namotion.Interceptor.Registry;
 ///
 /// Ordered against <see cref="ParentTrackingHandler"/> as well, so that the pre-descent segment has
 /// one order rather than a registration-dependent one. Neither reads the other, so the direction is
-/// chosen to match what every chain in this repository already resolved. It matters only to a
-/// handler placed between the two, which would otherwise see one recorder's output and not the
-/// other's depending on how the context was composed.
+/// chosen to match what every chain in this repository already resolved. What it changes is that a
+/// handler which would otherwise land between the two, seeing one recorder's output and not the
+/// other's according to how the context was composed, no longer has that position available: a
+/// handler declaring <c>[RunsAfter(ParentTrackingHandler)]</c> together with
+/// <c>[RunsBefore(SubjectRegistry)]</c> now closes a cycle and is rejected when the chain resolves.
+/// That is the intended answer rather than a casualty, because such a handler is asking for an order
+/// that contradicts the one the recorders publish for everyone else.
 /// </remarks>
 [RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
