@@ -4,6 +4,7 @@ namespace Namotion.Interceptor.Generator.Models;
 
 internal sealed record SubjectMetadata(
     string ClassName,
+    string AccessModifier,
     string? NamespaceName,
     string FullTypeName,
     string[] ContainingTypes,

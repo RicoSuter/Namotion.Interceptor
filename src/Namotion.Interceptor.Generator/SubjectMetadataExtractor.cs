@@ -22,6 +22,11 @@ internal static class SubjectMetadataExtractor
         CancellationToken cancellationToken)
     {
         var className = classDeclaration.Identifier.ValueText;
+
+        // Use the symbol rather than the syntax modifiers: a top-level class without a modifier
+        // defaults to internal, a nested one to private.
+        var accessModifier = GetAccessModifierFromAccessibility(typeSymbol.DeclaredAccessibility);
+
         var containingTypes = GetContainingTypes(classDeclaration);
         var namespaceName = GetNamespace(classDeclaration);
         var fullTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
@@ -66,6 +71,7 @@ internal static class SubjectMetadataExtractor
 
         return new SubjectMetadata(
             className,
+            accessModifier,
             namespaceName,
             fullTypeName,
             containingTypes,

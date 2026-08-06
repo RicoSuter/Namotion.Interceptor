@@ -118,7 +118,7 @@ internal static class SubjectCodeGenerator
             ? "IInterceptorSubject"
             : "IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged";
 
-        builder.AppendLine($"    public partial class {metadata.ClassName} : {interfaces}");
+        builder.AppendLine($"    {metadata.AccessModifier} partial class {metadata.ClassName} : {interfaces}");
         builder.AppendLine("    {");
     }
 
