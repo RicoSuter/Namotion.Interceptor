@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Registry;
 
@@ -16,8 +17,14 @@ namespace Namotion.Interceptor.Registry;
 /// the time any handler runs for it. Ordered the other way round, only part of that chain would be
 /// registered and <c>TryGetRegisteredSubject()</c> would return null for the rest. See "Handler
 /// Order Around the Descent" in docs/design/tracking-lifecycle.md.
+///
+/// Ordered against <see cref="ParentTrackingHandler"/> as well, so that the pre-descent segment has
+/// one order rather than a registration-dependent one. Neither reads the other, so the direction is
+/// chosen to match what every chain in this repository already resolved. It matters only to a
+/// handler placed between the two, which would otherwise see one recorder's output and not the
+/// other's depending on how the context was composed.
 /// </remarks>
-[RunsBefore(typeof(ContextInheritanceHandler))]
+[RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();

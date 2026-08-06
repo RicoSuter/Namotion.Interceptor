@@ -43,7 +43,7 @@ public class RegistryHandlerOrderTests
 
     [Theory]
     [MemberData(nameof(RegistrationOrders))]
-    public void WhenRegistryIsRegisteredInAnyOrder_ThenItResolvesAheadOfContextInheritance(string registrationOrder)
+    public void WhenRegistryIsRegisteredInAnyOrder_ThenTheHandlerChainResolvesIdentically(string registrationOrder)
     {
         // Arrange
         var context = CreateContext(registrationOrder);
@@ -53,17 +53,12 @@ public class RegistryHandlerOrderTests
             .Select(handler => handler.GetType().Name)
             .ToArray();
 
-        // Assert
-        var resolved = string.Join(" -> ", handlers);
-        var registryIndex = Array.IndexOf(handlers, nameof(SubjectRegistry));
-        var descentIndex = Array.IndexOf(handlers, nameof(ContextInheritanceHandler));
-
-        // Both must be present before comparing: IndexOf returns -1 for a missing entry, and -1 is
-        // less than any real index, so a chain that stopped resolving the registry would otherwise
-        // satisfy the ordering assertion.
-        Assert.True(registryIndex >= 0, $"Registry not resolved at all: {resolved}");
-        Assert.True(descentIndex >= 0, $"Inheritance handler not resolved at all: {resolved}");
-        Assert.True(registryIndex < descentIndex, $"Expected the registry ahead of the descent but resolved: {resolved}");
+        // Assert: the whole sequence, not just registry-before-descent. Both recorders are ordered
+        // against the descent and against each other, so composition order cannot reshuffle the
+        // pre-descent segment and a handler placed inside it sees the same state either way.
+        Assert.Equal(
+            [nameof(SubjectRegistry), nameof(ParentTrackingHandler), nameof(ContextInheritanceHandler)],
+            handlers);
     }
 
     [Fact]
