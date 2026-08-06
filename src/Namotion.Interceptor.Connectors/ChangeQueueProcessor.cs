@@ -128,7 +128,7 @@ public class ChangeQueueProcessor : IDisposable
     private static bool NeedsWriteBack(in SubjectPropertyChange change)
     {
         return change.Origin.Kind == ChangeOriginKind.Confirmed
-               && CurrentValueFilter.WasWrittenOut(change.Property);
+               && ChangeDeliveryFilter.WasWrittenOut(change.Property);
     }
 
     /// <summary>
@@ -206,14 +206,14 @@ public class ChangeQueueProcessor : IDisposable
                     continue;
                 }
 
-                if (wasQueuedBeforeStart && !CurrentValueFilter.IsCurrent(in change))
+                if (wasQueuedBeforeStart && !ChangeDeliveryFilter.IsCurrent(in change))
                 {
                     continue;
                 }
 
                 if (periodicTimer is null)
                 {
-                    CurrentValueFilter.MarkWrittenOut(in change);
+                    ChangeDeliveryFilter.MarkWrittenOut(in change);
 
                     // Immediate path: send a single change without buffering (zero allocation)
                     _immediateBuffer[0] = change;

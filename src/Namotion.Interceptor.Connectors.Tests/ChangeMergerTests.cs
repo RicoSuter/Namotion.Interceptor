@@ -291,7 +291,7 @@ public class ChangeMergerTests
             var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = index };
             var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
 
-            Assert.True(property.TryGetCommittedRevision(out var revision),
+            Assert.True(property.TryGetWriteState(out var revision, out _),
                 "The write did not reach a terminal, so this measures the wrong path.");
             Assert.NotEqual(0, revision);
 
@@ -385,10 +385,10 @@ public class ChangeMergerTests
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
         subject.FirstName = "Stale";
-        Assert.True(firstName.TryGetCommittedRevision(out var stragglerRevision));
+        Assert.True(firstName.TryGetWriteState(out var stragglerRevision, out _));
 
         subject.LastName = "Newer";
-        Assert.True(lastName.TryGetCommittedRevision(out var lastNameRevision));
+        Assert.True(lastName.TryGetWriteState(out var lastNameRevision, out _));
 
         subject.FirstName = "Newest";
 
@@ -423,10 +423,10 @@ public class ChangeMergerTests
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
         subject.FirstName = "Stale";
-        Assert.True(firstName.TryGetCommittedRevision(out var stragglerRevision));
+        Assert.True(firstName.TryGetWriteState(out var stragglerRevision, out _));
 
         subject.LastName = "Newer";
-        Assert.True(lastName.TryGetCommittedRevision(out var lastNameRevision));
+        Assert.True(lastName.TryGetWriteState(out var lastNameRevision, out _));
 
         subject.FirstName = "Newest";
 

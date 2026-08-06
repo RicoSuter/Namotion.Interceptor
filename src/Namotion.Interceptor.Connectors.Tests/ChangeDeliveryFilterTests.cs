@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.Connectors.Tests;
 /// not the value that was written, a derived value the getter recomputes, and a newer value that
 /// arrives from a different source.
 /// </summary>
-public class CurrentValueFilterTests
+public class ChangeDeliveryFilterTests
 {
     [Fact]
     public async Task WhenAHookClampsTheWrittenValue_ThenTheStoredValueIsStillDelivered()
@@ -184,18 +184,18 @@ public class CurrentValueFilterTests
             .AddProperty("Dynamic", typeof(int), _ => stored, (_, value) => stored = value);
 
         property.SetValue(1);
-        Assert.True(property.Reference.TryGetCommittedRevision(out var earlierRevision));
+        Assert.True(property.Reference.TryGetWriteState(out var earlierRevision, out _));
 
         property.SetValue(2);
-        Assert.True(property.Reference.TryGetCommittedRevision(out var settledRevision));
+        Assert.True(property.Reference.TryGetWriteState(out var settledRevision, out _));
         Assert.True(settledRevision > earlierRevision);
 
         var earlier = CreateChange(property.Reference, 0, 1, earlierRevision);
         var settled = CreateChange(property.Reference, 1, 2, settledRevision);
 
         // Act & Assert
-        Assert.False(CurrentValueFilter.IsCurrent(in earlier));
-        Assert.True(CurrentValueFilter.IsCurrent(in settled));
+        Assert.False(ChangeDeliveryFilter.IsCurrent(in earlier));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in settled));
     }
 
     [Fact]
@@ -205,17 +205,17 @@ public class CurrentValueFilterTests
         var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = 1 };
         var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
 
-        Assert.True(property.TryGetCommittedRevision(out var earlierRevision));
+        Assert.True(property.TryGetWriteState(out var earlierRevision, out _));
 
         subject.First = 2;
-        Assert.True(property.TryGetCommittedRevision(out var settledRevision));
+        Assert.True(property.TryGetWriteState(out var settledRevision, out _));
 
         var earlier = CreateChange(property, 0, 1, earlierRevision);
         var settled = CreateChange(property, 1, 2, settledRevision);
 
         // Act & Assert
-        Assert.False(CurrentValueFilter.IsCurrent(in earlier));
-        Assert.True(CurrentValueFilter.IsCurrent(in settled));
+        Assert.False(ChangeDeliveryFilter.IsCurrent(in earlier));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in settled));
     }
 
     [Fact]
@@ -231,7 +231,7 @@ public class CurrentValueFilterTests
         var change = CreateChange(property, 0, 1, revision: 0);
 
         // Act & Assert
-        Assert.True(CurrentValueFilter.IsCurrent(in change));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in change));
     }
 
     [Fact]
@@ -241,12 +241,12 @@ public class CurrentValueFilterTests
         var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create());
         var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
 
-        Assert.False(property.TryGetCommittedRevision(out _));
+        Assert.False(property.TryGetWriteState(out _, out _));
 
         var change = CreateChange(property, 0, 1, revision: 7);
 
         // Act & Assert
-        Assert.True(CurrentValueFilter.IsCurrent(in change));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in change));
     }
 
     private static SubjectPropertyChange CreateChange(

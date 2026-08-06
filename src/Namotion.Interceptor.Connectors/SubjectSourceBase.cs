@@ -347,7 +347,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     // Marked here because this path flushes the retry queue directly rather than going
                     // through the processor, and without the mark a later transaction confirmation on
                     // this property is not written back, which is the divergence that repair exists for.
-                    CurrentValueFilter.MarkWrittenOut(in change);
+                    ChangeDeliveryFilter.MarkWrittenOut(in change);
                     (toSend ??= []).Add(change);
                     sent++;
                 }

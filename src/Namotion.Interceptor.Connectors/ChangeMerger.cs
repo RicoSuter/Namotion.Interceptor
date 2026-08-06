@@ -186,12 +186,10 @@ internal sealed class ChangeMerger : IDisposable
         var kept = 0;
         for (var i = 0; i < _count; i++)
         {
-            if (!CurrentValueFilter.IsCurrent(in _buffer[i]))
+            if (!ChangeDeliveryFilter.TryAcceptForDelivery(in _buffer[i]))
             {
                 continue;
             }
-
-            CurrentValueFilter.MarkWrittenOut(in _buffer[i]);
 
             if (kept != i)
             {

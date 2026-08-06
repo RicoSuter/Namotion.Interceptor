@@ -69,25 +69,19 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
             .Remove(new KeyValuePair<(string?, string), object?>((Name, key), expectedValue));
     }
 
-    // One holder per property, created on its first write and reused for the property's lifetime. Both
-    // slots are written by the same terminal on the same write, so keeping them in one array is what
-    // holds the hot path to a single dictionary lookup. The slots are independent: nothing reads them
-    // as a pair, so the two exchanges below need no mutual ordering.
-    // Short by convention, and load-bearing here: the revision slot is read on every delivered change,
+    // Short by convention, and load-bearing here: the write state is read on every delivered change,
     // string hash codes are not cached, so key length is per-call work. Matches the "ni.*" keys the
     // tracking and connector layers use.
     private const string WriteStateKey = "ni.wstate";
-    private const int TimestampSlot = 0;
-    private const int RevisionSlot = 1;
 
     /// <summary>
     /// Gets the write timestamp, or null if no timestamp has been set.
     /// </summary>
     public DateTimeOffset? TryGetWriteTimestamp()
     {
-        if (Subject.Data.TryGetValue((Name, WriteStateKey), out var value) && value is long[] holder)
+        if (TryGetWriteState(out var state))
         {
-            var ticks = Interlocked.Read(ref holder[TimestampSlot]);
+            var ticks = Interlocked.Read(ref state.TimestampTicks);
             return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
         }
 
@@ -95,30 +89,48 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Gets the revision of the last write to this property that reached a write terminal.
+    /// Gets the revision of the last write to this property that reached a write terminal, and whether
+    /// a sink has already published this property's value.
     /// </summary>
     /// <remarks>
-    /// Comparable against the revision carried by a change to the same property, because both are
-    /// stamped by the same terminal under the subject's lock. Revisions of different subjects are not
-    /// comparable, and neither are revisions of two properties, so a caller may only compare a change
-    /// against the property it belongs to.
+    /// The revision is comparable against the revision carried by a change to the same property, because
+    /// both are stamped by the same terminal under the subject's lock. Revisions of different subjects
+    /// are not comparable, and neither are revisions of two properties, so a caller may only compare a
+    /// change against the property it belongs to.
     /// <para>
     /// The store happens after the value store and inside the lock, so a reader that observes revision
     /// N is guaranteed to observe the value committed at N. Returns false when the property has never
-    /// been written through a terminal, and 0 when only a path that stamps no revision has written it
-    /// (a derived recomputation, for instance).
+    /// been written, and a revision of 0 when only a path that stamps no revision has written it (a
+    /// derived recomputation, for instance).
+    /// </para>
+    /// <para>
+    /// Both values come from one lookup on purpose. This runs per delivered change, and a property data
+    /// lookup hashes the property name and the key, so splitting it in two doubles that cost.
     /// </para>
     /// </remarks>
-    public bool TryGetCommittedRevision(out long revision)
+    public bool TryGetWriteState(out long committedRevision, out bool published)
     {
-        if (Subject.Data.TryGetValue((Name, WriteStateKey), out var value) && value is long[] holder)
+        if (TryGetWriteState(out var state))
         {
-            revision = Interlocked.Read(ref holder[RevisionSlot]);
+            committedRevision = Interlocked.Read(ref state.CommittedRevision);
+            published = state.Published;
             return true;
         }
 
-        revision = 0;
+        committedRevision = 0;
+        published = false;
         return false;
+    }
+
+    /// <summary>
+    /// Records that a sink has published this property's value. Sticky: see
+    /// <see cref="PropertyWriteState.Published"/> for why it is never cleared and why an over-eager
+    /// mark is harmless. Callers are expected to check <see cref="TryGetWriteState(out long, out bool)"/>
+    /// first, which makes this a once-per-property cost rather than a per-change one.
+    /// </summary>
+    public void MarkPublished()
+    {
+        GetOrAddWriteState().Published = true;
     }
 
     /// <summary>
@@ -134,9 +146,9 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void SetWriteState(long timestamp, long revision)
     {
-        var holder = RentWriteState();
-        Interlocked.Exchange(ref holder[TimestampSlot], timestamp);
-        Interlocked.Exchange(ref holder[RevisionSlot], revision);
+        var state = GetOrAddWriteState();
+        Interlocked.Exchange(ref state.TimestampTicks, timestamp);
+        Interlocked.Exchange(ref state.CommittedRevision, revision);
     }
 
     /// <summary>
@@ -146,13 +158,26 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void SetWriteTimestamp(long timestamp)
     {
-        Interlocked.Exchange(ref RentWriteState()[TimestampSlot], timestamp);
+        Interlocked.Exchange(ref GetOrAddWriteState().TimestampTicks, timestamp);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private long[] RentWriteState()
+    private bool TryGetWriteState(out PropertyWriteState state)
     {
-        return (long[])Subject.Data.GetOrAdd((Name, WriteStateKey), static _ => new long[2])!;
+        if (Subject.Data.TryGetValue((Name, WriteStateKey), out var value) && value is PropertyWriteState existing)
+        {
+            state = existing;
+            return true;
+        }
+
+        state = null!;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private PropertyWriteState GetOrAddWriteState()
+    {
+        return (PropertyWriteState)Subject.Data.GetOrAdd((Name, WriteStateKey), static _ => new PropertyWriteState())!;
     }
 
     #region Equality
