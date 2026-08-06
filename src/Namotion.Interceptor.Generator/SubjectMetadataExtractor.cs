@@ -17,24 +17,69 @@ internal static class SubjectMetadataExtractor
     /// </summary>
     public static ExtractionResult Extract(
         INamedTypeSymbol typeSymbol,
-        ClassDeclarationSyntax classDeclaration,
+        TypeDeclarationSyntax typeDeclaration,
         SemanticModel semanticModel,
         CancellationToken cancellationToken)
     {
         var diagnostics = new List<Diagnostic>();
 
-        var className = classDeclaration.Identifier.ValueText;
+        var location = typeDeclaration.Identifier.GetLocation();
+
+        if (typeDeclaration is not ClassDeclarationSyntax)
+        {
+            diagnostics.Add(Diagnostic.Create(
+                Diagnostics.UnsupportedTypeKind, location,
+                typeSymbol.Name, typeDeclaration.Keyword.ValueText));
+            return new ExtractionResult(null, diagnostics);
+        }
+
+        if (!typeDeclaration.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)))
+        {
+            diagnostics.Add(Diagnostic.Create(Diagnostics.NotPartial, location, typeSymbol.Name));
+            return new ExtractionResult(null, diagnostics);
+        }
+
+        if (typeDeclaration.Modifiers.Any(m => m.IsKind(SyntaxKind.FileKeyword)))
+        {
+            diagnostics.Add(Diagnostic.Create(Diagnostics.FileTypeNotSupported, location, typeSymbol.Name));
+            return new ExtractionResult(null, diagnostics);
+        }
+
+        if (typeSymbol.IsGenericType)
+        {
+            diagnostics.Add(Diagnostic.Create(Diagnostics.GenericTypeNotSupported, location, typeSymbol.Name));
+            return new ExtractionResult(null, diagnostics);
+        }
+
+        for (var parent = typeDeclaration.Parent; parent is TypeDeclarationSyntax outer; parent = parent.Parent)
+        {
+            if (!outer.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)))
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    Diagnostics.ContainingTypeNotPartial, location,
+                    outer.Identifier.ValueText, typeSymbol.Name));
+                return new ExtractionResult(null, diagnostics);
+            }
+
+            if (outer.TypeParameterList is not null)
+            {
+                diagnostics.Add(Diagnostic.Create(Diagnostics.GenericTypeNotSupported, location, typeSymbol.Name));
+                return new ExtractionResult(null, diagnostics);
+            }
+        }
+
+        var className = typeDeclaration.Identifier.ValueText;
 
         // Use the symbol rather than the syntax modifiers: a top-level class without a modifier
         // defaults to internal, a nested one to private.
         var accessModifier = GetAccessModifierFromAccessibility(typeSymbol.DeclaredAccessibility);
 
-        var containingTypes = GetContainingTypes(classDeclaration);
-        var namespaceName = GetNamespace(classDeclaration);
+        var containingTypes = GetContainingTypes(typeDeclaration);
+        var namespaceName = GetNamespace(typeDeclaration);
         var fullTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
         // Detect base class
-        var baseClass = classDeclaration.BaseList?.Types
+        var baseClass = typeDeclaration.BaseList?.Types
             .Select(t => semanticModel.GetTypeInfo(t.Type, cancellationToken).Type as INamedTypeSymbol)
             .FirstOrDefault(t => t != null &&
                 (HasInterceptorSubjectAttribute(t) ||
@@ -45,14 +90,14 @@ internal static class SubjectMetadataExtractor
 
         // Check if base class has INotifyPropertyChanged
         var baseClassHasInpc = baseClassHasInterceptorSubject ||
-            (classDeclaration.BaseList?.Types
+            (typeDeclaration.BaseList?.Types
                 .Select(t => semanticModel.GetTypeInfo(t.Type, cancellationToken).Type as INamedTypeSymbol)
                 .Any(t => t != null && ImplementsInterface(t, KnownTypes.IRaisePropertyChanged)) ?? false);
 
         // Collect all partial class declarations
         var allClassDeclarations = typeSymbol.DeclaringSyntaxReferences
             .Select(r => r.GetSyntax(cancellationToken))
-            .OfType<ClassDeclarationSyntax>()
+            .OfType<TypeDeclarationSyntax>()
             .ToArray();
 
         // Collect properties from all partial declarations
@@ -88,10 +133,10 @@ internal static class SubjectMetadataExtractor
             diagnostics);
     }
 
-    private static string? GetNamespace(ClassDeclarationSyntax classDeclaration)
+    private static string? GetNamespace(TypeDeclarationSyntax typeDeclaration)
     {
         // Walk up past containing types to find namespace
-        SyntaxNode? current = classDeclaration.Parent;
+        SyntaxNode? current = typeDeclaration.Parent;
         while (current is TypeDeclarationSyntax)
         {
             current = current.Parent;
@@ -143,7 +188,7 @@ internal static class SubjectMetadataExtractor
         foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
         {
             var declaration = syntaxReference.GetSyntax(cancellationToken);
-            if (declaration is not ClassDeclarationSyntax classDecl)
+            if (declaration is not TypeDeclarationSyntax classDecl)
             {
                 continue;
             }
@@ -265,7 +310,7 @@ internal static class SubjectMetadataExtractor
         foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
         {
             var declaration = syntaxReference.GetSyntax(cancellationToken);
-            if (declaration is not ClassDeclarationSyntax classDecl)
+            if (declaration is not TypeDeclarationSyntax classDecl)
             {
                 continue;
             }
@@ -490,7 +535,7 @@ internal static class SubjectMetadataExtractor
     /// - HasOrWillHaveParameterlessConstructor: true if we have or will generate a parameterless constructor
     /// </summary>
     private static (bool NeedsGeneratedParameterlessConstructor, bool HasOrWillHaveParameterlessConstructor) DetectConstructorState(
-        ClassDeclarationSyntax[] allClassDeclarations)
+        TypeDeclarationSyntax[] allClassDeclarations)
     {
         var firstConstructor = allClassDeclarations
             .SelectMany(c => c.Members)

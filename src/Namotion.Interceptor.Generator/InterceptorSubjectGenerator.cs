@@ -16,21 +16,21 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
     {
         var classWithAttributeProvider = context.SyntaxProvider
             .CreateSyntaxProvider(
-                predicate: (node, _) => node is ClassDeclarationSyntax { AttributeLists.Count: > 0 },
+                predicate: (node, _) => node is TypeDeclarationSyntax { AttributeLists.Count: > 0 },
                 transform: (ctx, ct) =>
                 {
                     var model = ctx.SemanticModel;
-                    var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
+                    var typeDeclaration = (TypeDeclarationSyntax)ctx.Node;
 
                     // Get the type symbol to access all partial declarations
-                    var typeSymbol = model.GetDeclaredSymbol(classDeclaration, ct);
+                    var typeSymbol = model.GetDeclaredSymbol(typeDeclaration, ct);
                     if (typeSymbol is null)
                         return null;
 
                     // Check if ANY partial declaration has the InterceptorSubjectAttribute
                     var hasAttributeInAnyPartial = typeSymbol.DeclaringSyntaxReferences
                         .Select(r => r.GetSyntax(ct))
-                        .OfType<ClassDeclarationSyntax>()
+                        .OfType<TypeDeclarationSyntax>()
                         .Any(c =>
                         {
                             var declarationModel = model.Compilation.GetSemanticModel(c.SyntaxTree);
@@ -41,7 +41,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                         ? new
                         {
                             Model = model,
-                            ClassNode = classDeclaration,
+                            ClassNode = typeDeclaration,
                             TypeSymbol = typeSymbol
                         }
                         : null;
@@ -105,8 +105,8 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
         });
     }
 
-    private static bool HasInterceptorSubjectAttribute(ClassDeclarationSyntax classDeclaration, SemanticModel semanticModel, CancellationToken ct)
+    private static bool HasInterceptorSubjectAttribute(TypeDeclarationSyntax typeDeclaration, SemanticModel semanticModel, CancellationToken ct)
     {
-        return SymbolExtensions.HasAttribute(classDeclaration.AttributeLists, KnownTypes.InterceptorSubjectAttribute, semanticModel, ct);
+        return SymbolExtensions.HasAttribute(typeDeclaration.AttributeLists, KnownTypes.InterceptorSubjectAttribute, semanticModel, ct);
     }
 }
