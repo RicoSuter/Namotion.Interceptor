@@ -188,18 +188,23 @@ internal static class SubjectCodeGenerator
 
         foreach (var property in metadata.Properties)
         {
-            if (property.IsFromInterface)
+            // An explicitly implemented member is unreachable through the class, so it is emitted
+            // through the interface exactly like an interface default property.
+            var accessorInterfaceTypeName = property.IsFromInterface
+                ? property.InterfaceTypeName
+                : property.ExplicitInterfaceTypeName;
+
+            if (accessorInterfaceTypeName is not null)
             {
-                // Interface default properties: cast to interface to invoke default implementation
                 var getterLambda = property.HasGetter
-                    ? $"(o) => (({property.InterfaceTypeName})o).{property.Name}"
+                    ? $"(o) => (({accessorInterfaceTypeName})o).{property.Name}"
                     : "null";
                 var setterLambda = property.HasSetter
-                    ? $"(o, v) => (({property.InterfaceTypeName})o).{property.Name} = ({property.FullTypeName})v"
+                    ? $"(o, v) => (({accessorInterfaceTypeName})o).{property.Name} = ({property.FullTypeName})v"
                     : "null";
 
                 builder.AppendLine($"                    [\"{property.Name}\"] = new SubjectPropertyMetadata(");
-                builder.AppendLine($"                        typeof({property.InterfaceTypeName}).GetProperty(nameof({property.InterfaceTypeName}.{property.Name}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,");
+                builder.AppendLine($"                        typeof({accessorInterfaceTypeName}).GetProperty(nameof({accessorInterfaceTypeName}.{property.Name}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,");
                 builder.AppendLine($"                        {getterLambda},");
                 builder.AppendLine($"                        {setterLambda},");
                 builder.AppendLine("                        isIntercepted: false,");

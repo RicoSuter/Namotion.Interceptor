@@ -135,7 +135,8 @@ internal static class SubjectMetadataExtractor
                     : null;
 
                 var accessModifier = GetAccessModifier(property.Modifiers);
-                var isPartial = property.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword));
+                var isPartial = property.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)) &&
+                                property.ExplicitInterfaceSpecifier is null;
                 var isVirtual = property.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
                 var isOverride = property.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
                 var isDerived = HasDerivedAttribute(property, declarationModel, cancellationToken);
@@ -267,14 +268,23 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
+                // For an explicit implementation, IPropertySymbol.Name is the fully qualified
+                // "Namespace.IHuman.Gender". The implemented member carries the simple name, and
+                // its containing type is the interface the accessor must cast through: reflection
+                // on the declaring interface does not find the member, and the implemented one
+                // dispatches correctly in every direction.
+                var explicitImplementation = property.ExplicitInterfaceImplementations.FirstOrDefault();
+                var resolvedName = explicitImplementation?.Name ?? property.Name;
+                var accessorInterface = explicitImplementation?.ContainingType ?? interfaceType;
+
                 // Skip properties already declared in the class
-                if (classPropertyNames.Contains(property.Name))
+                if (classPropertyNames.Contains(resolvedName))
                 {
                     continue;
                 }
 
                 // Skip properties already processed from another interface (diamond inheritance)
-                if (processedPropertyNames.Contains(property.Name))
+                if (processedPropertyNames.Contains(resolvedName))
                 {
                     continue;
                 }
@@ -288,11 +298,11 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
-                processedPropertyNames.Add(property.Name);
+                processedPropertyNames.Add(resolvedName);
 
                 var fullyQualifiedTypeName = property.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
                 var accessModifier = GetAccessModifierFromAccessibility(property.DeclaredAccessibility);
-                var interfaceTypeName = interfaceType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                var interfaceTypeName = accessorInterface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
                 var hasGetter = property.GetMethod != null;
                 var hasSetter = property.SetMethod is { IsInitOnly: false };
@@ -300,7 +310,7 @@ internal static class SubjectMetadataExtractor
 
                 // Interface default properties cannot be partial, virtual is implicit
                 interfaceProperties.Add(new PropertyMetadata(
-                    property.Name,
+                    resolvedName,
                     fullyQualifiedTypeName,
                     accessModifier,
                     IsPartial: false,
