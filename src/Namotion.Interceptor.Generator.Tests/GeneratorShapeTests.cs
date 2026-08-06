@@ -148,6 +148,30 @@ namespace Repro
     }
 
     [Fact]
+    public void WhenExplicitImplementationTargetsProtectedMember_ThenMemberIsSkipped()
+    {
+        // Arrange (a protected interface member cannot be reached even through an explicit
+        // implementation: Roslyn reports the implementation itself as Private, but the
+        // accessibility that governs reachability is the implemented member's)
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHuman { protected string Secret { get; } }
+    public interface IMale : IHuman { string IHuman.Secret => ""m""; }
+
+    [InterceptorSubject]
+    public partial class John : IMale { }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.DoesNotContain(@"[""Secret""]", generated.SingleSource());
+    }
+
+    [Fact]
     public void WhenMethodIsNamedExactlyWithoutInterceptor_ThenMethodIsSkipped()
     {
         // Arrange (case O)

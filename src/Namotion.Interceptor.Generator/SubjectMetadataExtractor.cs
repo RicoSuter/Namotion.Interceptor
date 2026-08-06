@@ -315,15 +315,14 @@ internal static class SubjectMetadataExtractor
                 var resolvedName = explicitImplementation?.Name ?? property.Name;
                 var accessorInterface = explicitImplementation?.ContainingType ?? interfaceType;
 
-                // The generated code lives in the same assembly, so internal and protected
-                // internal members are reachable. Private and protected ones are not. Explicit
-                // interface implementations report Private regardless of their actual visibility
-                // (the CLR requires it), so they are exempt: the cast through accessorInterface
-                // above is what makes them reachable, not their declared accessibility.
-                if (explicitImplementation is null &&
-                    property.DeclaredAccessibility is Accessibility.Private
-                        or Accessibility.Protected
-                        or Accessibility.ProtectedAndInternal)
+                // Roslyn reports an explicit implementation as Private regardless of the implemented
+                // member's real visibility, so the accessibility that matters is the implemented
+                // member's. Generated code lives in the same assembly, so internal and protected
+                // internal members are reachable; private and protected ones are not.
+                var accessibilityMember = explicitImplementation ?? property;
+                if (accessibilityMember.DeclaredAccessibility is Accessibility.Private
+                    or Accessibility.Protected
+                    or Accessibility.ProtectedAndInternal)
                 {
                     continue;
                 }
