@@ -29,12 +29,12 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             if (change.Subject is IHostedService hostedService)
             {
-                AttachHostedService(hostedService);
+                AttachHostedService(hostedService, change.Subject.Context);
             }
 
             foreach (var hostedService2 in change.Subject.GetAttachedHostedServices())
             {
-                AttachHostedService(hostedService2);
+                AttachHostedService(hostedService2, change.Subject.Context);
             }
         }
         else if (change.IsContextDetach)
@@ -132,15 +132,56 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         }
     }
     
-    internal void AttachHostedService(IHostedService hostedService)
+    internal void AttachHostedService(IHostedService hostedService, IInterceptorSubjectContext? context = null)
     {
         lock (_hostedServices)
         {
             if (_hostedServices.Add(hostedService))
             {
-                PostStartService(hostedService, null);
+                // Starting is queued, not inline, so the service is NOT running when this returns.
+                // Anything that treats "the graph has finished starting" as a completion point would
+                // otherwise reach it while this start is still on its way in - concretely, a source
+                // attached here would not yet have registered with its SourceMonitor, and a
+                // synchronization wait would complete against a tree that is not synchronized.
+                // Holds are taken HERE, synchronously, rather than inside the queued action, so
+                // there is no window between the attach and the hold in which completion can fire.
+                // They are released once the start has actually run (see PostStartService).
+                //
+                // A nested attach composes: a service that attaches children during its own
+                // StartAsync takes their holds before its own is released, so the count never
+                // reaches zero in between.
+                PostStartService(hostedService, null, TakeStartupHolds(context));
             }
         }
+    }
+
+    /// <summary>
+    /// Takes a completion hold on every deferrer reachable from <paramref name="context"/>.
+    /// </summary>
+    /// <remarks>
+    /// Empty for an application that configures no deferring subsystem (no source monitoring, for
+    /// example), which is the common case and costs one empty-array check per attach.
+    /// </remarks>
+    private static IDisposable[] TakeStartupHolds(IInterceptorSubjectContext? context)
+    {
+        if (context is null)
+        {
+            return [];
+        }
+
+        var deferrers = context.GetServices<IStartupCompletionDeferrer>();
+        if (deferrers.IsEmpty)
+        {
+            return [];
+        }
+
+        var holds = new IDisposable[deferrers.Length];
+        for (var index = 0; index < deferrers.Length; index++)
+        {
+            holds[index] = deferrers[index].DeferCompletion();
+        }
+
+        return holds;
     }
 
     internal void DetachHostedService(IHostedService hostedService)
@@ -190,30 +231,8 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         await tcs.Task.WaitAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// Completes once the actions queued before this call have run.
-    /// </summary>
-    /// <remarks>
-    /// The drain is FIFO, so a marker posted here runs after everything already queued and does not
-    /// wait for actions posted afterward - the right semantics for a loader that has finished
-    /// building its tree. Never completes if the drain loop isn't running - whether it hasn't
-    /// started yet, or has already exited (for example, at shutdown, after StopAsync cancels
-    /// _stoppingCts): the underlying buffer's Post still accepts the marker in either case, so the
-    /// returned task just hangs until <paramref name="cancellationToken"/> cancels it, rather than
-    /// throwing or completing.
-    /// </remarks>
-    internal Task WaitForPendingActionsAsync(CancellationToken cancellationToken)
-    {
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _actions.Post(_ =>
-        {
-            completion.TrySetResult();
-            return Task.CompletedTask;
-        });
-        return completion.Task.WaitAsync(cancellationToken);
-    }
-
-    private void PostStartService(IHostedService hostedService, TaskCompletionSource? tcs)
+    private void PostStartService(
+        IHostedService hostedService, TaskCompletionSource? tcs, IDisposable[]? startupHolds = null)
     {
         _actions.Post(async token =>
         {
@@ -228,6 +247,19 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
             catch (Exception ex)
             {
                 tcs?.TrySetException(ex);
+            }
+            finally
+            {
+                // In a finally, so a start that throws or is cancelled releases its hold too.
+                // Leaking a hold would block every synchronization wait on the tree forever - a
+                // hang rather than a wrong answer, which is the safer direction, but still a hang.
+                if (startupHolds is not null)
+                {
+                    foreach (var hold in startupHolds)
+                    {
+                        hold.Dispose();
+                    }
+                }
             }
         });
     }

@@ -19,7 +19,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// order; nothing here currently depends on the fallback context it maintains.
 /// </remarks>
 [RunsAfter(typeof(ContextInheritanceHandler), typeof(ParentTrackingHandler))]
-public class SourceMonitor : ILifecycleHandler
+public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 {
     private readonly Lock _lock = new();
     private readonly Func<ILogger?>? _loggerResolver;
@@ -32,18 +32,6 @@ public class SourceMonitor : ILifecycleHandler
     // lock-free. Same technique as ParentsHandlerExtensions.ParentsSet._cache.
     private volatile ImmutableArray<ISubjectSource>[] _sources = [ImmutableArray<ISubjectSource>.Empty];
     private volatile ImmutableArray<SourceSubscription>[] _subscriptions = [ImmutableArray<SourceSubscription>.Empty];
-
-    // Ground truth for "is this subject currently inside this monitor's tree", read by
-    // SourceEvent.CurrentState instead of the lossy context-fallback-reachability proxy that used to
-    // stand in for it (see the HandleLifecycleChange remarks below for why that proxy lags reality).
-    // A HashSet would need every IsContextDetach to fire to avoid retaining subjects forever - a
-    // reasonable bet given LifecycleInterceptor's guarantees, but not one worth taking on a member
-    // used from arbitrary threads with no enumeration or count need of its own. ConditionalWeakTable
-    // holds keys weakly, so even a missed or skipped detach cannot keep a subject alive past whatever
-    // else in the application still references it, and TryGetValue/AddOrUpdate/Remove are documented
-    // thread-safe with no locking required from the caller, so this needs no lock of its own and
-    // cannot participate in any lock ordering with _lock.
-    private readonly ConditionalWeakTable<IInterceptorSubject, object?> _membership = new();
 
     /// <summary>Creates a monitor. Prefer WithSourceMonitoring over calling this directly.</summary>
     public SourceMonitor(Func<ILogger?>? loggerResolver = null)
@@ -67,89 +55,22 @@ public class SourceMonitor : ILifecycleHandler
 
     /// <inheritdoc />
     /// <remarks>
-    /// HasSubscribers lets an attach/detach storm skip the scan when nobody is listening. Pending
-    /// waits do not count as subscribers - they need no property events, only
-    /// OnWaitConditionChanged, which every property-reference add/remove calls regardless (see
-    /// OnWaitConditionChanged for why that path takes _lock).
+    /// The wait engine is the only thing here that cares about lifecycle changes: a reparent moves a
+    /// branch's scope with no attach or detach event of its own, so satisfaction has to be
+    /// re-evaluated on every parent-link mutation. That is gated on reference mutation rather than
+    /// on subscriber count, because a pending wait is the one consumer with no subscription.
     /// <para>
-    /// Membership tracking below runs unconditionally, before the HasSubscribers gate: CurrentState
-    /// can be asked by anyone at any time, not only by a subscriber draining an event, so the fact it
-    /// reads from must stay current even while nobody is subscribed.
-    /// </para>
-    /// <para>
-    /// IsContextAttach/IsContextDetach are the right signals here, not IsPropertyReferenceAdded/Removed:
-    /// the latter fire on every individual parent link, including a second or third parent that leaves
-    /// the subject still very much in the tree through the first one. IsContextAttach/IsContextDetach
-    /// fire exactly once per subject, when its LifecycleInterceptor-tracked reference count crosses
-    /// into or out of zero - true tree entry and exit regardless of how many parents came and went in
-    /// between. That is also why ScanSubject below keys off the same two flags.
+    /// Ownership events are published from SetSource/RemoveSource, where ownership actually changes,
+    /// not from here. This monitor deliberately reports nothing about tree membership: a subject
+    /// entering or leaving the graph is a registry question (see
+    /// <c>ISubjectRegistry.TryGetRegisteredSubject</c>), not a source-ownership one.
     /// </para>
     /// </remarks>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        if (change.IsContextAttach)
-        {
-            _membership.AddOrUpdate(change.Subject, null);
-        }
-        else if (change.IsContextDetach)
-        {
-            _membership.Remove(change.Subject);
-        }
-
-        // A reparent changes branch scope with no attach/detach event, so gate on reference
-        // mutation, not subscriber count - a wait is the one consumer with no subscription.
         if (change.IsPropertyReferenceAdded || change.IsPropertyReferenceRemoved)
         {
             OnWaitConditionChanged();
-        }
-
-        if (!HasSubscribers)
-        {
-            return;
-        }
-
-        if (change.IsContextAttach)
-        {
-            ScanSubject(change.Subject, SourceEventKind.PropertyEnteredView);
-        }
-        else if (change.IsContextDetach)
-        {
-            ScanSubject(change.Subject, SourceEventKind.PropertyLeftView);
-        }
-    }
-
-    /// <summary>
-    /// True when <paramref name="subject"/> is currently inside this monitor's tree. Backs
-    /// SourceEvent.CurrentState's tree-membership check; see the CurrentState remarks for why this
-    /// asks the monitor directly instead of resolving through the subject's context.
-    /// </summary>
-    internal bool IsMember(IInterceptorSubject subject) => _membership.TryGetValue(subject, out _);
-
-    /// <summary>
-    /// Marks <paramref name="subject"/> as a tree member with no event published. Used by
-    /// WithSourceMonitoring to seed membership for subjects that attached before this monitor
-    /// registered as a lifecycle handler, so CurrentState resolves correctly for them without ever
-    /// treating the seed itself as an attach.
-    /// </summary>
-    internal void SeedMembership(IInterceptorSubject subject) => _membership.AddOrUpdate(subject, null);
-
-    private void ScanSubject(IInterceptorSubject subject, SourceEventKind kind)
-    {
-        var timestamp = DateTimeOffset.UtcNow;
-        foreach (var name in subject.Properties.Keys)
-        {
-            var property = new PropertyReference(subject, name);
-            if (!property.TryGetSource(out var source))
-            {
-                continue;
-            }
-
-            var entered = kind == SourceEventKind.PropertyEnteredView;
-            Publish(new SourceEvent(
-                kind, source, property,
-                entered ? SourceState.Unclaimed : source.State,
-                entered ? source.State : SourceState.Unclaimed,
-                timestamp) { Monitor = this });
         }
     }
 
@@ -220,7 +141,16 @@ public class SourceMonitor : ILifecycleHandler
 
     private void OnSourceStateChanged(object? sender, SourceEvent sourceEvent)
     {
-        Publish(sourceEvent);
+        // Under _lock, not a bare Publish: Register attaches this forwarder BEFORE it publishes
+        // SourceRegistered, both under _lock. A transition raised on another thread in that window
+        // would otherwise enqueue ahead of the registration event, so a consumer that starts
+        // tracking a source on SourceRegistered and applies NewState on StateChanged drops that
+        // first transition and stays permanently one state stale (Connecting -> Synchronized fires
+        // once for most sources, so there is no later event to correct it). Taking the lock here
+        // makes the transition wait for Register to finish publishing. No new lock edge: this runs
+        // inside the source's own transition lock, and OnWaitConditionChanged below already takes
+        // _lock on this same path.
+        PublishUnderLock(sourceEvent);
         OnWaitConditionChanged();
     }
 
@@ -237,8 +167,9 @@ public class SourceMonitor : ILifecycleHandler
     /// <summary>
     /// Publishes under _lock. Register and Unregister do the same, because they publish alongside a
     /// mutation of _sources and the lock keeps that atomic with a concurrent Subscribe's snapshot;
-    /// OnSourceStateChanged does not need it, since a state transition touches no monitor-owned
-    /// state. Used by SetSource/RemoveSource, which mutate property data entirely outside this
+    /// OnSourceStateChanged takes it to stay ordered behind the SourceRegistered event Register
+    /// publishes under the same lock (see OnSourceStateChanged). Used by SetSource/RemoveSource,
+    /// which mutate property data entirely outside this
     /// monitor, so an ownership event has no snapshot baseline to reconcile against the way
     /// registration does (see docs/connectors-monitoring.md, Worked Sample); only delivery order
     /// relative to a concurrent Register/Unregister/Subscribe needs protecting. Cannot deadlock:
@@ -282,6 +213,15 @@ public class SourceMonitor : ILifecycleHandler
         return new RegistrationHold(this);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Explicit, so the domain-named <see cref="DeferWaitCompletion"/> stays the single method on
+    /// this type's own surface. This is how Namotion.Interceptor.Hosting holds registration open
+    /// between attaching a source to the graph and that source's queued StartAsync actually running,
+    /// without either package referencing the other.
+    /// </remarks>
+    IDisposable IStartupCompletionDeferrer.DeferCompletion() => DeferWaitCompletion();
+
     private void ReleaseHold()
     {
         if (Interlocked.Decrement(ref _registrationHolds) == 0)
@@ -304,6 +244,26 @@ public class SourceMonitor : ILifecycleHandler
     private readonly HashSet<IInterceptorSubject> _scopeVisitedScratch = new(ReferenceEqualityComparer.Instance);
     private readonly Stack<IInterceptorSubject> _scopePendingScratch = new();
 
+    // Warn-once bookkeeping, keyed on the ANCHOR rather than on an individual wait. The intended
+    // usage is an application re-awaiting per operation (see WaitForSynchronizationAsync), and an
+    // already-satisfied wait returns on the fast path without ever allocating a PendingWait, so
+    // per-wait flags left that path with nothing to deduplicate against: a per-request wait on a
+    // legitimately local-only branch logged one Warning per request, forever. The diagnostic is a
+    // property of the branch, not of one wait, so the flag belongs on the anchor.
+    //
+    // Stored in the subject's own data rather than in a table on this monitor, so the flag has
+    // exactly the subject's lifetime and needs no weak references or cleanup: a side table would
+    // either retain anchors forever or need weak keys to avoid it. Same (null, key) subject-scoped
+    // convention ParentsHandlerExtensions and LifecycleInterceptorExtensions use. ConcurrentDictionary
+    // .TryAdd IS the one-shot latch - it returns true exactly once per subject - so this needs no
+    // lock of its own either, though every caller happens to hold _lock anyway.
+    //
+    // Two monitors sharing an anchor therefore share the flag, and only the first to reach it warns.
+    // Multiple monitors over one subject is already an unusual topology, and this is a hint rather
+    // than a verdict, so that is preferred over reintroducing per-monitor state.
+    private const string EmptyScopeWarnedKey = "Namotion.Interceptor.Connectors.EmptyScopeWarned";
+    private const string AllStoppedWarnedKey = "Namotion.Interceptor.Connectors.AllStoppedWarned";
+
     /// <summary>
     /// Completes when the branch containing <paramref name="subject"/> is synchronized: registration
     /// is complete, and every registered non-Stopped in-scope source is Synchronized. An empty
@@ -320,12 +280,11 @@ public class SourceMonitor : ILifecycleHandler
         lock (_lock)
         {
             // Checked first with no PendingWait allocated: the common case for an application
-            // re-awaiting per operation is already satisfied. A null wait tells IsSatisfied to warn
-            // directly rather than deduplicate through MarkWarned/MarkStoppedWarned, since a single
-            // evaluation that is never re-run has no repeat warning to guard against - so a
-            // quiescent tree still sees its one diagnostic without ever allocating a PendingWait for
-            // it. Only the unsatisfied path below allocates one (and its TaskCompletionSource).
-            if (IsSatisfied(subject, null))
+            // re-awaiting per operation is already satisfied. Warning deduplication lives on the
+            // anchor (see _anchorWarnings), not on the wait, precisely so this path deduplicates
+            // too. Only the unsatisfied path below allocates a PendingWait (and its
+            // TaskCompletionSource).
+            if (IsSatisfied(subject))
             {
                 return Task.CompletedTask;
             }
@@ -343,7 +302,7 @@ public class SourceMonitor : ILifecycleHandler
         });
     }
 
-    private bool IsSatisfied(IInterceptorSubject anchor, PendingWait? wait = null)
+    private bool IsSatisfied(IInterceptorSubject anchor)
     {
         if (!IsRegistrationComplete)
         {
@@ -374,11 +333,10 @@ public class SourceMonitor : ILifecycleHandler
 
         if (!matched)
         {
-            // Warn once per wait, not on every re-evaluation - MarkWarned is called only here, right
-            // before the warning fires, so a later pass that finds the branch matched again never
-            // burns the flag. A null wait (the one-shot fast-path check) always warns: that
-            // evaluation is never re-run, so there is no repeat to guard against.
-            if (wait is null || !wait.MarkWarned())
+            // Warn once per anchor, not on every re-evaluation and not on every call. TryAdd both
+            // tests and sets in one step, and only here, right before the warning fires, so a later
+            // pass that finds the branch matched again never burns the flag.
+            if (anchor.Data.TryAdd((null, EmptyScopeWarnedKey), null))
             {
                 Logger?.LogWarning(
                     "A synchronization wait on {Subject} has no in-scope source, and source registration is complete. " +
@@ -397,18 +355,19 @@ public class SourceMonitor : ILifecycleHandler
             return true;
         }
 
-        // Same one-shot treatment as the empty-scope warning above, and for the same reason: this
-        // wait can be re-evaluated again (e.g. by an unrelated Register/Unregister elsewhere in the
-        // tree) after it has already completed, in the window before its continuation removes it
-        // from _waits, so without a guard here it can log a second time for something that has not
-        // changed.
-        if (allInScopeStopped && (wait is null || !wait.MarkStoppedWarned()))
+        // Same one-shot-per-anchor treatment as the empty-scope warning above, and for the same
+        // reasons: a wait can be re-evaluated again (e.g. by an unrelated Register/Unregister
+        // elsewhere in the tree) after it has already completed, in the window before its
+        // continuation removes it from _waits, and an application re-awaiting per operation would
+        // otherwise log once per call forever.
+        if (allInScopeStopped && anchor.Data.TryAdd((null, AllStoppedWarnedKey), null))
         {
-            // Stopped is terminal, so this branch will never become live. Completing beats hanging,
-            // but silence would look like success, so log it.
+            // Stopped is terminal, so this branch will never become live. Completing beats
+            // hanging, but silence would look like success, so log it.
             Logger?.LogWarning(
-                "A synchronization wait completed with every in-scope source stopped. " +
-                "Stopped is terminal, so this branch will not synchronize again.");
+                "A synchronization wait on {Subject} completed with every in-scope source stopped. " +
+                "Stopped is terminal, so this branch will not synchronize again.",
+                anchor.GetType().Name);
         }
 
         return true;
@@ -449,7 +408,7 @@ public class SourceMonitor : ILifecycleHandler
             {
                 try
                 {
-                    if (IsSatisfied(wait.Anchor, wait))
+                    if (IsSatisfied(wait.Anchor))
                     {
                         wait.Complete();
                     }
@@ -468,37 +427,7 @@ public class SourceMonitor : ILifecycleHandler
     {
         private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // Plain bools, not Interlocked: every caller of IsSatisfied (the only place that reads or
-        // sets these) already holds _lock throughout, so there is no concurrent access to guard
-        // against here.
-        private bool _warned;
-        private bool _stoppedWarned;
-
         public IInterceptorSubject Anchor { get; } = anchor;
-
-        /// <summary>True once this wait has already logged its empty-scope warning.</summary>
-        public bool MarkWarned()
-        {
-            if (_warned)
-            {
-                return true;
-            }
-
-            _warned = true;
-            return false;
-        }
-
-        /// <summary>True once this wait has already logged its all-Stopped warning.</summary>
-        public bool MarkStoppedWarned()
-        {
-            if (_stoppedWarned)
-            {
-                return true;
-            }
-
-            _stoppedWarned = true;
-            return false;
-        }
 
         public void Complete() => _completion.TrySetResult();
 

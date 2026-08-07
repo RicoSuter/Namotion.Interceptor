@@ -47,24 +47,6 @@ public static class SourceMonitoringExtensions
             var monitor = new SourceMonitor(() =>
                 context.TryGetService<ILoggerFactory>()?.CreateLogger<SourceMonitor>());
             context.AddService<ILifecycleHandler>(monitor);
-
-            // Seed membership for every subject already attached before the monitor became a
-            // handler: otherwise a subject constructed earlier, including the root, stays a
-            // permanent non-member and CurrentState reports Unclaimed for its properties forever,
-            // with no later event to fix it. Seeding runs AFTER registering the handler above, under
-            // the same lock ForEachAttachedSubject holds across attach and detach: a concurrent
-            // attach is therefore caught by the now-registered handler rather than missed by the
-            // seed, and a concurrent detach cannot leave a phantom member, because the walk and the
-            // detach cannot interleave. WithParents (above) guarantees a LifecycleInterceptor is
-            // reachable, so its absence here means a broken invariant, not a configuration this can
-            // silently tolerate.
-            var lifecycleInterceptor = context.TryGetLifecycleInterceptor()
-                ?? throw new InvalidOperationException(
-                    "No LifecycleInterceptor is reachable from this context, even though " +
-                    "WithSourceMonitoring calls WithParents(), which implies WithLifecycle(). Call " +
-                    "WithLifecycle() (or WithParents()) on this context before WithSourceMonitoring().");
-            lifecycleInterceptor.ForEachAttachedSubject(monitor.SeedMembership);
-
             return monitor;
         }, _ => true);
 

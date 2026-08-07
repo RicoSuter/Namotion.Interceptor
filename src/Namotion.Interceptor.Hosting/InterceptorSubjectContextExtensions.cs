@@ -24,21 +24,4 @@ public static class InterceptorSubjectContextExtensions
         return context
             .WithLifecycle();
     }
-
-    /// <summary>
-    /// Completes once the hosted service start and stop actions queued before this call have run,
-    /// so services attached through the lifecycle path have actually started.
-    /// </summary>
-    /// <remarks>
-    /// Returns a completed task when no HostedServiceHandler is configured, because nothing was
-    /// ever queued.
-    /// </remarks>
-    public static Task WaitForPendingHostedServiceActionsAsync(
-        this IInterceptorSubjectContext context, CancellationToken cancellationToken = default)
-    {
-        var handler = context.TryGetService<HostedServiceHandler>();
-        return handler is null
-            ? Task.CompletedTask
-            : handler.WaitForPendingActionsAsync(cancellationToken);
-    }
 }

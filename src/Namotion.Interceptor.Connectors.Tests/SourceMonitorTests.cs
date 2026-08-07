@@ -428,6 +428,97 @@ public class SourceMonitorTests
     }
 
     [Fact]
+    public async Task WhenDisposeLandsInsideStartAsyncsRegistrationLoop_ThenNoStoppedSourceStaysRegistered()
+    {
+        // Arrange
+        // A second interleaving, narrower than the RootSubject-gated one above and with no seam to
+        // pin it on: Dispose has to land between StartAsync's assignment of _registeredMonitors and
+        // its registration loop. Dispose then unregisters nothing (the source is not in _sources
+        // yet) and blanks the field, so a post-registration re-check that re-READS the field finds
+        // an empty array and strands the registration it just made. Driven as a bounded race rather
+        // than a gate, since nothing between those two statements can be paused from a test.
+        const int iterations = 4000;
+        var leaked = 0;
+
+        // Act
+        for (var iteration = 0; iteration < iterations; iteration++)
+        {
+            var context = CreateContext();
+            var monitor = context.GetSourceMonitor();
+            var source = new TestStateSource(new Person(context));
+
+            using var bothReady = new Barrier(2);
+            var startTask = Task.Run(() =>
+            {
+                bothReady.SignalAndWait();
+                return source.StartAsync(CancellationToken.None);
+            });
+            var disposeTask = Task.Run(() =>
+            {
+                bothReady.SignalAndWait();
+                source.Dispose();
+            });
+
+            await Task.WhenAll(startTask, disposeTask);
+            source.Dispose();
+
+            if (monitor.Sources.Contains(source))
+            {
+                leaked++;
+            }
+        }
+
+        // Assert - a leaked source stays in Sources with a live StateChanged subscription, holding
+        // the source and its root subject for the lifetime of the monitor. Dispose has already run
+        // and will not run again, so nothing ever removes it.
+        Assert.Equal(0, leaked);
+    }
+
+    [Fact]
+    public async Task WhenASourceTransitionsWhileItIsRegistering_ThenSourceRegisteredIsStillDeliveredFirst()
+    {
+        // Arrange
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var received = new ConcurrentQueue<SourceEvent>();
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+
+        using var reachedStateRead = new ManualResetEventSlim(false);
+        using var releaseStateRead = new ManualResetEventSlim(false);
+        var source = new GatedStateRaisingSource(new Person(context), reachedStateRead, releaseStateRead);
+
+        // Act - Register attaches the StateChanged forwarder BEFORE it publishes SourceRegistered,
+        // and is pinned here on the State read it performs to build that event, still holding the
+        // monitor lock.
+        var register = Task.Run(() => monitor.Register(source));
+        Assert.True(reachedStateRead.Wait(TimeSpan.FromSeconds(10)));
+
+        using var transitionStarted = new ManualResetEventSlim(false);
+        var transition = Task.Run(() =>
+        {
+            transitionStarted.Set();
+            source.RaiseStateChanged(SourceState.Connecting, SourceState.Synchronized);
+        });
+        Assert.True(transitionStarted.Wait(TimeSpan.FromSeconds(10)));
+
+        // The forwarder publishes under the monitor lock, so this transition cannot finish while
+        // Register holds it. A bounded negative wait is the assertion here precisely because the
+        // property under test is that something does NOT happen: with a lock-free publish the
+        // transition returns at once and its event overtakes SourceRegistered in the queue.
+        var settledFirst = await Task.WhenAny(transition, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        Assert.NotSame(transition, settledFirst);
+
+        releaseStateRead.Set();
+        await register;
+        await transition;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Count >= 2);
+        Assert.Equal(SourceEventKind.SourceRegistered, received.First().Kind);
+        Assert.Equal(SourceEventKind.StateChanged, received.Skip(1).First().Kind);
+    }
+
+    [Fact]
     public void WhenASubjectIsAttachedToASecondTree_ThenOnlyTheFirstTreesMonitorIsReachable()
     {
         // Arrange
@@ -512,6 +603,55 @@ internal sealed class GatedStateSource : ISubjectSource
         add { }
         remove { }
     }
+
+    public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
+
+    public ValueTask<WriteResult> WriteChangesAsync(
+        ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        => new(WriteResult.Success);
+}
+
+/// <summary>
+/// Same gated State getter as <see cref="GatedStateSource"/>, but with a StateChanged event a test
+/// can actually raise, so a transition can be driven while Register is pinned mid-registration.
+/// </summary>
+internal sealed class GatedStateRaisingSource : ISubjectSource
+{
+    private readonly ManualResetEventSlim _reachedStateRead;
+    private readonly ManualResetEventSlim _releaseStateRead;
+
+    public GatedStateRaisingSource(
+        IInterceptorSubject rootSubject, ManualResetEventSlim reachedStateRead, ManualResetEventSlim releaseStateRead)
+    {
+        RootSubject = rootSubject;
+        _reachedStateRead = reachedStateRead;
+        _releaseStateRead = releaseStateRead;
+    }
+
+    public IInterceptorSubject RootSubject { get; }
+
+    public int WriteBatchSize => 0;
+
+    public SourceState State
+    {
+        get
+        {
+            _reachedStateRead.Set();
+            _releaseStateRead.Wait(TimeSpan.FromSeconds(10));
+            return SourceState.Connecting;
+        }
+    }
+
+    public DateTimeOffset? LastSynchronizedAt => null;
+
+    public int PendingWriteCount => 0;
+
+    public event EventHandler<SourceEvent>? StateChanged;
+
+    /// <summary>Raises StateChanged the way a source's own transition would.</summary>
+    public void RaiseStateChanged(SourceState oldState, SourceState newState) =>
+        StateChanged?.Invoke(this, new SourceEvent(
+            SourceEventKind.StateChanged, this, null, oldState, newState, DateTimeOffset.UtcNow));
 
     public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
 

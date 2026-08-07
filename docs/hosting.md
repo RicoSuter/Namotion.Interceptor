@@ -140,17 +140,13 @@ await person.AttachHostedServiceAsync(
     cancellationToken);
 ```
 
-## Waiting for Pending Actions
+## Deferred Starts and Startup Completion
 
-`WaitForPendingHostedServiceActionsAsync()` completes once every hosted service start and stop action queued before the call has actually run, so services attached through the lifecycle path have actually started (or stopped) by the time it returns:
+Attaching a hosted service queues its `StartAsync` rather than running it inline, so the service is not running when the attach returns. Any subsystem that treats "the graph has finished starting" as a completion point would otherwise pass that point while a queued start is still on its way in.
 
-```csharp
-await context.WaitForPendingHostedServiceActionsAsync(cancellationToken);
-```
+A subsystem says so by implementing `IStartupCompletionDeferrer` and registering it on the context. Before queueing a start, the hosting layer takes a hold on every reachable deferrer and releases it once the start has actually run, including when the start throws. Holds are counted, so nested attaches compose: a service that attaches children during its own `StartAsync` takes their holds before its own is released.
 
-It is a barrier over the attach queue, not a snapshot: it covers work already queued at the moment it is called, and any attach or detach that happens afterward queues a new action the barrier already returned for. Calling it again waits for that new action instead. When no `HostedServiceHandler` is configured on the context, it returns a completed task immediately, since nothing was ever queued.
-
-This is the barrier the source monitoring feature uses to make sure dynamically attached sources have actually started, and therefore registered, before an application declares source registration complete. See [Applications That Create Sources at Runtime](connectors-monitoring.md#applications-that-create-sources-at-runtime) for the full pattern.
+`SourceMonitor` is the one implementation in this repository. It is what makes an attached source count towards source registration from the moment it is attached rather than from the moment it finally starts, so a synchronization wait cannot complete against a tree whose sources have not registered yet. See [Applications That Create Sources at Runtime](connectors-monitoring.md#applications-that-create-sources-at-runtime).
 
 ## For Library Authors
 

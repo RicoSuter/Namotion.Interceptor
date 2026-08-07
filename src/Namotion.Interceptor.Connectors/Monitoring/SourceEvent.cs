@@ -16,17 +16,11 @@ public enum SourceEventKind
     PropertyClaimed,
 
     /// <summary>A source gave up ownership of a property.</summary>
-    PropertyReleased,
-
-    /// <summary>An already-claimed property joined the tree when its subject attached. Ownership did not change.</summary>
-    PropertyEnteredView,
-
-    /// <summary>A still-claimed property left the tree when its subject detached. Ownership did not change.</summary>
-    PropertyLeftView
+    PropertyReleased
 }
 
 /// <summary>
-/// A change to source metadata: registration, state, ownership, or tree membership.
+/// A change to source metadata: registration, state, or ownership.
 /// </summary>
 /// <remarks>
 /// <see cref="OldState"/> and <see cref="NewState"/> record one transition and must not be applied
@@ -51,37 +45,13 @@ public readonly record struct SourceEvent(
     /// property's; use <see cref="SourceMonitoringExtensions.GetSourceState"/> per property instead.
     /// Not cached: hoist to a local if you read it more than once.
     /// <para>
-    /// For <see cref="SourceEventKind.PropertyLeftView"/>, "left the tree" is tracked as a fact by
-    /// the monitor itself (see <see cref="SourceMonitor.HandleLifecycleChange"/>), not inferred from
-    /// whether the subject's context still reaches the monitor, so it is unaffected by how many
-    /// contexts or parents the subject has passed through on its way there.
+    /// This reports ownership only, and says nothing about whether the property's subject is still
+    /// in the object graph. A source that has released the property reports
+    /// <see cref="SourceState.Unclaimed"/>, which is what every built-in connector does on detach;
+    /// a source that deliberately keeps ownership across a detach still reports its own state. Ask
+    /// <c>ISubjectRegistry.TryGetRegisteredSubject</c> if graph membership is the question.
     /// </para>
     /// </remarks>
-    public SourceState CurrentState => ResolveCurrentState();
-
-    /// <summary>
-    /// The monitor this event was published to. Used to decide whether the property is still inside
-    /// that monitor's tree. Internal: consumers reach the monitor through the context.
-    /// </summary>
-    internal SourceMonitor? Monitor { get; init; }
-
-    private SourceState ResolveCurrentState()
-    {
-        if (Property is null)
-        {
-            return Source.State;
-        }
-
-        var property = Property.Value;
-
-        // Detach leaves ownership intact, so without this check a claim delivered after detach
-        // would resurrect a released property. Membership is the monitor's own tracked fact (see
-        // SourceMonitor.IsMember), not inferred from context-fallback reachability.
-        if (Monitor is not null && !Monitor.IsMember(property.Subject))
-        {
-            return SourceState.Unclaimed;
-        }
-
-        return property.GetSourceState();
-    }
+    public SourceState CurrentState =>
+        Property is null ? Source.State : Property.Value.GetSourceState();
 }

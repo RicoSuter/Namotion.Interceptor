@@ -17,7 +17,6 @@ namespace Namotion.Interceptor.Hosting
     }
     public static class InterceptorSubjectContextExtensions
     {
-        public static System.Threading.Tasks.Task WaitForPendingHostedServiceActionsAsync(this Namotion.Interceptor.IInterceptorSubjectContext context, System.Threading.CancellationToken cancellationToken = default) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithHostedServices(this Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection) { }
     }
 }

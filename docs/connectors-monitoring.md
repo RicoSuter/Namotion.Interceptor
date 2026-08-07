@@ -24,7 +24,7 @@ builder.Services.AddOpcUaSubjectClientSource<Root>("opc.tcp://localhost:4840", "
 builder.Services.AddHostedService<Worker>();
 ```
 
-`WithSourceMonitoring()` seeds tree membership from every subject already attached to the context at the moment it is called, atomically with the monitor becoming a lifecycle handler. So calling it after part of the tree already exists works correctly: a subject built earlier, including the root, is picked up by the seed rather than left a permanent non-member. The sample above calls it first only because that is the natural place in application startup, not because the order matters here.
+This works whether the sources are registered directly in DI, as above, or attached to the subject graph through `WithHostedServices` (see [Hosting](hosting.md)). An attached source is started from a queue rather than inline, so it has not registered by the time host startup finishes; registration is held open across that gap, so a wait cannot complete before the source is actually in.
 
 ```csharp
 using Namotion.Interceptor.Connectors.Monitoring;
@@ -55,7 +55,7 @@ No wait can complete before source registration is complete, whatever its scope:
 
 After registration completes, a wait is not frozen to the sources that existed at that moment. Satisfaction is re-evaluated on every registration, unregistration, and state change, against whichever sources are registered right now, so a source that registers later and falls in scope of a still-pending wait is picked up just like any earlier source and can block it. The only wait that is frozen is one that has already completed, because a completed task cannot be un-completed. A scope that currently matches no source is, for the same reason, vacuously satisfied rather than blocking, the same way a scope whose sources are all `Stopped` is (`Stopped` is terminal, see [The State Model, Transitions, and Delivery Contract](#the-state-model-transitions-and-delivery-contract)): both complete immediately instead of waiting.
 
-Be aware of what that vacuous completion does and does not tell you. An empty scope is the correct and expected answer for a branch that genuinely has no external source, such as configuration or computed state. It is also what you get if the source for that branch was never created, or if you anchored on a branch unrelated to any source. Those are application bugs, and this library cannot distinguish them from the legitimate case, because both look identical from the inside: nothing claims here. A one-time warning is logged the first time an empty scope is detected for a wait, and again if a wait completes with every in-scope source `Stopped`, as a hint rather than a verdict - check that log line first if a branch you expected a source to drive completes immediately. A consumer that treats a completed wait as proof the branch is live can walk straight into a dead one.
+Be aware of what that vacuous completion does and does not tell you. An empty scope is the correct and expected answer for a branch that genuinely has no external source, such as configuration or computed state. It is also what you get if the source for that branch was never created, or if you anchored on a branch unrelated to any source. Those are application bugs, and this library cannot distinguish them from the legitimate case, because both look identical from the inside: nothing claims here. A warning is logged the first time an empty scope is detected for a given anchor, and likewise the first time a wait on that anchor completes with every in-scope source `Stopped`. It is deduplicated per anchor rather than per wait deliberately: awaiting per operation on a local-only branch is a supported pattern, and a per-wait guard would have logged once per call forever. Treat it as a hint rather than a verdict - check that log line first if a branch you expected a source to drive completes immediately. A consumer that treats a completed wait as proof the branch is live can walk straight into a dead one.
 
 A subject referenced from two trees only fully participates in the first one. The context machinery that lets a subject's own context reach its tree's services adds that fallback the first time the subject attaches, and leaves it alone on a second attach from a different tree, so the subject's context keeps resolving through the first tree only. In practice that means a source claiming a property on such a subject publishes to the first tree's stream, and a wait anchored on the subject through the second tree sees only the first tree's sources, not the second tree's. Avoid sharing a subject instance across two independently-monitored trees if you need it to fully participate in both.
 
@@ -82,23 +82,21 @@ MQTT's `LoadInitialStateAsync` always returns `null`. Retained messages arrive i
 
 ## Applications That Create Sources at Runtime
 
-`WithSourceMonitoring(builder.Services)` registers a `SourceRegistrationGate` hosted service that calls `CompleteSourceRegistration()` once `IHostApplicationLifetime.ApplicationStarted` fires. That fits an application where every source is a DI-registered hosted service, started as part of ordinary host startup.
+There are two ways to declare registration complete, and no third: pick by whether your sources exist before host startup finishes.
 
-An application that creates sources dynamically, for example devices discovered after the host has already started, uses the parameterless `WithSourceMonitoring()` overload instead, and declares registration complete itself once it has started everything it intends to for that batch:
+`WithSourceMonitoring(builder.Services)` registers a `SourceRegistrationGate` hosted service that calls `CompleteSourceRegistration()` once `IHostApplicationLifetime.ApplicationStarted` fires. That covers every source that exists by the end of host startup, whether it is a DI-registered hosted service or one attached to the subject graph. Attaching a source queues its `StartAsync` rather than running it inline, so it has not registered yet when the attach returns; the hosting layer holds registration open from the attach until that start has actually run, and nested attaches compose, because a service that attaches children during its own start takes their holds before its own is released.
+
+An application that creates sources *after* startup, for example devices discovered at runtime, uses the parameterless `WithSourceMonitoring()` overload instead and declares registration complete itself:
 
 ```csharp
 using Namotion.Interceptor.Connectors.Monitoring;
-using Namotion.Interceptor.Hosting;
 
 protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 {
     await LoadAsync(stoppingToken);
-    await _context.WaitForPendingHostedServiceActionsAsync(stoppingToken);
     _context.CompleteSourceRegistration();
 }
 ```
-
-The barrier is there because `LoadAsync` typically attaches sources through the hosted-service path (see [Hosting](hosting.md)), and attaching queues a `StartAsync` call, which is what actually registers the source with the monitor, rather than running it inline. Calling `CompleteSourceRegistration()` before that queue has drained would let a wait started right afterward see a branch that looks fully registered while a source is still on its way in. `WaitForPendingHostedServiceActionsAsync` closes that gap: it completes once every start and stop action queued before the call has actually run.
 
 A `SourceMonitor` is born with one registration hold already taken, at `WithSourceMonitoring()` time, during context configuration and before the host is even built. That is what makes the ordering above work regardless of hosted service construction order: no wait can complete until something explicitly releases that hold.
 
@@ -134,7 +132,7 @@ Delivery here is queued per subscription and runs outside every lock, so a slowe
 
 Because of that, the stream is not a ledger: it cannot be replayed to reconstruct a history of transitions for a property, even in principle, since the order events arrive in is not the order the transitions actually happened in. A consumer built on it maintains a view of current state, kept up to date by whichever events arrive, not a log of what happened and when.
 
-`CurrentState` decides whether a property has left the tree from tree membership the monitor tracks directly as attach and detach happen, not by checking whether the subject's context still reaches the monitor. That check stays correct regardless of how many contexts or parents a subject has passed through: a subject constructed directly with a context, or one that has had two parents, resolves the same way as any other once it actually detaches.
+`CurrentState` reports ownership and nothing else. It does not tell you whether the property's subject is still in the object graph, and this monitor publishes no events about that either: source monitoring answers "which source owns this property, and what state is that source in". Graph membership is a separate question with its own owner, so ask `ISubjectRegistry.TryGetRegisteredSubject(subject)` for it. In practice the two rarely need distinguishing, because every built-in connector releases its claims when a subject detaches, which publishes `PropertyReleased` and makes `CurrentState` report `Unclaimed`.
 
 ## The State Model, Transitions, and Delivery Contract
 
@@ -167,8 +165,6 @@ Every source metadata change is one `SourceEventKind`:
 | `StateChanged` | `null` | A source's own state changed. |
 | `PropertyClaimed` | set | A source took ownership of a property. |
 | `PropertyReleased` | set | A source gave up ownership of a property. |
-| `PropertyEnteredView` | set | An already-claimed property joined the tree when its subject attached; ownership did not change. |
-| `PropertyLeftView` | set | A still-claimed property left the tree when its subject detached; ownership did not change. |
 
 `SourceMonitor.Publish` enqueues every event onto each subscriber's own queue; each subscription drains its own queue on a single worker at a time, so a slow handler delays only that subscription. There is no ordering guarantee across subscriptions: two subscribers can observe events in different relative orders under concurrent activity.
 
@@ -197,7 +193,7 @@ var isAvailable = device
     .GetValue();
 ```
 
-This pattern depends on construction order: the updater must be constructed, and `Subscribe` called, before any source it cares about starts claiming properties. `ISubjectSource` exposes no way to enumerate the properties a source has already claimed, so `PropertyClaimed` (and `PropertyEnteredView`) are the only way this updater ever learns about a claim. A property claimed before the updater subscribed never gets an `IsAvailable` attribute at all, with no later event to fill the gap.
+This pattern depends on construction order: the updater must be constructed, and `Subscribe` called, before any source it cares about starts claiming properties. `ISubjectSource` exposes no way to enumerate the properties a source has already claimed, so `PropertyClaimed` is the only way this updater ever learns about a claim. A property claimed before the updater subscribed never gets an `IsAvailable` attribute at all, with no later event to fill the gap.
 
 The updater subscribes once and reacts to every event kind that can change a property's availability. `SourceRegistered` and `SourceUnregistered` carry no property, so nothing needs applying until a property is actually claimed:
 
@@ -215,10 +211,8 @@ public sealed class DeviceAvailabilityUpdater : IDisposable
     // (see Handle below).
     private readonly ConcurrentDictionary<ISubjectSource, ImmutableHashSet<PropertyReference>> _bySource = new();
 
-    // Backing store for each property's IsAvailable attribute. The attribute's getValue reads from
-    // here rather than recomputing GetSourceState() live: GetSourceState() has no notion of tree
-    // membership, so it cannot tell a property that left the tree while still claimed - the case
-    // PropertyLeftView reports - from one that is genuinely still live.
+    // Backing store for each property's IsAvailable attribute, so the attribute's getValue is a
+    // dictionary read rather than a live GetSourceState() call on every access.
     private readonly ConcurrentDictionary<PropertyReference, bool> _isAvailable = new();
 
     private readonly SourceSubscription _subscription;
@@ -235,13 +229,11 @@ public sealed class DeviceAvailabilityUpdater : IDisposable
         switch (sourceEvent.Kind)
         {
             case SourceEventKind.PropertyClaimed:
-            case SourceEventKind.PropertyEnteredView:
                 Track(sourceEvent.Source, sourceEvent.Property!.Value);
                 Apply(sourceEvent.Property!.Value, sourceEvent.CurrentState);
                 break;
 
             case SourceEventKind.PropertyReleased:
-            case SourceEventKind.PropertyLeftView:
                 Apply(sourceEvent.Property!.Value, sourceEvent.CurrentState);
                 break;
 
@@ -284,4 +276,4 @@ public sealed class DeviceAvailabilityUpdater : IDisposable
 }
 ```
 
-For the four property-kind events, `sourceEvent.CurrentState` checks tree membership first and then resolves through `GetSourceState()` for that specific property (see [Observing Changes](#observing-changes)), so `Apply` can use it directly. `StateChanged` carries no property at all: `sourceEvent.CurrentState` there is the source's own state and says nothing about any individual property, so the handler instead walks `_bySource` for that source and calls `property.GetSourceState()` on each claimed property directly - skipping the membership check `CurrentState` applies for the other four kinds. That is why a custom source which does not release its claim on detach can leave `IsAvailable` reporting available for a property that `PropertyLeftView` already marked unavailable: the next `StateChanged` re-applies the membership-blind `GetSourceState()` result and overwrites it. Built-in connectors release their claims on detach, so this gap does not surface with them.
+For the two property-kind events, `sourceEvent.CurrentState` resolves through `GetSourceState()` for that specific property (see [Observing Changes](#observing-changes)), so `Apply` can use it directly. `StateChanged` carries no property at all: `sourceEvent.CurrentState` there is the source's own state and says nothing about any individual property, so the handler instead walks `_bySource` for that source and calls `property.GetSourceState()` on each claimed property directly.

@@ -458,48 +458,38 @@ public class SourceWaitTests
     {
         // Arrange
         var context = CreateContext();
-        context.AddService<ILoggerFactory>(new ThrowingLoggerFactory());
         var monitor = context.GetSourceMonitor();
 
         var healthyRoot = new Person(context);
         var healthySource = new TestStateSource(healthyRoot);
         monitor.Register(healthySource);
 
-        var stoppedRoot = new Person(context);
-        var stoppedSource = new TestStateSource(stoppedRoot);
-        monitor.Register(stoppedSource);
-        stoppedSource.ReportStopped();
-
         // A hold keeps registration incomplete while both waits below are created, so their
-        // fast-path IsSatisfied check short-circuits on IsRegistrationComplete without ever
-        // reaching the all-Stopped warning - that only happens on the re-evaluation pass triggered
-        // by disposing the hold, further down. (An empty-scope wait cannot be used for this instead:
-        // since registration-complete now makes an empty scope vacuously satisfied, such a wait
-        // could never stay pending long enough to be re-evaluated a second time.)
+        // fast-path IsSatisfied check short-circuits on IsRegistrationComplete before walking any
+        // scope - the poison wait must not throw until both waits are in the list.
         var hold = monitor.DeferWaitCompletion();
         monitor.CompleteSourceRegistration();
 
         // Added to _waits before the healthy wait below, so a loop with no per-wait isolation
-        // reaches this one first. Its only in-scope source is Stopped, which makes its
-        // re-evaluation log the all-Stopped warning (unconditional, unlike the once-per-wait
-        // empty-scope one) - and the logger this test installs throws from LogWarning, so
-        // re-evaluating this wait is what throws, every time it is reached.
-        var stoppedWait = stoppedRoot.WaitForSynchronizationAsync(CancellationToken.None);
-        Assert.False(stoppedWait.IsCompleted);
+        // reaches this one first. The throw comes from the ANCHOR's own scope walk, so it recurs on
+        // every re-evaluation pass. An earlier version of this test drove the throw from a
+        // one-shot diagnostic warning instead, which meant nothing threw on the second pass and
+        // the test passed with the per-wait isolation removed.
+        var poisonWait = new PoisonAnchor(context).WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(poisonWait.IsCompleted);
 
-        // A second, later wait whose own re-evaluation never touches the logger: it has an
-        // in-scope source that is not yet synchronized, so IsSatisfied returns false without ever
-        // reaching a warning branch - stoppedSource is not in healthyRoot's scope at all.
+        // A second, later wait whose own re-evaluation never touches the poison anchor: its scope
+        // walk only ever visits healthyRoot.
         var healthyWait = healthyRoot.WaitForSynchronizationAsync(CancellationToken.None);
         Assert.False(healthyWait.IsCompleted);
 
-        // Releasing the hold makes registration complete and triggers a single re-evaluation pass
-        // over every pending wait, including stoppedWait, whose all-Stopped warning throws.
+        // Releasing the hold makes registration complete and triggers a re-evaluation pass over
+        // every pending wait, including the poison one, whose scope walk throws.
         var releaseException = Assert.Throws<InvalidOperationException>(() => hold.Dispose());
-        Assert.Equal("logging is broken", releaseException.Message);
+        Assert.Equal("scope walk is broken", releaseException.Message);
 
         // Act - transitioning healthySource triggers a further re-evaluation pass over every
-        // pending wait. Without per-wait isolation, the throw while re-evaluating stoppedWait
+        // pending wait. Without per-wait isolation, the throw while re-evaluating poisonWait
         // (first in the list) would abort the pass before healthyWait (second) is ever looked at
         // again, which would leave it pending forever - a lost wakeup.
         healthySource.ReportSynchronized();
@@ -582,31 +572,38 @@ public class SourceWaitTests
         var left = new Person(context);
         var right = new Person(context);
         var moving = new Person();
+
+        // moving hangs under BOTH parents, so the single write in Act removes one parent link
+        // without ever emptying the anchor's scope. That matters: an empty scope completes a wait
+        // vacuously (see IsSatisfied), which would mask exactly the staleness this test exists to
+        // catch - an earlier version of this test let the scope go empty and therefore passed with
+        // the handler ordering inverted, and passed with the Act removed entirely.
         left.Mother = moving;
+        right.Mother = moving;
 
-        // Keeps moving's scope non-empty (so the wait below genuinely blocks instead of completing
-        // vacuously - see IsSatisfied's empty-scope rule) while moving sits under left: rooted at
-        // left, this source drops out of moving's scope the instant the reparent below moves it
-        // away, the same reparent that brings the real source into scope.
-        var keepAlive = new TestStateSource(left);
-        monitor.Register(keepAlive);
+        // Rooted at left, so it leaves moving's scope when the left link is cut. Never
+        // synchronizes, so while it IS in scope the wait cannot complete.
+        var blocking = new TestStateSource(left);
+        monitor.Register(blocking);
 
-        var source = new TestStateSource(right);
-        monitor.Register(source);
+        // Rooted at right, so it stays in scope throughout and is already satisfied.
+        var healthy = new TestStateSource(right);
+        monitor.Register(healthy);
+
         monitor.CompleteSourceRegistration();
-        source.ReportSynchronized();
+        healthy.ReportSynchronized();
+
         var wait = moving.WaitForSynchronizationAsync(CancellationToken.None);
         Assert.False(wait.IsCompleted);
 
-        // Act
+        // Act - one parent link removed. moving stays in the tree through right, so this fires
+        // neither IsContextAttach nor IsContextDetach, only a property reference removal.
         left.Mother = null;
-        right.Mother = moving;
 
         // Assert
-        // This is the test that catches handler-ordering defects. A reparent within one tree fires
-        // neither IsContextAttach nor IsContextDetach, and if the monitor runs before
-        // ParentTrackingHandler it re-evaluates against stale parents, decides nothing changed, and
-        // never looks again. The wait would then hang forever.
+        // This is the test that catches handler-ordering defects. If the monitor ran before
+        // ParentTrackingHandler it would re-evaluate against moving's stale parent set, still find
+        // blocking in scope, and never look again - the wait would hang.
         await wait.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
@@ -850,35 +847,29 @@ internal sealed class RecordingLoggerFactory(RecordingLogger logger) : ILoggerFa
     }
 }
 
-/// <summary>A logger whose LogWarning call throws, to exercise exception-safety in wait re-evaluation.</summary>
-internal sealed class ThrowingLogger : ILogger
+/// <summary>
+/// A subject whose <see cref="Data"/> getter throws, so any parent walk that reaches it fails.
+/// </summary>
+/// <remarks>
+/// Used as a wait anchor to make one wait's re-evaluation throw on every pass while leaving every
+/// other wait unaffected. GetParents() reads Data, and SourceScope's walk starts from the anchor, so
+/// the throw lands inside that wait's own IsSatisfied and nowhere else. A throwing source would not
+/// work here: IsSatisfied iterates the shared source list for every wait, so one poison source makes
+/// every wait's evaluation throw.
+/// </remarks>
+internal sealed class PoisonAnchor(IInterceptorSubjectContext context) : IInterceptorSubject
 {
-    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+    public object SyncRoot { get; } = new();
 
-    public bool IsEnabled(LogLevel logLevel) => true;
+    public IInterceptorSubjectContext Context { get; } = context;
 
-    public void Log<TState>(
-        LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-        Func<TState, Exception?, string> formatter)
-    {
-        if (logLevel == LogLevel.Warning)
-        {
-            throw new InvalidOperationException("logging is broken");
-        }
-    }
-}
+    public ConcurrentDictionary<(string? property, string key), object?> Data =>
+        throw new InvalidOperationException("scope walk is broken");
 
-/// <summary>Always resolves to a fresh <see cref="ThrowingLogger"/>, regardless of category.</summary>
-internal sealed class ThrowingLoggerFactory : ILoggerFactory
-{
-    public void AddProvider(ILoggerProvider provider)
-    {
-    }
+    public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; } =
+        new Dictionary<string, SubjectPropertyMetadata>();
 
-    public ILogger CreateLogger(string categoryName) => new ThrowingLogger();
-
-    public void Dispose()
-    {
-    }
+    public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+        throw new NotSupportedException();
 }
 

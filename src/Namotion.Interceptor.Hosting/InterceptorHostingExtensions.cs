@@ -56,8 +56,13 @@ public static class InterceptorHostingExtensions
 
         if (wasAdded)
         {
+            // Context passed so the start is held open until it has actually run: this overload
+            // queues the start and returns without waiting for it, so anything treating "the graph
+            // has finished starting" as a completion point would otherwise pass it too early. The
+            // awaiting overload needs no hold, because its caller is blocked until the service has
+            // started.
             var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            hostedServiceHandler?.AttachHostedService(hostedService);
+            hostedServiceHandler?.AttachHostedService(hostedService, subject.Context);
         }
 
         return wasAdded;

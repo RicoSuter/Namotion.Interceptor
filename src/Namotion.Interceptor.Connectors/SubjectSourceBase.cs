@@ -190,8 +190,9 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         }
 
         // Registration precedes the pump so SourceRegistered precedes any StateChanged of this source.
-        _registeredMonitors = RootSubject.Context.GetSourceMonitors();
-        foreach (var monitor in _registeredMonitors)
+        var monitors = RootSubject.Context.GetSourceMonitors();
+        ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, monitors);
+        foreach (var monitor in monitors)
         {
             monitor.Register(this);
         }
@@ -201,13 +202,22 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         // TransitionTo is monotonic and Stopped is terminal, so if State reads Stopped here, Dispose
         // has already run - re-check and unwind whatever was just registered so a disposed source
         // never stays registered forever.
+        //
+        // Unwinds through the LOCAL monitors array, never by re-reading the field: a Dispose that
+        // interleaved between the assignment and the registration loop above has already taken the
+        // field and left it empty, so re-reading it here would unregister nothing and strand this
+        // call's own registrations forever - a Stopped source left in SourceMonitor.Sources with a
+        // live StateChanged subscription retaining the writer, retry queue and root subject.
+        // Unregister is a no-op for a source that is not registered, so unwinding a registration
+        // Dispose already removed is harmless.
         if (State == SourceState.Stopped)
         {
-            foreach (var monitor in _registeredMonitors)
+            ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
+            foreach (var monitor in monitors)
             {
                 monitor.Unregister(this);
             }
-            _registeredMonitors = [];
+
             return Task.CompletedTask;
         }
 
@@ -386,11 +396,15 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         // Publish the final Stopped while still registered, so a dispose without a stop is not silent.
         TransitionTo(SourceState.Stopped);
 
-        foreach (var monitor in _registeredMonitors)
+        // Take-and-clear in one step, so a concurrent StartAsync unwinding through its own local
+        // array (see StartAsync) cannot have this method unregister the same entries a second time
+        // on a later call, and so the field is never read while another thread is writing it.
+        var monitors = ImmutableInterlocked.InterlockedExchange(
+            ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
+        foreach (var monitor in monitors)
         {
             monitor.Unregister(this);
         }
-        _registeredMonitors = [];
 
         WriteRetryQueue?.Dispose();
         base.Dispose();
