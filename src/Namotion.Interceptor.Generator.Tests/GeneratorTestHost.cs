@@ -21,6 +21,18 @@ internal sealed record GeneratorRunResult(
         .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
         .ToList();
 
+    /// <summary>
+    /// Warnings from the generated compilation, minus the ones the test host itself causes.
+    /// CS8632 is excluded because <see cref="GeneratorTestHost"/> builds without a nullable
+    /// context, so every existing test source that uses '?' reports it (SourceGeneratorTests.cs:16
+    /// among many). Everything else must be empty: src/Directory.Build.props sets
+    /// TreatWarningsAsErrors for consumers, so a warning in generated code is a broken build.
+    /// </summary>
+    public IReadOnlyList<Diagnostic> CompilationWarnings { get; } = CompilationDiagnostics
+        .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Warning)
+        .Where(diagnostic => diagnostic.Id != "CS8632")
+        .ToList();
+
     public string SingleSource() => Sources.Single().SourceText.ToString();
 
     public string AllSources() => string.Join("\n\n", Sources.Select(s => s.SourceText));
@@ -45,13 +57,26 @@ internal static class GeneratorTestHost
     /// <c>internal</c> or <c>protected internal</c> interface default member declared in a
     /// referenced assembly, where the generated code's own assembly has no InternalsVisibleTo).
     /// </summary>
-    public static GeneratorRunResult RunWithLibraryReference(string librarySource, string mainSource)
+    public static GeneratorRunResult RunWithLibraryReference(
+        string librarySource,
+        string mainSource,
+        bool runGeneratorOverLibrary = false)
     {
         var libraryCompilation = CSharpCompilation.Create(
             assemblyName: "TestLibrary",
             syntaxTrees: [CSharpSyntaxTree.ParseText(librarySource)],
             references: References,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        // Opt in, not automatic. NI0012's stale-base fixture is a base built by an OLDER generator:
+        // running the current generator over it would emit protected helpers, satisfy the contract,
+        // and make NI0012 unreachable.
+        if (runGeneratorOverLibrary)
+        {
+            GeneratorDriver libraryDriver = CSharpGeneratorDriver.Create(new InterceptorSubjectGenerator());
+            libraryDriver.RunGeneratorsAndUpdateCompilation(libraryCompilation, out var updated, out _);
+            libraryCompilation = (CSharpCompilation)updated;
+        }
 
         using var libraryStream = new MemoryStream();
         var emitResult = libraryCompilation.Emit(libraryStream);
@@ -100,6 +125,23 @@ internal static class GeneratorTestHost
             result.CompilationErrors.Count == 0,
             "Generated code did not compile:" + Environment.NewLine +
             string.Join(Environment.NewLine, result.CompilationErrors.Select(d => d.ToString())));
+
+        return result;
+    }
+
+    /// <summary>
+    /// Same as <see cref="RunExpectingCleanCompilation"/>, and additionally fails on any warning
+    /// other than CS8632. Use this for any shape where the risk is a hiding or sealed-member
+    /// warning (CS0108, CS0109, CS0628), which a consumer build turns into an error.
+    /// </summary>
+    public static GeneratorRunResult RunExpectingNoWarnings(string source)
+    {
+        var result = RunExpectingCleanCompilation(source);
+
+        Assert.True(
+            result.CompilationWarnings.Count == 0,
+            "Generated code compiled with warnings, which are errors in consumer builds:" + Environment.NewLine +
+            string.Join(Environment.NewLine, result.CompilationWarnings.Select(d => d.ToString())));
 
         return result;
     }
