@@ -64,11 +64,11 @@ Sources use a buffer-load-replay pattern during initialization and reconnection:
 This ensures:
 - Updates received during initialization are not lost
 - Updates are applied in the correct order relative to the initial state
-- Stale queued writes don't overwrite newer source values
+- Queued writes are reconciled by commit order rather than discarded
 
 A source cannot capture anything without a `PropertyChangeInterceptor` in its context, so starting one whose context lacks it fails immediately with an actionable message rather than running inert. Configure the context with `WithPropertyChangeSubscriptions()` or `WithFullPropertyTracking()`.
 
-Local writes made while the source is connecting are captured too, not only inbound updates: the outbound change subscription is created once for the whole source lifetime (before the retry loop), so a connect-window or reconnect-delay write survives instead of falling into a gap. Selection is by change origin (see [Change notification source semantics](#change-notification-source-semantics) below): only `Local` writes to source-owned properties are parked, while the source's own `FromSource` and `Confirmed` applies (inbound updates and initial-state loads via `SetValueFromSource`) are skipped, so an inbound value is never echoed back. When draining starts it reconciles to the model's current value, the same source-wins policy as the retry re-apply above (the last two rows of [Write Consistency Guarantees](#write-consistency-guarantees) below give both outcomes). A same-property write races the initial-state load, so its winner is timing-dependent: write after the connection has settled (post-connect writes are always sent), or use source transactions, when you need a deterministic result.
+Local writes made while the source is connecting are captured too, not only inbound updates: the outbound change subscription is created once for the whole source lifetime (before the retry loop), so a connect-window or reconnect-delay write survives instead of falling into a gap. Selection is by change origin (see [Change notification source semantics](#change-notification-source-semantics) below): only `Local` writes to source-owned properties are parked, while the source's own `FromSource` and `Confirmed` applies (inbound updates and initial-state loads via `SetValueFromSource`) are skipped, so an inbound value is never echoed back. When draining starts it reconciles each parked write by commit order: a write that a *later local* write superseded is dropped, because that later write is itself delivered, and any other parked write is sent, restoring it locally first if the initial-state load moved the model off it. **A local write that has already committed therefore wins over the value the load brought in**, rather than being discarded as a conflict. That is a deliberate reversal of the earlier source-wins behaviour, made because the load cannot be ranked against a local write (the same reason an echo cannot, see issue #373) and the old rule resolved that ambiguity by silently discarding a committed user write. Both ends still converge; what changed is which value they converge on. Source-wins is unaffected everywhere else: an inbound value with no local write pending still wins and produces no outbound write.
 
 ### Write Consistency Guarantees
 
@@ -79,11 +79,12 @@ Property writes to sources follow a **local-first** model: the local property is
 | Write succeeds | Updated immediately | Updated via async write | In sync |
 | Write fails, retry succeeds | Updated immediately | Updated on retry | Eventually in sync |
 | Disconnect + reconnect, source unchanged | Initial state restores source state, retry re-applies change | Receives change via fresh write | In sync |
-| Disconnect + reconnect, source changed | Initial state applies source's new value, retry dropped | Unchanged (source wins) | In sync |
+| Disconnect + reconnect, source changed | Queued write restored locally | Receives the queued write | In sync (local write wins) |
 | Write during connect, source leaves the property alone | Local write kept | Sent as a fresh write once draining starts | In sync |
-| Write during connect, initial state overwrites the property | Source value kept | Write dropped | In sync (source wins) |
+| Write during connect, initial state overwrites the property | Local write restored | Receives the local write | In sync (local write wins) |
+| Queued write superseded by a later local write | Later write kept | Receives only the later write | In sync |
 
-In all cases, the local model and source converge after reconnection. However, in the last scenario the local model temporarily shows a value that the source never accepted. Users may briefly see the local value before it snaps back to the source's value on reconnect.
+In all cases the local model and the source converge. A write that has already committed locally is never discarded, so in the reconnect rows the source ends up with the local write rather than the value it held during the outage. A write is only dropped when a *later local* write supersedes it, and that later write is delivered in its place. Source-wins still applies wherever no local write is pending: an inbound value is accepted and produces no outbound write.
 
 #### Confirmed writes with transactions
 
@@ -127,9 +128,11 @@ Per property, the surviving old value comes from the change with the *lowest* `S
 
 Revisions are monotonic per subject and are not comparable across subjects; see [Delivery Guarantees](tracking.md#delivery-guarantees) for the full contract, including what the old value does and does not promise. A change carrying revision 0 orders against nothing, so a property with one in its batch collapses by arrival position instead, which is what a source saw before revisions existed. The write path always stamps a revision, so this only arises for changes built through the public factory.
 
-Only a property's current value is ever delivered. A change is enqueued after its commit and outside the subject lock, so a writer preempted between the two can land an older commit in a later batch than a newer one; a flush therefore drops any survivor whose new value the model has since moved past. This never loses the settled state: the subject is the authority on its own value, and every transition to that value is itself enqueued to every connector that did not produce it, so what the source ends up owed always arrives. The comparison errs towards delivering, so an unregistered property or a throwing getter is written rather than dropped.
+Only a property's settled state is ever delivered. A change is enqueued after its commit and outside the subject lock, so a writer preempted between the two can land an older commit in a later batch than a newer one; a flush therefore drops any survivor that a later commit has superseded. Every committed write stamps its revision on the property it wrote, so this is decided by commit order rather than by comparing values, which means it holds for derived and runtime-registered properties too, whose getters need not return what a write stored.
 
-That check is applied to steady-state changes only on the buffered path. Changes already queued when processing starts were captured while the source was still connecting, and one the model has moved past is stale state that must not be pushed back; a change arriving afterwards is a stream value, where an intermediate is data rather than staleness. This is the delivery contract: **buffered delivery coalesces every change, and immediate delivery (`bufferTime` at zero) coalesces only what was queued before processing started.** A source that needs every intermediate value must run without buffering, and even then a value captured during the connect window is dropped if the model has moved past it.
+Dropping is safe because it only happens when a later commit carries the settled value in the dropped one's place. That qualifier is exact, and one case fails it: a commit that came **from the source** is skipped as an echo when that source's queue is drained, so nothing would be left to deliver. Source-originated commits therefore do not count as superseding. Without that exclusion, a source echoing back a value we had just written would suppress the next write to the same property, and both ends would settle on the value the source already had, with the local write lost permanently and no diagnostic (see issue #373 on why an echo cannot be ranked against local writes: its revision is stamped when it is applied here, not when the source produced it). A change carrying revision 0 orders against nothing and is always delivered, which is what a derived recomputation produces.
+
+That check is applied to steady-state changes only on the buffered path. Changes already queued when processing starts were captured while the source was still connecting, and one a later local write has superseded is stale state that must not be pushed back; a change arriving afterwards is a stream value, where an intermediate is data rather than staleness. This is the delivery contract: **buffered delivery coalesces every change, and immediate delivery (`bufferTime` at zero) coalesces only what was queued before processing started.** A source that needs every intermediate value must run without buffering.
 
 [Source transactions](tracking-transactions.md) write to the source themselves and then apply locally, and that local apply arrives here as a confirmation. Normally it is not sent on, because the source already has it. The exception is when a connector has also written that property itself: such a write can reach the source after the transaction's and leave it holding an older commit than the subject, so the confirmation is sent out to restore it.
 
@@ -145,7 +148,7 @@ Gaps that are not closed: cases where local and remote can stay out of sync, or 
 
 **Disabling the retry queue discards connect-window writes silently.** With `writeRetryQueueSize: 0` there is no queue to park captured writes in, so the drain empties the subscription and returns. The queue's own "buffering is disabled" warning never fires, because there is no queue object to emit it.
 
-**Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state directly without running the connect-window reconciliation, so a write queued before such a reconnect is flushed afterwards rather than being judged against what the source changed during the outage. This is the opposite of the source-wins rule the pump applies, so the two ends can settle on different values. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
+**Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state directly without running the connect-window reconciliation, so a write queued before such a reconnect is flushed afterwards without the supersession check. It agrees with the pump on which value wins, but a write that a later local write superseded can still be sent, so a source can briefly see an intermediate the pump would have filtered. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
 
 **Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the connect-window drain must empty the subscription to keep it bounded, so a write it cannot attribute to a source is dropped without an error. This affects the first connection only, since ownership persists across reconnects.
 
@@ -159,7 +162,7 @@ Gaps that are not closed: cases where local and remote can stay out of sync, or 
 - Ring buffer semantics: oldest writes dropped when capacity reached
 - Memory while disconnected is bounded per connection attempt: the change subscription is drained into this queue before each attempt and again after the initial state is applied, so repeated failed attempts do not compound. Between those two points, which covers the retry delay and all of `StartListeningAsync` plus `LoadInitialStateAsync`, captured changes accumulate in the subscription without a bound, so peak memory follows the write rate times the length of one attempt
 - Automatic retry when `WriteChangesAsync` fails during normal operation
-- Optimistic re-apply on reconnection: after loading initial state, queued changes are compared against the current (post-reconnection) property values. Only changes where the source hasn't modified the property are re-applied locally and sent to the source as fresh writes. Changes where the source value diverged are dropped (source wins).
+- Re-apply on reconnection by commit order: after loading initial state, each queued change is kept unless a later *local* write superseded it, in which case that later write is delivered instead. A kept change is sent as a fresh write, restored locally first if the load moved the model off it. Values the load brought in do not supersede a write that already committed, because the load cannot be ranked against it.
 - In-memory only: queued writes are lost on process restart
 
 ### Inbound Update Error Handling
@@ -491,7 +494,7 @@ There is no `SubjectServerBase`. Servers are implemented as `BackgroundService` 
 A server implementation typically handles:
 
 - **Starting the protocol server**: bind to a port, accept connections, restart on failure
-- **Publishing property changes**: observe changes via `ChangeQueueProcessor` and push them to connected clients using the protocol's wire format. Servers create the processor before the protocol server starts, so changes made during startup are captured; of those, values the model has already moved past are collapsed rather than published in sequence, so clients see the settled value instead of every intermediate one
+- **Publishing property changes**: observe changes via `ChangeQueueProcessor` and push them to connected clients using the protocol's wire format. Servers create the processor before the protocol server starts, so changes made during startup are captured; of those, changes a later local commit superseded are collapsed rather than published in sequence, so clients see the settled value instead of every intermediate one
 - **Handling inbound writes**: receive write requests from external clients and apply them to the local model (typically via `SetValueFromSource()` to prevent echo loops)
 - **Lifecycle cleanup**: release caches and subscriptions when subjects are detached from the object graph
 
@@ -732,13 +735,13 @@ The reconciliation rules resolve a conflict by letting the source win, which con
 
 Use [source transactions](tracking-transactions.md) when a write must be confirmed by the source before the local model accepts it.
 
-### A write racing the initial-state load has a timing-dependent winner
+### A write racing the initial-state load overwrites the loaded value
 
-Whether the local write or the source's snapshot wins depends on which lands first, which is inherent to the local-first model rather than a property of the reconciliation. Write after the connection has settled, or use source transactions, when the outcome has to be deterministic. See [Write Consistency Guarantees](#write-consistency-guarantees) for the full outcome table.
+A local write that commits while the source is connecting is sent once draining starts, so it overwrites whatever the initial-state load brought in for that property. This is deliberate: the load carries no ordering information that could rank it against the write (see issue #373), and resolving that ambiguity the other way silently discarded a committed write. Use [source transactions](tracking-transactions.md) when the source must confirm a value before the local model accepts it. See [Write Consistency Guarantees](#write-consistency-guarantees) for the full outcome table.
 
 ### Connector-internal reconnects do not run the reconciliation
 
-The reconciliation described above runs in the source pump, which covers the initial connection and its retries. Once a connection has succeeded, the connectors handle session loss internally (the OPC UA health loop, the WebSocket monitor loop, the MQTT connection monitor) by reloading initial state without going through the pump's drain and reconcile. A write that was queued for retry before such a reconnect is therefore flushed as-is afterwards, so it overwrites a value the source changed during the outage. That is the opposite of the source-wins rule the pump applies, and the two paths have always disagreed this way.
+The reconciliation described above runs in the source pump, which covers the initial connection and its retries. Once a connection has succeeded, the connectors handle session loss internally (the OPC UA health loop, the WebSocket monitor loop, the MQTT connection monitor) by reloading initial state without going through the pump's drain and reconcile. A write that was queued for retry before such a reconnect is therefore flushed as-is afterwards, without the supersession check the pump applies, so a write that a later local write superseded can still be sent. The two paths now agree on which value wins and differ only in whether superseded intermediates are filtered.
 
 ### Ordering across different properties is not preserved by reconciliation
 
