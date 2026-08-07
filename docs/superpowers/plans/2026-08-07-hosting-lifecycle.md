@@ -455,10 +455,9 @@ public class HostedServiceHandlerTests
             parent.Child = null;
             parent.Child = child;
 
-            // Assert
+            // Assert - the attachment being gone is the deterministic invariant. Counting creations
+            // after a yield would assert an absence on a timer and could pass vacuously.
             Assert.Empty(child.GetHostedServiceAttachments());
-            await Task.Yield();
-            Assert.Equal(1, created);
         });
     }
 
@@ -562,23 +561,19 @@ public class HostedServiceHandlerTests
         {
             var parent = new Parent(context);
             var child = new Person();
-            var created = 0;
-            child.AttachHostedService(() =>
-            {
-                created++;
-                return new TrackedBackgroundService();
-            });
+            var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
 
             parent.Child = child;
-            await AsyncTestHelpers.WaitUntilAsync(() => created == 1);
+            await AsyncTestHelpers.WaitUntilAsync(() => attachment.Current is not null);
+            var original = attachment.Current;
 
-            // Act
+            // Act - add then remove keeps the reference count above zero, so isLastDetach never fires
             parent.SecondChild = child;
             parent.Child = null;
 
-            // Assert
-            await Task.Yield();
-            Assert.Equal(1, created);
+            // Assert - instance identity is deterministic; a creation count after a yield is not
+            Assert.Same(original, attachment.Current);
+            Assert.False(original!.IsDisposed);
         });
     }
 
@@ -759,7 +754,9 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting;
 
-internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, IDisposable
+// No longer IDisposable: the old implementation existed only to cancel the action loop's token
+// source, and there is no such token under per target chains.
+internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 {
     private const int StartDelayMilliseconds = 50;
 
@@ -1033,10 +1030,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler, 
         }
 
         _gate.CompleteDraining();
-    }
-
-    public void Dispose()
-    {
     }
 }
 ```
