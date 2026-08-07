@@ -254,9 +254,11 @@ namespace Repro
     }
 
     [Fact]
-    public void WhenInterfaceDefaultMemberIsAnIndexer_ThenNI0006IsReported()
+    public void WhenInterfaceDefaultMemberIsAnIndexer_ThenNI0006IsNotReported()
     {
-        // Arrange (case E)
+        // Arrange (case E): an indexer is parameterised and has no usable name, so it was never a
+        // candidate to become a subject property. A class-declared indexer has always been ignored
+        // in silence; the interface-default path now agrees with it.
         const string source = @"
 using Namotion.Interceptor.Attributes;
 namespace Repro
@@ -271,15 +273,37 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
-        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
-        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
-        Assert.Contains("indexers cannot be subject properties", diagnostic.GetMessage());
+        Assert.Empty(generated.GeneratorDiagnostics);
     }
 
     [Fact]
-    public void WhenInterfaceDefaultMemberIsStatic_ThenNI0006IsReported()
+    public void WhenClassDeclaresAnIndexer_ThenNI0006IsNotReported()
     {
-        // Arrange (case V)
+        // Arrange: the class-declared sibling of the previous case, pinning that the two paths
+        // agree rather than agreeing by accident of the syntax filter.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    [InterceptorSubject]
+    public partial class Bag
+    {
+        public string this[int index] => ""x"";
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.Empty(generated.GeneratorDiagnostics);
+    }
+
+    [Fact]
+    public void WhenInterfaceDefaultMemberIsStatic_ThenNI0006IsNotReported()
+    {
+        // Arrange (case V): a static member cannot be read from an instance, so it was never a
+        // candidate, and no edit the user can make to a third-party interface would change that.
         const string source = @"
 using Namotion.Interceptor.Attributes;
 namespace Repro
@@ -294,14 +318,14 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
-        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
-        Assert.Contains("static members cannot be read from an instance", diagnostic.GetMessage());
+        Assert.Empty(generated.GeneratorDiagnostics);
     }
 
     [Fact]
-    public void WhenInterfaceDefaultMemberIsInaccessible_ThenNI0006IsReported()
+    public void WhenInterfaceDefaultMemberIsInaccessible_ThenNI0006IsNotReported()
     {
-        // Arrange (case W)
+        // Arrange (case W): a private interface default member is an intentional helper shared
+        // between the interface's own default implementations, not a would-be subject property.
         const string source = @"
 using Namotion.Interceptor.Attributes;
 namespace Repro
@@ -323,8 +347,31 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
-        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
-        Assert.Contains("the member is not accessible from generated code", diagnostic.GetMessage());
+        Assert.Empty(generated.GeneratorDiagnostics);
+    }
+
+    [Fact]
+    public void WhenInterfaceExplicitlyImplementsAnInaccessibleMember_ThenNI0006IsNotReported()
+    {
+        // Arrange: the explicit implementation lives in an interface, which may well be
+        // third-party, so it is not the subject author's opt-in and carries no actionable remedy.
+        // Contrast with the class-declared form below, which stays reported.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IHuman { protected string Secret { get; } }
+    public interface IMale : IHuman { string IHuman.Secret => ""m""; }
+
+    [InterceptorSubject]
+    public partial class John : IMale { }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.Empty(generated.GeneratorDiagnostics);
     }
 
     [Fact]
@@ -387,11 +434,11 @@ namespace Repro
     }
 
     [Fact]
-    public void WhenClassDeclaresAStaticProperty_ThenNI0006IsReported()
+    public void WhenClassDeclaresAStaticProperty_ThenNI0006IsNotReported()
     {
-        // Arrange: a static property declared directly in the class body. Without a shape guard on
-        // this path, the emitted accessor casts an instance to the class and reads the static
-        // member through it, which fails to compile with CS0176 and no diagnostic at all.
+        // Arrange: a static property declared directly in the class body. It is still skipped (the
+        // emitted accessor would cast an instance to the class and read the static member through
+        // it, which is CS0176), but a static member was never a candidate, so nothing is reported.
         const string source = @"
 using Namotion.Interceptor.Attributes;
 namespace Repro
@@ -407,17 +454,16 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
-        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
-        Assert.Contains("static members cannot be read from an instance", diagnostic.GetMessage());
+        Assert.Empty(generated.GeneratorDiagnostics);
+        Assert.DoesNotContain(@"[""Total""]", generated.SingleSource());
     }
 
     [Fact]
-    public void WhenClassExplicitlyImplementsAStaticInterfaceMember_ThenNI0006IsReported()
+    public void WhenClassExplicitlyImplementsAStaticInterfaceMember_ThenNI0006IsNotReported()
     {
-        // Arrange: the class-declared, explicit-implementation sibling of the previous case. A
-        // static virtual interface member explicitly implemented in the class is still static, so
-        // it must be skipped the same way, even though it is reached through the explicit
-        // implementation branch rather than an ordinary declaration.
+        // Arrange: the class-declared, explicit-implementation sibling of the previous case. The
+        // member is forced on the subject by a 'static abstract' interface member, so the static
+        // rule outranks the explicit-implementation opt-in: there is nothing the user could change.
         const string source = @"
 using Namotion.Interceptor.Attributes;
 namespace Repro
@@ -435,8 +481,8 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
-        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
-        Assert.Contains("static members cannot be read from an instance", diagnostic.GetMessage());
+        Assert.Empty(generated.GeneratorDiagnostics);
+        Assert.DoesNotContain(@"[""Seed""]", generated.SingleSource());
     }
 
     [Fact]
@@ -615,7 +661,44 @@ namespace Repro
         // Assert
         var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0008");
         Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Equal(
+            "'Kind' is provided by more than one member; the subject exposes Repro.IFoo<int>.Kind and Repro.IFoo<string>.Kind is unreachable",
+            diagnostic.GetMessage());
         Assert.Contains(@"[""Kind""]", generated.SingleSource());
+    }
+
+    [Fact]
+    public void WhenThreeInterfaceDefaultMembersCollideOnName_ThenEachWarningIdentifiesItsOwnLoser()
+    {
+        // Arrange: three interfaces at one location used to produce two byte-identical warnings,
+        // leaving both the winner and the two losers undiscoverable from build output.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IFirst { int Value => 1; }
+    public interface ISecond { string Value => ""s""; }
+    public interface IThird { bool Value => true; }
+
+    [InterceptorSubject]
+    public partial class Impl : IFirst, ISecond, IThird { }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var messages = generated.GeneratorDiagnostics
+            .Where(diagnostic => diagnostic.Id == "NI0008")
+            .Select(diagnostic => diagnostic.GetMessage())
+            .ToList();
+
+        Assert.Equal(
+            [
+                "'Value' is provided by more than one member; the subject exposes Repro.IFirst.Value and Repro.ISecond.Value is unreachable",
+                "'Value' is provided by more than one member; the subject exposes Repro.IFirst.Value and Repro.IThird.Value is unreachable"
+            ],
+            messages);
     }
 
     [Fact]
@@ -643,6 +726,9 @@ namespace Repro
         // Assert
         var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0008");
         Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Equal(
+            "'Kind' is provided by more than one member; the subject exposes Repro.IFoo<int>.Kind and Repro.IFoo<string>.Kind is unreachable",
+            diagnostic.GetMessage());
     }
 
     [Theory]
@@ -654,10 +740,11 @@ namespace Repro
         public partial string Kind { get; set; }
         int IFoo<int>.Kind => 1;
         string IFoo<string>.Kind => ""string"";")]
-    public void WhenTwoExplicitImplementationsCollideWithAClassProperty_ThenNI0008IsReportedRegardlessOfDeclarationOrder(string members)
+    public void WhenTwoExplicitImplementationsCollideWithAClassProperty_ThenNI0008NamesTheClassPropertyAsWinnerRegardlessOfDeclarationOrder(string members)
     {
-        // Arrange: the class property wins either way, but two distinct interface members are
-        // dropped, so the collision must be reported no matter which declaration comes first.
+        // Arrange: the class property wins either way, so the message must name it rather than
+        // claim "the first declaration wins", and both dropped interface members are reported
+        // because both are genuinely unreachable.
         var source = @"
 using Namotion.Interceptor.Attributes;
 namespace Repro
@@ -674,9 +761,17 @@ namespace Repro
         var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
 
         // Assert
-        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0008");
-        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
-        Assert.Contains("Kind", diagnostic.GetMessage());
+        var messages = generated.GeneratorDiagnostics
+            .Where(diagnostic => diagnostic.Id == "NI0008")
+            .Select(diagnostic => diagnostic.GetMessage())
+            .ToList();
+
+        Assert.Equal(
+            [
+                "'Kind' is provided by more than one member; the subject exposes the class property Repro.Impl.Kind and Repro.IFoo<int>.Kind is unreachable",
+                "'Kind' is provided by more than one member; the subject exposes the class property Repro.Impl.Kind and Repro.IFoo<string>.Kind is unreachable"
+            ],
+            messages);
     }
 
     [Fact]

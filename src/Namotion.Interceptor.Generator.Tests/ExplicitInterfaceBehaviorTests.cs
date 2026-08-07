@@ -22,6 +22,9 @@ public interface ICaseAMale : ICaseAHuman
 [InterceptorSubject]
 public partial class CaseAJohn : ICaseAMale
 {
+    // An ordinary intercepted property alongside the explicitly implemented one, so a test can
+    // show the interceptor chain observing this read while "Gender" stays absent from it.
+    public partial string Name { get; set; }
 }
 
 #endregion
@@ -248,16 +251,25 @@ public class ExplicitInterfaceBehaviorTests
             .WithRegistry()
             .WithService(() => readInterceptor);
 
-        var john = new CaseAJohn(context);
+        var john = new CaseAJohn(context) { Name = "John" };
 
         // Act
         var genderThroughInterface = ((ICaseAHuman)john).Gender;
+        var genderThroughMetadata = CaseAJohn.DefaultProperties["Gender"].GetValue?.Invoke(john);
+        var nameThroughSubject = john.Name;
         var registeredSubject = john.TryGetRegisteredSubject();
 
         // Assert
         Assert.Equal(CaseAGender.Male, genderThroughInterface);
-        Assert.Empty(readInterceptor.Reads);
+        Assert.Equal(CaseAGender.Male, genderThroughMetadata);
+        Assert.Equal("John", nameThroughSubject);
+
+        // "Name" proves the interceptor is wired and recording, which is what makes the absence of
+        // "Gender" below meaningful rather than vacuously true of an inert interceptor.
+        Assert.Contains(readInterceptor.Reads, read => read.PropertyName == "Name");
+        Assert.DoesNotContain(readInterceptor.Reads, read => read.PropertyName == "Gender");
         Assert.False(CaseAJohn.DefaultProperties["Gender"].IsIntercepted);
+        Assert.True(CaseAJohn.DefaultProperties["Name"].IsIntercepted);
 
         Assert.NotNull(registeredSubject);
         var genderProperty = registeredSubject.TryGetProperty("Gender");

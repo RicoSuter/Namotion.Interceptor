@@ -40,8 +40,10 @@ internal static class Diagnostics
         id: "NI0004",
         title: "Interceptor subject generation failed",
         // One sentence with no trailing period, because RS1032 rejects anything else, and the
-        // exception message interpolated at {2} usually ends in a period of its own.
-        messageFormat: "Generating '{0}' failed with {1}: {2} (the generated file contains the full stack trace)",
+        // exception message interpolated at {2} usually ends in a period of its own. The generated
+        // source is only a file on disk when the consumer sets EmitCompilerGeneratedFiles, so the
+        // message must not send them looking for one that is not there.
+        messageFormat: "Generating '{0}' failed with {1}: {2} (the full stack trace is in the generated source, which reaches disk only with EmitCompilerGeneratedFiles set)",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
@@ -76,12 +78,15 @@ internal static class Diagnostics
 
     public static readonly DiagnosticDescriptor PropertyNameCollision = new(
         id: "NI0008",
-        title: "Two interface members collide on one property name",
-        messageFormat: "'{0}' is provided by more than one interface member; the first declaration wins",
+        title: "More than one member provides the same property name",
+        // The winner and the dropped member are both interpolated: several interfaces colliding on
+        // one name otherwise produce byte-identical warnings at one location, and a class-declared
+        // property that takes the name is neither of the colliding members.
+        messageFormat: "'{0}' is provided by more than one member; the subject exposes {1} and {2} is unreachable",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Subject properties are keyed by simple name, so only one of the colliding members is reachable.");
+        description: "Subject properties are keyed by simple name, so only one of the colliding members is reachable. A class-declared property always takes the name; between interface members, the first one the generator reaches takes it.");
 
     public static readonly DiagnosticDescriptor GenericTypeNotSupported = new(
         id: "NI0009",

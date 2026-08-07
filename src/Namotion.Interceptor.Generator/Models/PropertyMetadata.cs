@@ -7,6 +7,8 @@ internal sealed record PropertyMetadata(
     bool IsPartial,
     bool IsVirtual,
     bool IsOverride,
+    bool IsNew,
+    bool IsSealed,
     bool IsDerived,
     bool IsRequired,
     bool HasGetter,

@@ -10,8 +10,17 @@ namespace Namotion.Interceptor.Generator.Tests;
 internal sealed record GeneratorRunResult(
     IReadOnlyList<GeneratedSourceResult> Sources,
     IReadOnlyList<Diagnostic> GeneratorDiagnostics,
-    IReadOnlyList<Diagnostic> CompilationErrors)
+    IReadOnlyList<Diagnostic> CompilationDiagnostics)
 {
+    /// <summary>
+    /// Warnings are kept alongside the errors because a generated shape can compile and still be
+    /// wrong: a shadowing property that omits 'new' produces CS0108, which never surfaces here as
+    /// an error.
+    /// </summary>
+    public IReadOnlyList<Diagnostic> CompilationErrors { get; } = CompilationDiagnostics
+        .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+        .ToList();
+
     public string SingleSource() => Sources.Single().SourceText.ToString();
 
     public string AllSources() => string.Join("\n\n", Sources.Select(s => s.SourceText));
@@ -75,9 +84,7 @@ internal static class GeneratorTestHost
         return new GeneratorRunResult(
             runResult.Results.SelectMany(result => result.GeneratedSources).ToList(),
             runResult.Diagnostics.ToList(),
-            outputCompilation.GetDiagnostics()
-                .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-                .ToList());
+            outputCompilation.GetDiagnostics().ToList());
     }
 
     /// <summary>

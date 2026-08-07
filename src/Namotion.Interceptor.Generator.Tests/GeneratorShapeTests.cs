@@ -76,6 +76,52 @@ namespace Repro
     }
 
     [Fact]
+    public void WhenBaseListIsOnADifferentPartialDeclarationThanTheAttribute_ThenTheBaseClassIsStillDetected()
+    {
+        // Arrange: properties, methods and interfaces are all collected across every partial
+        // declaration, but the base class used to be read off the attributed declaration's base
+        // list alone. Put ": BaseSubject" on the other half and the generated file lost the base
+        // entirely: it re-declared the INotifyPropertyChanged plumbing the base already provides,
+        // and DefaultProperties shadowed the base's without concatenating it, so the subject
+        // reported only its own properties.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    [InterceptorSubject]
+    public partial class BaseSubject
+    {
+        public partial string BaseName { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class DerivedSubject
+    {
+        public partial string DerivedName { get; set; }
+    }
+
+    public partial class DerivedSubject : BaseSubject
+    {
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var derivedSource = Assert
+            .Single(generated.Sources, generatedSource => generatedSource.HintName.Contains("DerivedSubject"))
+            .SourceText.ToString();
+
+        Assert.Contains("public partial class DerivedSubject : IInterceptorSubject\n", derivedSource);
+        Assert.Contains("public new static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties", derivedSource);
+        Assert.Contains(".Concat(global::Repro.BaseSubject.DefaultProperties)", derivedSource);
+        Assert.DoesNotContain("public event PropertyChangedEventHandler? PropertyChanged;", derivedSource);
+        Assert.DoesNotContain("void IRaisePropertyChanged.RaisePropertyChanged", derivedSource);
+        Assert.DoesNotContain(generated.CompilationDiagnostics, diagnostic => diagnostic.Id == "CS0108");
+    }
+
+    [Fact]
     public void WhenInterfaceHasDefaultIndexer_ThenIndexerIsSkipped()
     {
         // Arrange (case E)
@@ -508,6 +554,92 @@ namespace Repro
         Assert.Contains(@"[""Probe""]", generatedSource);
         Assert.Contains("(o) => ((global::Repro.IHasInternalSetter)o).Probe", generatedSource);
         Assert.Contains(".Probe = ", generatedSource);
+    }
+
+    [Fact]
+    public void WhenWithoutInterceptorMethodReturnsGenericTypeNestedInAnotherType_ThenWrapperNamesTheEnclosingType()
+    {
+        // Arrange: the wrapper's return type used to be rebuilt as
+        // "{ContainingNamespace}.{Name}<...>", which drops every enclosing type and emits
+        // "Repro.Inner<int>", a type that does not exist (CS0234).
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public class Outer { public class Inner<T> { } }
+
+    [InterceptorSubject]
+    public partial class Maker
+    {
+        public partial string Name { get; set; }
+
+        public Outer.Inner<int> BuildWithoutInterceptor() => new Outer.Inner<int>();
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.Contains("public global::Repro.Outer.Inner<int> Build()", generated.SingleSource());
+    }
+
+    [Fact]
+    public void WhenWithoutInterceptorMethodReturnsGenericTypeInGlobalNamespace_ThenWrapperNamesItWithGlobalPrefix()
+    {
+        // Arrange: a global-namespace generic used to render its containing namespace as the
+        // literal "<global namespace>", which does not parse and destroyed the whole generated
+        // file, taking every unrelated property of the same subject down with it.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+public class Box<T> { }
+
+[InterceptorSubject]
+public partial class Maker
+{
+    public partial string Name { get; set; }
+
+    public Box<int> BuildWithoutInterceptor(Box<string> template) => new Box<int>();
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var generatedSource = generated.SingleSource();
+        Assert.Contains("public global::Box<int> Build(global::Box<string> template)", generatedSource);
+        Assert.DoesNotContain("global namespace", generatedSource);
+    }
+
+    [Fact]
+    public void WhenWithoutInterceptorMethodReturnsGenericTypeNestedInTheSubject_ThenWrapperNamesTheSubject()
+    {
+        // Arrange: the same drop-the-enclosing-type defect, with the subject itself as the
+        // enclosing type. "Current" is here so the property path, which names the identical type
+        // through SymbolDisplayFormat.FullyQualifiedFormat, is pinned alongside the method path.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    [InterceptorSubject]
+    public partial class Holder
+    {
+        public class Item<T> { }
+
+        public partial Item<int> Current { get; set; }
+
+        public Item<int> BuildWithoutInterceptor() => new Item<int>();
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var generatedSource = generated.SingleSource();
+        Assert.Contains("public global::Repro.Holder.Item<int> Build()", generatedSource);
+        Assert.Contains("private global::Repro.Holder.Item<int> _Current;", generatedSource);
     }
 
     [Fact]

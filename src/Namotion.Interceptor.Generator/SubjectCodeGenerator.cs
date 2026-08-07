@@ -283,15 +283,28 @@ internal static class SubjectCodeGenerator
         builder.AppendLine($"        private {property.FullTypeName} _{property.Name};");
         builder.AppendLine();
 
-        // Build modifiers
+        // Every modifier the declaring half carries has to be repeated here, or the two halves of
+        // the partial property disagree and the compiler reports CS8800. 'new' matters beyond
+        // symmetry: it is the only way to silence the CS0108 that accompanies NI0005.
         var additionalModifiers = "";
+        if (property.IsNew)
+        {
+            additionalModifiers += "new ";
+        }
+
         if (property.IsVirtual)
         {
-            additionalModifiers = "virtual ";
+            additionalModifiers += "virtual ";
         }
-        else if (property.IsOverride)
+
+        if (property.IsSealed)
         {
-            additionalModifiers = "override ";
+            additionalModifiers += "sealed ";
+        }
+
+        if (property.IsOverride)
+        {
+            additionalModifiers += "override ";
         }
 
         var requiredModifier = property.IsRequired ? "required " : "";

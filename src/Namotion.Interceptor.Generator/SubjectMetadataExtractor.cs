@@ -88,21 +88,29 @@ internal static class SubjectMetadataExtractor
         var namespaceName = GetNamespace(typeDeclaration);
         var fullTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-        // Detect base class
-        var baseClass = typeDeclaration.BaseList?.Types
-            .Select(t => semanticModel.GetTypeInfo(t.Type, cancellationToken).Type as INamedTypeSymbol)
-            .FirstOrDefault(t => t != null &&
-                (HasInterceptorSubjectAttribute(t) ||
-                 ImplementsInterface(t, KnownTypes.IInterceptorSubject)));
+        // Resolved from the symbol, not from this declaration's base list: properties, methods and
+        // interfaces are all collected across every partial declaration, so the base list may sit
+        // on a declaration other than the attributed one. Reading it from syntax then lost the base
+        // class entirely, which re-declared the INotifyPropertyChanged plumbing the base already
+        // provides and shadowed the base's DefaultProperties without concatenating them, leaving the
+        // subject reporting only its own properties. BaseType is also strictly the base class, so an
+        // interface in the base list can no longer be mistaken for one.
+        var baseType = typeSymbol.BaseType;
+        var baseClass = baseType is { SpecialType: not SpecialType.System_Object } &&
+                        (HasInterceptorSubjectAttribute(baseType) ||
+                         ImplementsInterface(baseType, KnownTypes.IInterceptorSubject))
+            ? baseType
+            : null;
 
         var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var baseClassHasInterceptorSubject = HasInterceptorSubjectAttribute(baseClass);
 
-        // Check if base class has INotifyPropertyChanged
+        // Asked of the subject rather than of the base class alone, which keeps the previous
+        // base-list scan's reach: a subject that lists IRaisePropertyChanged itself and implements
+        // it by hand still suppresses the generated plumbing, and now does so no matter which
+        // partial declaration carries the base list.
         var baseClassHasInpc = baseClassHasInterceptorSubject ||
-            (typeDeclaration.BaseList?.Types
-                .Select(t => semanticModel.GetTypeInfo(t.Type, cancellationToken).Type as INamedTypeSymbol)
-                .Any(t => t != null && ImplementsInterface(t, KnownTypes.IRaisePropertyChanged)) ?? false);
+                               ImplementsInterface(typeSymbol, KnownTypes.IRaisePropertyChanged);
 
         // Collect all partial type declarations
         var allTypeDeclarations = typeSymbol.DeclaringSyntaxReferences
@@ -113,6 +121,7 @@ internal static class SubjectMetadataExtractor
         // Collect properties from all partial declarations
         var classProperties = DeduplicateByName(
             CollectProperties(typeSymbol, semanticModel, location, diagnostics, cancellationToken),
+            typeSymbol.ToDisplayString(),
             location,
             diagnostics);
 
@@ -202,19 +211,19 @@ internal static class SubjectMetadataExtractor
     /// Kept as one rule both paths consult, rather than one each, because the two paths have
     /// already drifted apart once before, on accessibility.
     /// </summary>
-    private static string? GetUnsupportedPropertyShapeReason(IPropertySymbol property)
+    /// <remarks>
+    /// Neither shape is reported: NI0006 speaks to a member that could plausibly have become a
+    /// subject property and did not, and neither an indexer nor a static member was ever a
+    /// candidate. A class-declared indexer has always been ignored in silence (it parses as
+    /// <c>IndexerDeclarationSyntax</c>, which the property filter excludes before this guard runs),
+    /// so reporting the interface-default form was also an inconsistency between the two paths.
+    /// This rule outranks the explicit-implementation opt-in below: a <c>static abstract</c>
+    /// interface member forces a static implementation on the subject, and no edit the author can
+    /// make would turn it into a property.
+    /// </remarks>
+    private static bool IsNeverASubjectProperty(IPropertySymbol property)
     {
-        if (property.IsIndexer)
-        {
-            return "indexers cannot be subject properties";
-        }
-
-        if (property.IsStatic)
-        {
-            return "static members cannot be read from an instance";
-        }
-
-        return null;
+        return property.IsIndexer || property.IsStatic;
     }
 
     private static IReadOnlyList<PropertyMetadata> CollectProperties(
@@ -246,15 +255,10 @@ internal static class SubjectMetadataExtractor
                 // check: an indexer cannot reach this path (it parses as IndexerDeclarationSyntax,
                 // which the PropertyDeclarationSyntax filter above already excludes), but a static
                 // property can, and the same rule that skips one on the interface-default path must
-                // skip it here too, or it emits a cast-through-the-class accessor that fails CS0176
-                // with no diagnostic.
+                // skip it here too, or it emits a cast-through-the-class accessor that fails CS0176.
                 var declaredPropertySymbol = declarationModel.GetDeclaredSymbol(property, cancellationToken);
-                if (declaredPropertySymbol is not null &&
-                    GetUnsupportedPropertyShapeReason(declaredPropertySymbol) is { } unsupportedShapeReason)
+                if (declaredPropertySymbol is not null && IsNeverASubjectProperty(declaredPropertySymbol))
                 {
-                    diagnostics.Add(Diagnostic.Create(
-                        Diagnostics.MemberSkipped, location,
-                        $"{typeSymbol.Name}.{propertyName}", unsupportedShapeReason));
                     continue;
                 }
 
@@ -270,6 +274,8 @@ internal static class SubjectMetadataExtractor
                                 property.ExplicitInterfaceSpecifier is null;
                 var isVirtual = property.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
                 var isOverride = property.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
+                var isNew = property.Modifiers.Any(m => m.IsKind(SyntaxKind.NewKeyword));
+                var isSealed = property.Modifiers.Any(m => m.IsKind(SyntaxKind.SealedKeyword));
                 var isDerived = HasDerivedAttribute(property, declarationModel, cancellationToken);
                 var isRequired = property.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword));
 
@@ -293,6 +299,10 @@ internal static class SubjectMetadataExtractor
                     {
                         var (isGetterAccessible, isSetterAccessible) = GetAccessorAccessibility(
                             semanticModel.Compilation, implementedMember, typeSymbol, implementedMember.ContainingType);
+                        // Reported, unlike the same outcome on the interface-default path: writing
+                        // an explicit implementation on the subject itself is an opt-in to it
+                        // becoming a subject property, in the author's own file, and silently
+                        // dropping it would leave them with no way to find out.
                         if (!isGetterAccessible && !isSetterAccessible)
                         {
                             diagnostics.Add(Diagnostic.Create(
@@ -323,6 +333,8 @@ internal static class SubjectMetadataExtractor
                     isPartial,
                     isVirtual,
                     isOverride,
+                    isNew,
+                    isSealed,
                     isDerived,
                     isRequired,
                     hasGetter,
@@ -346,34 +358,25 @@ internal static class SubjectMetadataExtractor
     /// </summary>
     private static IReadOnlyList<PropertyMetadata> DeduplicateByName(
         IReadOnlyList<PropertyMetadata> properties,
+        string subjectDisplayName,
         Location location,
         List<Diagnostic> diagnostics)
     {
         var result = new List<PropertyMetadata>();
         var indexByName = new Dictionary<string, int>();
-
-        // Tracked per name rather than per current winner: the class-wins rule below can overwrite
-        // the slot, and reading the collision off the slot would make the diagnostic depend on which
-        // declaration happened to be written first.
-        var explicitImplementationCountByName = new Dictionary<string, int>();
+        var explicitImplementationsByName = new Dictionary<string, List<PropertyMetadata>>();
 
         foreach (var property in properties)
         {
             if (property.ExplicitInterfaceTypeName is not null)
             {
-                explicitImplementationCountByName.TryGetValue(property.Name, out var explicitCount);
-                explicitImplementationCountByName[property.Name] = explicitCount + 1;
-
-                // Two explicit implementations of one simple name (typically one generic interface at
-                // two instantiations) is the class-declared form of the NI0008 collision: the second
-                // interface member is dropped whatever else claims the name. A class property
-                // colliding with a single explicit implementation is not: only one of the two comes
-                // from an interface, and the class property is the documented winner.
-                if (explicitCount > 0)
+                if (!explicitImplementationsByName.TryGetValue(property.Name, out var explicitImplementations))
                 {
-                    diagnostics.Add(Diagnostic.Create(
-                        Diagnostics.PropertyNameCollision, location, property.Name));
+                    explicitImplementations = new List<PropertyMetadata>();
+                    explicitImplementationsByName[property.Name] = explicitImplementations;
                 }
+
+                explicitImplementations.Add(property);
             }
 
             if (!indexByName.TryGetValue(property.Name, out var index))
@@ -390,7 +393,58 @@ internal static class SubjectMetadataExtractor
             }
         }
 
+        // Reported only once every declaration has been seen, because the winner the message names
+        // is not knowable mid-loop: a class-declared property takes the name whether it is written
+        // before or after the explicit implementations. Iterating the deduplicated result rather
+        // than the dictionary keeps the diagnostic order deterministic.
+        foreach (var winner in result)
+        {
+            // Two explicit implementations of one simple name (typically one generic interface at
+            // two instantiations) is the class-declared form of the NI0008 collision: whatever
+            // claims the name, at least one interface member is dropped. A class property colliding
+            // with a single explicit implementation is not: only one of the two comes from an
+            // interface, and the class property is the documented winner.
+            if (!explicitImplementationsByName.TryGetValue(winner.Name, out var explicitImplementations) ||
+                explicitImplementations.Count < 2)
+            {
+                continue;
+            }
+
+            var winnerDescription = winner.ExplicitInterfaceTypeName is not null
+                ? DescribeExplicitImplementation(winner)
+                : $"the class property {subjectDisplayName}.{winner.Name}";
+
+            foreach (var droppedProperty in explicitImplementations)
+            {
+                if (ReferenceEquals(droppedProperty, winner))
+                {
+                    continue;
+                }
+
+                diagnostics.Add(Diagnostic.Create(
+                    Diagnostics.PropertyNameCollision, location,
+                    winner.Name, winnerDescription, DescribeExplicitImplementation(droppedProperty)));
+            }
+        }
+
         return result;
+    }
+
+    /// <summary>
+    /// Names an explicitly implemented member the way a compiler error message would, so the
+    /// "global::" the emitter needs in generated code does not leak into a diagnostic.
+    /// </summary>
+    private static string DescribeExplicitImplementation(PropertyMetadata property)
+    {
+        const string globalPrefix = "global::";
+
+        var interfaceTypeName = property.ExplicitInterfaceTypeName!;
+        if (interfaceTypeName.StartsWith(globalPrefix))
+        {
+            interfaceTypeName = interfaceTypeName.Substring(globalPrefix.Length);
+        }
+
+        return $"{interfaceTypeName}.{property.Name}";
     }
 
     private static IReadOnlyList<MethodMetadata> CollectMethods(
@@ -498,7 +552,10 @@ internal static class SubjectMetadataExtractor
     {
         var interfaceProperties = new List<PropertyMetadata>();
         var classPropertyNames = new HashSet<string>(classProperties.Select(p => p.Name));
-        var processedPropertyNames = new HashSet<string>();
+
+        // Keyed by simple name, valued by the member that took it, so a collision can name the
+        // winner instead of leaving several identical warnings at one location.
+        var winnerByPropertyName = new Dictionary<string, string>();
 
         foreach (var interfaceType in typeSymbol.AllInterfaces)
         {
@@ -524,12 +581,8 @@ internal static class SubjectMetadataExtractor
 
                 // A static property with a body is not abstract, so it passes the default
                 // implementation test above, but it cannot be read from an instance.
-                var unsupportedShapeReason = GetUnsupportedPropertyShapeReason(property);
-                if (unsupportedShapeReason is not null)
+                if (IsNeverASubjectProperty(property))
                 {
-                    diagnostics.Add(Diagnostic.Create(
-                        Diagnostics.MemberSkipped, location,
-                        $"{interfaceType.Name}.{property.Name}", unsupportedShapeReason));
                     continue;
                 }
 
@@ -550,10 +603,11 @@ internal static class SubjectMetadataExtractor
                 }
 
                 // Skip properties already processed from another interface (diamond inheritance)
-                if (processedPropertyNames.Contains(resolvedName))
+                if (winnerByPropertyName.TryGetValue(resolvedName, out var winnerDescription))
                 {
                     diagnostics.Add(Diagnostic.Create(
-                        Diagnostics.PropertyNameCollision, location, resolvedName));
+                        Diagnostics.PropertyNameCollision, location,
+                        resolvedName, winnerDescription, $"{accessorInterface.ToDisplayString()}.{resolvedName}"));
                     continue;
                 }
 
@@ -571,12 +625,14 @@ internal static class SubjectMetadataExtractor
                 var accessibilityMember = explicitImplementation ?? property;
                 var (isGetterAccessible, isSetterAccessible) = GetAccessorAccessibility(
                     compilation, accessibilityMember, typeSymbol, accessorInterface);
+
+                // Skipped in silence. An interface member that generated code cannot see is scoped
+                // by its own author as a helper rather than offered as a property, and the interface
+                // may well be third-party, leaving the subject author with no remedy to follow. The
+                // class-declared explicit implementation in CollectProperties is the opposite case,
+                // written by the subject's own author, and stays reported.
                 if (!isGetterAccessible && !isSetterAccessible)
                 {
-                    diagnostics.Add(Diagnostic.Create(
-                        Diagnostics.MemberSkipped, location,
-                        $"{accessorInterface.Name}.{resolvedName}",
-                        "the member is not accessible from generated code"));
                     continue;
                 }
 
@@ -589,7 +645,7 @@ internal static class SubjectMetadataExtractor
                         Diagnostics.ExplicitImplementationAttributesIgnored, location, resolvedName));
                 }
 
-                processedPropertyNames.Add(resolvedName);
+                winnerByPropertyName[resolvedName] = $"{accessorInterface.ToDisplayString()}.{resolvedName}";
 
                 var fullyQualifiedTypeName = property.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
                 var accessModifier = GetAccessModifierFromAccessibility(property.DeclaredAccessibility);
@@ -607,6 +663,8 @@ internal static class SubjectMetadataExtractor
                     IsPartial: false,
                     IsVirtual: true,  // Interface default implementations are implicitly virtual
                     IsOverride: false,
+                    IsNew: false,
+                    IsSealed: false,
                     IsDerived: HasDerivedAttribute(property),
                     IsRequired: false,
                     hasGetter,
@@ -849,6 +907,12 @@ internal static class SubjectMetadataExtractor
         return type.BaseType is { } baseType && ImplementsInterface(baseType, interfaceTypeName);
     }
 
+    /// <summary>
+    /// Names the type exactly as the property path does. A hand-built generic name of the form
+    /// "{ContainingNamespace}.{Name}&lt;...&gt;" drops every enclosing type and renders the global
+    /// namespace as the literal "&lt;global namespace&gt;", which does not parse; the fully
+    /// qualified format handles both, so there is nothing left to special-case for generics.
+    /// </summary>
     private static string? GetFullTypeName(TypeSyntax? type, SemanticModel semanticModel)
     {
         if (type == null)
@@ -856,24 +920,6 @@ internal static class SubjectMetadataExtractor
             return null;
         }
 
-        var typeInfo = semanticModel.GetTypeInfo(type);
-        var symbol = typeInfo.Type;
-        if (symbol != null)
-        {
-            return GetFullTypeName(symbol);
-        }
-
-        return null;
-    }
-
-    private static string GetFullTypeName(ITypeSymbol typeSymbol)
-    {
-        if (typeSymbol is INamedTypeSymbol { IsGenericType: true } namedTypeSymbol)
-        {
-            var genericArguments = string.Join(", ", namedTypeSymbol.TypeArguments.Select(GetFullTypeName));
-            return $"{namedTypeSymbol.ContainingNamespace}.{namedTypeSymbol.Name}<{genericArguments}>";
-        }
-
-        return typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        return semanticModel.GetTypeInfo(type).Type?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
     }
 }
