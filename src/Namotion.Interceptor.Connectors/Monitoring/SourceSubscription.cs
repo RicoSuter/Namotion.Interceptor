@@ -87,7 +87,17 @@ public sealed class SourceSubscription : IDisposable
                 }
                 catch (Exception exception)
                 {
-                    _monitor.ResolveLogger()?.LogError(exception, "A source event handler threw and was ignored.");
+                    try
+                    {
+                        _monitor.ResolveLogger()?.LogError(
+                            exception, "A source event handler threw and was ignored.");
+                    }
+                    catch
+                    {
+                        // Reporting must not escape either: an exception here leaves _draining set,
+                        // and Enqueue's CompareExchange then never schedules another drain, so this
+                        // subscription would stop delivering permanently and grow its queue forever.
+                    }
                 }
             }
 

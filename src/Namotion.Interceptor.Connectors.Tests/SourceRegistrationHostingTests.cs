@@ -95,43 +95,6 @@ public class SourceRegistrationHostingTests
     }
 
     [Fact]
-    public async Task WhenSubscribingBeforeTheHostIsBuilt_ThenWaitWarningsAreStillLogged()
-    {
-        // Arrange
-        // WithSourceMonitoring(services) only bridges the ILoggerFactory into the context when the
-        // hosted-service factory runs at host build time, so the monitor resolves its logger lazily.
-        // Subscribe reads that logger, and the documented pattern subscribes before sources start
-        // claiming - i.e. before the factory exists. A monitor that latched the null it saw there
-        // would drop every wait-engine warning for the lifetime of the process, silently, which no
-        // other test catches because they all register logging before the first read.
-        var builder = Host.CreateApplicationBuilder();
-        var recordingLogger = new RecordingLogger();
-        builder.Logging.ClearProviders();
-        builder.Logging.AddProvider(new RecordingLoggerProvider(recordingLogger));
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry()
-            .WithSourceMonitoring(builder.Services)
-            .WithHostedServices(builder.Services);
-
-        var root = new Person(context);
-        using var subscription = context.GetSourceMonitor().Subscribe(_ => { });
-
-        var host = builder.Build();
-        await host.StartAsync();
-
-        // Act - a branch with no source in scope completes vacuously, which must warn.
-        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
-
-        // Assert
-        Assert.Contains(recordingLogger.Warnings, message => message.Contains("has no in-scope source"));
-
-        await host.StopAsync();
-    }
-
-    [Fact]
     public async Task WhenAHandlerThrowsOnASubscriptionMadeBeforeTheHostIsBuilt_ThenTheErrorIsLogged()
     {
         // Arrange

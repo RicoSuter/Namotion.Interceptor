@@ -35,8 +35,12 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     private volatile ImmutableArray<ISubjectSource>[] _sources = [ImmutableArray<ISubjectSource>.Empty];
     private volatile ImmutableArray<SourceSubscription>[] _subscriptions = [ImmutableArray<SourceSubscription>.Empty];
 
-    /// <summary>Creates a monitor. Prefer WithSourceMonitoring over calling this directly.</summary>
-    public SourceMonitor(Func<ILogger?>? loggerResolver = null)
+    /// <summary>
+    /// Internal: a monitor is only useful once it is registered as a lifecycle handler, which
+    /// WithSourceMonitoring does. One constructed directly would never re-evaluate waits on a
+    /// reparent, so this is not offered to consumers.
+    /// </summary>
+    internal SourceMonitor(Func<ILogger?>? loggerResolver = null)
     {
         _loggerResolver = loggerResolver;
         _initialHold = new RegistrationHold(this);
@@ -271,8 +275,15 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     public IDisposable DeferWaitCompletion()
     {
         Interlocked.Increment(ref _registrationHolds);
+
+        // The hold is constructed before the re-evaluation, not after: a throw from any pending
+        // wait's IsSatisfied would otherwise leave the count raised with nothing able to release it,
+        // blocking every wait on this tree forever. Re-evaluating cannot complete a wait here
+        // anyway - the increment guarantees IsSatisfied returns false - so the signal is defensive
+        // and must not be able to strand the hold it belongs to.
+        var hold = new RegistrationHold(this);
         OnWaitConditionChanged();
-        return new RegistrationHold(this);
+        return hold;
     }
 
     /// <inheritdoc />

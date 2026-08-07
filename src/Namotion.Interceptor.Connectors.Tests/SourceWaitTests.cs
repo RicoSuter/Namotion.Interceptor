@@ -587,6 +587,31 @@ public class SourceWaitTests
     }
 
     [Fact]
+    public void WhenNoLoggerIsReachableYet_ThenALaterWarningIsStillLogged()
+    {
+        // Arrange
+        // The logger resolves lazily because the context is configured before any logging provider
+        // exists. With the parameterless overload nothing bridges an ILoggerFactory in, so the first
+        // warning resolves null - and latching that null would silently kill every later warning for
+        // the lifetime of the process, which is what this lazy resolution exists to avoid.
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        monitor.CompleteSourceRegistration();
+
+        // First warning, with no logger reachable: resolves null, and must not latch it.
+        new Person(context).WaitForSynchronizationAsync(CancellationToken.None);
+
+        var recordingLogger = new RecordingLogger();
+        context.AddService<ILoggerFactory>(new RecordingLoggerFactory(recordingLogger));
+
+        // Act - a different anchor, so the per-anchor warn-once latch cannot suppress this one.
+        new Person(context).WaitForSynchronizationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(recordingLogger.Warnings, message => message.Contains("has no in-scope source"));
+    }
+
+    [Fact]
     public void WhenAWaitReEvaluationThrowsDuringAttach_ThenTheAttachStillCompletes()
     {
         // Arrange

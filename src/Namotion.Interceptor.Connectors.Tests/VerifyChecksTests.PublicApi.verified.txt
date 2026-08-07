@@ -55,6 +55,8 @@ namespace Namotion.Interceptor.Connectors
     public interface ISupportsConcurrentWrites { }
     public static class InterceptorSubjectContextExtensions
     {
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithSourceMonitoring(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithSourceMonitoring(this Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithSourceTransactions(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
     }
     public static class RegisteredSubjectPropertyExtensions
@@ -198,7 +200,6 @@ namespace Namotion.Interceptor.Connectors.Monitoring
             typeof(Namotion.Interceptor.Tracking.Parent.ParentTrackingHandler)})]
     public class SourceMonitor : Namotion.Interceptor.Tracking.IStartupCompletionDeferrer, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
-        public SourceMonitor(System.Func<Microsoft.Extensions.Logging.ILogger?>? loggerResolver = null) { }
         public bool IsRegistrationComplete { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Connectors.ISubjectSource> Sources { get; }
         public void CompleteSourceRegistration() { }
@@ -216,8 +217,6 @@ namespace Namotion.Interceptor.Connectors.Monitoring
         public static Namotion.Interceptor.Connectors.Monitoring.SourceMonitor GetSourceMonitor(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.Connectors.Monitoring.SourceState GetSourceState(this Namotion.Interceptor.PropertyReference property) { }
         public static System.Threading.Tasks.Task WaitForSynchronizationAsync(this Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
-        public static Namotion.Interceptor.IInterceptorSubjectContext WithSourceMonitoring(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
-        public static Namotion.Interceptor.IInterceptorSubjectContext WithSourceMonitoring(this Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
     }
     public enum SourceState
     {

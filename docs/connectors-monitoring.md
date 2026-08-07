@@ -7,7 +7,9 @@ Every `ISubjectSource` reports whether it's still connecting, has completed its 
 Add source monitoring to the tree root context, then await synchronization from anywhere holding a reference to the tree (or a subtree):
 
 ```csharp
-using Namotion.Interceptor.Connectors.Monitoring;
+using Namotion.Interceptor.Connectors;          // WithSourceMonitoring
+using Namotion.Interceptor.Registry;            // WithRegistry
+using Namotion.Interceptor.Tracking;            // WithFullPropertyTracking
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -89,6 +91,8 @@ There are two ways to declare registration complete, and no third: pick by wheth
 
 `WithSourceMonitoring(builder.Services)` registers an internal hosted service that calls `CompleteSourceRegistration()` once `IHostApplicationLifetime.ApplicationStarted` fires. That covers every source that exists by the end of host startup, whether it is a DI-registered hosted service or one attached to the subject graph. Attaching a source queues its `StartAsync` rather than running it inline, so it has not registered yet when the attach returns; the hosting layer holds registration open from the attach until that start has actually run, and nested attaches compose, because a service that attaches children during its own start takes their holds before its own is released.
 
+Because that gate opens only after every `IHostedService.StartAsync` has returned, **do not await `WaitForSynchronizationAsync` inside a `StartAsync` override, or before `host.RunAsync()`** when using this overload: registration can never complete while the host is still starting, so the wait blocks host startup and neither ever finishes. Await it from `ExecuteAsync`, or from any code that runs once the host is up, as the sample above does.
+
 An application that creates sources *after* startup, for example devices discovered at runtime, uses the parameterless `WithSourceMonitoring()` overload instead and declares registration complete itself:
 
 ```csharp
@@ -129,7 +133,7 @@ using var subscription = context.GetSourceMonitor().Subscribe(sourceEvent =>
 });
 ```
 
-Delivery here is queued per subscription and runs outside every lock, so a slower or mutating handler only delays its own subscription, never the transitioning thread or other subscribers. `Subscribe` also returns the source snapshot at the moment of subscribing (`SourceSubscription.Sources`), captured atomically with the subscription, so a consumer that seeds its own state from that snapshot and then processes the stream sees every source exactly once.
+Delivery here is queued per subscription and runs outside every lock, so a slower or mutating handler only delays its own subscription, never the transitioning thread or other subscribers. Handlers run on a thread-pool thread, so a UI consumer must marshal to its own dispatcher. `Subscribe` also returns the source snapshot at the moment of subscribing (`SourceSubscription.Sources`), captured atomically with the subscription, so a consumer that seeds its own state from that snapshot and then processes the stream sees every source exactly once.
 
 `SourceEvent.OldState` and `NewState` record one specific transition and must not be applied blindly to a derived view: events for the same property can be enqueued out of order, because the ownership compare-and-set and the stream enqueue are not atomic, so a release can be delivered before the claim it followed. Use `SourceEvent.CurrentState` instead, which re-resolves the authoritative state at read time rather than replaying what the event captured.
 
@@ -151,7 +155,7 @@ public enum SourceState
 
 See the XML docs on `SourceState` for what each member means. On a source itself (as opposed to a property, via `GetSourceState()`), `Unclaimed` never occurs.
 
-A source's state is driven by its pump lifecycle: construction and pump entry start it at `Connecting`; `StartBuffering()`, called on every connect and every reconnect, transitions to `Connecting`; a completed initial load transitions to `Synchronized`; a pump failure that escapes the connector's own handling transitions back to `Connecting` before the retry delay. A connector that detects a connection loss before it starts buffering calls the protected `ReportConnectionLost()`; the built-in examples are OPC UA's keep-alive handler and its manual reconnect path, which both to report `Connecting` immediately, rather than leaving `State` at `Synchronized` for the entire reconnect window.
+A source's state is driven by its pump lifecycle: construction and pump entry start it at `Connecting`; `StartBuffering()`, called on every connect and every reconnect, transitions to `Connecting`; a completed initial load transitions to `Synchronized`; a pump failure that escapes the connector's own handling transitions back to `Connecting` before the retry delay. A connector that detects a connection loss before it starts buffering calls the protected `ReportConnectionLost()`; the built-in examples are OPC UA's keep-alive handler and its manual reconnect path, which both report `Connecting` immediately rather than leaving `State` at `Synchronized` for the entire reconnect window.
 
 `Stopped` is terminal: once a source reports it, no further transition succeeds, and `ExecuteAsync` sets it in a `finally` block so it fires on every exit path, including cancellation. This is enforced by an explicit guard in `SubjectSourceBase.StartAsync`, not by the hosting platform: `BackgroundService.StartAsync` would happily run `ExecuteAsync` again on a second call, against a fresh, uncancelled token. Without the guard, a "restarted" stopped source would claim, load, and apply live values while `State` stayed `Stopped`. A stopped source instance is never restarted; create a new instance instead.
 
@@ -216,8 +220,12 @@ public sealed class DeviceAvailabilityUpdater : IDisposable
     // (see Handle below).
     private readonly ConcurrentDictionary<ISubjectSource, ImmutableHashSet<PropertyReference>> _bySource = new();
 
-    // Backing store for each property's IsAvailable attribute, so the attribute's getValue is a
-    // dictionary read rather than a live GetSourceState() call on every access.
+    // Backing store for each property's IsAvailable attribute. The attribute's setValue writes
+    // here and its getValue reads from here, so a write goes through the interceptor chain and
+    // publishes a change. Storing the value before calling SetValue instead would leave getValue
+    // already returning the new value, and the equality check that WithFullPropertyTracking
+    // installs would drop the write as a no-op - the attribute would read correctly but never
+    // notify.
     private readonly ConcurrentDictionary<PropertyReference, bool> _isAvailable = new();
 
     private readonly SourceSubscription _subscription;
@@ -268,15 +276,15 @@ public sealed class DeviceAvailabilityUpdater : IDisposable
             registeredProperty.AddDerivedAttribute(
                 IsAvailableAttribute, typeof(bool),
                 getValue: _ => _isAvailable.TryGetValue(property, out var available) && available,
-                setValue: (_, _) => { }); // no-op: the value lives in _isAvailable; this only triggers recalculation
+                setValue: (_, value) => _isAvailable[property] = value is true);
         }
     }
 
     private void Apply(PropertyReference property, SourceState state)
     {
-        var isAvailable = state == SourceState.Synchronized;
-        _isAvailable[property] = isAvailable;
-        property.TryGetRegisteredProperty()?.TryGetAttribute(IsAvailableAttribute)?.SetValue(isAvailable);
+        property.TryGetRegisteredProperty()?
+            .TryGetAttribute(IsAvailableAttribute)?
+            .SetValue(state == SourceState.Synchronized);
     }
 }
 ```

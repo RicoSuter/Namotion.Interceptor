@@ -205,9 +205,24 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         // Registration precedes the pump so SourceRegistered precedes any StateChanged of this source.
         var monitors = RootSubject.Context.GetSourceMonitors();
         ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, monitors);
-        foreach (var monitor in monitors)
+        try
         {
-            monitor.Register(this);
+            foreach (var monitor in monitors)
+            {
+                monitor.Register(this);
+            }
+        }
+        catch
+        {
+            // A half-registered source that never pumps hangs every in-scope wait, which is worse
+            // than not being monitored at all. Unwind and let the failure propagate.
+            ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
+            foreach (var monitor in monitors)
+            {
+                monitor.Unregister(this);
+            }
+
+            throw;
         }
 
         // Dispose can race this method: it may run (and find nothing yet in _registeredMonitors to
