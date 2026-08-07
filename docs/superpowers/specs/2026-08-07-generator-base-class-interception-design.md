@@ -25,10 +25,11 @@ The same duplication affects three more members. Measured on a three level hiera
 The allocation saving is a side effect, not the motivation. Counted with
 `grep -rn '^\s*\[InterceptorSubject' src --include '*.cs'`, excluding `obj`, `bin` and generated
 output, the repository declares 360 subjects across 151 files. Subject over subject hierarchies are
-rare and none is deeper than two levels; outside tests and samples the only ones are the three
-Philips Hue device classes over `HueDevice`. For those the saving is one `ConcurrentDictionary`, one
-`object` and two reference fields per instance, and for every subject without a subject base it is
-zero. The correctness fix carries this change on its own.
+rare. The deepest is the three level `VirtualPerson` to `VirtualEmployee` to `VirtualManager` test
+model (`VirtualPropertyIntegrationTests.cs:70-86`); outside tests and samples the only ones are the
+three Philips Hue device classes over `HueDevice`, all one level. For those the saving is one
+`ConcurrentDictionary`, one `object` and two reference fields per instance, and for every subject
+without a subject base it is zero. The correctness fix carries this change on its own.
 
 ### Adjacent shapes that are broken today
 
@@ -39,6 +40,7 @@ from the immediate base, and a generator cannot see its own output. All four are
 
 ```
 error CS0117: 'HandBase' does not contain a definition for 'DefaultProperties'
+warning CS0109: 'GenChild.DefaultProperties' does not hide an accessible member
 ```
 
 `SubjectMetadataExtractor.cs:98-105` sets `BaseClassTypeName` whenever the base merely implements
@@ -70,7 +72,8 @@ interface list exists only in `A.g.cs`. So `baseClass` resolves to null and `C` 
 shape that collides with everything it inherited. Even with the warnings silenced, `C.Properties`
 would report only `C`'s own properties, because `DefaultProperties` is emitted without the `.Concat`.
 
-**4. A sealed subject.** Does not build:
+**4. A sealed root subject.** Does not build. A sealed *derived* subject compiles clean today, because
+`RaisePropertyChanged` is gated on `BaseClassHasInpc` and is therefore not emitted into it:
 
 ```
 SealedSubject.g.cs(30,24): warning CS0628: 'SealedSubject.RaisePropertyChanged(string)': new protected member declared in sealed type
@@ -142,12 +145,16 @@ implementation does not occupy the class's simple name namespace, so `protected 
 `IInterceptorSubject.Properties` compile side by side on one type. The new member is still not named
 `Properties`, for the reasons under Naming below.
 
-**`[MethodImpl]` is not valid on a property declaration**, only on constructors and methods, so the
-attribute goes on the accessor:
+**`[MethodImpl]` is not valid on a property declaration**, only on constructors and methods:
 
 ```
 error CS0592: Attribute 'MethodImpl' is not valid on this declaration type.
 ```
+
+This constrained an earlier draft in which the new member was a property and the attribute had to move
+to its accessor. The final design makes it a method for an unrelated reason, see Naming, so the
+attribute sits on the declaration and the constraint no longer binds. It is recorded because it is the
+first thing an implementer will trip over if the member is ever turned back into a property.
 
 **A protected member in a `sealed` class is CS0628**, and an unnecessary `new` is CS0109. Both are
 warnings, and `src/Directory.Build.props` turns both into build errors, including inside generated
@@ -161,9 +168,27 @@ metadata. There are two emission modes, chosen per class.
 ### Resolving the base class facts
 
 `SubjectMetadataExtractor` currently derives `BaseClassTypeName`, `BaseClassHasInterceptorSubject`
-and `BaseClassHasInpc` from `typeSymbol.BaseType` alone (`SubjectMetadataExtractor.cs:98-113`). All
-three move to the **nearest subject ancestor**, and so does mode selection below. The two must use
-the same definition, or a class can land in derived mode while its facts come from somewhere else.
+and `BaseClassHasInpc` from `typeSymbol.BaseType` alone (`SubjectMetadataExtractor.cs:98-113`).
+`BaseClassTypeName` and `BaseClassHasInterceptorSubject` move to the **nearest subject ancestor**, and
+so does mode selection below. The two must use the same definition, or a class can land in derived
+mode while its facts come from somewhere else.
+
+`BaseClassHasInpc` is different and must **not** move wholesale. Its current form is
+
+```csharp
+var baseClassHasInpc = baseClassHasInterceptorSubject ||
+                       ImplementsInterface(typeSymbol, KnownTypes.IRaisePropertyChanged);
+```
+
+and the second disjunct is deliberately asked of the **subject**, not of the base
+(`SubjectMetadataExtractor.cs:108-113`). Only the first disjunct changes, to "the nearest subject
+ancestor carries the attribute". Dropping the second would break a shape with a live test:
+`ManualInpcPersonBase` (`src/Namotion.Interceptor.Tracking.Tests/Models/ManualInpcPersonBase.cs:8`)
+implements `INotifyPropertyChanged` and `IRaisePropertyChanged` but not `IInterceptorSubject` and
+carries no attribute, so it is not a subject ancestor at all. Its subject subclass would re-declare
+both members and produce the same two CS0108 as broken shape 3, and at runtime the type would carry
+two competing `PropertyChanged` events. Keeping the disjunct also still fixes shape 3, because there
+the ancestor does carry the attribute.
 
 The ancestor chain is `typeSymbol.BaseType` walked upward, excluding `System.Object`. An ancestor is
 a subject ancestor when it carries `[InterceptorSubject]`, **or declares `IInterceptorSubject` in its
@@ -196,12 +221,13 @@ IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.Ge
 [JsonIgnore]
 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
-[JsonIgnore]
-object IInterceptorSubject.SyncRoot { get; } = new object();
-
-// CHANGED: reads the protected accessor instead of the field directly.
+// CHANGED: reads the protected accessor instead of the field directly. Member order in this block
+// is unchanged from today's emission, so snapshots churn only on the changed lines.
 [JsonIgnore]
 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
+
+[JsonIgnore]
+object IInterceptorSubject.SyncRoot { get; } = new object();
 
 void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
 {
@@ -247,9 +273,12 @@ explicit forwarder is unaffected and still emitted. This fixes broken shape 4.
 Sealedness must be read from `typeSymbol.IsSealed`, not from the attributed declaration's syntax
 modifiers, because `sealed` may sit on any partial declaration. `DetectConstructorState` already scans
 every declaration and `accessModifier` already comes from the symbol, so this matches how the extractor
-resolves the rest of the class's shape. A sealed subject is by definition never in derived mode's base
-position, so nothing else in the design interacts with it: NI0013 and NI0014 both fire only in derived
-mode, and a sealed class cannot be a contract provider.
+resolves the rest of the class's shape.
+
+Sealed constrains only what can sit *below* a class, never what sits above it. A sealed subject is
+commonly the leaf of a hierarchy and is therefore frequently in derived mode itself, so NI0013 and
+NI0014 apply to it exactly as they do to any other derived subject. What a sealed class cannot be is a
+contract provider, since nothing can derive from it.
 
 ### Derived mode
 
@@ -322,6 +351,12 @@ already reached through an interface dispatch, several times per intercepted wri
 including the large majority that have no base class at all. The design keeps the hot path untouched
 and pays for it with NI0014 and the named residual risks below.
 
+**The rejection is reasoning, not measurement, and the reasoning cuts against a correctness benefit**,
+since the alternative makes the hijack structurally impossible and `AGENTS.md` ranks correctness above
+performance. To keep the decision honest the benchmark gate below measures the alternative once,
+alongside the chosen design. If the `Properties` row comes out flat, the trade should be revisited
+before merge rather than left as an assertion.
+
 ### Naming
 
 The new member is `GetInstanceProperties()`, not `Properties` and not `AddedProperties`.
@@ -384,6 +419,10 @@ protected member. When it does not, which is every hand written base, it emits
 enough. Requiring the protected member from a hand written base would reject the idiomatic
 implementation and defeat goal 4.
 
+`InvokeMethod`'s trailing parameter must be checked with `IsParams`, not by signature alone: the
+emitted call site uses expanded form, `InvokeMethod("M", lambda, p1, p2)`, so a base declaring the same
+parameter types without `params` satisfies a signature match and then fails at the call.
+
 Members may be more accessible than listed. Accessibility is checked with
 `Compilation.IsSymbolAccessibleWithin(member, typeSymbol)`, which handles protected through
 inheritance and `InternalsVisibleTo`. Lookup walks the ancestor chain, so a contract member inherited
@@ -407,8 +446,8 @@ in the conforming base test, and NI0011's description states that it verifies sh
    for that same instance. A base that keeps a second executor passes the symbol check and reproduces
    #437 verbatim, which is the bug being fixed.
 3. `IInterceptorSubject.Context` must return an `IInterceptorExecutor` constructed for that instance.
-   `DynamicSubjectFactory.cs:64` casts it unguarded, and `InterceptorExecutor` binds its subject at
-   construction (`InterceptorExecutor.cs:29-32`), so a borrowed or shared context misroutes every
+   `DynamicSubjectFactory.cs:66` casts it unguarded, and `InterceptorExecutor` binds its subject at
+   construction (`InterceptorExecutor.cs:30-33`), so a borrowed or shared context misroutes every
    `PropertyReference`.
 
 ### The subclass side
@@ -435,7 +474,7 @@ let ancestor = nearest subject ancestor, or none
 if none                                                                              -> Root
 if ancestor carries [InterceptorSubject] and is declared in source in this compilation -> Derived
 else if ancestor exposes the full contract accessibly                                 -> Derived
-else if an accessible static DefaultProperties resolves through ancestor              -> Root, report NI0012
+else if a usable static DefaultProperties resolves through ancestor                   -> Root, report NI0012
 else                                                                                  -> suppress, report NI0011
 ```
 
@@ -461,6 +500,12 @@ available evidence, and it is sufficient because the same generator run produces
 exactly why broken shape 3 exists today and why every base class fact has to come from the chain
 rather than from the immediate base.
 
+"Usable" means accessible **and** of a type the emitted `.Concat(...)` accepts, that is
+`IEnumerable<KeyValuePair<string, SubjectPropertyMetadata>>`. Checking only that some static named
+`DefaultProperties` resolves lets a base declaring `public static int DefaultProperties` through, and
+the generated code then fails with CS1929, which is precisely the raw-compiler-error-in-generated-code
+that goal 5 exists to remove. The same applies to the contract table row.
+
 **Locating the contract provider.** NI0013 and NI0014 are scoped against the class that provides a
 contract member, and two things make that class non-obvious. The contract may be satisfied piecewise,
 so different members can have different providers, and the scope is therefore defined per member: the
@@ -468,7 +513,8 @@ classes strictly more derived than the one declaring that member, up to and incl
 in the first branch the provider's members do not exist as symbols at all, which is the branch's whole
 premise, so the provider cannot be found by looking for them. It is found by walking upward and
 re-running mode selection at each ancestor until one resolves to root mode; that ancestor is the
-provider for every member.
+provider for every member. Once the walk leaves the compilation the members do exist as symbols, so
+from there the provider is the class actually declaring each member, found by ordinary lookup.
 
 Accepted consequence: if an in source ancestor carries the attribute but its own generation is
 suppressed by NI0001, NI0002, NI0003, NI0009 or NI0010, the derived class emits calls to members that
@@ -481,8 +527,8 @@ Four new rules, continuing from NI0010, category `Namotion.Interceptor`, appende
 `AnalyzerReleases.Unshipped.md`.
 
 **NI0011, base class does not satisfy the subject base contract.** Error, generation suppressed. The
-message lists the missing members by signature. Fires when an ancestor implements `IInterceptorSubject`
-or carries the attribute, the contract is not satisfied, and no static `DefaultProperties` resolves.
+message lists the missing members by signature. Fires when the nearest subject ancestor fails the
+contract and no usable static `DefaultProperties` resolves through it.
 This replaces today's CS0117 inside generated code. The message points `DynamicSubject` style bases at
 `[InterceptorSubject]` plus `AddProperties`. It verifies shape, not the three behavioural invariants
 above.
@@ -550,6 +596,15 @@ does equally for the four above. It is excluded because it is already inherited 
 relying on existing behaviour that may well be deliberate, and this change did not create that
 situation.
 
+**This is also a flagged breaking change, and it is asymmetric.** A subject may legally declare
+`public void InvokeMethod(string name)` today: the signature differs from the generated private helper,
+so there is no CS0111 and no CS0108. After this change the same source is a build error when the
+subject is in derived mode, and remains legal in root mode. The asymmetry is not an oversight: in root
+mode the class declares the helpers itself, so a member that could capture the generated call is
+already a hard CS0111 collision and a diagnostic would be noise. `InvokeMethod` in particular is not a
+name nobody picks, so this belongs in the release notes next to NI0014 rather than being presented as a
+pure safety net. No subject in the repository currently trips it.
+
 **NI0014, member hijacks an inherited interface implementation.** Error. Fires in derived mode when the
 subject, or any class between it and the contract provider, declares either of the following for
 `IInterceptorSubject.Context`, `Data`, `SyncRoot` or `AddProperties`:
@@ -571,10 +626,26 @@ than the one declaring that member, up to and including the subject.
 
 **This is a flagged breaking change.** A derived subject declaring `public object SyncRoot { get; }`
 compiles clean today with no warnings, because the derived class emits its own explicit implementation
-that wins over its own public member. After this change that member takes the interface slot. Error
-rather than warning is still right: `AddProperties` locks `SyncRoot`, and `InterceptorExecutor.cs:19-27`
-documents the per subject revision counter as relying on the terminal write holding that exact lock, so
-a silent redirect is a data race, not a cosmetic issue.
+that wins over its own public member. After this change that member takes the interface slot.
+
+Error rather than warning is right, but the argument runs through `Context`, not `SyncRoot`. Hijacking
+`Context` under the new emission is catastrophic and silent: the inherited helpers keep reading the
+root's `_context`, which nothing populates, so interception dies entirely and the unguarded
+`(IInterceptorExecutor)` casts at `DynamicSubjectFactory.cs:66` and `RegisteredSubject.cs:336-337`
+throw `InvalidCastException`. Measured under the proposed emission:
+
+```
+Context hijack: writes observed = []
+Context hijack: cast to IInterceptorExecutor -> InvalidCastException
+```
+
+`SyncRoot`, `Data` and `AddProperties` are less severe than they first look, and the spec should not
+overstate them. Every product consumer of `SyncRoot` reads it through the interface
+(`WriteInterceptorFactory.cs:19` and `:44`, `ReadInterceptorFactory.cs:19`, `DynamicSubject.cs:39`, and
+the generated `AddProperties`), so a hijack redirects all of them consistently to the same object
+rather than splitting the lock. It becomes a genuine race only if the hijacking member returns a fresh
+object per read. They stay in the rule for consistency and because a user-owned lock object is still an
+aliasing hazard, but `Context` is what makes the severity.
 
 ## Accepted residual risks
 
@@ -589,9 +660,18 @@ make it structurally impossible; keeping the hot path clean costs this.
 added to that interface in future has to be evaluated for the same hijack question and added to
 NI0014's list.
 
-**Construction time writes are still not intercepted.** A base declared property written inside a
-constructor runs before `AddFallbackContext`, so `_context` is null and the write takes the fast path.
-This is unchanged by this design and is pinned by a test so it does not read as a regression later.
+**Writes before the context is published are still not intercepted.** A derived class's field
+initializers run before the base constructor, so `_context` is null there and those writes take the
+fast path. Same for anything in a constructor that runs before `AddFallbackContext`. Pinned by a test
+so it does not read as a regression later.
+
+This is narrower than "construction time writes", and the difference is a deliberate behaviour change.
+`((IInterceptorSubject)this).Context` dispatches virtually, so a hand written
+`Leaf(IInterceptorSubjectContext ctx) : base(ctx)` publishes the executor inside the **base**
+constructor. Today a base declared property written afterwards in the leaf constructor body still takes
+the fast path, because the base reads its own permanently null `_context`. After this change that write
+is intercepted, which is the fix working as intended on the shape a subclass author is most likely to
+write. `The subclass side` above depends on exactly this ordering.
 
 All three are documented in `docs/generator.md` together with the reason they are accepted, namely
 that the alternative costs a virtual call on the intercepted write path.
@@ -631,7 +711,11 @@ one version bubble.
 Add a hierarchy benchmark to `Namotion.Interceptor.Benchmark` and run it on master and on the branch.
 Non-regression requires five flat rows: root only subject get, root only subject set, derived declared
 get, derived declared set, and `Properties` access. The improvement is three level construction, where allocated
-bytes must drop. The three level shape is synthetic: no subject in the repository is deeper than two
+bytes must drop. One additional row measures the rejected virtual hook against the chosen design on
+`Properties` access, so that rejection rests on a number rather than on reasoning; if it is flat, raise
+it before merge. The three level shape is not synthetic: `VirtualPerson` to `VirtualEmployee` to
+`VirtualManager` (`VirtualPropertyIntegrationTests.cs:70-86`) is exactly that shape, though it is a
+test model rather than product code, and no subject in the repository is deeper than three
 levels, so that row demonstrates the mechanism rather than a representative workload.
 
 ## Test harness changes
@@ -641,18 +725,22 @@ tests below mean anything.
 
 1. `GeneratorRunResult.CompilationErrors` filters `Severity == Error` (`GeneratorTestHost.cs:20-22`),
    and both clean compilation helpers assert only on that list. Every hazard here, CS0108, CS0109,
-   CS0628 and CS0019, is a warning, so a design that breaks every consumer build passes green. Add a
-   helper that asserts no warnings either, or compile the test compilation with
-   `GeneralDiagnosticOption.Error`. That escalation is the part of `src/Directory.Build.props` that
-   matters here; the test compilation still differs from a consumer build in other settings, notably
-   nullable, so this is an escalation match rather than a full one.
+   CS0628 and CS0108, is a **warning**, so a design that breaks every consumer build passes green.
+   Add a helper that asserts no warnings. It cannot be a blanket escalation: `RunCore`
+   (`GeneratorTestHost.cs:73-77`) builds the compilation with no nullable context, so every existing
+   test source using `?` emits CS8632, `SourceGeneratorTests.cs:16` among many. Either enable
+   `NullableContextOptions.Enable` on the test compilation, which changes other diagnostics and needs
+   its own sweep, or assert no warnings against an explicit allow list containing CS8632. Note CS0019
+   is an error, not a warning, and is already covered by `CompilationErrors`.
 2. `RunWithLibraryReference` (`GeneratorTestHost.cs:48-67`) compiles the library with a plain
    `CSharpCompilation.Create` and no generator driver, so a referenced base built by the current
    generator cannot be produced at all. That is the entire point of mode selection branch 2. Run the
    generator over the library compilation, **opt in per call**. It cannot be unconditional: NI0012's
    stale base fixture is a base built by an *older* generator, and running the current generator over
    it would emit `protected` helpers and satisfy the contract, so NI0012 could never fire. That
-   fixture is hand written, without the attribute, so nothing collides with generated members.
+   fixture is hand written and **does** carry `[InterceptorSubject]`, which is what makes it the
+   stale-generator case rather than the hand-written-base case; nothing collides, because the generator
+   is opted out for that library.
 
 ## Testing
 
@@ -691,7 +779,8 @@ to be interceptor observation.
    subclass's `DefaultProperties`.
 10. A plain non subject class between two subjects compiles with no warnings, intercepts at both
     subject levels, and reports both levels' properties. This fails today with three CS0108.
-11. A `sealed` subject compiles with no warnings. This fails today with CS0628.
+11. A sealed **root** subject compiles with no warnings, which fails today with CS0628, and a sealed
+    **derived** subject compiles with no warnings, which passes today and must keep passing.
 12. Diagnostics: NI0011 on a non conforming base; NI0012 on a referenced base with the attribute and
     private helpers, and on a hand written base with a static `DefaultProperties` only, both still
     compiling and neither emitting a stray `new`; NI0013 on a same named member of each kind including
@@ -707,11 +796,36 @@ to be interceptor observation.
 14. A hand written `IInterceptorSubject` implementer between a generated root and a generated leaf
     falls back to root mode with NI0012 rather than silently reproducing #437.
 15. The `Namotion.Interceptor.Dynamic` suite still passes.
-16. Snapshots for the root shape, the derived shape and the sealed shape.
-17. Whole repository regeneration diff against master. The expected changes are the modifiers, the
+16. Shapes that the new rules could regress, each pinned:
+    - `ManualInpcPersonBase`, a base implementing `INotifyPropertyChanged` and `IRaisePropertyChanged`
+      but not `IInterceptorSubject`. Its subject subclass's generated output must be unchanged. Nothing
+      covers this today and the first draft of the base-fact rule broke it.
+    - An **attributed** base in a referenced assembly whose helpers are private lands in root mode with
+      NI0012, not in derived mode. This pins branch 1's "declared in source" qualifier, without which a
+      NuGet referenced older base emits CS0122 calls into generated code.
+    - A base whose static `DefaultProperties` has the wrong type reports NI0011 rather than CS1929.
+    - A base whose `InvokeMethod` lacks `params` reports NI0011 rather than failing at the call site.
+    - A generic hand written base, checked with its type arguments substituted.
+    - An `internal` and a `private protected` nested subject in derived mode.
+    - A hand written `Leaf(IInterceptorSubjectContext ctx) : base(ctx)` whose constructor body writes a
+      base declared property: that write is now intercepted, which is the intended behaviour change,
+      while a derived field initializer stays unintercepted.
+17. Two existing tests are upgraded rather than supplemented, because both currently look like coverage
+    and are not. `VirtualPropertyIntegrationTests.cs:70-86` is already a three level hierarchy asserted
+    by value only. `GeneratorShapeBehaviorTests.cs:287-330` carries a "KNOWN GAP" comment describing
+    this exact bug and deliberately asserts only value and `PropertyChanged`; that comment is deleted
+    and the assertion moved to interceptor observation.
+18. Snapshots for the root shape, the derived shape and the sealed shape.
+19. Whole repository regeneration diff against master. The expected changes are the modifiers, the
     `GetInstanceProperties()` member, the `AddProperties` operand, the removed block in derived subjects,
     and any `new` or `.Concat` target that moves because a base class fact now comes from the subject
     ancestor. Property key sets must be identical.
+
+    Key set equality is a weaker check than it looks. `.Concat(Base.DefaultProperties)` puts the base
+    last and `ToFrozenDictionary` is last wins rather than throwing, so for an `override` or `new`
+    property the surviving metadata entry is the base's. That is pre-existing and out of scope here,
+    but it means a change in which entry survives would not show up as a key difference. Compare the
+    resolved entries, not only the keys.
 
 ## Documentation
 
