@@ -24,7 +24,6 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
     private ILogger? _logger;
 
-
     // Boxed so the reference can be read with Volatile.Read: ImmutableArray<T> is a struct, which
     // Volatile cannot target. Writes swap the box under _lock, so readers stay lock-free.
     // Same technique as ParentsHandlerExtensions.ParentsSet._cache.

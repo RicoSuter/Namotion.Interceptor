@@ -36,100 +36,6 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// </summary>
     public int PendingWriteCount => WriteRetryQueue?.PendingWriteCount ?? 0;
 
-    /// <inheritdoc />
-    public SourceState State => (SourceState)Volatile.Read(ref _state);
-
-    /// <inheritdoc />
-    public DateTimeOffset? LastSynchronizedAt
-    {
-        get
-        {
-            var ticks = Interlocked.Read(ref _lastSynchronizedTicks);
-            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
-        }
-    }
-
-    /// <inheritdoc />
-    public event EventHandler<SourceEvent>? StateChanged;
-
-    /// <summary>
-    /// Reports that the connection was lost, for connectors that detect an outage before they
-    /// start buffering.
-    /// </summary>
-    /// <remarks>
-    /// Deliberately separate from <see cref="SubjectPropertyWriter.StartBuffering"/>: calling that
-    /// at detection time would replace the buffer with a fresh list, and the later StartBuffering
-    /// on the reconnect path would then discard everything buffered in between. Protected rather
-    /// than public: application code holding an ISubjectSource reference must not be able to flip a
-    /// synchronized source back to Connecting. A concrete source in another assembly that needs to
-    /// call this from a helper object outside its own inheritance hierarchy (SessionManager for
-    /// OpcUaSubjectClientSource) needs an internal forwarder on that source; see
-    /// OpcUaSubjectClientSource for the pattern.
-    /// <para>
-    /// Also invalidates the property writer's generation (see
-    /// <see cref="SubjectPropertyWriter.InvalidateGeneration"/>): an initial load already in flight
-    /// when the connection drops must not apply the pre-outage snapshot it eventually returns, or
-    /// certify it as Synchronized. Without this, that stale report would stand until the reconnect's
-    /// own StartBuffering runs - the whole tail of the in-flight load, not a narrow race.
-    /// </para>
-    /// </remarks>
-    protected void ReportConnectionLost()
-    {
-        _propertyWriter.InvalidateGeneration();
-        TransitionTo(SourceState.Connecting);
-    }
-
-    /// <summary>
-    /// Moves to <paramref name="newState"/> and publishes the change, or does nothing when the
-    /// transition is a no-op or the source has already stopped.
-    /// </summary>
-    /// <remarks>
-    /// The state write, timestamp write and event raise are all inside one lock: a bare
-    /// compare-exchange is not enough, since a writer could set Synchronized, be preempted, let
-    /// disposal set Stopped and unregister, then resume and publish Synchronized after Stopped -
-    /// both compare-exchanges would have succeeded, so no stickiness rule could prevent it.
-    /// </remarks>
-    internal void TransitionTo(SourceState newState)
-    {
-        lock (_stateLock)
-        {
-            var oldState = (SourceState)_state;
-            if (oldState == newState || oldState == SourceState.Stopped)
-            {
-                return;
-            }
-
-            _state = (int)newState;
-
-            var now = DateTimeOffset.UtcNow;
-            if (newState == SourceState.Synchronized)
-            {
-                Interlocked.Exchange(ref _lastSynchronizedTicks, now.UtcTicks);
-            }
-
-            var handlers = StateChanged;
-            if (handlers is not null)
-            {
-                var sourceEvent = new SourceEvent(
-                    SourceEventKind.StateChanged, this, null, oldState, newState, now);
-
-                foreach (var handler in handlers.GetInvocationList())
-                {
-                    try
-                    {
-                        ((EventHandler<SourceEvent>)handler)(this, sourceEvent);
-                    }
-                    catch (Exception exception)
-                    {
-                        // A buggy handler must not be mistaken for a source failure, and must not
-                        // prevent the remaining subscribers from observing the transition.
-                        _logger.LogError(exception, "A StateChanged handler threw and was ignored.");
-                    }
-                }
-            }
-        }
-    }
-
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
@@ -225,16 +131,10 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
             throw;
         }
 
-        // Dispose can race this method: it may run (and find nothing yet in _registeredMonitors to
-        // unregister) between the guard above and the assignment/registration loop just completed.
-        // TransitionTo is monotonic and Stopped is terminal, so if State reads Stopped here, Dispose
-        // has already run - re-check and unwind whatever was just registered so a disposed source
-        // never stays registered forever.
-        //
-        // Unwinds through the LOCAL monitors array, never by re-reading the field: a Dispose that
-        // interleaved between the assignment and the loop above has already taken the field and left
-        // it empty, so re-reading here would strand this call's own registrations forever.
-        // Unregister is a no-op for an unregistered source, so a double unwind is harmless.
+        // Dispose can interleave with the registration above. Stopped is terminal, so seeing it here
+        // means Dispose already ran: unwind what was just registered. Through the LOCAL array, not
+        // the field, which Dispose has already emptied - re-reading it would strand these
+        // registrations. Unregister no-ops on an unregistered source, so a double unwind is safe.
         if (State == SourceState.Stopped)
         {
             ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
@@ -285,7 +185,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 }
                 catch (Exception ex)
                 {
-                    TransitionTo(SourceState.Connecting);
+                    TransitionStateTo(SourceState.Connecting);
                     _logger.LogError(ex, "Failed to listen for changes in source.");
                     try
                     {
@@ -300,7 +200,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         }
         finally
         {
-            TransitionTo(SourceState.Stopped);
+            TransitionStateTo(SourceState.Stopped);
         }
     }
 
@@ -414,11 +314,107 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         }
     }
 
+    // ---- Source monitoring surface ----
+
+    /// <inheritdoc />
+    public SourceState State => (SourceState)Volatile.Read(ref _state);
+
+    /// <inheritdoc />
+    public DateTimeOffset? LastSynchronizedAt
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _lastSynchronizedTicks);
+            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+    }
+
+    /// <inheritdoc />
+    public event EventHandler<SourceEvent>? StateChanged;
+
+    /// <summary>
+    /// Reports that the connection was lost, for connectors that detect an outage before they
+    /// start buffering.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately separate from <see cref="SubjectPropertyWriter.StartBuffering"/>: calling that
+    /// at detection time would replace the buffer with a fresh list, and the later StartBuffering
+    /// on the reconnect path would then discard everything buffered in between. Protected rather
+    /// than public: application code holding an ISubjectSource reference must not be able to flip a
+    /// synchronized source back to Connecting. A concrete source in another assembly that needs to
+    /// call this from a helper object outside its own inheritance hierarchy (SessionManager for
+    /// OpcUaSubjectClientSource) needs an internal forwarder on that source; see
+    /// OpcUaSubjectClientSource for the pattern.
+    /// <para>
+    /// Also invalidates the property writer's generation (see
+    /// <see cref="SubjectPropertyWriter.InvalidateGeneration"/>): an initial load already in flight
+    /// when the connection drops must not apply the pre-outage snapshot it eventually returns, or
+    /// certify it as Synchronized. Without this, that stale report would stand until the reconnect's
+    /// own StartBuffering runs - the whole tail of the in-flight load, not a narrow race.
+    /// </para>
+    /// </remarks>
+    protected void ReportConnectionLost()
+    {
+        _propertyWriter.InvalidateGeneration();
+        TransitionStateTo(SourceState.Connecting);
+    }
+
+    /// <summary>
+    /// Moves to <paramref name="newState"/> and publishes the change, or does nothing when the
+    /// transition is a no-op or the source has already stopped.
+    /// </summary>
+    /// <remarks>
+    /// The state write, timestamp write and event raise are all inside one lock: a bare
+    /// compare-exchange is not enough, since a writer could set Synchronized, be preempted, let
+    /// disposal set Stopped and unregister, then resume and publish Synchronized after Stopped -
+    /// both compare-exchanges would have succeeded, so no stickiness rule could prevent it.
+    /// </remarks>
+    internal void TransitionStateTo(SourceState newState)
+    {
+        lock (_stateLock)
+        {
+            var oldState = (SourceState)_state;
+            if (oldState == newState || oldState == SourceState.Stopped)
+            {
+                return;
+            }
+
+            _state = (int)newState;
+
+            var now = DateTimeOffset.UtcNow;
+            if (newState == SourceState.Synchronized)
+            {
+                Interlocked.Exchange(ref _lastSynchronizedTicks, now.UtcTicks);
+            }
+
+            var handlers = StateChanged;
+            if (handlers is not null)
+            {
+                var sourceEvent = new SourceEvent(
+                    SourceEventKind.StateChanged, this, null, oldState, newState, now);
+
+                foreach (var handler in handlers.GetInvocationList())
+                {
+                    try
+                    {
+                        ((EventHandler<SourceEvent>)handler)(this, sourceEvent);
+                    }
+                    catch (Exception exception)
+                    {
+                        // A buggy handler must not be mistaken for a source failure, and must not
+                        // prevent the remaining subscribers from observing the transition.
+                        _logger.LogError(exception, "A StateChanged handler threw and was ignored.");
+                    }
+                }
+            }
+        }
+    }
+
     /// <inheritdoc />
     public override void Dispose()
     {
         // Publish the final Stopped while still registered, so a dispose without a stop is not silent.
-        TransitionTo(SourceState.Stopped);
+        TransitionStateTo(SourceState.Stopped);
 
         // Take-and-clear in one step, so a concurrent StartAsync unwinding through its own local
         // array (see StartAsync) cannot have this method unregister the same entries a second time

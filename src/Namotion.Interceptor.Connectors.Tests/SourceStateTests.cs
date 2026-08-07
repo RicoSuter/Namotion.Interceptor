@@ -298,11 +298,11 @@ internal class TestStateSource : SubjectSourceBase
     // SubjectPropertyWriter's direct TransitionTo calls now (see SubjectPropertyWriter.StartBuffering
     // and LoadInitialStateAndResumeAsync), but the test suite still drives state machine behaviour
     // through named, state-specific entry points rather than a bare TransitionTo call.
-    public void ReportConnecting() => TransitionTo(SourceState.Connecting);
+    public void ReportConnecting() => TransitionStateTo(SourceState.Connecting);
 
-    public void ReportSynchronized() => TransitionTo(SourceState.Synchronized);
+    public void ReportSynchronized() => TransitionStateTo(SourceState.Synchronized);
 
-    public void ReportStopped() => TransitionTo(SourceState.Stopped);
+    public void ReportStopped() => TransitionStateTo(SourceState.Stopped);
 
     /// <summary>Exposes the now-protected ReportConnectionLost seam for tests outside the type hierarchy.</summary>
     public void SimulateConnectionLost() => ReportConnectionLost();

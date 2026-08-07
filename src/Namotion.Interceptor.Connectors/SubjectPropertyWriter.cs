@@ -57,7 +57,7 @@ public sealed class SubjectPropertyWriter
 
             // Under _lock, paired with the generation change that governs it, so the transition
             // cannot be observed out of sync with the buffer it belongs to.
-            _source.TransitionTo(SourceState.Connecting);
+            _source.TransitionStateTo(SourceState.Connecting);
         }
     }
 
@@ -140,7 +140,7 @@ public sealed class SubjectPropertyWriter
             // StartBuffering landing in between cannot let a superseded cycle certify Synchronized.
             // Lock order writer._lock -> _stateLock -> monitor._lock (TransitionTo can reach a
             // registered monitor synchronously) is never reversed anywhere, so it cannot deadlock.
-            _source.TransitionTo(SourceState.Synchronized);
+            _source.TransitionStateTo(SourceState.Synchronized);
         }
     }
 
