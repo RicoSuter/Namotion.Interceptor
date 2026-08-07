@@ -84,9 +84,7 @@ public class SourceEventEmissionTests
         // Assert
         Assert.False(claimed);
         // Same marker technique as above: an asynchronous absence needs a delivered successor.
-        var marker = new TestStateSource(person);
-        new PropertyReference(person, nameof(Person.LastName)).SetSource(marker);
-        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Property?.Name == nameof(Person.LastName)));
+        await SettleDeliveryAsync(person, received);
         Assert.DoesNotContain(received, e => e.Property?.Name == nameof(Person.FirstName));
     }
 
@@ -133,9 +131,7 @@ public class SourceEventEmissionTests
         // Delivery is asynchronous, so an empty queue proves nothing on its own: publish a known
         // event afterwards and wait for it, then anything wrongly published earlier would already
         // have been delivered too.
-        var marker = new TestStateSource(person);
-        new PropertyReference(person, nameof(Person.LastName)).SetSource(marker);
-        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Property?.Name == nameof(Person.LastName)));
+        await SettleDeliveryAsync(person, received);
         Assert.DoesNotContain(received, e => e.Kind == SourceEventKind.PropertyReleased);
     }
 
@@ -160,9 +156,7 @@ public class SourceEventEmissionTests
         Assert.False(removed);
         Assert.True(property.TryGetSource(out var stillOwning));
         Assert.Same(owningSource, stillOwning);
-        var marker = new TestStateSource(person);
-        new PropertyReference(person, nameof(Person.LastName)).SetSource(marker);
-        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Property?.Name == nameof(Person.LastName)));
+        await SettleDeliveryAsync(person, received);
         Assert.DoesNotContain(received, e => e.Kind == SourceEventKind.PropertyReleased);
     }
 
@@ -222,4 +216,14 @@ public class SourceEventEmissionTests
         Assert.Equal(SourceState.Connecting, sourceEvent.NewState);
     }
 
+    /// <summary>
+    /// Settles asynchronous delivery so an absence can be asserted: claims a marker property and
+    /// waits for its event. Delivery per subscription is FIFO, so once that arrives, anything
+    /// wrongly published earlier would already have arrived too.
+    /// </summary>
+    private static async Task SettleDeliveryAsync(Person person, ConcurrentQueue<SourceEvent> received)
+    {
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(new TestStateSource(person));
+        await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Property?.Name == nameof(Person.LastName)));
+    }
 }

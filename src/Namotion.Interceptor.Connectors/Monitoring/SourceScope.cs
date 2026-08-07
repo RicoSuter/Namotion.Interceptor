@@ -11,18 +11,7 @@ internal static class SourceScope
     /// True when the source's root and the anchor lie on the same root-to-leaf path, in either
     /// direction: the source is rooted above the anchor and may claim into it, or rooted inside it.
     /// A source on a sibling branch is in neither set, which is what stops an unrelated failing
-    /// connection from blocking a wait.
-    /// </summary>
-    internal static bool IsInScope(ISubjectSource source, IInterceptorSubject anchor)
-    {
-        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
-        var pending = new Stack<IInterceptorSubject>();
-        return IsInScope(source, anchor, visited, pending);
-    }
-
-    /// <summary>
-    /// Same as <see cref="IsInScope(ISubjectSource,IInterceptorSubject)"/>, but walks the parent
-    /// graph using caller-supplied scratch collections instead of allocating fresh ones.
+    /// connection from blocking a wait. Walks using caller-supplied scratch collections.
     /// </summary>
     /// <remarks>
     /// Every caller of this overload is <c>SourceMonitor.IsSatisfied</c>, which already holds the

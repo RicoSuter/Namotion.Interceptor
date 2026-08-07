@@ -75,10 +75,7 @@ public class SourceMonitorTests
         // afterwards and wait for ITS delivered event; once that has arrived, anything the
         // (supposedly disconnected) source's ReportSynchronized wrongly published would already have
         // been delivered too, since delivery per subscription is FIFO.
-        var sentinel = new TestStateSource(new Person(context));
-        monitor.Register(sentinel);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)));
+        await SettleDeliveryAsync(monitor, context, received);
         Assert.DoesNotContain(received, e => e.Kind == SourceEventKind.StateChanged);
         Assert.DoesNotContain(source, monitor.Sources);
     }
@@ -103,10 +100,7 @@ public class SourceMonitorTests
         // any event the second, idempotent Register call wrongly published would already have been
         // delivered too, so exactly one SourceRegistered for `source` proves the second call emitted
         // nothing, not just that Sources stayed a single element.
-        var sentinel = new TestStateSource(new Person(context));
-        monitor.Register(sentinel);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)));
+        await SettleDeliveryAsync(monitor, context, received);
         Assert.Single(received, e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, source));
     }
 
@@ -129,10 +123,7 @@ public class SourceMonitorTests
         // Unregister would still publish a spurious SourceUnregistered for a source nobody ever
         // registered - that is the part only a subscriber can catch.
         Assert.Empty(monitor.Sources);
-        var sentinel = new TestStateSource(new Person(context));
-        monitor.Register(sentinel);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)));
+        await SettleDeliveryAsync(monitor, context, received);
         Assert.DoesNotContain(received, e => e.Kind == SourceEventKind.SourceUnregistered);
     }
 
@@ -538,10 +529,7 @@ public class SourceMonitorTests
         // Assert
         // A sentinel settles delivery: once its SourceRegistered arrives, anything the in-flight
         // transition wrongly published would already have been delivered on this FIFO queue.
-        var sentinel = new TestStateSource(new Person(context));
-        monitor.Register(sentinel);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)));
+        await SettleDeliveryAsync(monitor, context, received);
         Assert.DoesNotContain(received, e => e.Kind == SourceEventKind.StateChanged);
     }
 
@@ -588,6 +576,21 @@ public class SourceMonitorTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.SourceRegistered));
     }
+
+    /// <summary>
+    /// Settles asynchronous delivery so an absence can be asserted: registers a sentinel source and
+    /// waits for its event. Delivery per subscription is FIFO, so once that arrives, anything
+    /// wrongly published earlier would already have arrived too.
+    /// </summary>
+    private static async Task SettleDeliveryAsync(
+        SourceMonitor monitor, IInterceptorSubjectContext context, ConcurrentQueue<SourceEvent> received)
+    {
+        var sentinel = new TestStateSource(new Person(context));
+        monitor.Register(sentinel);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)));
+    }
+
 }
 
 /// <summary>

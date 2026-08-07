@@ -25,7 +25,7 @@ public class SourceScopeTests
         var source = new TestStateSource(root);
 
         // Act
-        var inScope = SourceScope.IsInScope(source, child);
+        var inScope = IsInScope(source, child);
 
         // Assert
         Assert.True(inScope);
@@ -42,7 +42,7 @@ public class SourceScopeTests
         var source = new TestStateSource(child);
 
         // Act
-        var inScope = SourceScope.IsInScope(source, root);
+        var inScope = IsInScope(source, root);
 
         // Assert
         Assert.True(inScope);
@@ -61,7 +61,7 @@ public class SourceScopeTests
         var source = new TestStateSource(right);
 
         // Act
-        var inScope = SourceScope.IsInScope(source, left);
+        var inScope = IsInScope(source, left);
 
         // Assert
         Assert.False(inScope);
@@ -76,7 +76,7 @@ public class SourceScopeTests
         var source = new TestStateSource(detached);
 
         // Act
-        var inScope = SourceScope.IsInScope(source, detached);
+        var inScope = IsInScope(source, detached);
 
         // Assert
         Assert.True(inScope);
@@ -94,8 +94,8 @@ public class SourceScopeTests
         secondRoot.Mother = shared;
 
         // Act & Assert
-        Assert.True(SourceScope.IsInScope(new TestStateSource(firstRoot), shared));
-        Assert.True(SourceScope.IsInScope(new TestStateSource(secondRoot), shared));
+        Assert.True(IsInScope(new TestStateSource(firstRoot), shared));
+        Assert.True(IsInScope(new TestStateSource(secondRoot), shared));
     }
 
     [Fact(Timeout = 10_000)]
@@ -115,9 +115,19 @@ public class SourceScopeTests
         var source = new TestStateSource(unrelated);
 
         // Act
-        var inScope = await Task.Run(() => SourceScope.IsInScope(source, first));
+        var inScope = await Task.Run(() => IsInScope(source, first));
 
         // Assert
         Assert.False(inScope);
     }
+
+    /// <summary>
+    /// The production overload takes caller-supplied scratch collections, since the wait engine
+    /// reuses them across every walk. These tests allocate a fresh pair per call.
+    /// </summary>
+    private static bool IsInScope(ISubjectSource source, IInterceptorSubject anchor) =>
+        SourceScope.IsInScope(
+            source, anchor,
+            new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance),
+            new Stack<IInterceptorSubject>());
 }
