@@ -8,6 +8,7 @@ using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
@@ -583,6 +584,35 @@ public class SourceWaitTests
 
         // Assert
         await wait.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public void WhenAWaitReEvaluationThrowsDuringAttach_ThenTheAttachStillCompletes()
+    {
+        // Arrange
+        // OnWaitConditionChanged runs from inside LifecycleInterceptor's attach lock. Letting an
+        // exception out of it leaves the graph half-attached: later handlers are skipped and child
+        // properties never attach. The poison anchor throws on every re-evaluation, standing in for
+        // the realistic causes (a throwing logger, a custom subject with a throwing Data getter).
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        monitor.Register(new TestStateSource(root));
+        monitor.CompleteSourceRegistration();
+
+        var hold = monitor.DeferWaitCompletion();
+        var poisonWait = new PoisonAnchor(context).WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(poisonWait.IsCompleted);
+        Assert.Throws<InvalidOperationException>(() => hold.Dispose());
+
+        // Act - attaching fires a property reference add, which re-evaluates the poison wait.
+        var child = new Person();
+        var exception = Record.Exception(() => root.Mother = child);
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Same(child, root.Mother);
+        Assert.NotEmpty(child.GetParents());
     }
 
     [Fact]

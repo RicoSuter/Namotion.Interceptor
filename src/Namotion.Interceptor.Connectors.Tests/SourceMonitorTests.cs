@@ -511,6 +511,41 @@ public class SourceMonitorTests
     }
 
     [Fact]
+    public async Task WhenATransitionWasAlreadyInFlightWhenTheSourceUnregistered_ThenItIsNotPublished()
+    {
+        // Arrange
+        // TransitionTo captures the handler list before invoking it, so a transition that started
+        // before Unregister ran its -= still reaches the monitor afterwards. Publishing it would
+        // hand a consumer a state for a source it has already seen unregistered.
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var received = new ConcurrentQueue<SourceEvent>();
+        using var reached = new ManualResetEventSlim(true);
+        using var release = new ManualResetEventSlim(true);
+        var source = new GatedStateRaisingSource(new Person(context), reached, release);
+        monitor.Register(source);
+        using var subscription = monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+
+        // The in-flight transition: handlers captured while the source is still registered.
+        var inFlight = source.CaptureStateChangedHandlers();
+
+        // Act
+        monitor.Unregister(source);
+        inFlight?.Invoke(source, new SourceEvent(
+            SourceEventKind.StateChanged, source, null,
+            SourceState.Connecting, SourceState.Synchronized, DateTimeOffset.UtcNow));
+
+        // Assert
+        // A sentinel settles delivery: once its SourceRegistered arrives, anything the in-flight
+        // transition wrongly published would already have been delivered on this FIFO queue.
+        var sentinel = new TestStateSource(new Person(context));
+        monitor.Register(sentinel);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => received.Any(e => e.Kind == SourceEventKind.SourceRegistered && ReferenceEquals(e.Source, sentinel)));
+        Assert.DoesNotContain(received, e => e.Kind == SourceEventKind.StateChanged);
+    }
+
+    [Fact]
     public void WhenASubjectIsAttachedToASecondTree_ThenOnlyTheFirstTreesMonitorIsReachable()
     {
         // Arrange
@@ -592,6 +627,12 @@ internal sealed class GatedStateRaisingSource : ISubjectSource
     public int PendingWriteCount => 0;
 
     public event EventHandler<SourceEvent>? StateChanged;
+
+    /// <summary>
+    /// Captures the handler list the way SubjectSourceBase.TransitionTo does before it invokes it,
+    /// so a test can unregister in between and then deliver the already-in-flight transition.
+    /// </summary>
+    public EventHandler<SourceEvent>? CaptureStateChangedHandlers() => StateChanged;
 
     /// <summary>Raises StateChanged the way a source's own transition would.</summary>
     public void RaiseStateChanged(SourceState oldState, SourceState newState) =>

@@ -1112,4 +1112,43 @@ public class SubjectSourceBaseTests
             currentValue,
             newValue);
     }
+
+    [Fact]
+    public async Task WhenStartAsyncIsCalledTwice_ThenTheSecondStartIsIgnored()
+    {
+        // Arrange
+        // A source registered in DI AND attached to the subject graph is started down both paths.
+        // Two pumps then run against one source: the first to exit latches Stopped in its finally,
+        // terminally, while the second is still listening and applying live values.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithSourceMonitoring();
+
+        var subject = new Person(context);
+        var recordingLogger = new RecordingLogger();
+        var loads = 0;
+        using var loaded = new ManualResetEventSlim(false);
+        using var source = new TestSubjectSource(subject, context, recordingLogger, writeRetryQueueSize: 0)
+        {
+            LoadInitialStateOverride = _ =>
+            {
+                Interlocked.Increment(ref loads);
+                loaded.Set();
+                return Task.FromResult<Action?>(null);
+            }
+        };
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        Assert.True(loaded.Wait(TimeSpan.FromSeconds(10)));
+        await source.StartAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(recordingLogger.Warnings, message => message.Contains("already started"));
+        await AsyncTestHelpers.WaitUntilAsync(() => source.State == SourceState.Synchronized);
+        Assert.Equal(1, Volatile.Read(ref loads));
+    }
 }

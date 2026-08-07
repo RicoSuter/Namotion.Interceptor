@@ -25,6 +25,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private readonly Lock _stateLock = new();
     private int _state = (int)SourceState.Connecting;
     private long _lastSynchronizedTicks;
+    private int _started;
 
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
 
@@ -185,6 +186,18 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         {
             _logger.LogWarning(
                 "Source {Source} was stopped and cannot be restarted. Create a new instance instead.",
+                GetType().Name);
+            return Task.CompletedTask;
+        }
+
+        // A source registered in DI AND attached to the subject graph is started down both paths.
+        // Without this latch both run a pump: the first to exit latches Stopped in its finally while
+        // the second is still applying live values.
+        if (Interlocked.Exchange(ref _started, 1) == 1)
+        {
+            _logger.LogWarning(
+                "Source {Source} is already started and the duplicate start was ignored. It is most " +
+                "likely both registered in DI and attached to the subject graph; use one or the other.",
                 GetType().Name);
             return Task.CompletedTask;
         }

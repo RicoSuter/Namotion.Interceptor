@@ -96,6 +96,11 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// re-evaluated on every parent-link mutation. That is gated on reference mutation rather than
     /// on subscriber count, because a pending wait is the one consumer with no subscription.
     /// <para>
+    /// Nothing may escape from here. This runs inside LifecycleInterceptor's attach lock, which
+    /// documents its handlers as exception-free, and a throw leaves the graph half-attached: later
+    /// handlers are skipped, SubjectAttached never fires, and child properties never attach.
+    /// </para>
+    /// <para>
     /// Nothing else here needs lifecycle events: ownership events are published from
     /// SetSource/RemoveSource, and graph membership is a registry question, not a source one.
     /// </para>
@@ -104,7 +109,22 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     {
         if (change.IsPropertyReferenceAdded || change.IsPropertyReferenceRemoved)
         {
-            OnWaitConditionChanged();
+            try
+            {
+                OnWaitConditionChanged();
+            }
+            catch (Exception exception)
+            {
+                try
+                {
+                    ResolveLogger()?.LogError(
+                        exception, "A synchronization wait re-evaluation threw and was ignored.");
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
         }
     }
 
@@ -181,11 +201,24 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
     private void OnSourceStateChanged(object? sender, SourceEvent sourceEvent)
     {
-        // Under _lock so this cannot overtake the SourceRegistered event Register publishes under
-        // the same lock, having already attached this forwarder. A consumer tracking a source from
-        // SourceRegistered would otherwise drop its first transition, permanently, since most
-        // sources transition once. No new lock edge: OnWaitConditionChanged below already takes it.
-        PublishUnderLock(sourceEvent);
+        lock (_lock)
+        {
+            // Dropped rather than published: a transition already in flight when Unregister ran
+            // captured the handler list before the -=, so without this it would arrive after
+            // SourceUnregistered, giving a consumer a state for a source it has already removed.
+            // Both sides publish under this lock, so the check is decisive.
+            if (!_sources[0].Contains(sourceEvent.Source))
+            {
+                return;
+            }
+
+            // Under _lock so this cannot overtake the SourceRegistered event Register publishes
+            // under the same lock, having already attached this forwarder. A consumer tracking a
+            // source from SourceRegistered would otherwise drop its first transition permanently,
+            // since most sources transition once.
+            Publish(sourceEvent);
+        }
+
         OnWaitConditionChanged();
     }
 
