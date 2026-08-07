@@ -212,4 +212,33 @@ public class SubjectBaseShapeTests
         Assert.Contains(".Concat(global::Lib.HandWrittenSubject.DefaultProperties)", derived);
         Assert.DoesNotContain("global::Lib.PlainInBetween", derived);
     }
+
+    [Fact]
+    public void WhenSubjectIsSealedAndIsARoot_ThenProtectedMembersAreEmittedPrivate()
+    {
+        // Arrange: a sealed root emits protected RaisePropertyChanged today, which is CS0628 and
+        // therefore a build error for consumers.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public sealed partial class SealedRoot
+                {
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunExpectingNoWarnings(source);
+        var generated = result.SingleSource();
+
+        // Assert
+        Assert.Contains("private void RaisePropertyChanged(string propertyName)", generated);
+        Assert.DoesNotContain("protected void RaisePropertyChanged(string propertyName)", generated);
+        Assert.Contains("void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)", generated);
+    }
 }

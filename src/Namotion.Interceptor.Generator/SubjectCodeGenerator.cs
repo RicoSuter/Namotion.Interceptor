@@ -17,7 +17,7 @@ internal static class SubjectCodeGenerator
         EmitNamespaceOpening(builder, metadata.NamespaceName);
         EmitContainingTypeOpening(builder, metadata.ContainingTypes);
         EmitClassDeclaration(builder, metadata);
-        EmitNotifyPropertyChangedImplementation(builder, metadata.BaseClassHasInpc);
+        EmitNotifyPropertyChangedImplementation(builder, metadata);
         EmitInterceptorSubjectImplementation(builder);
         EmitDefaultProperties(builder, metadata);
         EmitConstructors(builder, metadata);
@@ -30,6 +30,13 @@ internal static class SubjectCodeGenerator
 
         return builder.ToString();
     }
+
+    /// <summary>
+    /// The accessibility of a member that a generated subclass has to reach. A sealed class cannot be
+    /// derived from, so a protected member in one is CS0628, which is a build error under
+    /// TreatWarningsAsErrors; nothing can need the access, so emit private instead.
+    /// </summary>
+    private static string ProtectedUnlessSealed(SubjectMetadata metadata) => metadata.IsSealed ? "private" : "protected";
 
     /// <summary>
     /// Generates the filename for the generated code.
@@ -128,23 +135,20 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("    }");
     }
 
-    private static void EmitNotifyPropertyChangedImplementation(StringBuilder builder, bool baseClassHasInpc)
+    private static void EmitNotifyPropertyChangedImplementation(StringBuilder builder, SubjectMetadata metadata)
     {
-        if (baseClassHasInpc)
+        if (metadata.BaseClassHasInpc)
         {
             return;
         }
 
-        builder.Append("""
-                    public event PropertyChangedEventHandler? PropertyChanged;
-
-                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
-
-                    void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
-
-
-            """);
+        builder.AppendLine("        public event PropertyChangedEventHandler? PropertyChanged;");
+        builder.AppendLine();
+        builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+        builder.AppendLine($"        {ProtectedUnlessSealed(metadata)} void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));");
+        builder.AppendLine();
+        builder.AppendLine("        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);");
+        builder.AppendLine();
     }
 
     private static void EmitInterceptorSubjectImplementation(StringBuilder builder)

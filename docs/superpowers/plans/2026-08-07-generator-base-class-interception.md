@@ -564,7 +564,7 @@ In `src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs`, change `EmitNot
     /// A sealed class cannot be derived from, so a protected member in one is CS0628, which is a
     /// build error under TreatWarningsAsErrors. Emit private instead; nothing can need the access.
     /// </summary>
-    private static string InheritableModifier(SubjectMetadata metadata) => metadata.IsSealed ? "private" : "protected";
+    private static string ProtectedUnlessSealed(SubjectMetadata metadata) => metadata.IsSealed ? "private" : "protected";
 
     private static void EmitNotifyPropertyChangedImplementation(StringBuilder builder, SubjectMetadata metadata)
     {
@@ -576,7 +576,7 @@ In `src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs`, change `EmitNot
         builder.AppendLine("        public event PropertyChangedEventHandler? PropertyChanged;");
         builder.AppendLine();
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-        builder.AppendLine($"        {InheritableModifier(metadata)} void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));");
+        builder.AppendLine($"        {ProtectedUnlessSealed(metadata)} void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));");
         builder.AppendLine();
         builder.AppendLine("        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);");
         builder.AppendLine();
@@ -886,7 +886,7 @@ Replace `EmitHelperMethods` (lines 401 to 431) with:
             return;
         }
 
-        var modifier = InheritableModifier(metadata);
+        var modifier = ProtectedUnlessSealed(metadata);
 
         // A method rather than a property: DynamicSubjectFactory reflects over
         // GetProperties(Instance | Public | NonPublic), which returns inherited protected
@@ -1516,7 +1516,7 @@ Pass `hiddenPlumbingMembers` to `new SubjectMetadata(...)` after `emitsSharedPlu
 
 - [ ] **Step 8: Emit `new` where it is needed**
 
-In `SubjectCodeGenerator.cs`, add near `InheritableModifier`:
+In `SubjectCodeGenerator.cs`, add near `ProtectedUnlessSealed`:
 
 ```csharp
     private static string HidingModifier(SubjectMetadata metadata, string memberName)

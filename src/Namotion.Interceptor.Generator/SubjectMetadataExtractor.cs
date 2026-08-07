@@ -84,6 +84,11 @@ internal static class SubjectMetadataExtractor
         // defaults to internal, a nested one to private.
         var accessModifier = GetAccessModifierFromAccessibility(typeSymbol.DeclaredAccessibility);
 
+        // From the symbol, because 'sealed' may sit on any partial declaration, not necessarily
+        // the attributed one. DetectConstructorState already scans every declaration for the same
+        // reason.
+        var isSealed = typeSymbol.IsSealed;
+
         var containingTypes = GetContainingTypes(typeDeclaration);
         var namespaceName = GetNamespace(typeDeclaration);
         var fullTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
@@ -137,6 +142,7 @@ internal static class SubjectMetadataExtractor
             new SubjectMetadata(
                 className,
                 accessModifier,
+                isSealed,
                 namespaceName,
                 fullTypeName,
                 containingTypes,
