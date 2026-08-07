@@ -132,6 +132,20 @@ internal static class SubjectMetadataExtractor
                 SubjectBaseContract.SatisfiesContract(subjectAncestor, typeSymbol, semanticModel.Compilation, out var missingMembers))
             {
                 emitsSharedPlumbing = false;
+
+                foreach (var (declarer, memberName) in SubjectBaseContract.FindHidingMembers(
+                             typeSymbol, subjectAncestor, semanticModel.Compilation))
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.HidesGeneratedMember, location, declarer.ToDisplayString(), memberName));
+                }
+
+                foreach (var (declarer, memberName) in SubjectBaseContract.FindHijackingMembers(
+                             typeSymbol, subjectAncestor, semanticModel.Compilation))
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.HijacksInterfaceImplementation, location, declarer.ToDisplayString(), memberName));
+                }
             }
             else if (SubjectBaseContract.HasUsableDefaultProperties(subjectAncestor, typeSymbol, semanticModel.Compilation))
             {
@@ -143,8 +157,14 @@ internal static class SubjectMetadataExtractor
                     subjectAncestor.ToDisplayString(),
                     typeSymbol.ToDisplayString()));
 
-                hiddenPlumbingMembers = SubjectBaseContract.FindHiddenPlumbingMembers(
-                    subjectAncestor, typeSymbol, semanticModel.Compilation);
+                // A generated ancestor's plumbing does not exist as a symbol during this pass, so
+                // the lookup below cannot see it, but the generator knows it is about to emit it.
+                // Without this, every member root mode re-emits here hides the generated ancestor's
+                // copy and produces a CS0108 in a file the consumer cannot edit.
+                hiddenPlumbingMembers = HasGeneratedSubjectAncestor(typeSymbol, cancellationToken)
+                    ? SubjectBaseContract.RootModePlumbingMemberNames
+                    : SubjectBaseContract.FindHiddenPlumbingMembers(
+                        subjectAncestor, typeSymbol, semanticModel.Compilation);
             }
             else
             {
@@ -205,6 +225,28 @@ internal static class SubjectMetadataExtractor
                 properties,
                 methods),
             diagnostics);
+    }
+
+    /// <summary>
+    /// Whether any ancestor, not only the nearest subject one, is an in-source subject that will
+    /// actually receive generated plumbing. Asked of the whole chain because a hand-written class in
+    /// between is exactly what pushes this subject back into root mode, and the generated ancestor
+    /// above it still owns the members this one is about to re-emit.
+    /// </summary>
+    private static bool HasGeneratedSubjectAncestor(INamedTypeSymbol typeSymbol, CancellationToken cancellationToken)
+    {
+        for (var ancestor = typeSymbol.BaseType;
+             ancestor is { SpecialType: not SpecialType.System_Object };
+             ancestor = ancestor.BaseType)
+        {
+            if (SubjectBaseContract.HasInterceptorSubjectAttribute(ancestor) &&
+                WillBeGeneratedInThisCompilation(ancestor, cancellationToken))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

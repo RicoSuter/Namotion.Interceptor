@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Xunit;
@@ -10,7 +11,8 @@ namespace Namotion.Interceptor.Generator.Tests;
 internal sealed record GeneratorRunResult(
     IReadOnlyList<GeneratedSourceResult> Sources,
     IReadOnlyList<Diagnostic> GeneratorDiagnostics,
-    IReadOnlyList<Diagnostic> CompilationDiagnostics)
+    IReadOnlyList<Diagnostic> CompilationDiagnostics,
+    Compilation OutputCompilation)
 {
     /// <summary>
     /// Warnings are kept alongside the errors because a generated shape can compile and still be
@@ -36,6 +38,43 @@ internal sealed record GeneratorRunResult(
     public string SingleSource() => Sources.Single().SourceText.ToString();
 
     public string AllSources() => string.Join("\n\n", Sources.Select(s => s.SourceText));
+
+    private Assembly? _loadedAssembly;
+
+    /// <summary>
+    /// Emits the post-generator compilation and loads it, so the shape can be exercised for real.
+    /// Generator diagnostics are not part of the compilation, so a shape the generator reports can
+    /// still be run, which is the only way to show whether the report was justified. Loaded once per
+    /// run: two loads of the same bytes would produce two assemblies whose types are not identical.
+    /// </summary>
+    public Assembly LoadAssembly()
+    {
+        if (_loadedAssembly is not null)
+        {
+            return _loadedAssembly;
+        }
+
+        using var stream = new MemoryStream();
+        var emitResult = OutputCompilation.Emit(stream);
+
+        Assert.True(
+            emitResult.Success,
+            "Generated code did not compile:" + Environment.NewLine +
+            string.Join(Environment.NewLine, emitResult.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)));
+
+        _loadedAssembly = Assembly.Load(stream.ToArray());
+        return _loadedAssembly;
+    }
+
+    /// <summary>
+    /// Creates an instance of a generated type through its generated parameterless constructor.
+    /// </summary>
+    public object CreateInstance(string fullTypeName)
+    {
+        var type = LoadAssembly().GetType(fullTypeName);
+        Assert.NotNull(type);
+        return Activator.CreateInstance(type)!;
+    }
 }
 
 /// <summary>
@@ -47,7 +86,18 @@ internal static class GeneratorTestHost
 
     public static GeneratorRunResult Run(string source)
     {
-        return RunCore(source, References);
+        // The name is fixed because one library fixture grants InternalsVisibleTo("TestAssembly").
+        return RunCore(source, References, "TestAssembly");
+    }
+
+    /// <summary>
+    /// Same as <see cref="Run"/> but under a name unique to this run, so the emitted assembly can be
+    /// loaded next to those of other runs without two of them sharing an identity. Use together with
+    /// <see cref="GeneratorRunResult.LoadAssembly"/>.
+    /// </summary>
+    public static GeneratorRunResult RunForExecution(string source)
+    {
+        return RunCore(source, References, "TestAssembly_" + Guid.NewGuid().ToString("N"));
     }
 
     /// <summary>
@@ -88,15 +138,18 @@ internal static class GeneratorTestHost
         libraryStream.Position = 0;
         var libraryReference = MetadataReference.CreateFromStream(libraryStream);
 
-        return RunCore(mainSource, References.Append(libraryReference).ToList());
+        return RunCore(mainSource, References.Append(libraryReference).ToList(), "TestAssembly");
     }
 
-    private static GeneratorRunResult RunCore(string source, IReadOnlyList<MetadataReference> references)
+    private static GeneratorRunResult RunCore(
+        string source,
+        IReadOnlyList<MetadataReference> references,
+        string assemblyName)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);
 
         var compilation = CSharpCompilation.Create(
-            assemblyName: "TestAssembly",
+            assemblyName: assemblyName,
             syntaxTrees: [syntaxTree],
             references: references,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -109,7 +162,8 @@ internal static class GeneratorTestHost
         return new GeneratorRunResult(
             runResult.Results.SelectMany(result => result.GeneratedSources).ToList(),
             runResult.Diagnostics.ToList(),
-            outputCompilation.GetDiagnostics().ToList());
+            outputCompilation.GetDiagnostics().ToList(),
+            outputCompilation);
     }
 
     /// <summary>

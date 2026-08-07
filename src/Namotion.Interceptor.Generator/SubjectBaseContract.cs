@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 
@@ -332,5 +333,204 @@ internal static class SubjectBaseContract
     private static bool ImplementsInterfaceThroughChain(INamedTypeSymbol type, string interfaceTypeName)
     {
         return type.AllInterfaces.Any(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName);
+    }
+
+    /// <summary>
+    /// Derived from <see cref="PlumbingMethods"/> rather than repeated, so a fifth helper added
+    /// there cannot be contract-checked and silently escape the hiding rule.
+    /// </summary>
+    private static readonly string[] GeneratedMemberNames =
+        PlumbingMethods.Select(shape => shape.Name).ToArray();
+
+    /// <summary>
+    /// Every member root mode emits that a generated copy further up the chain would hide. The two
+    /// INPC members are part of it although nothing else in this file reads them: they are emitted
+    /// by the same root-mode block and hide the ancestor's copies exactly like the helpers do.
+    /// </summary>
+    public static readonly string[] RootModePlumbingMemberNames =
+        GeneratedMemberNames.Concat(["PropertyChanged", "RaisePropertyChanged"]).ToArray();
+
+    private static readonly string[] HijackableInterfaceMembers =
+        ["Context", "Data", "SyncRoot", "AddProperties"];
+
+    /// <summary>
+    /// Members named like an inherited generated member. Deliberately name-only, any kind, no
+    /// signature test: a 'new' annotated member of the same shape captures the generated call with
+    /// no compiler diagnostic at all, and an applicable overload with a different signature can win
+    /// overload resolution without hiding anything. Reporting the name covers both. Statics are
+    /// included, because C# hiding is not staticness-sensitive and a static called by simple name
+    /// from an instance body captures the generated call just as quietly. On intermediate classes
+    /// the scan is restricted to members accessible from the subject, because a private member
+    /// neither hides nor is found by member lookup.
+    /// </summary>
+    public static IEnumerable<(INamedTypeSymbol Declarer, string MemberName)> FindHidingMembers(
+        INamedTypeSymbol subject,
+        INamedTypeSymbol contractProvider,
+        Compilation compilation)
+    {
+        foreach (var type in EnumerateBetween(subject, contractProvider))
+        {
+            foreach (var name in GeneratedMemberNames)
+            {
+                foreach (var member in type.GetMembers(name))
+                {
+                    if (!SymbolEqualityComparer.Default.Equals(type, subject) &&
+                        !compilation.IsSymbolAccessibleWithin(member, subject))
+                    {
+                        continue;
+                    }
+
+                    yield return (type, name);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Public members, and explicit interface implementations, that would take an IInterceptorSubject
+    /// slot from the root under interface re-implementation. Context is the severe one: hijacking it
+    /// leaves the inherited helpers reading a context that is never populated, so interception stops
+    /// silently and the unguarded IInterceptorExecutor casts in DynamicSubjectFactory and
+    /// RegisteredSubject throw.
+    /// </summary>
+    /// <remarks>
+    /// The explicit form is reported on the subject itself too. The subject's own generated half is
+    /// the only thing this generator authored, it contains nothing but
+    /// IInterceptorSubject.Properties in derived mode, and a hand-written explicit Context on the
+    /// user's half is exactly the severe case: it compiles with no diagnostic and kills interception
+    /// entirely, writes landing in the backing fields so the values still look right.
+    /// </remarks>
+    public static IEnumerable<(INamedTypeSymbol Declarer, string MemberName)> FindHijackingMembers(
+        INamedTypeSymbol subject,
+        INamedTypeSymbol contractProvider,
+        Compilation compilation)
+    {
+        var interfaceType = compilation.GetTypeByMetadataName(KnownTypes.IInterceptorSubject);
+        if (interfaceType is null)
+        {
+            yield break;
+        }
+
+        var hijackableMembers = HijackableInterfaceMembers
+            .Select(name => (Name: name, Member: interfaceType.GetMembers(name).FirstOrDefault()))
+            .Where(entry => entry.Member is not null)
+            .ToArray();
+
+        foreach (var type in EnumerateBetween(subject, contractProvider))
+        {
+            foreach (var (name, interfaceMember) in hijackableMembers)
+            {
+                foreach (var member in type.GetMembers())
+                {
+                    if (member.IsStatic)
+                    {
+                        continue;
+                    }
+
+                    var isPublicMatch = member.Name == name &&
+                                        member.DeclaredAccessibility == Accessibility.Public &&
+                                        IsImplicitImplementationOf(member, interfaceMember!);
+
+                    var isExplicitMatch = IsExplicitInterceptorSubjectImplementation(member, name);
+
+                    if (isPublicMatch || isExplicitMatch)
+                    {
+                        yield return (type, name);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a public member really is an implicit implementation of the interface member, which
+    /// is what taking the slot requires. Name alone is not enough and reporting on it is a hard
+    /// break: a partial string Data, a get-only object Data and a bool-returning AddProperties all
+    /// compile, keep the root's implementations, and are perfectly ordinary names on a domain model.
+    /// </summary>
+    private static bool IsImplicitImplementationOf(ISymbol member, ISymbol interfaceMember)
+    {
+        switch (interfaceMember)
+        {
+            case IPropertySymbol interfaceProperty:
+                return member is IPropertySymbol property &&
+                       SymbolEqualityComparer.Default.Equals(property.Type, interfaceProperty.Type) &&
+                       ParametersMatch(property.Parameters, interfaceProperty.Parameters) &&
+                       (interfaceProperty.GetMethod is null || IsPubliclyCallable(property.GetMethod)) &&
+                       (interfaceProperty.SetMethod is null || IsPubliclyCallable(property.SetMethod));
+
+            case IMethodSymbol interfaceMethod:
+                return member is IMethodSymbol method &&
+                       SymbolEqualityComparer.Default.Equals(method.ReturnType, interfaceMethod.ReturnType) &&
+                       method.TypeParameters.Length == interfaceMethod.TypeParameters.Length &&
+                       ParametersMatch(method.Parameters, interfaceMethod.Parameters);
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// An accessor only implements an interface accessor when it is itself public: a
+    /// "public string P { get; private set; }" does not implement a settable interface property.
+    /// </summary>
+    private static bool IsPubliclyCallable(IMethodSymbol? accessor)
+    {
+        return accessor is { DeclaredAccessibility: Accessibility.Public };
+    }
+
+    /// <summary>
+    /// The 'params' modifier is deliberately not compared: it is not part of the signature, so a
+    /// plain IEnumerable parameter still implements a params one.
+    /// </summary>
+    private static bool ParametersMatch(
+        ImmutableArray<IParameterSymbol> candidate,
+        ImmutableArray<IParameterSymbol> required)
+    {
+        if (candidate.Length != required.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < candidate.Length; index++)
+        {
+            if (candidate[index].RefKind != required[index].RefKind ||
+                !SymbolEqualityComparer.Default.Equals(candidate[index].Type, required[index].Type))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsExplicitInterceptorSubjectImplementation(ISymbol member, string name)
+    {
+        var explicitProperty = (member as IPropertySymbol)?.ExplicitInterfaceImplementations.FirstOrDefault();
+        var explicitMethod = (member as IMethodSymbol)?.ExplicitInterfaceImplementations.FirstOrDefault();
+        var implemented = (ISymbol?)explicitProperty ?? explicitMethod;
+
+        return implemented is not null &&
+               implemented.Name == name &&
+               implemented.ContainingType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == KnownTypes.IInterceptorSubject;
+    }
+
+    /// <summary>
+    /// The subject and every class between it and the class providing the contract member, which
+    /// is where a capturing or hijacking member can sit. Members in the provider itself are
+    /// excluded: interface mapping prefers a class's own explicit implementation over its own
+    /// public members.
+    /// </summary>
+    private static IEnumerable<INamedTypeSymbol> EnumerateBetween(INamedTypeSymbol subject, INamedTypeSymbol provider)
+    {
+        for (var current = subject;
+             current is { SpecialType: not SpecialType.System_Object } &&
+             !SymbolEqualityComparer.Default.Equals(current, provider);
+             current = current.BaseType!)
+        {
+            yield return current;
+        }
     }
 }

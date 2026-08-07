@@ -40,7 +40,7 @@ internal static class SubjectCodeGenerator
 
     /// <summary>
     /// Emitted per member rather than across the block: a blanket 'new' is CS0109 wherever nothing
-    /// is hidden, and both of NI0012's trigger shapes hide nothing.
+    /// is hidden, and an NI0012 base that hides nothing is the common case.
     /// </summary>
     private static string HidingModifier(SubjectMetadata metadata, string memberName)
         => metadata.HiddenPlumbingMemberNames.Contains(memberName) ? "new " : "";
@@ -149,10 +149,10 @@ internal static class SubjectCodeGenerator
             return;
         }
 
-        builder.AppendLine("        public event PropertyChangedEventHandler? PropertyChanged;");
+        builder.AppendLine($"        {HidingModifier(metadata, "PropertyChanged")}public event PropertyChangedEventHandler? PropertyChanged;");
         builder.AppendLine();
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-        builder.AppendLine($"        {ProtectedUnlessSealed(metadata)} void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));");
+        builder.AppendLine($"        {HidingModifier(metadata, "RaisePropertyChanged")}{ProtectedUnlessSealed(metadata)} void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));");
         builder.AppendLine();
         builder.AppendLine("        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);");
         builder.AppendLine();
