@@ -44,4 +44,46 @@ public class WithHostedServicesTests
             await host.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task WhenOneSubjectIsReachableFromTwoHostingContexts_ThenItIsStartedOnce()
+    {
+        // Arrange - both contexts resolve their own handler and both see the subject's context attach,
+        // so without a single owner per target the subject is started twice.
+        var builder = Host.CreateApplicationBuilder();
+
+        var firstContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var secondContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var subject = new CountingHostedSubject();
+
+            // Act
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
+
+            // Assert - an empty transition appended after both attaches drains the target's chain,
+            // so the count is read once every queued start has run rather than after a delay.
+            await ((IInterceptorSubject)subject)
+                .TryGetSubjectTarget()!
+                .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
 }

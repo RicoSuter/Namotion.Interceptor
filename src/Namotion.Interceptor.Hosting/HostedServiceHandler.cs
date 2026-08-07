@@ -128,6 +128,15 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 return;
             }
 
+            if (target.Current is not null)
+            {
+                // One instance per target, checked in the body where the chain serializes it. Ownership
+                // stops a second handler, but a subject reachable from two hosting enabled contexts
+                // raises one context attach per context, and the owning handler sees both: measured as
+                // StartCount 2 without this guard.
+                return;
+            }
+
             try
             {
                 await Task.Delay(StartDelayMilliseconds, cancellationToken).ConfigureAwait(false);
