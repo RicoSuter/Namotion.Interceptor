@@ -251,16 +251,11 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// </summary>
     public IDisposable DeferWaitCompletion()
     {
+        // Deliberately does not re-evaluate. The increment happens first, so IsSatisfied returns
+        // false on its registration check for every wait before it walks anything: a pass here
+        // could only ever be a no-op. Release is where re-evaluation belongs (see ReleaseHold).
         Interlocked.Increment(ref _registrationHolds);
-
-        // The hold is constructed before the re-evaluation, not after: a throw from any pending
-        // wait's IsSatisfied would otherwise leave the count raised with nothing able to release it,
-        // blocking every wait on this tree forever. Re-evaluating cannot complete a wait here
-        // anyway - the increment guarantees IsSatisfied returns false - so the signal is defensive
-        // and must not be able to strand the hold it belongs to.
-        var hold = new RegistrationHold(this);
-        OnWaitConditionChanged();
-        return hold;
+        return new RegistrationHold(this);
     }
 
     /// <inheritdoc />

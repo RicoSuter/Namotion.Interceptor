@@ -270,10 +270,13 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                         {
                             hold.Dispose();
                         }
-                        catch
+                        catch (Exception holdException)
                         {
                             // One deferrer throwing must not strand the others: a leaked hold blocks
-                            // every wait on that tree forever.
+                            // every wait on that tree forever. Logged rather than swallowed, since
+                            // this used to surface through the action loop.
+                            _logger?.LogError(
+                                holdException, "Releasing a startup completion hold threw and was ignored.");
                         }
                     }
                 }
