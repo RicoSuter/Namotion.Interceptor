@@ -14,5 +14,7 @@ internal sealed record SubjectMetadata(
     string? BaseClassTypeName,
     bool BaseClassHasInterceptorSubject,
     bool BaseClassHasInpc,
+    bool EmitsSharedPlumbing,
+    IReadOnlyList<string> HiddenPlumbingMemberNames,
     IReadOnlyList<PropertyMetadata> Properties,
     IReadOnlyList<MethodMetadata> Methods);

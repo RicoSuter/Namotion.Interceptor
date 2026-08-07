@@ -109,6 +109,55 @@ internal static class SubjectMetadataExtractor
         var baseClassHasInpc = baseClassHasInterceptorSubject ||
                                ImplementsInterface(typeSymbol, KnownTypes.IRaisePropertyChanged);
 
+        // Root mode emits the whole IInterceptorSubject block; derived mode emits only its own
+        // Properties line and inherits the rest.
+        //
+        // Mode selection, asked of the nearest subject ancestor and never of "some ancestor": a
+        // hand-written IInterceptorSubject implementer between two generated subjects would
+        // otherwise select derived mode and silently reproduce this bug, because Context resolves
+        // to the middle's executor while the inherited helpers read the root's field.
+        var emitsSharedPlumbing = true;
+        IReadOnlyList<string> hiddenPlumbingMembers = [];
+
+        if (subjectAncestor is not null)
+        {
+            // An ancestor generated in this very compilation cannot be contract-checked: its
+            // plumbing lives in source the generator has not emitted yet, so the symbol shows none
+            // of it.
+            var ancestorIsGeneratedHere =
+                baseClassHasInterceptorSubject &&
+                WillBeGeneratedInThisCompilation(subjectAncestor, cancellationToken);
+
+            if (ancestorIsGeneratedHere ||
+                SubjectBaseContract.SatisfiesContract(subjectAncestor, typeSymbol, semanticModel.Compilation, out var missingMembers))
+            {
+                emitsSharedPlumbing = false;
+            }
+            else if (SubjectBaseContract.HasUsableDefaultProperties(subjectAncestor, typeSymbol, semanticModel.Compilation))
+            {
+                // Only emitsSharedPlumbing flips. The ancestor stays the base-class fact source, so
+                // DefaultProperties still concatenates with it and the INPC decision is unchanged.
+                diagnostics.Add(Diagnostic.Create(
+                    Diagnostics.BasePlumbingCannotBeShared,
+                    location,
+                    subjectAncestor.ToDisplayString(),
+                    typeSymbol.ToDisplayString()));
+
+                hiddenPlumbingMembers = SubjectBaseContract.FindHiddenPlumbingMembers(
+                    subjectAncestor, typeSymbol, semanticModel.Compilation);
+            }
+            else
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    Diagnostics.BaseDoesNotSatisfyContract,
+                    location,
+                    subjectAncestor.ToDisplayString(),
+                    string.Join(", ", missingMembers)));
+
+                return new ExtractionResult(null, diagnostics);
+            }
+        }
+
         // Collect all partial type declarations
         var allTypeDeclarations = typeSymbol.DeclaringSyntaxReferences
             .Select(r => r.GetSyntax(cancellationToken))
@@ -151,9 +200,37 @@ internal static class SubjectMetadataExtractor
                 baseClassTypeName,
                 baseClassHasInterceptorSubject,
                 baseClassHasInpc,
+                emitsSharedPlumbing,
+                hiddenPlumbingMembers,
                 properties,
                 methods),
             diagnostics);
+    }
+
+    /// <summary>
+    /// Whether an attributed ancestor declared in this compilation will actually receive generated
+    /// plumbing. Carrying the attribute is not enough: NI0001 suppresses generation for a subject
+    /// that is not partial, and assuming the plumbing appears anyway puts the subclass into derived
+    /// mode, replacing one actionable diagnostic on the base with a wall of raw errors in a
+    /// generated file the user cannot edit.
+    /// </summary>
+    private static bool WillBeGeneratedInThisCompilation(INamedTypeSymbol ancestor, CancellationToken cancellationToken)
+    {
+        if (ancestor.DeclaringSyntaxReferences.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var syntaxReference in ancestor.DeclaringSyntaxReferences)
+        {
+            if (syntaxReference.GetSyntax(cancellationToken) is not ClassDeclarationSyntax declaration ||
+                !declaration.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.PartialKeyword)))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static string? GetNamespace(TypeDeclarationSyntax typeDeclaration)

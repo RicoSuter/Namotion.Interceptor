@@ -119,4 +119,41 @@ internal static class Diagnostics
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "A generated partial declaration cannot join a file-local type.");
+
+    public static readonly DiagnosticDescriptor BaseDoesNotSatisfyContract = new(
+        id: "NI0011",
+        title: "Base class does not satisfy the subject base contract",
+        // Two sentences, so RS1032 requires the trailing period the single-sentence rules omit.
+        messageFormat: "Base class '{0}' cannot host a generated subject: it is missing {1}. Use [InterceptorSubject] on the base, or call AddProperties for runtime properties.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The generated subclass calls members the base class must provide. This checks their shape, not their behaviour.");
+
+    public static readonly DiagnosticDescriptor BasePlumbingCannotBeShared = new(
+        id: "NI0012",
+        title: "Base class plumbing cannot be shared",
+        messageFormat: "Base class '{0}' does not expose the shared subject plumbing, so '{1}' emits its own and base-declared properties stay unintercepted. Rebuild the base assembly against the current package version, or satisfy the subject base contract.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "The subject still compiles and behaves as it did before the plumbing was shared.");
+
+    public static readonly DiagnosticDescriptor HidesGeneratedMember = new(
+        id: "NI0013",
+        title: "Member hides an inherited generated member",
+        messageFormat: "'{0}' declares '{1}', which hides the inherited generated member of the same name and can silently capture the generated call",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The generated property and method bodies call these members by simple name.");
+
+    public static readonly DiagnosticDescriptor HijacksInterfaceImplementation = new(
+        id: "NI0014",
+        title: "Member hijacks an inherited interface implementation",
+        messageFormat: "'{0}' declares '{1}', which takes the IInterceptorSubject.{1} slot from the base class implementation under interface re-implementation",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Hijacking Context leaves the inherited helpers reading a context that is never populated, so interception silently stops.");
 }

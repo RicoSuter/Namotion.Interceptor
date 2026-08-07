@@ -45,7 +45,7 @@ namespace TestNamespace
         ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
 
         [JsonIgnore]
         object IInterceptorSubject.SyncRoot { get; } = new object();
@@ -54,7 +54,7 @@ namespace TestNamespace
         {
             lock (((IInterceptorSubject)this).SyncRoot)
             {
-                _properties = (_properties ?? DefaultProperties)
+                _properties = ((IInterceptorSubject)this).Properties
                     .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
                     .ToFrozenDictionary();
             }
@@ -107,13 +107,16 @@ namespace TestNamespace
         partial void OnValueChanged(int newValue);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
+        protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
         {
             return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -127,7 +130,7 @@ namespace TestNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
+        protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
         {
             return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }

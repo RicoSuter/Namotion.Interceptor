@@ -18,12 +18,12 @@ internal static class SubjectCodeGenerator
         EmitContainingTypeOpening(builder, metadata.ContainingTypes);
         EmitClassDeclaration(builder, metadata);
         EmitNotifyPropertyChangedImplementation(builder, metadata);
-        EmitInterceptorSubjectImplementation(builder);
+        EmitInterceptorSubjectImplementation(builder, metadata);
         EmitDefaultProperties(builder, metadata);
         EmitConstructors(builder, metadata);
         EmitProperties(builder, metadata);
         EmitMethods(builder, metadata);
-        EmitHelperMethods(builder);
+        EmitHelperMethods(builder, metadata);
         EmitClassClosing(builder);
         EmitContainingTypeClosing(builder, metadata.ContainingTypes);
         EmitNamespaceClosing(builder, metadata.NamespaceName);
@@ -37,6 +37,13 @@ internal static class SubjectCodeGenerator
     /// TreatWarningsAsErrors; nothing can need the access, so emit private instead.
     /// </summary>
     private static string ProtectedUnlessSealed(SubjectMetadata metadata) => metadata.IsSealed ? "private" : "protected";
+
+    /// <summary>
+    /// Emitted per member rather than across the block: a blanket 'new' is CS0109 wherever nothing
+    /// is hidden, and both of NI0012's trigger shapes hide nothing.
+    /// </summary>
+    private static string HidingModifier(SubjectMetadata metadata, string memberName)
+        => metadata.HiddenPlumbingMemberNames.Contains(memberName) ? "new " : "";
 
     /// <summary>
     /// Generates the filename for the generated code.
@@ -151,36 +158,48 @@ internal static class SubjectCodeGenerator
         builder.AppendLine();
     }
 
-    private static void EmitInterceptorSubjectImplementation(StringBuilder builder)
+    private static void EmitInterceptorSubjectImplementation(StringBuilder builder, SubjectMetadata metadata)
     {
-        builder.Append("""
-                    private IInterceptorExecutor? _context;
-                    private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+        // Emitted by every subject, root and derived alike. It is the one member that cannot move
+        // to the root: DefaultProperties is a static hidden by 'new' at each level, so this
+        // expression binds at compile time to the class it was emitted into. Emitted only in the
+        // root, every derived subject would report the root's property set.
+        if (!metadata.EmitsSharedPlumbing)
+        {
+            builder.AppendLine("        [JsonIgnore]");
+            builder.AppendLine("        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;");
+            builder.AppendLine();
+            return;
+        }
 
-                    [JsonIgnore]
-                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
-
-                    [JsonIgnore]
-                    ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-
-                    [JsonIgnore]
-                    IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
-
-                    [JsonIgnore]
-                    object IInterceptorSubject.SyncRoot { get; } = new object();
-
-                    void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
-                    {
-                        lock (((IInterceptorSubject)this).SyncRoot)
-                        {
-                            _properties = (_properties ?? DefaultProperties)
-                                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                                .ToFrozenDictionary();
-                        }
-                    }
-
-
-            """);
+        builder.AppendLine("        private IInterceptorExecutor? _context;");
+        builder.AppendLine("        private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;");
+        builder.AppendLine();
+        builder.AppendLine("        [JsonIgnore]");
+        builder.AppendLine("        IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);");
+        builder.AppendLine();
+        builder.AppendLine("        [JsonIgnore]");
+        builder.AppendLine("        ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();");
+        builder.AppendLine();
+        builder.AppendLine("        [JsonIgnore]");
+        builder.AppendLine("        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;");
+        builder.AppendLine();
+        builder.AppendLine("        [JsonIgnore]");
+        builder.AppendLine("        object IInterceptorSubject.SyncRoot { get; } = new object();");
+        builder.AppendLine();
+        builder.AppendLine("        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            lock (((IInterceptorSubject)this).SyncRoot)");
+        builder.AppendLine("            {");
+        // Dispatching through the interface rather than reading _properties directly is what lets
+        // this method live in the root: it makes the merge start from the most derived
+        // DefaultProperties instead of this class's own.
+        builder.AppendLine("                _properties = ((IInterceptorSubject)this).Properties");
+        builder.AppendLine("                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))");
+        builder.AppendLine("                    .ToFrozenDictionary();");
+        builder.AppendLine("            }");
+        builder.AppendLine("        }");
+        builder.AppendLine();
     }
 
     private static void EmitDefaultProperties(StringBuilder builder, SubjectMetadata metadata)
@@ -402,35 +421,46 @@ internal static class SubjectCodeGenerator
         builder.AppendLine();
     }
 
-    private static void EmitHelperMethods(StringBuilder builder)
+    private static void EmitHelperMethods(StringBuilder builder, SubjectMetadata metadata)
     {
-        builder.Append("""
-                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
-                    {
-                        return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
-                    }
+        if (!metadata.EmitsSharedPlumbing)
+        {
+            return;
+        }
 
-                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
-                    {
-                        if (_context is null)
-                        {
-                            setValue(this, newValue);
-                            return true;
-                        }
-                        else
-                        {
-                            return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
-                        }
-                    }
+        var modifier = ProtectedUnlessSealed(metadata);
 
-                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
-                    {
-                        return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
-                    }
-
-            """);
+        // A method rather than a property: DynamicSubjectFactory reflects over
+        // GetProperties(Instance | Public | NonPublic), which returns inherited protected
+        // properties and turns every unknown one into an intercepted subject property. A protected
+        // property here would give every Castle-proxied generated subject a phantom property.
+        builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+        builder.AppendLine($"        {HidingModifier(metadata, "GetInstanceProperties")}{modifier} IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;");
+        builder.AppendLine();
+        builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+        builder.AppendLine($"        {HidingModifier(metadata, "GetPropertyValue")}{modifier} TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;");
+        builder.AppendLine("        }");
+        builder.AppendLine();
+        builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+        builder.AppendLine($"        {HidingModifier(metadata, "SetPropertyValue")}{modifier} bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            if (_context is null)");
+        builder.AppendLine("            {");
+        builder.AppendLine("                setValue(this, newValue);");
+        builder.AppendLine("                return true;");
+        builder.AppendLine("            }");
+        builder.AppendLine("            else");
+        builder.AppendLine("            {");
+        builder.AppendLine("                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);");
+        builder.AppendLine("            }");
+        builder.AppendLine("        }");
+        builder.AppendLine();
+        builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+        builder.AppendLine($"        {HidingModifier(metadata, "InvokeMethod")}{modifier} object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);");
+        builder.AppendLine("        }");
     }
 }

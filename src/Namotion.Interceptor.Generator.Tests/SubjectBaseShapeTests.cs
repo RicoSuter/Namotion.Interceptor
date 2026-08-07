@@ -208,7 +208,10 @@ public class SubjectBaseShapeTests
         var result = GeneratorTestHost.RunWithLibraryReferenceExpectingCleanCompilation(librarySource, mainSource);
         var derived = result.SingleSource();
 
-        // Assert
+        // Assert: the hand-written ancestor exposes a usable DefaultProperties but none of the
+        // helpers, so it takes the NI0012 root-mode fallback. Pinned here because the mode is not
+        // otherwise visible in the emitted shape, and it must not flip back unnoticed.
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0012");
         Assert.Contains(".Concat(global::Lib.HandWrittenSubject.DefaultProperties)", derived);
         Assert.DoesNotContain("global::Lib.PlainInBetween", derived);
     }
