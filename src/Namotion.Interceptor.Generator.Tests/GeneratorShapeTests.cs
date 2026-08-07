@@ -565,4 +565,41 @@ namespace Repro
         Assert.DoesNotContain("public void Ref(", generatedSource);
         Assert.DoesNotContain("public void Do(", generatedSource);
     }
+
+    [Fact]
+    public void WhenWithoutInterceptorMethodTakesInParameter_ThenWrapperIsGeneratedWhileRefAndOutStaySkipped()
+    {
+        // Arrange: an "in" argument is passable by value, so the wrapper compiles. A "ref" or "out"
+        // argument is not (CS1620), so those two shapes stay skipped.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    [InterceptorSubject]
+    public partial class Machine
+    {
+        public partial string Name { get; set; }
+
+        public void SendWithoutInterceptor(in int value) { }
+        public void PushWithoutInterceptor(ref int value) { }
+        public void PullWithoutInterceptor(out int value) { value = 0; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var generatedSource = generated.SingleSource();
+        Assert.Contains("public void Send(int value)", generatedSource);
+        Assert.Contains("SendWithoutInterceptor((int)p[0]!)", generatedSource);
+        Assert.DoesNotContain("public void Push(", generatedSource);
+        Assert.DoesNotContain("public void Pull(", generatedSource);
+
+        var skipped = generated.GeneratorDiagnostics.Where(diagnostic => diagnostic.Id == "NI0006").ToList();
+        Assert.Equal(2, skipped.Count);
+        Assert.All(skipped, diagnostic => Assert.DoesNotContain("SendWithoutInterceptor", diagnostic.GetMessage()));
+        Assert.Contains(skipped, diagnostic => diagnostic.GetMessage().Contains("PushWithoutInterceptor"));
+        Assert.Contains(skipped, diagnostic => diagnostic.GetMessage().Contains("PullWithoutInterceptor"));
+    }
 }

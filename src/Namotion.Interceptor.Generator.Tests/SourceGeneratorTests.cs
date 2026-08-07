@@ -56,6 +56,9 @@ public partial class ClassWithoutInterceptorSubject
         // The source is deliberately invalid: ClassWithoutInterceptorSubject declares partial
         // properties with no attribute, so nothing generates their implementation. Assert the
         // expected CS9248 pair and nothing else, so a generator-caused error would still fail here.
+        // The count is asserted too, because Assert.All alone would pass on an empty collection and
+        // stop proving that the protected property is excluded.
+        Assert.Equal(2, generated.CompilationErrors.Count);
         Assert.All(generated.CompilationErrors, error =>
         {
             Assert.Equal("CS9248", error.Id);

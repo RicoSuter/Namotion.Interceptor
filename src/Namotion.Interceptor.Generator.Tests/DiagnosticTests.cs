@@ -562,6 +562,40 @@ namespace Repro
         Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
     }
 
+    [Theory]
+    [InlineData(@"
+        int IFoo<int>.Kind => 1;
+        string IFoo<string>.Kind => ""string"";
+        public partial string Kind { get; set; }")]
+    [InlineData(@"
+        public partial string Kind { get; set; }
+        int IFoo<int>.Kind => 1;
+        string IFoo<string>.Kind => ""string"";")]
+    public void WhenTwoExplicitImplementationsCollideWithAClassProperty_ThenNI0008IsReportedRegardlessOfDeclarationOrder(string members)
+    {
+        // Arrange: the class property wins either way, but two distinct interface members are
+        // dropped, so the collision must be reported no matter which declaration comes first.
+        var source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IFoo<T> { T Kind { get; } }
+
+    [InterceptorSubject]
+    public partial class Impl : IFoo<int>, IFoo<string>
+    {" + members + @"
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0008");
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("Kind", diagnostic.GetMessage());
+    }
+
     [Fact]
     public void WhenClassDeclaresAndExplicitlyImplementsSameProperty_ThenNI0008IsNotReported()
     {

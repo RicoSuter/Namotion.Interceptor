@@ -314,24 +314,35 @@ internal static class SubjectMetadataExtractor
         var result = new List<PropertyMetadata>();
         var indexByName = new Dictionary<string, int>();
 
+        // Tracked per name rather than per current winner: the class-wins rule below can overwrite
+        // the slot, and reading the collision off the slot would make the diagnostic depend on which
+        // declaration happened to be written first.
+        var explicitImplementationCountByName = new Dictionary<string, int>();
+
         foreach (var property in properties)
         {
+            if (property.ExplicitInterfaceTypeName is not null)
+            {
+                explicitImplementationCountByName.TryGetValue(property.Name, out var explicitCount);
+                explicitImplementationCountByName[property.Name] = explicitCount + 1;
+
+                // Two explicit implementations of one simple name (typically one generic interface at
+                // two instantiations) is the class-declared form of the NI0008 collision: the second
+                // interface member is dropped whatever else claims the name. A class property
+                // colliding with a single explicit implementation is not: only one of the two comes
+                // from an interface, and the class property is the documented winner.
+                if (explicitCount > 0)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.PropertyNameCollision, location, property.Name));
+                }
+            }
+
             if (!indexByName.TryGetValue(property.Name, out var index))
             {
                 indexByName[property.Name] = result.Count;
                 result.Add(property);
                 continue;
-            }
-
-            // Two explicit implementations of one simple name (typically one generic interface at
-            // two instantiations) is the class-declared form of the NI0008 collision. A class
-            // property colliding with an explicit implementation of the same name is not: only one
-            // of the two comes from an interface, and the class property is the documented winner.
-            if (result[index].ExplicitInterfaceTypeName is not null &&
-                property.ExplicitInterfaceTypeName is not null)
-            {
-                diagnostics.Add(Diagnostic.Create(
-                    Diagnostics.PropertyNameCollision, location, property.Name));
             }
 
             if (result[index].ExplicitInterfaceTypeName is not null &&
@@ -385,20 +396,21 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
-                // The emitter drops static, generic and by-reference shapes, and cannot route an
-                // explicit interface implementation through the executor.
+                // The emitter drops static and generic shapes, and cannot route an explicit interface
+                // implementation through the executor. The wrapper forwards its parameters by value,
+                // which a "ref" or an "out" parameter rejects (CS1620) but an "in" parameter accepts,
+                // so only the first two are skipped.
                 if (method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword)) ||
                     method.TypeParameterList is not null ||
                     method.ExplicitInterfaceSpecifier is not null ||
                     method.ParameterList.Parameters.Any(parameter => parameter.Modifiers.Any(modifier =>
                         modifier.IsKind(SyntaxKind.RefKeyword) ||
-                        modifier.IsKind(SyntaxKind.OutKeyword) ||
-                        modifier.IsKind(SyntaxKind.InKeyword))))
+                        modifier.IsKind(SyntaxKind.OutKeyword))))
                 {
                     diagnostics.Add(Diagnostic.Create(
                         Diagnostics.MemberSkipped, location,
                         $"{typeSymbol.Name}.{fullMethodName}",
-                        "the method shape is not supported (static, generic, by-reference parameters or an explicit interface implementation)"));
+                        "the method shape is not supported (static, generic, a 'ref' or 'out' parameter, or an explicit interface implementation)"));
                     continue;
                 }
 
