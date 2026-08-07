@@ -148,7 +148,9 @@ public interface IMale : IHuman { Gender IHuman.Gender => Gender.Male; }
 [InterceptorSubject]
 public partial class John : IMale
 {
-    // "Gender" is in the metadata and reads as Gender.Male, but writes are not intercepted
+    // "Gender" is in the metadata and reads as Gender.Male. IHuman.Gender has no setter here;
+    // even a writable explicit implementation would not be intercepted, since C# does not allow
+    // "partial" on an explicit interface implementation.
 }
 ```
 
@@ -187,6 +189,8 @@ public partial class Dog : Animal
     public override partial string Name { get; protected set; }
 }
 ```
+
+`new` and `sealed` are also supported on a partial property, and are repeated on the generated half automatically. `new` is the fix for the CS0108 warning that accompanies NI0005 (see [Diagnostics](generator.md#diagnostics) in the generator documentation).
 
 ### Interface Default Properties
 

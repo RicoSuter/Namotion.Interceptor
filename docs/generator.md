@@ -188,6 +188,8 @@ public partial class John : IMale
 
 The property is reached by casting to the interface that declares the member (`IHuman` here), so it always resolves through the normal dispatch rules for interface default implementations. A property reached this way is not intercepted, because an explicitly implemented member cannot be routed through the interception pipeline.
 
+An explicit implementation written directly in the subject class is included only when the implemented member is reachable from generated code (at least one accessor accessible through a cast to the declaring interface); if neither accessor is reachable, the member is skipped and reported as NI0006, because writing the explicit implementation in the subject's own file is an opt-in the author can act on. The same accessibility check on an explicit implementation declared inside an interface (not the subject class) is silent when it fails, because there is no remedy to offer the subject's author for code they do not own.
+
 Attributes such as `[Derived]` must be declared on the interface member rather than on the explicit implementation, because the property metadata reflects the interface member. Any attribute on the implementation reports NI0007 (see [Diagnostics](#diagnostics)), including an implementation-local one such as `[SuppressMessage]`, which keeps its usual meaning but is simply not part of the metadata.
 
 ### Method Interception
@@ -210,7 +212,7 @@ public partial class Calculator
 
 The generated method routes through the interception pipeline, enabling cross-cutting concerns.
 
-Parameters are forwarded by value, so `in` and `ref readonly` parameters are supported, while a plain `ref` or an `out` parameter is not and makes the method skipped with NI0006.
+Parameters are forwarded by value, so `in` and `ref readonly` parameters are supported, while a plain `ref` or an `out` parameter is not and makes the method skipped with NI0006. A by-reference return type is skipped the same way: no wrapper is generated, so a caller that relied on one fails to compile with CS1061 rather than silently losing the ref semantics.
 
 ### Virtual and Override Properties
 
@@ -225,6 +227,29 @@ public partial class Animal
 public partial class Dog : Animal
 {
     public override partial string Name { get; protected set; }
+}
+```
+
+### New and Sealed Properties
+
+`new` and `sealed` are supported on partial properties. Both modifiers are repeated on the generated half of the property automatically, so the hand-written declaration only needs to carry them once:
+
+```csharp
+public interface IHuman { string Origin { get; } }
+public class BaseSubject : IHuman { public string Origin => "base"; }
+
+[InterceptorSubject]
+public partial class DerivedSubject : BaseSubject
+{
+    // "new" hides BaseSubject.Origin with a tracked partial property and silences the CS0108
+    // warning that accompanies NI0005 (see Diagnostics).
+    public new partial string Origin { get; set; }
+}
+
+[InterceptorSubject]
+public partial class SealedDog : Animal
+{
+    public sealed override partial string Name { get; protected set; }
 }
 ```
 
@@ -366,7 +391,6 @@ internal partial class InternalSubject
 | Init-only properties cannot be set after construction | Design constraint of C# |
 | Partial properties cannot have field initializers | Initialize in constructor |
 | A `WithoutInterceptor` method whose stripped name collides with an existing method fails with CS0111 | Rename one of the two. No `NI` diagnostic is reported for this |
-| Repeating the `new` modifier on a partial property fails with CS8800 | Remove `new` from the property declaration. No `NI` diagnostic is reported for this |
 
 ## Diagnostics
 
@@ -377,15 +401,15 @@ The generator reports the following diagnostics, all in the `Namotion.Intercepto
 | NI0001 | Error | The subject class is not declared `partial` | Add the `partial` modifier |
 | NI0002 | Error | A containing type of the subject is not declared `partial` | Add `partial` to every containing type |
 | NI0003 | Error | `[InterceptorSubject]` is placed on a record or a record struct. A plain struct or interface never reaches this diagnostic; the compiler already rejects those with CS0592, because the attribute only targets classes | Use a class |
-| NI0004 | Error | The generator threw an unhandled exception while processing the subject | Report the issue. The generated file contains the full stack trace |
-| NI0005 | Warning | A derived subject re-declares a property whose interface implementation is already provided by a base class, so reading through the subject and reading through the interface return different values | Rename the property, or suppress the warning if the divergence is intended |
-| NI0006 | Warning | A member was skipped because it cannot be supported: an interface default property is an indexer or a static member, or is not accessible from generated code (only when neither accessor is reachable; a single inaccessible accessor keeps the property and drops just that accessor); or a `WithoutInterceptor` method has no name before the suffix, is static or generic, takes a by-reference parameter other than `in` or `ref readonly` (a plain `ref` or an `out` parameter), or is itself an explicit interface implementation | Remove or rename the member, widen its accessibility, or adjust the method signature |
+| NI0004 | Error | The generator threw an unhandled exception while processing the subject | Report the issue. The full stack trace is embedded in the generated source, which only reaches disk if the project sets `EmitCompilerGeneratedFiles` |
+| NI0005 | Warning | A derived subject re-declares a property whose interface implementation is already provided by a base class, so reading through the subject and reading through the interface return different values | Add `new` to the property declaration, which acknowledges the shadowing and silences the accompanying CS0108; rename the property; or suppress the warning if the divergence is intended |
+| NI0006 | Warning | A member the author plausibly offered as a subject property could not be supported: a `*WithoutInterceptor` method with no name before the suffix, that is static or generic, takes a plain `ref` or an `out` parameter, has a by-reference return type, or is itself an explicit interface implementation; or an explicit interface implementation **declared in the subject class** whose implemented member has no accessor reachable from generated code. A static member, an indexer (class-declared or an interface default), any other interface default member that is unreachable from generated code, and an explicit implementation **declared in an interface** are never candidates for a subject property and stay silent | Remove or rename the `*WithoutInterceptor` method, adjust its signature, widen the implemented member's accessibility, or drop the explicit implementation |
 | NI0007 | Warning | Any attribute, not only `[Derived]`, is placed on an explicit interface implementation. The emitted metadata reflects the interface member, so the attribute is not part of the subject's property metadata | Move an attribute the library reads, such as `[Derived]` or a validation attribute, to the interface member. An implementation-local attribute such as `[SuppressMessage]` or `[ExcludeFromCodeCoverage]` keeps its usual meaning where it is and can be suppressed |
-| NI0008 | Warning | Two interface members resolve to the same property name; the first one found wins and the rest are dropped | Rename one of the members, or suppress the warning to accept the first-wins behavior |
+| NI0008 | Warning | More than one member provides the same simple property name. A class-declared property always takes the name; between colliding interface members, the first one the generator reaches takes it. One warning is reported per member that ends up unreachable, naming both the member that took the name and the member that was dropped | Rename one of the colliding members, or suppress the warning to accept the resolution rule |
 | NI0009 | Error | The subject itself is generic, or the subject is nested inside a generic containing type | Remove the type parameters from the subject or its containing type |
 | NI0010 | Error | The subject is declared `file`-local | Remove the `file` modifier |
 
-Suppress a rule at the point of use with `#pragma warning disable NI0005`, or project-wide through `<NoWarn>` in the project file.
+Suppress a rule at the point of use with `#pragma warning disable NI0005`, or project-wide through `<NoWarn>` in the project file. This is a real fix for the four warning rules (NI0005 through NI0008): generation still succeeds, so suppressing only silences advice about a shape the author has chosen to accept. It does not help for the six rules that stop generation (NI0001 through NI0004, NI0009, NI0010): suppressing one of those silences the message, but the class still never becomes an interceptor subject, leaving an inert type with none of the generated members and no further compiler feedback pointing at why. Fix the underlying shape instead.
 
 ## Requirements
 

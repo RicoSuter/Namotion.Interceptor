@@ -139,13 +139,16 @@ they turn out to matter in practice.
   ProbeWithoutInterceptor()` on the same subject: the generator strips the suffix and emits a second
   `void Probe()` wrapper, which the compiler rejects as a duplicate. The generator does not currently
   check for this collision before emitting the wrapper.
-- **The emitter cannot repeat a `new` modifier on the generated half of a partial property.**
-  `public new partial string Origin { get; set; }` fails with CS8800, because `PropertyMetadata` tracks
-  `IsVirtual` and `IsOverride` but has no `IsNew`, so the generated partial declaration omits the
-  modifier that the hand-written declaration requires to match.
-- **An interface property with an inaccessible accessor on both sides, such as `{ protected get; init;
-  }`, explicitly implemented by a class, yields a metadata entry with both accessor lambdas null.** This
-  is a degenerate but valid entry (the property key exists, reading or writing it via the metadata does
+- **An interface property whose only accessible accessor is `init`, such as `{ protected get; init;
+  }`, explicitly implemented by a class, yields a metadata entry with both accessor lambdas null.**
+  This is not the "both accessors inaccessible" case, which is skipped entirely and never reaches the
+  emitter: the property-level accessibility check passes here because `init` is accessible, so the
+  property is kept. The getter lambda is then omitted because `protected get` is not reachable from
+  generated code, and the setter lambda is *also* omitted, even though the property was kept for the
+  setter's sake, because `EmitDefaultProperties` only emits a setter lambda when `HasSetter` is true,
+  and an `init` accessor sets `HasInit`, never `HasSetter`; `HasInit` is consulted only when emitting a
+  partial property's own accessor, a code path an explicit implementation never reaches. The result is a
+  degenerate but valid entry (the property key exists, reading or writing it via the metadata does
   nothing observable), and is a strict improvement over the previous behaviour, which was CS1540.
 
 ## Why the test strategy has three layers
@@ -156,10 +159,14 @@ larger wrong string still contains the substring being asserted. Fixing that req
 regression tests for the reported shape; it required a strategy that cannot pass on broken output by
 construction.
 
-1. **Verify snapshots of the full generated source**, for every shape, using Verify.Xunit's
-   `.verified.txt`/`.received.txt` workflow. This catches unintended output changes for already-working
-   shapes, but a snapshot can itself capture code that does not compile, so it is necessary and not
-   sufficient.
+1. **Verify snapshots of the full generated source**, using Verify.Xunit's `.verified.txt`/`.received.txt`
+   workflow. This catches unintended output changes, but only for the sixteen shapes that already had a
+   snapshot before this work (ordinary, virtual, override, inheritance, accessor visibility, nesting, and
+   interface-default properties). None of the shapes this work added has one: not explicit interface
+   implementations, not non-public subjects, not subjects nested in a record, struct or interface, and not
+   `in` / `ref readonly` wrapper parameters. Layers 2 and 3 below are what cover those instead. A snapshot
+   can also itself capture code that does not compile, so even for the sixteen shapes it does cover, it is
+   necessary and not sufficient.
 2. **A compile-clean assertion** (`GeneratorTestHost.RunExpectingCleanCompilation` and its
    library-reference variant), which fails the test if `outputCompilation.GetDiagnostics()` contains any
    error. This is the layer that would have caught the original #428 defect directly, since the
