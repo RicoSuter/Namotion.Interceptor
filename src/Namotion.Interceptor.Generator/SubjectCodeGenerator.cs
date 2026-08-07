@@ -356,14 +356,19 @@ internal static class SubjectCodeGenerator
             var setterModifiers = property.SetterAccessModifier is not null ? $"{property.SetterAccessModifier} " : "";
 
             // Determine how to call RaisePropertyChanged:
-            // - [InterceptorSubject] base: direct call to inherited protected method (fastest)
+            // - [InterceptorSubject] base that really exposes the member: direct call to the
+            //   inherited protected method (fastest). The attribute alone does not prove it: such a
+            //   base can implement IRaisePropertyChanged explicitly, or emit no raise of its own
+            //   because its own base already provided the plumbing, and a simple-name call is then
+            //   CS0103 in a file the consumer cannot edit.
             // - Manual IRaisePropertyChanged base: interface cast (rare case)
             // - Own implementation: direct call to own method (fastest)
-            var raisePropertyChangedCall = metadata.BaseClass.HasInterceptorSubject
-                ? $"RaisePropertyChanged(nameof({property.Name}))"
-                : metadata.BaseClass.HasInpc
-                    ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))"
-                    : $"RaisePropertyChanged(nameof({property.Name}))";
+            var raisePropertyChangedCall =
+                metadata.BaseClass.HasInterceptorSubject && metadata.BaseClass.HasCallableRaisePropertyChanged
+                    ? $"RaisePropertyChanged(nameof({property.Name}))"
+                    : metadata.BaseClass.HasInpc
+                        ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))"
+                        : $"RaisePropertyChanged(nameof({property.Name}))";
 
             builder.AppendLine($"            {setterModifiers}{accessorText}");
             builder.AppendLine("            {");

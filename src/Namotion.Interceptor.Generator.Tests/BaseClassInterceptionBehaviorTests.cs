@@ -263,17 +263,6 @@ public class BaseClassInterceptionBehaviorTests
         return count;
     }
 
-    private sealed class RecordingWriteInterceptor : IWriteInterceptor
-    {
-        public List<(string PropertyName, object? Value)> Writes { get; } = [];
-
-        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
-        {
-            Writes.Add((context.Property.Name, context.NewValue));
-            next(ref context);
-        }
-    }
-
     private sealed class RecordingReadInterceptor : IReadInterceptor
     {
         public List<(string PropertyName, object? Value)> Reads { get; } = [];

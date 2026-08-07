@@ -34,13 +34,8 @@ internal static class SubjectBaseContract
         var baseClassTypeName = subjectAncestor?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var baseClassHasInterceptorSubject = HasInterceptorSubjectAttribute(subjectAncestor);
 
-        // Only the first disjunct follows the ancestor. The second is deliberately asked of the
-        // SUBJECT: a base that implements IRaisePropertyChanged by hand without implementing
-        // IInterceptorSubject is not a subject ancestor at all, and dropping this would make its
-        // subclass re-declare PropertyChanged and RaisePropertyChanged. ManualInpcPersonBase in
-        // Namotion.Interceptor.Tracking.Tests is exactly that shape and has a live test.
-        var baseClassHasInpc = baseClassHasInterceptorSubject ||
-                               SymbolExtensions.ImplementsInterface(typeSymbol, KnownTypes.IRaisePropertyChanged);
+        var baseClassHasInpc = InheritsNotifyPropertyChanged(typeSymbol, compilation, cancellationToken);
+        var hasCallableRaisePropertyChanged = HasCallableRaisePropertyChanged(typeSymbol, compilation, cancellationToken);
 
         // Root mode emits the whole IInterceptorSubject block; derived mode emits only its own
         // Properties line and inherits the rest.
@@ -112,9 +107,87 @@ internal static class SubjectBaseContract
             baseClassTypeName,
             baseClassHasInterceptorSubject,
             baseClassHasInpc,
+            hasCallableRaisePropertyChanged,
             emitsPlumbingHere,
             hiddenPlumbingMembers);
     }
+
+    /// <summary>
+    /// Whether the class chain above the type already provides the INotifyPropertyChanged plumbing,
+    /// so the subject must not declare its own.
+    /// </summary>
+    /// <remarks>
+    /// The interface clause is deliberately asked of the TYPE and not of its subject ancestor: a
+    /// base that implements IRaisePropertyChanged by hand without implementing IInterceptorSubject
+    /// is not a subject ancestor at all, and dropping this would make its subclass re-declare
+    /// PropertyChanged and RaisePropertyChanged. ManualInpcPersonBase in
+    /// Namotion.Interceptor.Tracking.Tests is exactly that shape and has a live test.
+    /// The attribute on its own is not evidence, only a promise: an attributed base can be declared
+    /// without being partial, so nothing is ever generated into it, and a hand-written attributed
+    /// base can carry no notify plumbing at all. Believing the promise leaves the subject with
+    /// neither call form: the simple name is CS0103 and the interface cast throws at runtime.
+    /// </remarks>
+    private static bool InheritsNotifyPropertyChanged(
+        INamedTypeSymbol typeSymbol,
+        Compilation compilation,
+        CancellationToken cancellationToken)
+    {
+        if (SymbolExtensions.ImplementsInterface(typeSymbol, KnownTypes.IRaisePropertyChanged))
+        {
+            return true;
+        }
+
+        var subjectAncestor = FindNearestSubjectAncestor(typeSymbol);
+        if (subjectAncestor is null || !HasInterceptorSubjectAttribute(subjectAncestor))
+        {
+            return false;
+        }
+
+        // An ancestor generated in this compilation implements IRaisePropertyChanged in code that
+        // does not exist as a symbol yet, and one built by an older generator may expose the raise
+        // as a plain member without the interface.
+        return WillBeGeneratedInThisCompilation(subjectAncestor, cancellationToken) ||
+               HasCallableRaisePropertyChanged(typeSymbol, compilation, cancellationToken);
+    }
+
+    /// <summary>
+    /// Whether a simple-name RaisePropertyChanged(name) call in the type's own body binds to a
+    /// member above it. Emitting that form when it does not is CS0103 inside a generated file the
+    /// consumer cannot edit, which is why the emitter falls back to the interface form.
+    /// </summary>
+    /// <remarks>
+    /// The whole chain is walked, not just the nearest subject ancestor: a generated ancestor emits
+    /// no raise of its own when its own base already provided the plumbing, so the member that
+    /// answers the call can sit several classes further up. That is the shipped
+    /// ManualInpcPersonBase shape. An explicit interface implementation is not found here and must
+    /// not be: its name is qualified and it is private, so no simple-name call can reach it.
+    /// </remarks>
+    private static bool HasCallableRaisePropertyChanged(
+        INamedTypeSymbol typeSymbol,
+        Compilation compilation,
+        CancellationToken cancellationToken)
+    {
+        if (typeSymbol.BaseType is not null &&
+            AccessibleMembers(typeSymbol.BaseType, typeSymbol, compilation, MemberNames.RaisePropertyChanged)
+                .OfType<IMethodSymbol>()
+                .Any(IsRaisePropertyChangedSignature))
+        {
+            return true;
+        }
+
+        // An ancestor generated in this compilation has no member symbol yet. It emits one exactly
+        // when nothing above it provides the plumbing, which is the same question asked here.
+        return EnumerateChain(typeSymbol.BaseType).Any(ancestor =>
+            HasInterceptorSubjectAttribute(ancestor) &&
+            WillBeGeneratedInThisCompilation(ancestor, cancellationToken) &&
+            !InheritsNotifyPropertyChanged(ancestor, compilation, cancellationToken));
+    }
+
+    private static bool IsRaisePropertyChangedSignature(IMethodSymbol method)
+        => method.TypeParameters.Length == 0 &&
+           method.Parameters.Length == 1 &&
+           method.Parameters[0].RefKind == RefKind.None &&
+           method.Parameters[0].Type.SpecialType == SpecialType.System_String;
 
     /// <summary>
     /// Whether any ancestor, not only the nearest subject one, is an in-source subject that will
@@ -456,7 +529,8 @@ internal static class SubjectBaseContract
     /// chain. Statics are dropped because none of the emitted call sites can reach one, and
     /// inaccessible members because they neither hide nor bind. Callers add the part that actually
     /// differs between them: the contract check tests the signature, the hiding check tests C#'s
-    /// hiding rule. Deliberately not used by <see cref="FindHidingMembers"/>, which must see statics.
+    /// hiding rule, and <see cref="HasCallableRaisePropertyChanged"/> tests the emitted call's one
+    /// argument. Deliberately not used by <see cref="FindHidingMembers"/>, which must see statics.
     /// </summary>
     private static IEnumerable<ISymbol> AccessibleMembers(
         INamedTypeSymbol ancestor,

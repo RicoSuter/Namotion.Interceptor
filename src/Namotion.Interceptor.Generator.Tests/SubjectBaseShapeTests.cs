@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace Namotion.Interceptor.Generator.Tests;
@@ -41,6 +43,243 @@ public class SubjectBaseShapeTests
         Assert.DoesNotContain("public event PropertyChangedEventHandler? PropertyChanged;", generated);
         Assert.DoesNotContain("protected void RaisePropertyChanged(string propertyName)", generated);
         Assert.Contains("((IRaisePropertyChanged)this).RaisePropertyChanged(nameof(Name))", generated);
+    }
+
+    [Fact]
+    public void WhenAttributedAncestorRaisesThroughAnExplicitImplementation_ThenTheSetterCallsItThroughTheInterface()
+    {
+        // Arrange: Middle carries the attribute but emits no RaisePropertyChanged of its own,
+        // because ManualInpcBase already provides the INPC plumbing, and that base implements the
+        // raise explicitly. Leaf's attributed ancestor therefore exposes no member of that name and
+        // a simple-name call from Leaf is CS0103.
+        const string source = """
+            using System.ComponentModel;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public abstract class ManualInpcBase : INotifyPropertyChanged, IRaisePropertyChanged
+                {
+                    public event PropertyChangedEventHandler? PropertyChanged;
+
+                    void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
+                        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+                }
+
+                [InterceptorSubject]
+                public partial class Middle : ManualInpcBase
+                {
+                    public partial string MiddleName { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Leaf : Middle
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunExpectingNoWarnings(source);
+        var middle = Assert.Single(result.Sources, s => s.HintName.Contains("Repro.Middle.g.cs")).SourceText.ToString();
+        var leaf = Assert.Single(result.Sources, s => s.HintName.Contains("Repro.Leaf.g.cs")).SourceText.ToString();
+
+        // Assert
+        Assert.DoesNotContain("void RaisePropertyChanged(string propertyName)", middle);
+        Assert.Contains("((IRaisePropertyChanged)this).RaisePropertyChanged(nameof(LeafName))", leaf);
+    }
+
+    [Fact]
+    public void WhenTheRaiseSitsAboveTheAttributedAncestor_ThenTheSetterStillCallsItBySimpleName()
+    {
+        // Arrange: the same shape as above except that ManualInpcBase implements the raise as an
+        // ordinary public member. Middle still emits none of its own, so only a walk of the whole
+        // chain finds the member that answers Leaf's call; a lookup stopping at the attributed
+        // ancestor would drop Leaf to the interface form. This is the shipped ManualInpcPersonBase
+        // shape from Namotion.Interceptor.Tracking.Tests.
+        const string source = """
+            using System.ComponentModel;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public abstract class ManualInpcBase : INotifyPropertyChanged, IRaisePropertyChanged
+                {
+                    public event PropertyChangedEventHandler? PropertyChanged;
+
+                    public void RaisePropertyChanged(string propertyName)
+                        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+                }
+
+                [InterceptorSubject]
+                public partial class Middle : ManualInpcBase
+                {
+                    public partial string MiddleName { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Leaf : Middle
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunExpectingNoWarnings(source);
+        var middle = Assert.Single(result.Sources, s => s.HintName.Contains("Repro.Middle.g.cs")).SourceText.ToString();
+        var leaf = Assert.Single(result.Sources, s => s.HintName.Contains("Repro.Leaf.g.cs")).SourceText.ToString();
+
+        // Assert: the boundary between the two forms. Middle has no attributed ancestor at all and
+        // keeps the interface form, Leaf has one and reaches the inherited member directly.
+        Assert.Contains("((IRaisePropertyChanged)this).RaisePropertyChanged(nameof(MiddleName))", middle);
+        Assert.Contains("RaisePropertyChanged(nameof(LeafName));", leaf);
+        Assert.DoesNotContain("((IRaisePropertyChanged)this).RaisePropertyChanged(nameof(LeafName))", leaf);
+    }
+
+    [Fact]
+    public void WhenReferencedAttributedBaseRaisesThroughAnExplicitImplementation_ThenTheSetterCallsItThroughTheInterface()
+    {
+        // Arrange: the same shape across an assembly boundary. The base satisfies every contract
+        // clause, so the subject takes derived mode, but its raise is reachable through the
+        // interface only.
+        const string librarySource = """
+            using System;
+            using System.Collections.Concurrent;
+            using System.Collections.Generic;
+            using System.Collections.Frozen;
+            using System.ComponentModel;
+            using System.Linq;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Interceptors;
+
+            namespace Library
+            {
+                [InterceptorSubject]
+                public class ExplicitRaiseBase : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+                {
+                    private IInterceptorExecutor? _context;
+                    private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+
+                    public event PropertyChangedEventHandler? PropertyChanged;
+
+                    void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
+                        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                    ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
+                    object IInterceptorSubject.SyncRoot { get; } = new object();
+                    IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
+
+                    void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+                        => _properties = ((IInterceptorSubject)this).Properties
+                            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                            .ToFrozenDictionary();
+
+                    public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
+                        = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+
+                    protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
+
+                    protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
+                        => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+
+                    protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                    {
+                        if (_context is null)
+                        {
+                            setValue(this, newValue);
+                            return true;
+                        }
+
+                        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                    }
+
+                    protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
+                        => _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+                }
+            }
+            """;
+
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace App
+            {
+                [InterceptorSubject]
+                public partial class AppLeaf : Library.ExplicitRaiseBase
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunWithLibraryReference(librarySource, mainSource);
+        var generated = result.SingleSource();
+
+        // Assert: derived mode, no diagnostic, and the only call form that binds.
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0011" || d.Id == "NI0012");
+        Assert.Contains("((IRaisePropertyChanged)this).RaisePropertyChanged(nameof(LeafName))", generated);
+    }
+
+    [Fact]
+    public void WhenReferencedAttributedBaseHasNoNotifyPlumbing_ThenTheSubjectDeclaresItsOwn()
+    {
+        // Arrange: the attribute alone is not evidence that the base owns the INPC plumbing. This
+        // base owns none of it, so a simple-name call is CS0103 and an interface cast throws at
+        // runtime; the subject has to declare the plumbing itself.
+        const string librarySource = """
+            using System.Collections.Generic;
+            using System.Collections.Frozen;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Library
+            {
+                [InterceptorSubject]
+                public class NoNotifyBase
+                {
+                    public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
+                        = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+                }
+            }
+            """;
+
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace App
+            {
+                [InterceptorSubject]
+                public partial class AppLeaf : Library.NoNotifyBase
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunWithLibraryReference(librarySource, mainSource);
+        var generated = result.SingleSource();
+
+        // Assert: the base only provides DefaultProperties, so it takes the NI0012 root-mode
+        // fallback and declares the notify plumbing it then calls by simple name.
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0012");
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+        Assert.Contains("IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged", generated);
+        Assert.Contains("public event PropertyChangedEventHandler? PropertyChanged;", generated);
+        Assert.Contains("RaisePropertyChanged(nameof(LeafName))", generated);
+        Assert.DoesNotContain("((IRaisePropertyChanged)this).RaisePropertyChanged", generated);
     }
 
     [Fact]
@@ -243,5 +482,409 @@ public class SubjectBaseShapeTests
         Assert.Contains("private void RaisePropertyChanged(string propertyName)", generated);
         Assert.DoesNotContain("protected void RaisePropertyChanged(string propertyName)", generated);
         Assert.Contains("void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)", generated);
+    }
+
+    [Fact]
+    public void WhenSubclassIsHandWritten_ThenItCanUseTheProtectedHelpers()
+    {
+        // Arrange: one of the two directions goal 4 asks for. This was CS0122 on every helper the
+        // subclass touches while the generator emitted them private, so the shape is pinned rather
+        // than left to the emitter's modifier choice.
+        const string source = """
+            using System;
+            using System.Collections.Generic;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class GenBase
+                {
+                    public partial string BaseName { get; set; }
+                }
+
+                public class HandDerived : GenBase
+                {
+                    private string _own = "";
+
+                    public HandDerived()
+                    {
+                        // Must run before the first intercepted write: PropertyReference.Metadata
+                        // throws when the name is not registered.
+                        ((IInterceptorSubject)this).AddProperties(
+                            new SubjectPropertyMetadata(
+                                nameof(Own),
+                                typeof(string),
+                                [],
+                                o => ((HandDerived)o).Own,
+                                (o, v) => ((HandDerived)o).Own = (string)v!,
+                                isIntercepted: true,
+                                isDynamic: false));
+                    }
+
+                    public string Own
+                    {
+                        get => GetPropertyValue(nameof(Own), static o => ((HandDerived)o)._own);
+                        set => SetPropertyValue(nameof(Own), value, _own, static (o, v) => ((HandDerived)o)._own = v);
+                    }
+
+                    // The other two of the four members the design promises a hand-written subclass
+                    // can reach.
+                    public bool HasAddedProperties => GetInstanceProperties() is not null;
+
+                    public string Describe(string prefix)
+                        => (string)InvokeMethod(
+                            nameof(Describe),
+                            static (s, p) => (string)p[0]! + ((HandDerived)s)._own,
+                            prefix)!;
+                }
+            }
+            """;
+
+        // Act & Assert
+        GeneratorTestHost.RunExpectingNoWarnings(source);
+    }
+
+    [Fact]
+    public void WhenHandWrittenSubclassWritesThroughTheHelpers_ThenTheInheritedExecutorInterceptsIt()
+    {
+        // Arrange: the test above proves the helpers are reachable, this one proves they work. A
+        // hand-written subclass has no generated DefaultProperties, so its metadata only exists once
+        // AddProperties has run, and the base's ": base(context)" constructor publishes the executor
+        // before this constructor body starts. Registering after the first write would therefore
+        // throw from PropertyReference.Metadata rather than silently skip interception.
+        const string source = """
+            using System;
+            using System.Collections.Generic;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class GenBase
+                {
+                    public partial string BaseName { get; set; }
+                }
+
+                public class HandDerived : GenBase
+                {
+                    public const string WrittenInConstructor = "written-in-constructor";
+
+                    private string _own = "";
+
+                    public HandDerived(IInterceptorSubjectContext context) : base(context)
+                    {
+                        ((IInterceptorSubject)this).AddProperties(
+                            new SubjectPropertyMetadata(
+                                nameof(Own),
+                                typeof(string),
+                                [],
+                                o => ((HandDerived)o).Own,
+                                (o, v) => ((HandDerived)o).Own = (string)v!,
+                                isIntercepted: true,
+                                isDynamic: false));
+
+                        Own = WrittenInConstructor;
+                    }
+
+                    public string Own
+                    {
+                        get => GetPropertyValue(nameof(Own), static o => ((HandDerived)o)._own);
+                        set => SetPropertyValue(nameof(Own), value, _own, static (o, v) => ((HandDerived)o)._own = v);
+                    }
+                }
+            }
+            """;
+
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => writeInterceptor);
+
+        var subjectType = GeneratorTestHost.RunForExecution(source).LoadAssembly().GetType("Repro.HandDerived");
+        Assert.NotNull(subjectType);
+        var ownProperty = subjectType.GetProperty("Own");
+        var baseNameProperty = subjectType.GetProperty("BaseName");
+        Assert.NotNull(ownProperty);
+        Assert.NotNull(baseNameProperty);
+
+        // Act
+        var subject = Activator.CreateInstance(subjectType, context);
+        ownProperty.SetValue(subject, "written-after-construction");
+        baseNameProperty.SetValue(subject, "base-written");
+
+        // Assert: the hand-written property and the generated base property both reach the one
+        // executor the root published.
+        Assert.Equal("written-after-construction", ownProperty.GetValue(subject));
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "Own" && Equals(write.Value, "written-in-constructor"));
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "Own" && Equals(write.Value, "written-after-construction"));
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "BaseName" && Equals(write.Value, "base-written"));
+    }
+
+    [Fact]
+    public void WhenBaseSubjectIsInAReferencedAssembly_ThenTheDerivedSubjectSharesItsPlumbing()
+    {
+        // Arrange: mode selection branch 2. The library is compiled WITH the generator, so its
+        // protected helpers exist as metadata symbols the contract check can see.
+        const string librarySource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Library
+            {
+                [InterceptorSubject]
+                public partial class LibraryBase
+                {
+                    public partial string BaseName { get; set; }
+                }
+            }
+            """;
+
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace App
+            {
+                [InterceptorSubject]
+                public partial class AppLeaf : Library.LibraryBase
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunWithLibraryReference(librarySource, mainSource, runGeneratorOverLibrary: true);
+        var generated = result.SingleSource();
+
+        // Assert: derived mode, so no plumbing of its own. Both members below are emitted by root
+        // mode only, unlike the Properties line, which both modes emit identically.
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+        Assert.DoesNotContain("private IInterceptorExecutor? _context;", generated);
+        Assert.DoesNotContain("void IInterceptorSubject.AddProperties", generated);
+    }
+
+    [Fact]
+    public void WhenReferencedBaseHasPrivateHelpers_ThenItFallsBackToRootModeWithNI0012()
+    {
+        // Arrange: an attributed base built by an older generator, so its helpers are private and it
+        // has no GetInstanceProperties at all. Either cause alone fails the contract, so the
+        // fallback is what the assertions pin, not one specific missing member.
+        // Branch 1's "declared in source" qualifier is what stops this from selecting derived mode
+        // and emitting CS0122 calls into generated code. The generator is NOT run over the library.
+        const string librarySource = """
+            using System;
+            using System.Collections.Concurrent;
+            using System.Collections.Generic;
+            using System.Collections.Frozen;
+            using System.ComponentModel;
+            using System.Linq;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Interceptors;
+
+            namespace Library
+            {
+                [InterceptorSubject]
+                public class StaleBase : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+                {
+                    private IInterceptorExecutor? _context;
+                    private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+
+                    // The old generator paired its private helpers with a protected RaisePropertyChanged,
+                    // so the fixture carries both: the attribute alone makes the subclass treat the base
+                    // as the INPC owner and call RaisePropertyChanged by simple name.
+                    public event PropertyChangedEventHandler? PropertyChanged;
+
+                    protected void RaisePropertyChanged(string propertyName)
+                        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+                    void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
+
+                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                    ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
+                    object IInterceptorSubject.SyncRoot { get; } = new object();
+                    IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+
+                    void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+                        => _properties = (_properties ?? DefaultProperties)
+                            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                            .ToFrozenDictionary();
+
+                    public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
+                        = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+
+                    private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
+                        => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+
+                    private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                    {
+                        if (_context is null)
+                        {
+                            setValue(this, newValue);
+                            return true;
+                        }
+
+                        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                    }
+
+                    private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
+                        => _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+                }
+            }
+            """;
+
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace App
+            {
+                [InterceptorSubject]
+                public partial class AppLeaf : Library.StaleBase
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunWithLibraryReference(librarySource, mainSource);
+
+        // Assert: warning, root mode, still compiles, and no stray 'new' that would be CS0109.
+        // The private base helpers neither hide nor bind across the assembly boundary, so the
+        // warning check is what pins the modifier decision: CS0109 is a warning, not an error.
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0012");
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+        Assert.Contains("private IInterceptorExecutor? _context;", result.SingleSource());
+    }
+
+    [Fact]
+    public void WhenHandWrittenBaseIsGeneric_ThenTheContractIsCheckedWithTypeArgumentsSubstituted()
+    {
+        // Arrange: the subject derives from a constructed GenericBase<SubjectPropertyMetadata>, so
+        // the contract lookup has to see the substituted members, not the open definition's.
+        // DefaultProperties is declared in terms of T on purpose: its type only equals the
+        // IReadOnlyDictionary<string, SubjectPropertyMetadata> the check compares against once the
+        // type argument is substituted, so a lookup running against the open definition fails.
+        const string source = """
+            using System;
+            using System.Collections.Concurrent;
+            using System.Collections.Generic;
+            using System.Collections.Frozen;
+            using System.ComponentModel;
+            using System.Linq;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Interceptors;
+
+            namespace Repro
+            {
+                public class GenericBase<T> : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+                {
+                    private IInterceptorExecutor? _context;
+                    private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+
+                    public event PropertyChangedEventHandler? PropertyChanged;
+                    public void RaisePropertyChanged(string propertyName)
+                        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+                    public static IReadOnlyDictionary<string, T> DefaultProperties { get; }
+                        = FrozenDictionary<string, T>.Empty;
+
+                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                    ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
+                    object IInterceptorSubject.SyncRoot { get; } = new object();
+                    IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties
+                        => GetInstanceProperties() ?? FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+
+                    void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+                    {
+                        lock (((IInterceptorSubject)this).SyncRoot)
+                        {
+                            _properties = ((IInterceptorSubject)this).Properties
+                                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                                .ToFrozenDictionary();
+                        }
+                    }
+
+                    protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
+
+                    protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
+                        => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+
+                    protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                    {
+                        if (_context is null)
+                        {
+                            setValue(this, newValue);
+                            return true;
+                        }
+
+                        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                    }
+
+                    protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
+                        => _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+                }
+
+                [InterceptorSubject]
+                public partial class GenericDerived : GenericBase<SubjectPropertyMetadata>
+                {
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunExpectingNoWarnings(source);
+
+        // Assert: derived mode, so no plumbing of its own, and no contract diagnostic.
+        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0011" || d.Id == "NI0012");
+        Assert.DoesNotContain("private IInterceptorExecutor? _context;", result.SingleSource());
+    }
+
+    [Fact]
+    public void WhenSubjectsAreInternalAndNested_ThenTheLeafTakesDerivedModeWithItsDeclaredAccessibility()
+    {
+        // Arrange: accessibility is checked with IsSymbolAccessibleWithin, and nested containing
+        // types are re-declared by the generator, so both interact with the derived-mode split.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public partial class Container
+                {
+                    [InterceptorSubject]
+                    internal partial class NestedRoot
+                    {
+                        public partial string RootName { get; set; }
+                    }
+
+                    [InterceptorSubject]
+                    private protected partial class NestedLeaf : NestedRoot
+                    {
+                        public partial string LeafName { get; set; }
+                    }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunExpectingNoWarnings(source);
+        var leaf = Assert.Single(result.Sources, s => s.HintName.Contains("NestedLeaf")).SourceText.ToString();
+
+        // Assert: the private protected leaf reaches the internal root's protected helpers, so it
+        // still takes derived mode through two re-declared containing types.
+        Assert.Contains("private protected partial class NestedLeaf : IInterceptorSubject", leaf);
+        Assert.DoesNotContain("private IInterceptorExecutor? _context;", leaf);
     }
 }
