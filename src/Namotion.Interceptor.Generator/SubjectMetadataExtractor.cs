@@ -88,27 +88,19 @@ internal static class SubjectMetadataExtractor
         var namespaceName = GetNamespace(typeDeclaration);
         var fullTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-        // Resolved from the symbol, not from this declaration's base list: properties, methods and
-        // interfaces are all collected across every partial declaration, so the base list may sit
-        // on a declaration other than the attributed one. Reading it from syntax then lost the base
-        // class entirely, which re-declared the INotifyPropertyChanged plumbing the base already
-        // provides and shadowed the base's DefaultProperties without concatenating them, leaving the
-        // subject reporting only its own properties. BaseType is also strictly the base class, so an
-        // interface in the base list can no longer be mistaken for one.
-        var baseType = typeSymbol.BaseType;
-        var baseClass = baseType is { SpecialType: not SpecialType.System_Object } &&
-                        (HasInterceptorSubjectAttribute(baseType) ||
-                         ImplementsInterface(baseType, KnownTypes.IInterceptorSubject))
-            ? baseType
-            : null;
+        // Resolved from the symbol, not from this declaration's base list: the base list may sit on
+        // a partial declaration other than the attributed one, and the symbol's BaseType chain is
+        // strictly base classes, so an interface in the base list is never mistaken for one.
+        var subjectAncestor = SubjectBaseContract.FindNearestSubjectAncestor(typeSymbol);
 
-        var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-        var baseClassHasInterceptorSubject = HasInterceptorSubjectAttribute(baseClass);
+        var baseClassTypeName = subjectAncestor?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var baseClassHasInterceptorSubject = SubjectBaseContract.HasInterceptorSubjectAttribute(subjectAncestor);
 
-        // Asked of the subject rather than of the base class alone, which keeps the previous
-        // base-list scan's reach: a subject that lists IRaisePropertyChanged itself and implements
-        // it by hand still suppresses the generated plumbing, and now does so no matter which
-        // partial declaration carries the base list.
+        // Only the first disjunct follows the ancestor. The second is deliberately asked of the
+        // SUBJECT: a base that implements IRaisePropertyChanged by hand without implementing
+        // IInterceptorSubject is not a subject ancestor at all, and dropping this would make its
+        // subclass re-declare PropertyChanged and RaisePropertyChanged. ManualInpcPersonBase in
+        // Namotion.Interceptor.Tracking.Tests is exactly that shape and has a live test.
         var baseClassHasInpc = baseClassHasInterceptorSubject ||
                                ImplementsInterface(typeSymbol, KnownTypes.IRaisePropertyChanged);
 
@@ -872,18 +864,6 @@ internal static class SubjectMetadataExtractor
     {
         return property.GetAttributes()
             .Any(a => SymbolExtensions.IsTypeOrInheritsFrom(a.AttributeClass, KnownTypes.DerivedAttribute));
-    }
-
-    private static bool HasInterceptorSubjectAttribute(INamedTypeSymbol? type)
-    {
-        if (type is null)
-        {
-            return false;
-        }
-
-        return type
-            .GetAttributes()
-            .Any(a => SymbolExtensions.IsTypeOrInheritsFrom(a.AttributeClass, KnownTypes.InterceptorSubjectAttribute));
     }
 
     private static bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)
