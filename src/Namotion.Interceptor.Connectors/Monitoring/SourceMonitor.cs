@@ -317,13 +317,6 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     private readonly HashSet<IInterceptorSubject> _scopeVisitedScratch = new(ReferenceEqualityComparer.Instance);
     private readonly Stack<IInterceptorSubject> _scopePendingScratch = new();
 
-    // Warn-once keys, on the ANCHOR rather than on a wait: an already-satisfied wait returns on the
-    // fast path without allocating a PendingWait, so per-wait flags never deduplicated the intended
-    // usage of re-awaiting per operation. Stored in the subject's own data, so the flag has exactly
-    // the subject's lifetime and needs no weak table. Two monitors sharing an anchor share the flag,
-    // and only the first warns; that is preferred over reintroducing per-monitor state.
-    private const string EmptyScopeWarnedKey = "Namotion.Interceptor.Connectors.EmptyScopeWarned";
-    private const string AllStoppedWarnedKey = "Namotion.Interceptor.Connectors.AllStoppedWarned";
 
     /// <summary>
     /// Completes when the branch containing <paramref name="subject"/> is synchronized: registration
@@ -368,8 +361,6 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
             return false;
         }
 
-        var matched = false;
-        var allInScopeStopped = true;
         foreach (var source in _sources[0])
         {
             if (!SourceScope.IsInScope(source, anchor, _scopeVisitedScratch, _scopePendingScratch))
@@ -377,61 +368,19 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
                 continue;
             }
 
-            matched = true;
             var state = source.State;
             if (state != SourceState.Stopped && state != SourceState.Synchronized)
             {
                 return false;
             }
-
-            if (state != SourceState.Stopped)
-            {
-                allInScopeStopped = false;
-            }
         }
 
-        if (!matched)
-        {
-            WarnOnce(anchor, EmptyScopeWarnedKey,
-                "A synchronization wait on {Subject} has no in-scope source, and source registration is complete. " +
-                "The wait completes immediately: once registration is complete an empty scope is no longer " +
-                "ambiguous between \"no source yet\" and \"no source ever\", so it definitively means this " +
-                "branch is local-only and vacuously synchronized. Check that a source is configured for this " +
-                "branch if that is unexpected.");
-
-            // Once the application has called CompleteSourceRegistration, an empty scope is no
-            // longer ambiguous, so it is vacuously satisfied - consistent with the all-Stopped rule
-            // below. Before registration is complete this method already returned false above, so an
-            // empty scope still blocks during startup.
-            return true;
-        }
-
-        if (allInScopeStopped)
-        {
-            // Stopped is terminal, so this branch will never become live. Completing beats hanging,
-            // but silence would look like success, so log it.
-            WarnOnce(anchor, AllStoppedWarnedKey,
-                "A synchronization wait on {Subject} completed with every in-scope source stopped. " +
-                "Stopped is terminal, so this branch will not synchronize again.");
-        }
-
+        // An empty scope, and a scope whose sources have all Stopped, both complete rather than
+        // block. Once the application has declared registration complete it has asserted its sources
+        // are set up, so a branch with nothing to wait for is a branch that is already synchronized.
+        // Before registration is complete this method returned false above, so an empty scope still
+        // blocks during startup.
         return true;
-    }
-
-    /// <summary>
-    /// Logs <paramref name="message"/> at most once per anchor, latched on the anchor's own subject
-    /// data. The latch is only taken right before the warning fires, so a pass that finds the branch
-    /// healthy again never burns it.
-    /// </summary>
-    private void WarnOnce(IInterceptorSubject anchor, string key, string message)
-    {
-        // Logger first: resolving it is cheap, and when no logger is configured this skips the
-        // dictionary write entirely, since the latch exists only to gate a warning.
-        var logger = ResolveLogger();
-        if (logger is not null && anchor.TryAddData(key, null))
-        {
-            logger.LogWarning(message, anchor.GetType().Name);
-        }
     }
 
     /// <summary>

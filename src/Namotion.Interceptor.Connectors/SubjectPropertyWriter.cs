@@ -15,8 +15,7 @@ namespace Namotion.Interceptor.Connectors;
 /// </remarks>
 public sealed class SubjectPropertyWriter
 {
-    private readonly ISubjectSource _source;
-    private readonly SubjectSourceBase? _sourceBase;
+    private readonly SubjectSourceBase _source;
     private readonly ILogger _logger;
     private readonly Lock _lock = new();
 
@@ -33,10 +32,14 @@ public sealed class SubjectPropertyWriter
     /// </summary>
     /// <param name="source">The source associated with this writer.</param>
     /// <param name="logger">The logger.</param>
-    public SubjectPropertyWriter(ISubjectSource source, ILogger logger)
+    /// <remarks>
+    /// Typed to the concrete base rather than <see cref="ISubjectSource"/> because this writer
+    /// drives the source's state transitions, which only <see cref="SubjectSourceBase"/> defines. A
+    /// source implementing the interface directly owns its own write path and its own transitions.
+    /// </remarks>
+    public SubjectPropertyWriter(SubjectSourceBase source, ILogger logger)
     {
         _source = source;
-        _sourceBase = source as SubjectSourceBase;
         _logger = logger;
     }
 
@@ -57,7 +60,7 @@ public sealed class SubjectPropertyWriter
             // while still holding _lock, symmetric with LoadInitialStateAndResumeAsync's own
             // TransitionTo(Synchronized) call below: both transitions are paired with the generation
             // change that governs them so neither can be observed out of sync with it.
-            _sourceBase?.TransitionTo(SourceState.Connecting);
+            _source.TransitionTo(SourceState.Connecting);
         }
     }
 
@@ -147,7 +150,7 @@ public sealed class SubjectPropertyWriter
             // StartBuffering landing in between cannot let a superseded cycle certify Synchronized.
             // Lock order writer._lock -> _stateLock -> monitor._lock (TransitionTo can reach a
             // registered monitor synchronously) is never reversed anywhere, so it cannot deadlock.
-            _sourceBase?.TransitionTo(SourceState.Synchronized);
+            _source.TransitionTo(SourceState.Synchronized);
         }
     }
 

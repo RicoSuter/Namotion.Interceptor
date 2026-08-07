@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
@@ -13,12 +14,7 @@ public class SubjectPropertyWriterTests
     public async Task WhenAfterInit_ThenUpdatesAreAppliedImmediately()
     {
         // Arrange
-        var sourceMock = new Mock<ISubjectSource>();
-        sourceMock
-            .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
-
-        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(CreateSource(), NullLogger.Instance);
         var updates = new List<string>();
 
         writer.StartBuffering();
@@ -36,14 +32,9 @@ public class SubjectPropertyWriterTests
     public async Task WhenInitialStateProvided_ThenOrderIsInitialStateThenBuffered()
     {
         // Arrange
-        var sourceMock = new Mock<ISubjectSource>();
         var order = new List<string>();
-
-        sourceMock
-            .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => { order.Add("InitialState"); });
-
-        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(
+            CreateSource(() => order.Add("InitialState")), NullLogger.Instance);
 
         // Act
         writer.StartBuffering();
@@ -60,12 +51,7 @@ public class SubjectPropertyWriterTests
     public async Task WhenUpdateThrows_ThenErrorIsLoggedAndOtherUpdatesApplied()
     {
         // Arrange
-        var sourceMock = new Mock<ISubjectSource>();
-        sourceMock
-            .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
-
-        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(CreateSource(), NullLogger.Instance);
         var updates = new List<string>();
 
         // Act
@@ -86,12 +72,7 @@ public class SubjectPropertyWriterTests
     public async Task WhenImmediateUpdateThrows_ThenErrorIsLoggedNotThrown()
     {
         // Arrange
-        var sourceMock = new Mock<ISubjectSource>();
-        sourceMock
-            .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
-
-        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(CreateSource(), NullLogger.Instance);
 
         writer.StartBuffering();
         await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
@@ -104,12 +85,7 @@ public class SubjectPropertyWriterTests
     public async Task WhenStartBufferingCalledMultipleTimes_ThenOnlyLatestBufferIsReplayed()
     {
         // Arrange
-        var sourceMock = new Mock<ISubjectSource>();
-        sourceMock
-            .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
-
-        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(CreateSource(), NullLogger.Instance);
         var updates = new List<string>();
 
         // Act
@@ -130,15 +106,10 @@ public class SubjectPropertyWriterTests
     public async Task WhenLoadInitialStateAndResumeCalledTwice_ThenSecondCallSkipsReplay()
     {
         // Arrange
-        var sourceMock = new Mock<ISubjectSource>();
         var loadCount = 0;
         var replayCount = 0;
-
-        sourceMock
-            .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => { loadCount++; });
-
-        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(
+            CreateSource(() => loadCount++), NullLogger.Instance);
 
         // Act
         writer.StartBuffering();
@@ -156,8 +127,7 @@ public class SubjectPropertyWriterTests
     public async Task WhenNotClientSource_ThenNoInitialStateLoaded()
     {
         // Arrange - using ISubjectSource (not ISubjectSource)
-        var sourceMock = new Mock<ISubjectSource>();
-        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(CreateSource(), NullLogger.Instance);
         var updates = new List<string>();
 
         // Act
@@ -174,8 +144,7 @@ public class SubjectPropertyWriterTests
     public void WhenNoStartBufferingCalled_ThenUpdatesAreBuffered()
     {
         // Arrange - _updates starts as empty list (buffering by default)
-        var sourceMock = new Mock<ISubjectSource>();
-        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(CreateSource(), NullLogger.Instance);
         var updates = new List<string>();
 
         // Act
@@ -330,5 +299,19 @@ public class SubjectPropertyWriterTests
         // Assert
         Assert.False(applied, "A load that completes after a reported connection loss must not apply pre-outage data.");
         Assert.Equal(SourceState.Connecting, source.State);
+    }
+
+    /// <summary>
+    /// A minimal started-nowhere source for writer tests. The writer takes SubjectSourceBase rather
+    /// than ISubjectSource because it drives the source's state transitions, so these cannot use a
+    /// bare interface mock.
+    /// </summary>
+    private static TestSubjectSource CreateSource(Action? onLoadInitialState = null)
+    {
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        return new TestSubjectSource(new Person(context), context, NullLogger.Instance, writeRetryQueueSize: 0)
+        {
+            LoadInitialStateOverride = _ => Task.FromResult(onLoadInitialState)
+        };
     }
 }

@@ -54,13 +54,7 @@ No wait can complete before source registration is complete, whatever its scope:
 
 After registration completes, a wait is not frozen to the sources that existed at that moment. Satisfaction is re-evaluated on every registration, unregistration, and state change, against whichever sources are registered right now, so a source that registers later and falls in scope of a still-pending wait is picked up just like any earlier source and can block it. The only wait that is frozen is one that has already completed, because a completed task cannot be un-completed. A scope that currently matches no source is, for the same reason, vacuously satisfied rather than blocking, the same way a scope whose sources are all `Stopped` is (`Stopped` is terminal, see [The State Model, Transitions, and Delivery Contract](#the-state-model-transitions-and-delivery-contract)): both complete immediately instead of waiting.
 
-Be aware of what that vacuous completion does and does not tell you. An empty scope is the correct and expected answer for a branch that genuinely has no external source, such as configuration or computed state. It is also what you get if the source for that branch was never created, or if you anchored on a branch unrelated to any source. Those are application bugs, and this library cannot distinguish them from the legitimate case, because both look identical from the inside: nothing claims here. A warning is logged the first time an empty scope is detected for a given anchor, and likewise the first time a wait on that anchor completes with every in-scope source `Stopped`. It is deduplicated per anchor rather than per wait deliberately: awaiting per operation on a local-only branch is a supported pattern, and a per-wait guard would have logged once per call forever. Treat it as a hint rather than a verdict - check that log line first if a branch you expected a source to drive completes immediately. A consumer that treats a completed wait as proof the branch is live can walk straight into a dead one.
-
-The warning needs an `ILoggerFactory` reachable from the **context**, not just from DI. `WithSourceMonitoring(builder.Services)` bridges one across for you. The parameterless overload cannot, so an application using it gets no warning at all unless it registers one itself:
-
-```csharp
-context.TryAddService(serviceProvider.GetRequiredService<ILoggerFactory>, _ => true);
-```
+An empty scope is the expected answer for a branch with no external source, such as configuration or computed state. It is also what you get if you anchored on the wrong branch, or if the source was never created. The library cannot tell those apart, so treat a completed wait as "nothing here is still loading" rather than as proof the branch is live.
 
 A subject referenced from two trees only fully participates in the first one. The context machinery that lets a subject's own context reach its tree's services adds that fallback the first time the subject attaches, and leaves it alone on a second attach from a different tree, so the subject's context keeps resolving through the first tree only. In practice that means a source claiming a property on such a subject publishes to the first tree's stream, and a wait anchored on the subject through the second tree sees only the first tree's sources, not the second tree's. Avoid sharing a subject instance across two independently-monitored trees if you need it to fully participate in both.
 
@@ -81,9 +75,9 @@ See the XML docs on `SourceState` for what each member means. `Synchronized` spe
 
 ## What Synchronized Means per Protocol
 
-OPC UA's `LoadInitialStateAsync` batch-reads every owned property from the session before returning, and WebSocket's applies the full-state message the server sends on connect. For both, reaching `Synchronized` means real values were confirmed from the external system.
+[OPC UA](connectors-opcua-client.md)'s `LoadInitialStateAsync` batch-reads every owned property from the session before returning, and WebSocket's applies the full-state message the server sends on connect. For both, reaching `Synchronized` means real values were confirmed from the external system.
 
-MQTT's `LoadInitialStateAsync` always returns `null`. Retained messages arrive indistinguishably from any other message, through the normal subscription handler, and neither MQTT 3.1.1 nor 5.0 defines a signal that says "no more retained messages are coming" for a subscription. `SubjectSourceBase` therefore reaches `Synchronized` once the client's subscriptions are established, not once retained values have actually arrived. This is a protocol limitation, not something left unfinished: raising `DefaultQualityOfService` does not change it, since QoS governs delivery guarantees for messages that are sent, not whether the broker tells the client when a topic's retained backlog is exhausted. See [#418](https://github.com/RicoSuter/Namotion.Interceptor/issues/418) for an opt-in barrier that would wait for the first message (retained or live) per subscribed topic before declaring `Synchronized`.
+[MQTT](connectors-mqtt.md)'s `LoadInitialStateAsync` always returns `null`. Retained messages arrive indistinguishably from any other message, through the normal subscription handler, and neither MQTT 3.1.1 nor 5.0 defines a signal that says "no more retained messages are coming" for a subscription. `SubjectSourceBase` therefore reaches `Synchronized` once the client's subscriptions are established, not once retained values have actually arrived. This is a protocol limitation, not something left unfinished: raising `DefaultQualityOfService` does not change it, since QoS governs delivery guarantees for messages that are sent, not whether the broker tells the client when a topic's retained backlog is exhausted. See [#418](https://github.com/RicoSuter/Namotion.Interceptor/issues/418) for an opt-in barrier that would wait for the first message (retained or live) per subscribed topic before declaring `Synchronized`.
 
 ## Applications That Create Sources at Runtime
 
@@ -93,7 +87,7 @@ There are two ways to declare registration complete, and no third: pick by wheth
 
 Because that gate opens only after every `IHostedService.StartAsync` has returned, **do not await `WaitForSynchronizationAsync` inside a `StartAsync` override, or before `host.RunAsync()`** when using this overload: registration can never complete while the host is still starting, so the wait blocks host startup and neither ever finishes. Await it from `ExecuteAsync`, or from any code that runs once the host is up, as the sample above does.
 
-An application that creates sources *after* startup, for example devices discovered at runtime, uses the parameterless `WithSourceMonitoring()` overload instead and declares registration complete itself:
+An application that creates its sources dynamically, during startup but after the DI container is built, uses the parameterless `WithSourceMonitoring()` overload instead and declares registration complete itself:
 
 ```csharp
 using Namotion.Interceptor.Connectors.Monitoring;
@@ -115,6 +109,8 @@ using var hold = _context.DeferWaitCompletion();
 ```
 
 Taking a hold blocks any wait that is still pending, but it never un-completes a wait that has already finished. Dispose the hold once the batch has registered.
+
+That is also the limit of this feature: waits describe startup, not steady state. A source created long after startup cannot re-block a wait that already completed, so follow sources that come and go at runtime through the event stream instead.
 
 ## Observing Changes
 
