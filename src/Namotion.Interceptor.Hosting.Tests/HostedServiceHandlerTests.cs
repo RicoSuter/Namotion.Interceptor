@@ -246,6 +246,99 @@ public class HostedServiceHandlerTests
         });
     }
 
+    [Fact]
+    public async Task WhenAServiceIsAttachedAfterItsHandlerDrained_ThenTheNextHandlerStartsIt()
+    {
+        // Arrange - two hosts, the second still running when the first has drained. The subject stays
+        // attached to the drained handler's context, so the attach below really does resolve it and
+        // the claim under test is reachable.
+        var firstBuilder = Host.CreateApplicationBuilder();
+
+        var firstContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(firstBuilder.Services);
+
+        var firstHost = firstBuilder.Build();
+        await firstHost.StartAsync();
+
+        var secondBuilder = Host.CreateApplicationBuilder();
+
+        var secondContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(secondBuilder.Services);
+
+        var secondHost = secondBuilder.Build();
+        await secondHost.StartAsync();
+
+        try
+        {
+            var subject = new Person();
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+            await firstHost.StopAsync();
+
+            // Act
+            var attachment = subject.AttachHostedService(() => new TrackedBackgroundService());
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => attachment.Current is { IsStarted: true },
+                message: "The drained handler claimed the target and never released it, so the live handler could not take it.");
+        }
+        finally
+        {
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheAttachAwaitIsCancelled_ThenTheStartStillRunsToCompletion()
+    {
+        // Arrange - the token bounds the caller's wait, not the transition. Aborting the work instead
+        // would leave a half started service behind and record the cancellation as a start failure,
+        // which the OPC UA wrappers surface as a user visible error status.
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService();
+            using var cancellation = new CancellationTokenSource();
+            await cancellation.CancelAsync();
+
+            // Act
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => person.AttachHostedServiceAsync(() => instance, cancellation.Token));
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => instance.IsStarted,
+                message: "The cancelled await aborted the start transition instead of only the wait.");
+
+            var attachment = Assert.Single(person.GetHostedServiceAttachments());
+            Assert.Same(instance, attachment.Current);
+            Assert.Null(attachment.Fault);
+        });
+    }
+
+    [Fact]
+    public void WhenASubjectWithoutHostedServicesIsRead_ThenNoDataEntryIsInserted()
+    {
+        // Arrange - both reads run on every context detach, under the lifecycle lock, for every
+        // subject in the graph.
+        var subject = (IInterceptorSubject)new Person();
+        var entriesBefore = subject.Data.Count;
+
+        // Act
+        var target = subject.TryGetSubjectTarget();
+        var attachments = subject.GetHostedServiceAttachments();
+
+        // Assert
+        Assert.Null(target);
+        Assert.Empty(attachments);
+        Assert.Equal(entriesBefore, subject.Data.Count);
+    }
+
     private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
     {
         var builder = Host.CreateApplicationBuilder();

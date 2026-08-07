@@ -16,8 +16,12 @@ public static class InterceptorHostingExtensions
     /// </summary>
     public static ImmutableArray<IHostedServiceAttachment> GetHostedServiceAttachments(this IInterceptorSubject subject)
     {
-        var value = subject.Data.GetOrAdd((null, AttachmentsKey), _ => null);
-        return value is ImmutableArray<IHostedServiceAttachment> attachments ? attachments : [];
+        // TryGetValue, not GetOrAdd: this runs on every context detach, under the lifecycle lock, and
+        // GetOrAdd inserts a null entry into every subject's data bag just to read it.
+        return subject.Data.TryGetValue((null, AttachmentsKey), out var value)
+            && value is ImmutableArray<IHostedServiceAttachment> attachments
+            ? attachments
+            : [];
     }
 
     /// <summary>
@@ -35,7 +39,7 @@ public static class InterceptorHostingExtensions
         var handler = subject.Context.TryGetService<HostedServiceHandler>();
         if (handler is not null && handler.IsLive(subject) && attachment.Target.TryTakeOwnership(handler))
         {
-            handler.AppendStart(subject, attachment.Target, CancellationToken.None);
+            handler.AppendStart(subject, attachment.Target);
         }
 
         return attachment;
@@ -62,8 +66,10 @@ public static class InterceptorHostingExtensions
 
         if (handler.IsLive(subject) && attachment.Target.TryTakeOwnership(handler))
         {
+            // The token bounds this wait only. The transition itself runs to completion, so a caller
+            // that gives up waiting still ends with a started instance rather than a half started one.
             await handler
-                .AppendStart(subject, attachment.Target, cancellationToken)
+                .AppendStart(subject, attachment.Target)
                 .WaitAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -167,5 +173,5 @@ public static class InterceptorHostingExtensions
     }
 
     internal static HostedServiceTarget? TryGetSubjectTarget(this IInterceptorSubject subject)
-        => subject.Data.GetOrAdd((null, SubjectTargetKey), _ => null) as HostedServiceTarget;
+        => subject.Data.TryGetValue((null, SubjectTargetKey), out var value) ? value as HostedServiceTarget : null;
 }

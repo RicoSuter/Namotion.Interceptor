@@ -247,6 +247,170 @@ public class HostedServiceHandlerRaceTests
         }
     }
 
+    [Fact]
+    public async Task WhenAStopIsStillQueuedWhenTheDrainCompletes_ThenItStillStopsAndDisposes()
+    {
+        // Arrange - the detached subject's stop and its attachment's stop are both queued while the
+        // drain snapshots an empty running set, so both run with the gate already Drained.
+        var (child, created, release) = await ArrangeDetachedSubjectWithTheDrainCompletedAsync();
+
+        // Act
+        release.SetResult();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => created.ToArray() is [{ IsStopped: true, IsDisposed: true }],
+            message: "The queued stop was dropped at Drained, so the attachment was never stopped and never disposed.");
+
+        Assert.Equal(1, child.StopCount);
+    }
+
+    [Fact]
+    public async Task WhenAStopRanAfterTheDrain_ThenTheNextHandlerStartsTheSubjectAndItsAttachmentAgain()
+    {
+        // Arrange - the permanent half of the same defect. A stop dropped at Drained leaves Current
+        // set, and the one instance guard then skips every later start, so the subject sits in a live
+        // graph with nothing running.
+        var (child, created, release) = await ArrangeDetachedSubjectWithTheDrainCompletedAsync();
+        release.SetResult();
+
+        var builder = Host.CreateApplicationBuilder();
+
+        var secondContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var secondHost = builder.Build();
+        await secondHost.StartAsync();
+
+        try
+        {
+            // Act - the new starts queue behind the released stops, on the same two chains.
+            var secondParent = new HostedParent(secondContext);
+            secondParent.Child = child;
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => child.StartCount == 2 && created.ToArray() is [_, { IsStarted: true }],
+                message: "The second handler started nothing: the dropped stop left both targets holding a stale instance.");
+
+            Assert.True(created.ToArray()[0].IsDisposed);
+        }
+        finally
+        {
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAQueuedStartIsGatedOutByTheDrain_ThenAnEarlierFaultSurvives()
+    {
+        // Arrange - a start that never creates anything must not clear the fault a caller has not
+        // read yet. Two seams: the transition seam queues the start, and the drain seam proves the
+        // gate is already draining when it runs.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var parent = new Parent(context);
+        var child = new Person();
+        var shouldThrow = true;
+
+        var attachment = child.AttachHostedService(() =>
+        {
+            if (shouldThrow)
+            {
+                shouldThrow = false;
+                throw new InvalidOperationException("first attempt fails");
+            }
+
+            return new TrackedBackgroundService();
+        });
+
+        parent.Child = child;
+        await AsyncTestHelpers.WaitUntilAsync(() => attachment.Fault is not null);
+
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        target.TransitionGate = () => release.Task;
+
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+        var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.DrainGate = () =>
+        {
+            drainEntered.TrySetResult();
+            return releaseDrain.Task;
+        };
+
+        // Act - the re-attach's start is queued behind the held stop and runs once draining began.
+        parent.Child = null;
+        parent.Child = child;
+
+        var stopping = host.StopAsync();
+        await drainEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        release.SetResult();
+        releaseDrain.SetResult();
+
+        // Assert - the drain appends its own stop behind that start and awaits it, so the start has
+        // provably run by the time the shutdown returns.
+        await stopping;
+        Assert.NotNull(attachment.Fault);
+    }
+
+    /// <summary>
+    /// Starts a host over a hosted subject that carries a factory attachment, detaches the subject
+    /// with its own stop held on the transition seam, and drains the host. Both targets leave the
+    /// running set when their stops are appended, so the drain snapshots nothing and reaches Drained
+    /// while both stops are still queued. Returns before the hold is released.
+    /// </summary>
+    private static async Task<(CountingHostedSubject Child, ConcurrentQueue<TrackedBackgroundService> Created, TaskCompletionSource Release)>
+        ArrangeDetachedSubjectWithTheDrainCompletedAsync()
+    {
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var parent = new HostedParent(context);
+        var child = new CountingHostedSubject();
+        var created = new ConcurrentQueue<TrackedBackgroundService>();
+
+        child.AttachHostedService(() =>
+        {
+            var instance = new TrackedBackgroundService();
+            created.Enqueue(instance);
+            return instance;
+        });
+
+        parent.Child = child;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => child.StartCount == 1 && created.ToArray() is [{ IsStarted: true }]);
+
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var subjectTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
+        subjectTarget.TransitionGate = () => release.Task;
+
+        parent.Child = null;
+        await host.StopAsync();
+
+        subjectTarget.TransitionGate = null;
+        return (child, created, release);
+    }
+
     private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
     {
         var builder = Host.CreateApplicationBuilder();

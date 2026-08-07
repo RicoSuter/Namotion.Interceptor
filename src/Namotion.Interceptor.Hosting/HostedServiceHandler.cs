@@ -48,6 +48,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     private void AttachSubject(IInterceptorSubject subject)
     {
+        if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        {
+            // A draining or drained handler must not take ownership again. Nothing it owns can ever
+            // start, and the target would stay owned by a dead handler, so the next handler over the
+            // same subject loses the compare and exchange and never starts anything.
+            return;
+        }
+
         _liveSubjects[subject] = 0;
 
         if (subject is IHostedService hostedService)
@@ -55,7 +63,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             var target = subject.GetOrAddSubjectTarget(hostedService);
             if (target.TryTakeOwnership(this))
             {
-                AppendStart(subject, target, CancellationToken.None);
+                AppendStart(subject, target);
             }
         }
 
@@ -64,7 +72,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             var target = ((IHostedServiceAttachmentTarget)attachment).Target;
             if (target.TryTakeOwnership(this))
             {
-                AppendStart(subject, target, CancellationToken.None);
+                AppendStart(subject, target);
             }
         }
     }
@@ -106,14 +114,18 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
     }
 
-    internal Task AppendStart(IInterceptorSubject subject, HostedServiceTarget target, CancellationToken cancellationToken)
+    /// <summary>
+    /// Appends a start transition. Deliberately takes no cancellation token: a caller's token bounds
+    /// its wait for the transition, never the transition itself, or cancelling an
+    /// <c>AttachHostedServiceAsync</c> await would abort a start that is already under way and record
+    /// the cancellation as a start failure.
+    /// </summary>
+    internal Task AppendStart(IInterceptorSubject subject, HostedServiceTarget target)
     {
         _running[target] = subject;
 
         return target.AppendAsync(async _ =>
         {
-            target.SetFault(null);
-
             await _gate.WaitForOpenAsync().ConfigureAwait(false);
             if (_gate.State != HostedServiceGateState.Running)
             {
@@ -137,9 +149,13 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 return;
             }
 
+            // Cleared after every guard, never before: a start that is gated out or skipped must not
+            // drop a fault that a caller has not read yet.
+            target.SetFault(null);
+
             try
             {
-                await Task.Delay(StartDelayMilliseconds, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(StartDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
 
                 var instance = target.Subject ?? target.Factory!();
                 try
@@ -163,7 +179,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 target.SetFault(exception);
                 Logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
             }
-        }, cancellationToken);
+        }, CancellationToken.None);
     }
 
     internal Task AppendStop(
@@ -187,11 +203,13 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                     await waitFor.ConfigureAwait(false);
                 }
 
+                // Waited for, but not read: a stop runs at every state, Drained included. The null
+                // check below already makes it a no-op once the drain has stopped the target, so the
+                // only case a Drained check changes is the one it must not. A target leaves the
+                // running set when its stop is APPENDED, so a stop queued before the drain and still
+                // parked (an attachment waits for its subject's whole unwind) is in no snapshot and
+                // reaches Drained with its instance still running.
                 await _gate.WaitForOpenAsync().ConfigureAwait(false);
-                if (_gate.State == HostedServiceGateState.Drained)
-                {
-                    return;
-                }
 
                 var instance = target.Current;
                 if (instance is null)
@@ -279,6 +297,11 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     {
         _gate.BeginDraining();
 
+        // Liveness ends where the drain begins. A handler that still reports a subject as live claims
+        // ownership of every attachment added to it afterwards, appends a start that no-ops, and never
+        // releases it, because the release loop below only covers the drain's own snapshot.
+        _liveSubjects.Clear();
+
         if (DrainGate is { } drainGate)
         {
             await drainGate().ConfigureAwait(false);
@@ -300,6 +323,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             // and released at all so a second host over the same subjects is not blocked forever.
             target.ReleaseOwnership(this);
         }
+
+        // A drained handler is still reachable from the context that created it, so it must not keep
+        // rooting the subjects and targets it has seen.
+        _running.Clear();
 
         _gate.CompleteDraining();
     }
