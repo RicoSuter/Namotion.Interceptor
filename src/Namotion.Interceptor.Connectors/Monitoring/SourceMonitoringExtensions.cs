@@ -12,6 +12,7 @@ public static class SourceMonitoringExtensions
 {
     private const string NoMonitorMessage =
         "No SourceMonitor is reachable from this context. Call WithSourceMonitoring() on the tree root context.";
+
     /// <summary>
     /// Gets the property's synchronization state, derived from its owning source with no per-property storage.
     /// </summary>
