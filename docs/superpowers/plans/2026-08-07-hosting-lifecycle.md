@@ -252,446 +252,52 @@ loop never started and every subject in that context silently never ran."
 
 ---
 
-## Task 3: The gate and the target
+## Task 3 (DONE): The gate and the target
+
+Executed as a spike before the rest of the plan, to validate the riskiest primitives and confirm the
+plan's code is written against the real APIs. Shipped in commit `feat: add the hosted service gate and
+per target transition chain`. 11 tests, all passing.
+
+Two things the spike corrected in this plan:
+
+- `Task.WhenAll` over `IEnumerable<Task<Task>>` binds to the non generic overload and yields `void`
+  (`CS0815`), and `Task.Run(Func<Task>)` unwraps, so awaiting it waits for the transition rather than
+  for the append and deadlocks against a held head. The concurrency test uses real threads and a
+  `Barrier` instead, which also produces sharper contention.
+- The test project needs `<InternalsVisibleTo Include="Namotion.Interceptor.Hosting.Tests" />` in
+  `Namotion.Interceptor.Hosting.csproj`, since the gate, the target and the handler are all internal.
+  The repository already uses this pattern, for example in `Namotion.Devices.Shelly.csproj:11`.
+
+**Files shipped:**
+- `src/Namotion.Interceptor.Hosting/HostedServiceGate.cs`
+- `src/Namotion.Interceptor.Hosting/HostedServiceTarget.cs`
+- `src/Namotion.Interceptor.Hosting/Namotion.Interceptor.Hosting.csproj` (InternalsVisibleTo)
+- `src/Namotion.Interceptor.Hosting.Tests/HostedServiceGateTests.cs`
+- `src/Namotion.Interceptor.Hosting.Tests/HostedServiceTargetTests.cs`
+
+**Interfaces produced**, which Tasks 4 and 5 consume:
+
+- `internal enum HostedServiceGateState { NotStarted, Running, Draining, Drained }`
+- `internal sealed class HostedServiceGate`: `HostedServiceGateState State { get; }`,
+  `void EnsureStarted()`, `void BeginDraining()`, `void CompleteDraining()`, `Task WaitForOpenAsync()`
+- `internal sealed class HostedServiceTarget`: constructor
+  `(Func<IHostedService>? factory, IHostedService? subject)`, and
+  `Func<IHostedService>? Factory`, `IHostedService? Subject`, `bool IsHandlerOwnedInstance`,
+  `Func<Task>? TransitionGate`, `IHostedService? Current`, `Exception? Fault`,
+  `HostedServiceHandler? Owner`, `void SetCurrent(IHostedService?)`, `void SetFault(Exception?)`,
+  `bool TryTakeOwnership(HostedServiceHandler)`, `void ReleaseOwnership(HostedServiceHandler)`,
+  `Task AppendAsync(Func<CancellationToken, Task>, CancellationToken)`
+
+**The stall seam.** `HostedServiceTarget.TransitionGate` is a `Func<Task>?` awaited at the top of every
+transition body, null in production. A test sets it to a `TaskCompletionSource`-backed function to hold
+a transition at a known point. Task 4 adds the matching `HostedServiceHandler.DrainGate` so a test can
+hold the drain in `Draining`. Together these are what make the four race tests in Task 4 deterministic
+instead of timing dependent.
+
+**Verification performed.** The concurrency test was run as a positive control with the lock removed
+from `AppendAsync`, and failed with 4 transitions running concurrently on one target. A test that
+cannot fail is not protecting anything, and this one demonstrably can.
 
-The two concurrency primitives, built and tested without a host. Everything later depends on these being right, and they are the pieces two design reviews found easiest to get subtly wrong.
-
-**Files:**
-- Create: `src/Namotion.Interceptor.Hosting/HostedServiceGate.cs`
-- Create: `src/Namotion.Interceptor.Hosting/HostedServiceTarget.cs`
-- Create: `src/Namotion.Interceptor.Hosting.Tests/HostedServiceGateTests.cs`
-- Create: `src/Namotion.Interceptor.Hosting.Tests/HostedServiceTargetTests.cs`
-
-**Interfaces:**
-- Consumes: nothing.
-- Produces:
-  - `internal enum HostedServiceGateState { NotStarted, Running, Draining, Drained }`
-  - `internal sealed class HostedServiceGate` with `HostedServiceGateState State { get; }`, `void EnsureStarted()`, `void BeginDraining()`, `void CompleteDraining()`, `Task WaitForOpenAsync()`
-  - `internal sealed class HostedServiceTarget` with `Func<IHostedService>? Factory`, `IHostedService? Current`, `Exception? Fault`, `HostedServiceHandler? Owner`, `bool TryTakeOwnership(HostedServiceHandler)`, `void ReleaseOwnership(HostedServiceHandler)`, `Task AppendAsync(Func<CancellationToken, Task>, CancellationToken)`
-
-- [ ] **Step 1: Write the failing gate tests**
-
-Create `src/Namotion.Interceptor.Hosting.Tests/HostedServiceGateTests.cs`:
-
-```csharp
-namespace Namotion.Interceptor.Hosting.Tests;
-
-public class HostedServiceGateTests
-{
-    [Fact]
-    public void WhenEnsureStartedIsCalledTwice_ThenStateIsRunningOnce()
-    {
-        // Arrange
-        var gate = new HostedServiceGate();
-
-        // Act
-        gate.EnsureStarted();
-        gate.EnsureStarted();
-
-        // Assert
-        Assert.Equal(HostedServiceGateState.Running, gate.State);
-    }
-
-    [Fact]
-    public void WhenEnsureStartedIsCalledWhileDraining_ThenStateStaysDraining()
-    {
-        // Arrange
-        var gate = new HostedServiceGate();
-        gate.EnsureStarted();
-        gate.BeginDraining();
-
-        // Act
-        gate.EnsureStarted();
-
-        // Assert - a plain assignment here would reopen the shutdown race the fourth state exists to close
-        Assert.Equal(HostedServiceGateState.Draining, gate.State);
-    }
-
-    [Fact]
-    public async Task WhenGateIsNotStarted_ThenWaitDoesNotComplete()
-    {
-        // Arrange
-        var gate = new HostedServiceGate();
-
-        // Act
-        var wait = gate.WaitForOpenAsync();
-
-        // Assert
-        Assert.False(wait.IsCompleted);
-        gate.EnsureStarted();
-        await wait;
-    }
-
-    [Fact]
-    public async Task WhenDrainingStartsFromNotStarted_ThenParkedWaitersAreReleasedAtDrained()
-    {
-        // Arrange - a host that aborts startup never opens the gate; parked transitions must not hang
-        var gate = new HostedServiceGate();
-        var wait = gate.WaitForOpenAsync();
-        Assert.False(wait.IsCompleted);
-
-        // Act
-        gate.BeginDraining();
-        gate.CompleteDraining();
-
-        // Assert
-        await wait;
-        Assert.Equal(HostedServiceGateState.Drained, gate.State);
-    }
-}
-```
-
-- [ ] **Step 2: Run to verify they fail**
-
-Run: `dotnet test src/Namotion.Interceptor.Hosting.Tests --filter "FullyQualifiedName~HostedServiceGateTests"`
-Expected: FAIL to compile with `CS0246: The type or namespace name 'HostedServiceGate' could not be found`.
-
-- [ ] **Step 3: Implement the gate**
-
-Create `src/Namotion.Interceptor.Hosting/HostedServiceGate.cs`:
-
-```csharp
-namespace Namotion.Interceptor.Hosting;
-
-internal enum HostedServiceGateState
-{
-    NotStarted,
-    Running,
-    Draining,
-    Drained
-}
-
-/// <summary>
-/// Startup and shutdown gate for hosted service transitions. The state only ever moves forward:
-/// NotStarted to Running to Draining to Drained, or NotStarted straight to Draining when a host
-/// is stopped without having started.
-/// </summary>
-internal sealed class HostedServiceGate
-{
-    private readonly object _sync = new();
-    private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    private HostedServiceGateState _state = HostedServiceGateState.NotStarted;
-
-    public HostedServiceGateState State
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _state;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Advances NotStarted to Running. A one way ratchet: calling this during shutdown must not
-    /// reopen the gate, or a detach arriving mid drain would let queued starts run again.
-    /// </summary>
-    public void EnsureStarted()
-    {
-        var opened = false;
-        lock (_sync)
-        {
-            if (_state == HostedServiceGateState.NotStarted)
-            {
-                _state = HostedServiceGateState.Running;
-                opened = true;
-            }
-        }
-
-        if (opened)
-        {
-            _opened.TrySetResult();
-        }
-    }
-
-    public void BeginDraining()
-    {
-        lock (_sync)
-        {
-            if (_state is HostedServiceGateState.NotStarted or HostedServiceGateState.Running)
-            {
-                _state = HostedServiceGateState.Draining;
-            }
-        }
-
-        // Releases anything parked on a gate that was never opened, so a host that aborts
-        // startup does not leave transitions and their awaiters hanging forever.
-        _opened.TrySetResult();
-    }
-
-    public void CompleteDraining()
-    {
-        lock (_sync)
-        {
-            _state = HostedServiceGateState.Drained;
-        }
-
-        _opened.TrySetResult();
-    }
-
-    /// <summary>
-    /// Completes once the gate has left <see cref="HostedServiceGateState.NotStarted"/>. Callers
-    /// must then read <see cref="State"/> and decide what to do; the wait itself carries no verdict.
-    /// </summary>
-    public Task WaitForOpenAsync() => _opened.Task;
-}
-```
-
-- [ ] **Step 4: Run to verify the gate tests pass**
-
-Run: `dotnet test src/Namotion.Interceptor.Hosting.Tests --filter "FullyQualifiedName~HostedServiceGateTests"`
-Expected: PASS, 4 tests.
-
-- [ ] **Step 5: Write the failing target tests**
-
-Create `src/Namotion.Interceptor.Hosting.Tests/HostedServiceTargetTests.cs`:
-
-```csharp
-namespace Namotion.Interceptor.Hosting.Tests;
-
-public class HostedServiceTargetTests
-{
-    [Fact]
-    public async Task WhenTransitionsAreAppendedConcurrently_ThenTheyNeverOverlap()
-    {
-        // Arrange - an unsynchronised "_tail = _tail.ContinueWith(...)" is a read-modify-write and
-        // loses an assignment under contention, running several transitions on one target at once.
-        var target = new HostedServiceTarget(factory: null, subject: null);
-        var head = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var concurrent = 0;
-        var maximumConcurrent = 0;
-        var sync = new object();
-
-        var stall = target.AppendAsync(async _ => await head.Task, CancellationToken.None);
-
-        // Act
-        var appended = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
-            target.AppendAsync(async _ =>
-            {
-                lock (sync)
-                {
-                    concurrent++;
-                    maximumConcurrent = Math.Max(maximumConcurrent, concurrent);
-                }
-
-                await Task.Yield();
-
-                lock (sync)
-                {
-                    concurrent--;
-                }
-            }, CancellationToken.None))).ToArray();
-
-        var transitions = await Task.WhenAll(appended);
-        head.SetResult();
-        await stall;
-        await Task.WhenAll(transitions);
-
-        // Assert
-        Assert.Equal(1, maximumConcurrent);
-    }
-
-    [Fact]
-    public async Task WhenATransitionThrows_ThenTheFaultIsRecordedAndTheChainContinues()
-    {
-        // Arrange - a faulted tail that propagated would raise UnobservedTaskException for every
-        // dropped fire and forget transition, and would surface nowhere at all.
-        var target = new HostedServiceTarget(factory: null, subject: null);
-        var secondRan = false;
-
-        // Act
-        await target.AppendAsync(_ => throw new InvalidOperationException("boom"), CancellationToken.None);
-        await target.AppendAsync(_ =>
-        {
-            secondRan = true;
-            return Task.CompletedTask;
-        }, CancellationToken.None);
-
-        // Assert
-        Assert.True(secondRan);
-    }
-
-    [Fact]
-    public async Task WhenATransitionIsAppended_ThenItDoesNotRunOnTheAppendingThread()
-    {
-        // Arrange - appends happen while LifecycleInterceptor holds its lock, so an inline
-        // continuation would run user code under that lock.
-        var target = new HostedServiceTarget(factory: null, subject: null);
-        var appendingThread = Environment.CurrentManagedThreadId;
-        var ranInline = false;
-
-        // Act
-        await target.AppendAsync(_ =>
-        {
-            ranInline = Environment.CurrentManagedThreadId == appendingThread;
-            return Task.CompletedTask;
-        }, CancellationToken.None);
-
-        // Assert
-        Assert.False(ranInline);
-    }
-
-    [Fact]
-    public void WhenOwnershipIsTakenTwiceByTheSameHandler_ThenItSucceeds()
-    {
-        // Arrange - a re-attach arriving before the release must not be read as "lost to another handler"
-        var target = new HostedServiceTarget(factory: null, subject: null);
-        var handler = new HostedServiceHandler(() => null);
-
-        // Act
-        var first = target.TryTakeOwnership(handler);
-        var second = target.TryTakeOwnership(handler);
-
-        // Assert
-        Assert.True(first);
-        Assert.True(second);
-    }
-
-    [Fact]
-    public void WhenASecondHandlerTakesOwnership_ThenItFails()
-    {
-        // Arrange
-        var target = new HostedServiceTarget(factory: null, subject: null);
-        var first = new HostedServiceHandler(() => null);
-        var second = new HostedServiceHandler(() => null);
-        target.TryTakeOwnership(first);
-
-        // Act
-        var taken = target.TryTakeOwnership(second);
-
-        // Assert
-        Assert.False(taken);
-        Assert.Same(first, target.Owner);
-    }
-}
-```
-
-- [ ] **Step 6: Run to verify they fail**
-
-Run: `dotnet test src/Namotion.Interceptor.Hosting.Tests --filter "FullyQualifiedName~HostedServiceTargetTests"`
-Expected: FAIL to compile, `HostedServiceTarget` does not exist.
-
-- [ ] **Step 7: Implement the target**
-
-Create `src/Namotion.Interceptor.Hosting/HostedServiceTarget.cs`:
-
-```csharp
-using Microsoft.Extensions.Hosting;
-
-namespace Namotion.Interceptor.Hosting;
-
-/// <summary>
-/// One managed thing: either a subject that implements <see cref="IHostedService"/>, or a factory
-/// attachment. Owns a serialized transition chain so start, stop and dispose for this target never
-/// interleave, while transitions for unrelated targets run concurrently.
-/// </summary>
-internal sealed class HostedServiceTarget
-{
-    private readonly object _sync = new();
-
-    private Task _tail = Task.CompletedTask;
-    private IHostedService? _current;
-    private Exception? _fault;
-    private HostedServiceHandler? _owner;
-
-    public HostedServiceTarget(Func<IHostedService>? factory, IHostedService? subject)
-    {
-        Factory = factory;
-        Subject = subject;
-    }
-
-    /// <summary>The factory for an attachment, or null when this target is a subject.</summary>
-    public Func<IHostedService>? Factory { get; }
-
-    /// <summary>The subject when this target is a subject, or null when it is an attachment.</summary>
-    public IHostedService? Subject { get; }
-
-    /// <summary>True when the handler created the current instance and must therefore dispose it.</summary>
-    public bool IsHandlerOwnedInstance => Factory is not null;
-
-    public IHostedService? Current => Volatile.Read(ref _current);
-
-    public Exception? Fault => Volatile.Read(ref _fault);
-
-    public HostedServiceHandler? Owner => Volatile.Read(ref _owner);
-
-    public void SetCurrent(IHostedService? instance) => Volatile.Write(ref _current, instance);
-
-    public void SetFault(Exception? fault) => Volatile.Write(ref _fault, fault);
-
-    /// <summary>
-    /// Takes ownership for the given handler. Finding this handler already installed counts as
-    /// success; only losing to a different handler returns false.
-    /// </summary>
-    public bool TryTakeOwnership(HostedServiceHandler handler)
-    {
-        var previous = Interlocked.CompareExchange(ref _owner, handler, null);
-        return previous is null || ReferenceEquals(previous, handler);
-    }
-
-    public void ReleaseOwnership(HostedServiceHandler handler)
-        => Interlocked.CompareExchange(ref _owner, null, handler);
-
-    /// <summary>
-    /// Appends a transition to this target's chain and returns a task that completes when it has run.
-    /// Appending never blocks and never runs the body, so callers may append while holding a lock.
-    /// </summary>
-    public Task AppendAsync(Func<CancellationToken, Task> body, CancellationToken cancellationToken)
-    {
-        lock (_sync)
-        {
-            // The lock is required: "_tail = _tail.ContinueWith(...)" is a read-modify-write and
-            // two racing appenders lose an assignment, running both transitions concurrently.
-            // TaskScheduler.Default is required: ContinueWith otherwise captures TaskScheduler.Current,
-            // which can be a scheduler the appending task is itself occupying.
-            _tail = _tail
-                .ContinueWith(
-                    _ => RunAsync(body, cancellationToken),
-                    CancellationToken.None,
-                    TaskContinuationOptions.None,
-                    TaskScheduler.Default)
-                .Unwrap();
-
-            return _tail;
-        }
-    }
-
-    private static async Task RunAsync(Func<CancellationToken, Task> body, CancellationToken cancellationToken)
-    {
-        // Bodies never throw. A faulted tail would raise UnobservedTaskException for every dropped
-        // fire and forget transition and would be retained until the target transitions again.
-        try
-        {
-            await body(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            // Handled by the body itself, which records into Fault and logs. This catch only
-            // guarantees the chain stays unfaulted.
-        }
-    }
-}
-```
-
-- [ ] **Step 8: Run to verify the target tests pass**
-
-Run: `dotnet test src/Namotion.Interceptor.Hosting.Tests --filter "FullyQualifiedName~HostedServiceTargetTests"`
-Expected: PASS, 5 tests. If `WhenTransitionsAreAppendedConcurrently` fails with `maximumConcurrent > 1`, the lock or the scheduler argument was dropped.
-
-- [ ] **Step 9: Commit**
-
-```bash
-git add src/Namotion.Interceptor.Hosting src/Namotion.Interceptor.Hosting.Tests
-git commit -m "feat: add the hosted service gate and per target transition chain
-
-Two primitives the handler rewrite needs: a four state startup and shutdown
-gate that only ratchets forward, and a target that serializes its own start,
-stop and dispose transitions without coupling unrelated services."
-```
-
----
 
 ## Task 4: Rewrite the handler and the attachment API
 
@@ -714,7 +320,7 @@ The core of the change. The handler and the extension methods are rewritten toge
   - `bool DetachHostedService(this IInterceptorSubject, IHostedServiceAttachment)`
   - `Task<bool> DetachHostedServiceAsync(this IInterceptorSubject, IHostedServiceAttachment, CancellationToken)`
   - `ImmutableArray<IHostedServiceAttachment> GetHostedServiceAttachments(this IInterceptorSubject)`
-  - On `HostedServiceHandler`: `internal Task EnsureStartedAsync()`, `internal Task WaitForStartAsync(IInterceptorSubject, IHostedService, CancellationToken)`
+  - On `HostedServiceHandler`: `internal Task EnsureStartedAsync()`, `internal Task WaitForStartAsync(IInterceptorSubject, IHostedService, CancellationToken)`, `internal Func<Task>? DrainGate { get; set; }` (test seam, awaited in `StopAsync` after `BeginDraining` and before the running set is snapshotted, null in production)
 
 Read the spec's "Concurrency: per target serialization" section in full before writing any code in this task. Five decisions in it are counter intuitive and each has a measured failure behind it.
 
@@ -2494,19 +2100,32 @@ hosted service must not detach an attachment from inside its own stop path."
 
 ---
 
-## Deferred test coverage
+## Race coverage, folded into Task 4
 
-The spec lists 29 test scenarios. Tasks 1 to 9 implement the ones that pin behaviour a reviewer can check without new infrastructure. The following need a **stall seam**, one internal hook that lets a test hold a named transition or hold the drain in `Draining`. Design that seam once, then write these together as a final task rather than four ad hoc delays, and do not use timing:
+These four were originally deferred to a final task. They are not deferred any more, because they cover
+the failures that only ever showed up under a replica and that no amount of reading caught, and because
+the seam they need now exists as of Task 3. Write them in Task 4 alongside the handler:
 
-- A target attached during the drain is not left running (measured at 3 in 400 without the fourth gate state).
-- An attachment added while a detach is in flight is not left running (329 in 400 with target level liveness instead of subject level).
+- A target attached **during** the drain is not left running. Measured at 3 in 400 without the fourth
+  gate state. Uses `HostedServiceHandler.DrainGate` to hold the drain in `Draining`.
+- An attachment added while a detach is in flight is not left running. Measured at 329 in 400 with
+  target level liveness instead of the per subject flag. Uses `TransitionGate` on the detach.
 - A context detach immediately followed by a re-attach where the re-attach provably lands mid stop.
+  Holds the subject's stop on `TransitionGate`.
 - Concurrent appends to one target, driven by an explicit detach racing a context detach.
 
-Two more are worth writing but are not blocking:
+Each needs a positive control, the way the Task 3 concurrency test was validated by removing the lock
+and watching it fail with 4 concurrent transitions. A race test that has never been seen to fail is not
+evidence of anything.
 
-- Stopping the host while a wrapper's `ExecuteAsync` is unwinding completes well inside a shortened `HostOptions.ShutdownTimeout`. This is the regression guard for the deadlock Task 7 removes.
-- A dropped fire and forget faulted transition raises no `UnobservedTaskException`. Vacuous while transition bodies never throw, so it needs a positive control proving the assertion can fail, `GC.Collect` plus `WaitForPendingFinalizers`, and a non parallel collection because `TaskScheduler.UnobservedTaskException` is process global.
+Two further tests are worth writing but are not blocking:
+
+- Stopping the host while a wrapper's `ExecuteAsync` is unwinding completes well inside a shortened
+  `HostOptions.ShutdownTimeout`. This is the regression guard for the deadlock Task 7 removes.
+- A dropped fire and forget faulted transition raises no `UnobservedTaskException`. Vacuous while
+  transition bodies never throw, so it needs a positive control, `GC.Collect` plus
+  `WaitForPendingFinalizers`, and a non parallel collection because
+  `TaskScheduler.UnobservedTaskException` is process global.
 
 ## Verification before opening the pull request
 
