@@ -374,6 +374,38 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public void WhenAnInboundApplyIsTransformedByAHook_ThenItDoesNotAdvanceTheCommitMarker()
+    {
+        // Arrange: FinalizeOrigin demotes a stamped origin to Local when the stored value differs from
+        // the sent value, which is right for publishing (the local model computed it) but must not make
+        // the write count as a local commit. If it did, a property carrying a clamp or normalize hook
+        // would let an inbound value supersede a local write that had already committed, so whether a
+        // user's write survives would depend on whether that property happens to have a hook.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        context.AddService<IWriteInterceptor>(new UppercasingInterceptor());
+
+        var subject = new Person(context);
+        var source = new object();
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+
+        subject.FirstName = "userwrite";
+        Assert.True(property.TryGetWriteState(out var markerAfterLocalWrite, out _));
+
+        // Act: an inbound apply the hook rewrites, so the origin demotes to Local.
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(source), "server-value"))
+        {
+            subject.FirstName = "server-value";
+        }
+
+        // Assert
+        Assert.Equal("SERVER-VALUE", subject.FirstName);
+        Assert.True(property.TryGetWriteState(out var markerAfterInboundApply, out _));
+        Assert.Equal(markerAfterLocalWrite, markerAfterInboundApply);
+    }
+
+    [Fact]
     public async Task WhenAParkedWriteIsSupersededByALaterLocalWrite_ThenOnlyTheLaterOneIsSent()
     {
         // Arrange: this is the case that must still drop. The second local write supersedes the first,
@@ -387,8 +419,19 @@ public class SubjectSourceBaseTests
         var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
             initialStateAction: _ => { });
 
-        WriteAndPark(source, subject, nameof(Person.FirstName), "Original", "FirstAttempt");
-        WriteAndPark(source, subject, nameof(Person.FirstName), "FirstAttempt", "SecondAttempt");
+        // The later local write commits normally; the parked change carries the revision from before it,
+        // which is what a write captured earlier and flushed late looks like. Parking both writes instead
+        // would let CollapsePerProperty merge them before the reconcile loop, so the survivor would take
+        // the send branch and this test would pass with the production drop deleted.
+        subject.FirstName = "SecondAttempt";
+        Assert.True(new PropertyReference(subject, nameof(Person.FirstName))
+            .TryGetWriteState(out var firstNameMarker, out _));
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "FirstAttempt",
+            revision: firstNameMarker - 1);
+
+        // A second property gives the reconcile something to send, so the wait below has a signal and the
+        // drop is observed rather than merely not-yet-flushed.
+        WriteAndPark(source, subject, nameof(Person.LastName), "OrigLast", "ClientLast");
 
         // Act
         await source.StartAsync(CancellationToken.None);
@@ -398,6 +441,7 @@ public class SubjectSourceBaseTests
         // Assert
         Assert.Equal("SecondAttempt", subject.FirstName);
         Assert.DoesNotContain(writtenChanges, c => c.GetNewValue<string?>() == "FirstAttempt");
+
     }
 
     [Fact]
@@ -879,7 +923,7 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
-    public async Task WhenTheLoadOverwritesOnlyOneParkedWrite_ThenBothLocalWritesWin()
+    public async Task WhenOneParkedWriteIsSupersededAndOneIsNot_ThenEachTakesItsOwnBranch()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -889,14 +933,17 @@ public class SubjectSourceBaseTests
 
         var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
             initialStateAction: s =>
-            {
-                // Server changed this -> conflict
-                new PropertyReference(subject, nameof(Person.FirstName)).SetValueFromSource(s, null, null, "ServerFirst");
-                // Server didn't change this -> no conflict
-                new PropertyReference(subject, nameof(Person.LastName)).SetValueFromSource(s, null, null, "OrigLast");
-            });
+                // Moves the model off LastName's parked value, so that one takes the restore branch.
+                new PropertyReference(subject, nameof(Person.LastName)).SetValueFromSource(s, null, null, "OrigLast"));
 
-        WriteAndPark(source, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
+        // Two different outcomes in one reconcile pass: FirstName's parked write is superseded by a
+        // later local commit and must drop, LastName's is not and must be restored and sent.
+        subject.FirstName = "NewerFirst";
+        Assert.True(new PropertyReference(subject, nameof(Person.FirstName))
+            .TryGetWriteState(out var firstNameMarker, out _));
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst",
+            revision: firstNameMarker - 1);
+
         WriteAndPark(source, subject, nameof(Person.LastName), "OrigLast", "ClientLast");
 
         // Act
@@ -904,13 +951,9 @@ public class SubjectSourceBaseTests
         await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await source.StopAsync(CancellationToken.None);
 
-        // Assert - whether the load happened to move the property or not, neither local write is lost:
-        // one is sent as-is, the other is restored first, and both reach the source.
-        Assert.Equal("ClientFirst", subject.FirstName);
+        // Assert
         Assert.Equal("ClientLast", subject.LastName);
-        Assert.Contains(writtenChanges, c =>
-            c.Property.Name == nameof(Person.FirstName) &&
-            c.GetNewValue<string?>() == "ClientFirst");
+        Assert.DoesNotContain(writtenChanges, c => c.GetNewValue<string?>() == "ClientFirst");
         Assert.Contains(writtenChanges, c =>
             c.Property.Name == nameof(Person.LastName) &&
             c.GetNewValue<string?>() == "ClientLast");
@@ -943,7 +986,12 @@ public class SubjectSourceBaseTests
         // Assert - the load moved both properties, and both local writes are restored and sent
         Assert.Equal("ClientFirst", subject.FirstName);
         Assert.Equal("ClientLast", subject.LastName);
-        Assert.NotEmpty(writtenChanges);
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.FirstName) &&
+            c.GetNewValue<string?>() == "ClientFirst");
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.LastName) &&
+            c.GetNewValue<string?>() == "ClientLast");
     }
 
     [Fact]

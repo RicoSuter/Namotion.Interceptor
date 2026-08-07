@@ -9,11 +9,12 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors.Tests;
 
 /// <summary>
-/// Delivering only the current value is safe because a change is dropped only when the model holds a
-/// different one, and every transition to the model's current value is itself enqueued to every
-/// processor that does not own it. These pin the cases where that could fail: a stored value that is
-/// not the value that was written, a derived value the getter recomputes, and a newer value that
-/// arrives from a different source.
+/// Delivery is decided by commit order: a change is dropped only when a later non-source commit will
+/// carry the settled value in its place. These pin cases where a value-based rule went wrong and the
+/// commit-order rule must not: a stored value that is not the value that was written, a derived value
+/// the getter recomputes, and a newer value that arrives from a different source. The value cases no
+/// longer exercise the decision itself, since it never inspects a value, but they still pin that such
+/// properties are delivered rather than filtered out on some other ground.
 /// </summary>
 public class ChangeDeliveryFilterTests
 {

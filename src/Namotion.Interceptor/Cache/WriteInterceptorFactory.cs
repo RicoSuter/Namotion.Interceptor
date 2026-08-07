@@ -28,10 +28,16 @@ internal static class WriteInterceptorFactory<TProperty>
                     Debug.Assert(ReferenceEquals(context.Executor.Subject, subject),
                         "The context's executor must own the subject being locked: the plain increment relies on that pairing.");
                     context.Revision = ++context.Executor.Revision;
+                    // Read before finalizing, because finalizing is what loses the distinction. A stamped
+                    // origin whose stored value differs from the sent value is demoted to Local, which is
+                    // right for publishing (the local model computed that value) but wrong here: the write
+                    // still originated at the source, so counting it as a local commit would let a hook that
+                    // clamps or normalizes an inbound value discard a local write that had already committed.
+                    var isFromSource = context.Origin.Kind == ChangeOriginKind.FromSource;
+
                     context.FinalizeOrigin();
                     var raw = context.WriteTimestampRaw;
-                    property.SetWriteState(raw > 0 ? raw : 0, context.Revision,
-                        context.Origin.Kind == ChangeOriginKind.FromSource);
+                    property.SetWriteState(raw > 0 ? raw : 0, context.Revision, isFromSource);
                 }
             };
         }
@@ -51,10 +57,16 @@ internal static class WriteInterceptorFactory<TProperty>
                     Debug.Assert(ReferenceEquals(context.Executor.Subject, subject),
                         "The context's executor must own the subject being locked: the plain increment relies on that pairing.");
                     context.Revision = ++context.Executor.Revision;
+                    // Read before finalizing, because finalizing is what loses the distinction. A stamped
+                    // origin whose stored value differs from the sent value is demoted to Local, which is
+                    // right for publishing (the local model computed that value) but wrong here: the write
+                    // still originated at the source, so counting it as a local commit would let a hook that
+                    // clamps or normalizes an inbound value discard a local write that had already committed.
+                    var isFromSource = context.Origin.Kind == ChangeOriginKind.FromSource;
+
                     context.FinalizeOrigin();
                     var raw = context.WriteTimestampRaw;
-                    property.SetWriteState(raw > 0 ? raw : 0, context.Revision,
-                        context.Origin.Kind == ChangeOriginKind.FromSource);
+                    property.SetWriteState(raw > 0 ? raw : 0, context.Revision, isFromSource);
                 }
                 return context.NewValue;
             }

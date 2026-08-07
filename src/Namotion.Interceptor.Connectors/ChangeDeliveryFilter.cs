@@ -89,11 +89,12 @@ internal static class ChangeDeliveryFilter
 
     private static bool IsSuperseded(in SubjectPropertyChange change, long lastNonSourceCommitRevision)
     {
-        // Revision 0 is a change constructed outside a write terminal, which orders against nothing. A
-        // derived recomputation is the common case: it produces a change without committing a write, so
-        // staleness is unprovable and the change is delivered. A redundant write costs one message, while
-        // a wrong drop is permanent, because the transition that would re-enqueue the value is the very
-        // change being dropped.
+        // Revision 0 is a change constructed outside a write terminal, which orders against nothing, so
+        // staleness is unprovable and it is delivered. A redundant write costs one message, while a wrong
+        // drop is permanent, because the transition that would re-enqueue the value is the very change
+        // being dropped. Note this is a guard, not a path the write pipeline takes: every published change
+        // comes from a terminal and carries a revision, including a derived property's recomputation,
+        // which reaches the terminal with a no-op write delegate and takes a revision of its own.
         //
         // The comparison is an inequality rather than equality: the property's revision is stamped inside
         // the write lock and the change is enqueued after it, so a terminal-stamped change can never

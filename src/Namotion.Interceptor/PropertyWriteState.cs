@@ -41,5 +41,5 @@ internal sealed class PropertyWriteState
     /// sink is owed anyway. A plain bool needs no interlocking, because a torn read is impossible and a
     /// stale read costs at most that same redundant write.
     /// </summary>
-    internal bool Published;
+    internal volatile bool Published;
 }
