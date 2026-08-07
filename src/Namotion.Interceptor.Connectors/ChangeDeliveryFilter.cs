@@ -27,14 +27,14 @@ internal static class ChangeDeliveryFilter
     public static bool TryAcceptForDelivery(in SubjectPropertyChange change)
     {
         var property = change.Property;
-        if (!property.TryGetWriteState(out var committedRevision, out var published))
+        if (!property.TryGetWriteState(out var lastNonSourceCommitRevision, out var published))
         {
             // Nothing has ever been written to this property, so nothing can have superseded the change.
             property.MarkPublished();
             return true;
         }
 
-        if (IsSuperseded(in change, committedRevision))
+        if (IsSuperseded(in change, lastNonSourceCommitRevision))
         {
             return false;
         }
@@ -55,8 +55,8 @@ internal static class ChangeDeliveryFilter
     /// </summary>
     public static bool IsCurrent(in SubjectPropertyChange change)
     {
-        return !change.Property.TryGetWriteState(out var committedRevision, out _)
-               || !IsSuperseded(in change, committedRevision);
+        return !change.Property.TryGetWriteState(out var lastNonSourceCommitRevision, out _)
+               || !IsSuperseded(in change, lastNonSourceCommitRevision);
     }
 
     /// <summary>
@@ -87,7 +87,7 @@ internal static class ChangeDeliveryFilter
         return property.TryGetWriteState(out _, out var published) && published;
     }
 
-    private static bool IsSuperseded(in SubjectPropertyChange change, long committedRevision)
+    private static bool IsSuperseded(in SubjectPropertyChange change, long lastNonSourceCommitRevision)
     {
         // Revision 0 is a change constructed outside a write terminal, which orders against nothing. A
         // derived recomputation is the common case: it produces a change without committing a write, so
@@ -99,6 +99,6 @@ internal static class ChangeDeliveryFilter
         // the write lock and the change is enqueued after it, so a terminal-stamped change can never
         // exceed it. The inequality can only trigger on a path that stamps a change without advancing the
         // property, and delivering there keeps the bias above.
-        return change.Revision != 0 && change.Revision < committedRevision;
+        return change.Revision != 0 && change.Revision < lastNonSourceCommitRevision;
     }
 }

@@ -393,12 +393,13 @@ public class ChangeQueueProcessorTests
     /// </summary>
 
     [Fact]
-    public async Task WhenAnEchoIsDequeued_ThenAnOlderStragglerIsNotWritten()
+    public async Task WhenAnEchoIsDequeued_ThenAnOlderLocalWriteIsStillWritten()
     {
-        // Arrange: the echo is skipped rather than written, so nothing downstream proves it was seen.
-        // Recording it is what suppresses a local commit that predates it. Nothing is delivered for
-        // FirstName beforehand on purpose: a delivered change records its own revision, which would
-        // suppress the straggler by itself and make this test pass with the bookkeeping removed.
+        // Arrange: an echo carries a value the source produced before it saw our write, and its revision
+        // is stamped when we apply it locally, not when the source produced it (issue #373), so it cannot
+        // rank against our writes. Suppressing a local commit against it would be permanent: the echo is
+        // skipped rather than written, so no later change carries the value in the dropped one's place
+        // and both ends settle on the value the source already had.
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -457,15 +458,15 @@ public class ChangeQueueProcessorTests
         Assert.True(echoRevision > 1, "the echo needs a revision with room below it");
 
         // A commit that predates the echo, arriving late because enqueuing happens after the commit and
-        // outside the subject lock. Only the echo's recorded revision can suppress it.
+        // outside the subject lock.
         EnqueueChange(processor, firstName, "Old", "Straggler", echoRevision - 1);
         EnqueueChange(processor, lastName, "Fence", "SecondFence", long.MaxValue);
         subject.LastName = "SecondFence";
 
         // Assert: the second fence shares the straggler's flush, so its arrival means the straggler was
-        // considered and dropped rather than merely still in flight.
+        // considered rather than merely still in flight, and it was written.
         await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("SecondFence"));
-        Assert.DoesNotContain("Straggler", written);
+        Assert.Contains("Straggler", written);
 
         await cancellation.CancelAsync();
         try { await processing; } catch (OperationCanceledException) { /* expected */ }

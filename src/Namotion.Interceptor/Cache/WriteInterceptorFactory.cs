@@ -30,7 +30,8 @@ internal static class WriteInterceptorFactory<TProperty>
                     context.Revision = ++context.Executor.Revision;
                     context.FinalizeOrigin();
                     var raw = context.WriteTimestampRaw;
-                    property.SetWriteState(raw > 0 ? raw : 0, context.Revision);
+                    property.SetWriteState(raw > 0 ? raw : 0, context.Revision,
+                        context.Origin.Kind == ChangeOriginKind.FromSource);
                 }
             };
         }
@@ -52,7 +53,8 @@ internal static class WriteInterceptorFactory<TProperty>
                     context.Revision = ++context.Executor.Revision;
                     context.FinalizeOrigin();
                     var raw = context.WriteTimestampRaw;
-                    property.SetWriteState(raw > 0 ? raw : 0, context.Revision);
+                    property.SetWriteState(raw > 0 ? raw : 0, context.Revision,
+                        context.Origin.Kind == ChangeOriginKind.FromSource);
                 }
                 return context.NewValue;
             }

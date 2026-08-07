@@ -136,7 +136,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 // Park connect-window writes captured during listen/load.
                 DrainOwnedWritesToRetryQueue(subscription);
 
-                // Single reconcile point: restore (source unchanged), send (already current), drop (diverged).
+                // Single reconcile point: send (model already holds it), restore (the load moved the model off it),
+                // drop (a later local write supersedes it).
                 await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
 
                 // Connected phase reuses the source-lifetime subscription and does not own it.
@@ -339,8 +340,23 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
             try
             {
                 var property = change.Property;
-                var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
 
+                if (!ChangeDeliveryFilter.IsCurrent(in change))
+                {
+                    // A later local commit supersedes this write, and that commit's own change is
+                    // delivered, so it carries the settled value in this one's place.
+                    dropped++;
+                    continue;
+                }
+
+                // Not superseded, so this write is still the latest local intent for the property and has
+                // to reach the source. Deciding that by commit order rather than by comparing values is
+                // what makes it safe: the initial-state load writes the source's value into the model
+                // without advancing the local commit marker, so a value comparison sees a model that
+                // matches neither this write's new value nor its baseline and cannot tell "the load moved
+                // the model" from "a newer local write superseded this one". It then discards a live user
+                // write, which is permanent, because nothing re-enqueues it.
+                var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
                 if (Equals(currentValue, change.GetNewValue<object?>()))
                 {
                     // Already the current model value: the source has not received it, so send it.
@@ -351,17 +367,13 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     (toSend ??= []).Add(change);
                     sent++;
                 }
-                else if (Equals(currentValue, change.GetOldValue<object?>()))
-                {
-                    // Source still at the baseline the write was based on: restore locally. The
-                    // connected phase captures and sends the re-applied write.
-                    property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object?>());
-                    restored++;
-                }
                 else
                 {
-                    // Source diverged from the baseline: source wins.
-                    dropped++;
+                    // The load moved the model off this write: restore it locally, so the connected
+                    // phase captures the re-applied write and sends it, leaving model and source agreeing
+                    // on the value the user last wrote.
+                    property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object?>());
+                    restored++;
                 }
             }
             catch (Exception exception)
@@ -382,7 +394,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         if (dropped > 0 || failed > 0)
         {
             _logger.LogWarning(
-                "Retry queue reconcile: {Restored} restored, {Sent} sent, {Dropped} dropped (source wins), {Failed} failed.",
+                "Retry queue reconcile: {Restored} restored over the loaded source value, {Sent} sent, {Dropped} superseded by a later local write, {Failed} failed.",
                 restored, sent, dropped, failed);
         }
         else if (restored > 0 || sent > 0)

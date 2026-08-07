@@ -108,16 +108,16 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// lookup hashes the property name and the key, so splitting it in two doubles that cost.
     /// </para>
     /// </remarks>
-    public bool TryGetWriteState(out long committedRevision, out bool published)
+    public bool TryGetWriteState(out long lastNonSourceCommitRevision, out bool published)
     {
         if (TryGetWriteState(out var state))
         {
-            committedRevision = Interlocked.Read(ref state.CommittedRevision);
+            lastNonSourceCommitRevision = Interlocked.Read(ref state.LastNonSourceCommitRevision);
             published = state.Published;
             return true;
         }
 
-        committedRevision = 0;
+        lastNonSourceCommitRevision = 0;
         published = false;
         return false;
     }
@@ -136,6 +136,10 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// <summary>
     /// Records what the terminal just committed: the write timestamp as raw UTC ticks, avoiding
     /// DateTimeOffset conversion on the hot path, and the commit revision.
+    /// The revision is recorded only for commits that did not come from a source; see
+    /// <see cref="PropertyWriteState.LastNonSourceCommitRevision"/> for why that exclusion is required
+    /// rather than merely convenient. The timestamp is recorded either way, which preserves what
+    /// <see cref="TryGetWriteTimestamp"/> has always reported.
     /// Uses <see cref="Interlocked.Exchange(ref long, long)"/> to guarantee atomic 64-bit writes
     /// on 32-bit runtimes (the library targets netstandard2.0, which includes x86 .NET Framework;
     /// ECMA-335 only guarantees atomicity for writes up to <c>native int</c> size, so plain stores
@@ -144,11 +148,15 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// unused.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void SetWriteState(long timestamp, long revision)
+    internal void SetWriteState(long timestamp, long revision, bool isFromSource)
     {
         var state = GetOrAddWriteState();
         Interlocked.Exchange(ref state.TimestampTicks, timestamp);
-        Interlocked.Exchange(ref state.CommittedRevision, revision);
+
+        if (!isFromSource)
+        {
+            Interlocked.Exchange(ref state.LastNonSourceCommitRevision, revision);
+        }
     }
 
     /// <summary>

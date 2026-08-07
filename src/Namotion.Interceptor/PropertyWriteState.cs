@@ -20,10 +20,19 @@ internal sealed class PropertyWriteState
     internal long TimestampTicks;
 
     /// <summary>
-    /// The revision of the last write to this property that reached a terminal, or 0 when only a path
-    /// that stamps no revision has written it.
+    /// The revision of the last write to this property that reached a terminal and did NOT come from a
+    /// source, or 0 when no such write has happened.
     /// </summary>
-    internal long CommittedRevision;
+    /// <remarks>
+    /// Source-originated commits are excluded on purpose, and the exclusion is load-bearing rather than
+    /// an optimization. A connector drops a change only because a later commit will carry the settled
+    /// value in its place, and a commit that came from a source is skipped as an echo when that source's
+    /// queue is drained. Counting it would drop a newer local write against a superseding change that is
+    /// then never delivered, so the write is lost permanently and both ends settle on the old value. That
+    /// is reachable without concurrency: a source echoing back a write we just made, arriving after a
+    /// second write to the same property, is enough (see issue #373).
+    /// </remarks>
+    internal long LastNonSourceCommitRevision;
 
     /// <summary>
     /// Whether a sink has published this property's value. Sticky, and never cleared: it only ever
