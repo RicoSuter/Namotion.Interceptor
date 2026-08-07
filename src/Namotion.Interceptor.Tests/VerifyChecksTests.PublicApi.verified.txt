@@ -99,6 +99,7 @@ namespace Namotion.Interceptor
     public static class InterceptorSubjectExtensions
     {
         public static void SetData(this Namotion.Interceptor.IInterceptorSubject subject, string key, object? value) { }
+        public static bool TryAddData(this Namotion.Interceptor.IInterceptorSubject subject, string key, object? value) { }
         public static bool TryGetData(this Namotion.Interceptor.IInterceptorSubject subject, string key, out object? value) { }
     }
     public static class PropertyChangedEventArgsCache
@@ -122,6 +123,7 @@ namespace Namotion.Interceptor
         public object? GetOrSetPropertyData(string key, object? value) { }
         public void RemovePropertyData(string key) { }
         public void SetPropertyData(string key, object? value) { }
+        public bool TryAddPropertyData(string key, object? value) { }
         public bool TryGetPropertyData(string key, out object? value) { }
         public System.DateTimeOffset? TryGetWriteTimestamp() { }
         public bool TryRemovePropertyData(string key, object? expectedValue) { }

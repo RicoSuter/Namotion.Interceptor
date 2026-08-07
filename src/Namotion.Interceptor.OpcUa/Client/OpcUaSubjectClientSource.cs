@@ -48,6 +48,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     internal void ClearLastError() => Volatile.Write(ref _lastError, null);
 
+    /// <summary>
+    /// Forwards to the protected ReportConnectionLost transition seam for SessionManager, which
+    /// holds this concrete source type but is not part of its inheritance hierarchy and so cannot
+    /// call the protected member directly.
+    /// </summary>
+    internal void NotifyConnectionLost() => ReportConnectionLost();
+
     /// <inheritdoc />
     public override int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
 
@@ -446,6 +453,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         // Without this, keep-alive on the newly created session can fire immediately,
         // triggering OnKeepAlive → BeginReconnect → OnReconnectComplete → AbandonCurrentSession,
         // which nullifies the session while we're still setting up subscriptions and loading state.
+        // Report at detection, matching OnKeepAlive (see ReportConnectionLost remarks for why not
+        // StartBuffering here).
+        ReportConnectionLost();
+
         sessionManager.SetReconnecting(true);
 
         try

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -125,6 +126,18 @@ public class SubjectTransactionBenchmark
         public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
         {
             return Task.FromResult<Action?>(null);
+        }
+
+        public SourceState State => SourceState.Connecting;
+
+        public DateTimeOffset? LastSynchronizedAt => null;
+
+        public int PendingWriteCount => 0;
+
+        public event EventHandler<SourceEvent>? StateChanged
+        {
+            add { }
+            remove { }
         }
     }
 }
