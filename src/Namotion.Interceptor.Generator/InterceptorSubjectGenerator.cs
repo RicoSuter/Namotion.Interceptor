@@ -17,11 +17,12 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
         var classWithAttributeProvider = context.SyntaxProvider
             .CreateSyntaxProvider(
                 // A struct or interface can never be a valid subject (InterceptorSubjectAttribute's
-                // AttributeUsage is Class-only, so the compiler already reports CS0592 on those),
-                // so excluding them here keeps GetDeclaredSymbol and GetSemanticModel below from
-                // running per attributed struct and interface on every keystroke in an IDE.
-                // Records are deliberately kept: the compiler accepts the attribute on a record
-                // class, so NI0003 below is the only report that case gets.
+                // AttributeUsage is Class-only, so the compiler already reports CS0592 on those);
+                // this predicate has never matched them, so nothing here is skipping GetDeclaredSymbol
+                // or GetSemanticModel work that would otherwise run for them. Records are the one
+                // deliberate addition: the compiler accepts the attribute on a record class, so
+                // NI0003 below is the only report that case gets, at a measured cost of about 3
+                // milliseconds per 150 attributed records.
                 predicate: (node, _) =>
                     node is ClassDeclarationSyntax { AttributeLists.Count: > 0 } or
                     RecordDeclarationSyntax { AttributeLists.Count: > 0 },
@@ -114,10 +115,36 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     exception.GetType().Name,
                     exception.Message));
 
-                // The file keeps the full frames; a diagnostic message renders as one line.
-                spc.AddSource($"{className}.g.cs", SourceText.From($"/* {exception} */", Encoding.UTF8));
+                // The file keeps the full frames; a diagnostic message renders as one line. The
+                // hint name must be unique across the whole generator run, not just readable: two
+                // failing subjects that share a simple class name, or a failing "N.Foo" alongside a
+                // succeeding global-namespace "Foo" (a pair GetFileName's own namespace-qualified
+                // naming never produces), collide on the bare class name, and AddSource throws
+                // ArgumentException on a duplicate hint name from inside this very catch block.
+                // Roslyn turns that into CS8785, which drops every generated file for the run, not
+                // just this subject's. cls.TypeName is the fully-qualified display name already used
+                // to de-duplicate subjects upstream, so it is unique per type; sanitise it into a
+                // valid hint name instead.
+                spc.AddSource(GetFailureHintName(cls.TypeName), SourceText.From($"/* {exception} */", Encoding.UTF8));
             }
         });
+    }
+
+    /// <summary>
+    /// Turns a fully-qualified type display name (e.g. "global::N.Foo&lt;string&gt;") into a hint
+    /// name that <c>SourceProductionContext.AddSource</c> accepts and that stays unique per type,
+    /// by replacing every character AddSource would reject with '_' and keeping everything else,
+    /// including the dots that make the origin still readable in build output.
+    /// </summary>
+    internal static string GetFailureHintName(string fullyQualifiedTypeName)
+    {
+        var builder = new StringBuilder(fullyQualifiedTypeName.Length + 5);
+        foreach (var character in fullyQualifiedTypeName)
+        {
+            builder.Append(char.IsLetterOrDigit(character) || character is '.' or '_' ? character : '_');
+        }
+
+        return builder.Append(".g.cs").ToString();
     }
 
     private static bool HasInterceptorSubjectAttribute(TypeDeclarationSyntax typeDeclaration, SemanticModel semanticModel, CancellationToken ct)

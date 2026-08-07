@@ -187,6 +187,12 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("            new Dictionary<string, SubjectPropertyMetadata>");
         builder.AppendLine("            {");
 
+        // Each entry below is emitted as an indexer assignment (["Name"] = ...) rather than a
+        // collection-initializer Add(...), so a duplicate key silently overwrites the earlier entry
+        // instead of throwing at type-init. The extractor already dedups property names and reports
+        // NI0008 on a genuine collision, so this should never trigger today, but the trade-off is
+        // worth keeping in mind: a future extractor bug that lets a duplicate through would silently
+        // drop a property here rather than fail loudly.
         foreach (var property in metadata.Properties)
         {
             // An explicitly implemented member is unreachable through the class, so it is emitted

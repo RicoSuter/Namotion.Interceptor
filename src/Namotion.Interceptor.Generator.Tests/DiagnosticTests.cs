@@ -387,6 +387,59 @@ namespace Repro
     }
 
     [Fact]
+    public void WhenClassDeclaresAStaticProperty_ThenNI0006IsReported()
+    {
+        // Arrange: a static property declared directly in the class body. Without a shape guard on
+        // this path, the emitted accessor casts an instance to the class and reads the static
+        // member through it, which fails to compile with CS0176 and no diagnostic at all.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    [InterceptorSubject]
+    public partial class Holder
+    {
+        public static int Total { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Contains("static members cannot be read from an instance", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public void WhenClassExplicitlyImplementsAStaticInterfaceMember_ThenNI0006IsReported()
+    {
+        // Arrange: the class-declared, explicit-implementation sibling of the previous case. A
+        // static virtual interface member explicitly implemented in the class is still static, so
+        // it must be skipped the same way, even though it is reached through the explicit
+        // implementation branch rather than an ordinary declaration.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface ICounter { static abstract int Seed { get; set; } }
+
+    [InterceptorSubject]
+    public partial class Counter : ICounter
+    {
+        static int ICounter.Seed { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Contains("static members cannot be read from an instance", diagnostic.GetMessage());
+    }
+
+    [Fact]
     public void WhenMethodIsNamedExactlyWithoutInterceptor_ThenNI0006IsReported()
     {
         // Arrange (case O)
@@ -437,6 +490,36 @@ namespace Repro
 
         // Assert
         Assert.Equal(4, generated.GeneratorDiagnostics.Count(d => d.Id == "NI0006"));
+    }
+
+    [Fact]
+    public void WhenWithoutInterceptorMethodReturnsByRef_ThenNI0006IsReportedAndWrapperIsSkipped()
+    {
+        // Arrange: GetFullTypeName returns null for a RefTypeSyntax return type, and the "?? void"
+        // fallback used to swallow that silently: the wrapper compiled with a "void" return type,
+        // dereferenced the ref return into a throwaway copy, and discarded it, with no diagnostic
+        // telling the caller their return value now goes nowhere.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    [InterceptorSubject]
+    public partial class RefReturnHolder
+    {
+        private int _value;
+
+        public ref int GetRefWithoutInterceptor() => ref _value;
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Contains("the method shape is not supported", diagnostic.GetMessage());
+        Assert.Contains("by-reference return type", diagnostic.GetMessage());
+        Assert.DoesNotContain("GetRef", generated.SingleSource());
     }
 
     [Fact]
@@ -740,5 +823,66 @@ namespace Repro
 
         // Assert
         Assert.DoesNotContain(generated.GeneratorDiagnostics, d => d.Id == "NI0005");
+    }
+
+    [Fact]
+    public void WhenBaseClassIsUnrelatedToACollidingInterfaceDefault_ThenNI0005IsNotReported()
+    {
+        // Arrange: Base does not implement IThing at all, so IThing is Sub's own interface to
+        // implement. Sub's own "Name" does not actually bind to IThing.Name (the types differ), so
+        // the interface's own default body ends up as the resolved implementation for IThing.Name.
+        // The gate this pins previously read "implementation.ContainingType != typeSymbol" as proof
+        // that some base class already implements the member, but that is equally true when the
+        // resolved implementation is the interface's own default and no base class is involved at
+        // all: Base never mentions IThing, so blaming it is false.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IThing { string Name => ""default""; }
+    public class Base { }
+
+    [InterceptorSubject]
+    public partial class Sub : Base, IThing
+    {
+        public partial object Name { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.DoesNotContain(generated.GeneratorDiagnostics, d => d.Id == "NI0005");
+    }
+
+    [Fact]
+    public void WhenSameDivergenceHasNoBaseClass_ThenNoDiagnosticIsReported()
+    {
+        // Arrange: the no-base-class mirror of the previous case. Sub declares "Name" directly
+        // alongside IThing, "Name" does not bind to IThing.Name because the types differ, and the
+        // interface's own default silently becomes the value read through IThing while Sub.Name
+        // reads something else. This is a real, verified divergence, but neither NI0005 (its
+        // message is specifically about a base class, and there is none here) nor NI0008 (there is
+        // only one interface involved, not two colliding members) is the right vehicle for it, so
+        // it is pinned here as a known, separately-scoped gap rather than silently left unverified.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    public interface IThing { string Name => ""default""; }
+
+    [InterceptorSubject]
+    public partial class Sub : IThing
+    {
+        public partial object Name { get; set; }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        Assert.Empty(generated.GeneratorDiagnostics);
     }
 }

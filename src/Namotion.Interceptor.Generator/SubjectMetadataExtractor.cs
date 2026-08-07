@@ -194,6 +194,29 @@ internal static class SubjectMetadataExtractor
             : $"{recordDeclaration.Keyword.ValueText} {classOrStructKeyword}";
     }
 
+    /// <summary>
+    /// The shape guard a property must pass to become a subject property, shared between a
+    /// property declared in the class body and one adopted from an interface default
+    /// implementation: an indexer has no usable name and is parameterised, and a static member
+    /// cannot be read from an instance (the emitted accessor lambda always takes an instance).
+    /// Kept as one rule both paths consult, rather than one each, because the two paths have
+    /// already drifted apart once before, on accessibility.
+    /// </summary>
+    private static string? GetUnsupportedPropertyShapeReason(IPropertySymbol property)
+    {
+        if (property.IsIndexer)
+        {
+            return "indexers cannot be subject properties";
+        }
+
+        if (property.IsStatic)
+        {
+            return "static members cannot be read from an instance";
+        }
+
+        return null;
+    }
+
     private static IReadOnlyList<PropertyMetadata> CollectProperties(
         INamedTypeSymbol typeSymbol,
         SemanticModel semanticModel,
@@ -218,6 +241,22 @@ internal static class SubjectMetadataExtractor
                 var typeInfo = declarationModel.GetTypeInfo(property.Type, cancellationToken);
                 var fullyQualifiedName = typeInfo.Type?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ?? "object";
                 var propertyName = property.Identifier.ValueText;
+
+                // Resolved once and reused below for the explicit-implementation accessibility
+                // check: an indexer cannot reach this path (it parses as IndexerDeclarationSyntax,
+                // which the PropertyDeclarationSyntax filter above already excludes), but a static
+                // property can, and the same rule that skips one on the interface-default path must
+                // skip it here too, or it emits a cast-through-the-class accessor that fails CS0176
+                // with no diagnostic.
+                var declaredPropertySymbol = declarationModel.GetDeclaredSymbol(property, cancellationToken);
+                if (declaredPropertySymbol is not null &&
+                    GetUnsupportedPropertyShapeReason(declaredPropertySymbol) is { } unsupportedShapeReason)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.MemberSkipped, location,
+                        $"{typeSymbol.Name}.{propertyName}", unsupportedShapeReason));
+                    continue;
+                }
 
                 var explicitInterfaceTypeName = property.ExplicitInterfaceSpecifier is { } explicitSpecifier
                     ? declarationModel
@@ -249,7 +288,6 @@ internal static class SubjectMetadataExtractor
                 // (always-effectively-private) accessibility of the implementation itself.
                 if (property.ExplicitInterfaceSpecifier is not null)
                 {
-                    var declaredPropertySymbol = declarationModel.GetDeclaredSymbol(property, cancellationToken);
                     var implementedMember = declaredPropertySymbol?.ExplicitInterfaceImplementations.FirstOrDefault();
                     if (implementedMember is not null)
                     {
@@ -399,16 +437,20 @@ internal static class SubjectMetadataExtractor
                 // The emitter drops static and generic shapes, and cannot route an explicit interface
                 // implementation through the executor. The wrapper forwards its parameters by value,
                 // which a plain "ref" or an "out" parameter rejects (CS1620), while "in" and
-                // "ref readonly" accept it, so only the first two are skipped.
+                // "ref readonly" accept it, so only the first two are skipped. A by-reference return
+                // type is skipped outright: GetFullTypeName cannot name a RefTypeSyntax, and the
+                // wrapper would otherwise compile with a "void" return that silently dereferences the
+                // ref return into a copy and discards it.
                 if (method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword)) ||
                     method.TypeParameterList is not null ||
                     method.ExplicitInterfaceSpecifier is not null ||
+                    method.ReturnType is RefTypeSyntax ||
                     method.ParameterList.Parameters.Any(HasUnsupportedByReferenceModifier))
                 {
                     diagnostics.Add(Diagnostic.Create(
                         Diagnostics.MemberSkipped, location,
                         $"{typeSymbol.Name}.{fullMethodName}",
-                        "the method shape is not supported (static, generic, a by-reference parameter other than 'in' or 'ref readonly', or an explicit interface implementation)"));
+                        "the method shape is not supported (static, generic, a by-reference parameter other than 'in' or 'ref readonly', a by-reference return type, or an explicit interface implementation)"));
                     continue;
                 }
 
@@ -480,22 +522,14 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
-                // An indexer has no usable name and is parameterised.
-                if (property.IsIndexer)
-                {
-                    diagnostics.Add(Diagnostic.Create(
-                        Diagnostics.MemberSkipped, location,
-                        $"{interfaceType.Name}.{property.Name}", "indexers cannot be subject properties"));
-                    continue;
-                }
-
                 // A static property with a body is not abstract, so it passes the default
                 // implementation test above, but it cannot be read from an instance.
-                if (property.IsStatic)
+                var unsupportedShapeReason = GetUnsupportedPropertyShapeReason(property);
+                if (unsupportedShapeReason is not null)
                 {
                     diagnostics.Add(Diagnostic.Create(
                         Diagnostics.MemberSkipped, location,
-                        $"{interfaceType.Name}.{property.Name}", "static members cannot be read from an instance"));
+                        $"{interfaceType.Name}.{property.Name}", unsupportedShapeReason));
                     continue;
                 }
 
@@ -622,6 +656,17 @@ internal static class SubjectMetadataExtractor
 
             foreach (var interfaceType in typeSymbol.AllInterfaces)
             {
+                // The message claims the base class already implements this member, so that must
+                // be checked directly: an interface the subject itself lists (not one the base type
+                // carries) is the subject's own to implement, even when its own same-named property
+                // fails to bind to it (a type or accessor mismatch, say) and the interface's default
+                // body ends up as the resolved implementation instead. That default is not the base
+                // class's doing, so it must not be blamed as one.
+                if (!baseType.AllInterfaces.Contains(interfaceType, SymbolEqualityComparer.Default))
+                {
+                    continue;
+                }
+
                 var interfaceMember = interfaceType
                     .GetMembers(property.Name)
                     .OfType<IPropertySymbol>()
