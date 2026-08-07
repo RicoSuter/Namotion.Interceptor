@@ -93,89 +93,12 @@ internal static class SubjectMetadataExtractor
         var namespaceName = GetNamespace(typeDeclaration);
         var fullTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-        // Resolved from the symbol, not from this declaration's base list: the base list may sit on
-        // a partial declaration other than the attributed one, and the symbol's BaseType chain is
-        // strictly base classes, so an interface in the base list is never mistaken for one.
-        var subjectAncestor = SubjectBaseContract.FindNearestSubjectAncestor(typeSymbol);
+        var baseClass = SubjectBaseContract.Resolve(
+            typeSymbol, semanticModel.Compilation, location, diagnostics, cancellationToken);
 
-        var baseClassTypeName = subjectAncestor?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-        var baseClassHasInterceptorSubject = SubjectBaseContract.HasInterceptorSubjectAttribute(subjectAncestor);
-
-        // Only the first disjunct follows the ancestor. The second is deliberately asked of the
-        // SUBJECT: a base that implements IRaisePropertyChanged by hand without implementing
-        // IInterceptorSubject is not a subject ancestor at all, and dropping this would make its
-        // subclass re-declare PropertyChanged and RaisePropertyChanged. ManualInpcPersonBase in
-        // Namotion.Interceptor.Tracking.Tests is exactly that shape and has a live test.
-        var baseClassHasInpc = baseClassHasInterceptorSubject ||
-                               ImplementsInterface(typeSymbol, KnownTypes.IRaisePropertyChanged);
-
-        // Root mode emits the whole IInterceptorSubject block; derived mode emits only its own
-        // Properties line and inherits the rest.
-        //
-        // Mode selection, asked of the nearest subject ancestor and never of "some ancestor": a
-        // hand-written IInterceptorSubject implementer between two generated subjects would
-        // otherwise select derived mode and silently reproduce this bug, because Context resolves
-        // to the middle's executor while the inherited helpers read the root's field.
-        var emitsSharedPlumbing = true;
-        IReadOnlyList<string> hiddenPlumbingMembers = [];
-
-        if (subjectAncestor is not null)
+        if (baseClass is null)
         {
-            // An ancestor generated in this very compilation cannot be contract-checked: its
-            // plumbing lives in source the generator has not emitted yet, so the symbol shows none
-            // of it.
-            var ancestorIsGeneratedHere =
-                baseClassHasInterceptorSubject &&
-                WillBeGeneratedInThisCompilation(subjectAncestor, cancellationToken);
-
-            if (ancestorIsGeneratedHere ||
-                SubjectBaseContract.SatisfiesContract(subjectAncestor, typeSymbol, semanticModel.Compilation, out var missingMembers))
-            {
-                emitsSharedPlumbing = false;
-
-                foreach (var (declarer, memberName) in SubjectBaseContract.FindHidingMembers(
-                             typeSymbol, subjectAncestor, semanticModel.Compilation))
-                {
-                    diagnostics.Add(Diagnostic.Create(
-                        Diagnostics.HidesGeneratedMember, location, declarer.ToDisplayString(), memberName));
-                }
-
-                foreach (var (declarer, memberName) in SubjectBaseContract.FindHijackingMembers(
-                             typeSymbol, subjectAncestor, semanticModel.Compilation))
-                {
-                    diagnostics.Add(Diagnostic.Create(
-                        Diagnostics.HijacksInterfaceImplementation, location, declarer.ToDisplayString(), memberName));
-                }
-            }
-            else if (SubjectBaseContract.HasUsableDefaultProperties(subjectAncestor, typeSymbol, semanticModel.Compilation))
-            {
-                // Only emitsSharedPlumbing flips. The ancestor stays the base-class fact source, so
-                // DefaultProperties still concatenates with it and the INPC decision is unchanged.
-                diagnostics.Add(Diagnostic.Create(
-                    Diagnostics.BasePlumbingCannotBeShared,
-                    location,
-                    subjectAncestor.ToDisplayString(),
-                    typeSymbol.ToDisplayString()));
-
-                // A generated ancestor's plumbing does not exist as a symbol during this pass, so
-                // the lookup below cannot see it, but the generator knows it is about to emit it.
-                // Without this, every member root mode re-emits here hides the generated ancestor's
-                // copy and produces a CS0108 in a file the consumer cannot edit.
-                hiddenPlumbingMembers = HasGeneratedSubjectAncestor(typeSymbol, cancellationToken)
-                    ? SubjectBaseContract.RootModePlumbingMemberNames
-                    : SubjectBaseContract.FindHiddenPlumbingMembers(
-                        subjectAncestor, typeSymbol, semanticModel.Compilation);
-            }
-            else
-            {
-                diagnostics.Add(Diagnostic.Create(
-                    Diagnostics.BaseDoesNotSatisfyContract,
-                    location,
-                    subjectAncestor.ToDisplayString(),
-                    string.Join(", ", missingMembers)));
-
-                return new ExtractionResult(null, diagnostics);
-            }
+            return new ExtractionResult(null, diagnostics);
         }
 
         // Collect all partial type declarations
@@ -217,62 +140,10 @@ internal static class SubjectMetadataExtractor
                 containingTypes,
                 needsGeneratedParameterlessConstructor,
                 hasOrWillHaveParameterlessConstructor,
-                baseClassTypeName,
-                baseClassHasInterceptorSubject,
-                baseClassHasInpc,
-                emitsSharedPlumbing,
-                hiddenPlumbingMembers,
+                baseClass,
                 properties,
                 methods),
             diagnostics);
-    }
-
-    /// <summary>
-    /// Whether any ancestor, not only the nearest subject one, is an in-source subject that will
-    /// actually receive generated plumbing. Asked of the whole chain because a hand-written class in
-    /// between is exactly what pushes this subject back into root mode, and the generated ancestor
-    /// above it still owns the members this one is about to re-emit.
-    /// </summary>
-    private static bool HasGeneratedSubjectAncestor(INamedTypeSymbol typeSymbol, CancellationToken cancellationToken)
-    {
-        for (var ancestor = typeSymbol.BaseType;
-             ancestor is { SpecialType: not SpecialType.System_Object };
-             ancestor = ancestor.BaseType)
-        {
-            if (SubjectBaseContract.HasInterceptorSubjectAttribute(ancestor) &&
-                WillBeGeneratedInThisCompilation(ancestor, cancellationToken))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Whether an attributed ancestor declared in this compilation will actually receive generated
-    /// plumbing. Carrying the attribute is not enough: NI0001 suppresses generation for a subject
-    /// that is not partial, and assuming the plumbing appears anyway puts the subclass into derived
-    /// mode, replacing one actionable diagnostic on the base with a wall of raw errors in a
-    /// generated file the user cannot edit.
-    /// </summary>
-    private static bool WillBeGeneratedInThisCompilation(INamedTypeSymbol ancestor, CancellationToken cancellationToken)
-    {
-        if (ancestor.DeclaringSyntaxReferences.Length == 0)
-        {
-            return false;
-        }
-
-        foreach (var syntaxReference in ancestor.DeclaringSyntaxReferences)
-        {
-            if (syntaxReference.GetSyntax(cancellationToken) is not ClassDeclarationSyntax declaration ||
-                !declaration.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.PartialKeyword)))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static string? GetNamespace(TypeDeclarationSyntax typeDeclaration)
@@ -989,27 +860,6 @@ internal static class SubjectMetadataExtractor
     {
         return property.GetAttributes()
             .Any(a => SymbolExtensions.IsTypeOrInheritsFrom(a.AttributeClass, KnownTypes.DerivedAttribute));
-    }
-
-    private static bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)
-    {
-        if (type is null)
-        {
-            return false;
-        }
-
-        if (type.TypeKind == TypeKind.Interface &&
-            type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName)
-        {
-            return true;
-        }
-
-        if (type.AllInterfaces.Any(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName))
-        {
-            return true;
-        }
-
-        return type.BaseType is { } baseType && ImplementsInterface(baseType, interfaceTypeName);
     }
 
     /// <summary>

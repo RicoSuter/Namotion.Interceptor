@@ -22,6 +22,27 @@ internal static class SymbolExtensions
             });
     }
 
+    /// <summary>
+    /// Whether the type implements the named interface, including through a base class and through
+    /// interface inheritance. AllInterfaces already covers both, so no recursion is needed.
+    /// </summary>
+    public static bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)
+    {
+        if (type is null)
+        {
+            return false;
+        }
+
+        if (type.TypeKind == TypeKind.Interface &&
+            type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName)
+        {
+            return true;
+        }
+
+        return type.AllInterfaces.Any(i =>
+            i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName);
+    }
+
     public static bool IsTypeOrInheritsFrom(ITypeSymbol? type, string fullTypeName)
     {
         while (type is not null)

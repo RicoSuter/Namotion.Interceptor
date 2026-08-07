@@ -11,10 +11,6 @@ internal sealed record SubjectMetadata(
     ContainingType[] ContainingTypes,
     bool NeedsGeneratedParameterlessConstructor,
     bool HasOrWillHaveParameterlessConstructor,
-    string? BaseClassTypeName,
-    bool BaseClassHasInterceptorSubject,
-    bool BaseClassHasInpc,
-    bool EmitsSharedPlumbing,
-    IReadOnlyList<string> HiddenPlumbingMemberNames,
+    BaseClassInfo BaseClass,
     IReadOnlyList<PropertyMetadata> Properties,
     IReadOnlyList<MethodMetadata> Methods);
