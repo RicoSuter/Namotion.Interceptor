@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Hosting;
@@ -89,6 +90,114 @@ public class SourceRegistrationHostingTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => monitor.IsRegistrationComplete);
         await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task WhenSubscribingBeforeTheHostIsBuilt_ThenWaitWarningsAreStillLogged()
+    {
+        // Arrange
+        // WithSourceMonitoring(services) only bridges the ILoggerFactory into the context when the
+        // hosted-service factory runs at host build time, so the monitor resolves its logger lazily.
+        // Subscribe reads that logger, and the documented pattern subscribes before sources start
+        // claiming - i.e. before the factory exists. A monitor that latched the null it saw there
+        // would drop every wait-engine warning for the lifetime of the process, silently, which no
+        // other test catches because they all register logging before the first read.
+        var builder = Host.CreateApplicationBuilder();
+        var recordingLogger = new RecordingLogger();
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(new RecordingLoggerProvider(recordingLogger));
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithSourceMonitoring(builder.Services)
+            .WithHostedServices(builder.Services);
+
+        var root = new Person(context);
+        using var subscription = context.GetSourceMonitor().Subscribe(_ => { });
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        // Act - a branch with no source in scope completes vacuously, which must warn.
+        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        Assert.Contains(recordingLogger.Warnings, message => message.Contains("has no in-scope source"));
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task WhenAHandlerThrowsOnASubscriptionMadeBeforeTheHostIsBuilt_ThenTheErrorIsLogged()
+    {
+        // Arrange
+        // Companion to the test above, one layer down: a subscription used to capture the resolved
+        // logger at Subscribe time, which is typically before the ILoggerFactory reaches the context,
+        // so every exception a handler threw was swallowed for that subscription's lifetime.
+        var builder = Host.CreateApplicationBuilder();
+        var recordingLogger = new RecordingLogger();
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(new RecordingLoggerProvider(recordingLogger));
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithSourceMonitoring(builder.Services);
+
+        var root = new Person(context);
+        var monitor = context.GetSourceMonitor();
+        using var subscription = monitor.Subscribe(_ => throw new InvalidOperationException("handler is buggy"));
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        // Act
+        monitor.Register(new TestStateSource(root));
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => recordingLogger.Errors.Any(message => message.Contains("source event handler threw")));
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task WhenAnAwaitedAttachIsStillStarting_ThenRegistrationIsHeldOpen()
+    {
+        // Arrange
+        // The awaiting attach overload blocks its own caller, but that does not block whatever else
+        // decides startup is finished, so it needs a hold like the fire-and-forget path. Without one,
+        // a wait taken while this start is still queued completes vacuously.
+        var builder = Host.CreateApplicationBuilder();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithSourceMonitoring(builder.Services)
+            .WithHostedServices(builder.Services);
+
+        var root = new Person(context);
+        var monitor = context.GetSourceMonitor();
+        var host = builder.Build();
+        await host.StartAsync();
+        Assert.True(monitor.IsRegistrationComplete);
+
+        using var gate = new GatedStartHostedService();
+
+        // Act - the hold is taken synchronously, before the returned task is handed back.
+        var attach = root.AttachHostedServiceAsync(gate, CancellationToken.None);
+
+        // Assert
+        Assert.False(monitor.IsRegistrationComplete);
+
+        gate.ReleaseStart();
+        await attach.WaitAsync(TimeSpan.FromSeconds(10));
+        await AsyncTestHelpers.WaitUntilAsync(() => monitor.IsRegistrationComplete);
 
         await host.StopAsync();
     }

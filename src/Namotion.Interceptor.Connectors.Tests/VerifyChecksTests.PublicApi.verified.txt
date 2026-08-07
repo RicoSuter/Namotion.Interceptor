@@ -196,7 +196,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring
     [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Lifecycle.ContextInheritanceHandler),
             typeof(Namotion.Interceptor.Tracking.Parent.ParentTrackingHandler)})]
-    public class SourceMonitor : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IStartupCompletionDeferrer
+    public class SourceMonitor : Namotion.Interceptor.Tracking.IStartupCompletionDeferrer, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
         public SourceMonitor(System.Func<Microsoft.Extensions.Logging.ILogger?>? loggerResolver = null) { }
         public bool IsRegistrationComplete { get; }

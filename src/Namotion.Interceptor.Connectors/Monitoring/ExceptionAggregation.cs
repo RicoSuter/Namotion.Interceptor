@@ -3,13 +3,34 @@ using System.Runtime.ExceptionServices;
 namespace Namotion.Interceptor.Connectors.Monitoring;
 
 /// <summary>
-/// Shared collect-and-rethrow tail for loops that isolate each iteration's exception from the
-/// others, so one failure does not skip the remaining iterations: SourceMonitor's wait
-/// re-evaluation, SourceMonitoringExtensions.CompleteSourceRegistration across monitors, and
-/// CompositeDisposable's hold release.
+/// Runs every item of a loop even when one throws, then reports the failures together, so a single
+/// failure cannot skip the remaining iterations.
 /// </summary>
 internal static class ExceptionAggregation
 {
+    /// <summary>
+    /// Applies <paramref name="action"/> to every item, isolating each one's exception, then throws
+    /// what was collected (see <see cref="ThrowIfAny"/>).
+    /// </summary>
+    internal static void ForEach<T>(IEnumerable<T> items, Action<T> action)
+    {
+        List<Exception>? exceptions = null;
+
+        foreach (var item in items)
+        {
+            try
+            {
+                action(item);
+            }
+            catch (Exception exception)
+            {
+                (exceptions ??= []).Add(exception);
+            }
+        }
+
+        ThrowIfAny(exceptions);
+    }
+
     /// <summary>
     /// Throws the single collected exception directly, or an <see cref="AggregateException"/> when
     /// more than one was collected. Does nothing when <paramref name="exceptions"/> is null or empty.

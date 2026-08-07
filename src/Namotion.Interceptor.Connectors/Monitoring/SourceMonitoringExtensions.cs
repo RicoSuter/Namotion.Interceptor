@@ -81,22 +81,8 @@ public static class SourceMonitoringExtensions
     /// <exception cref="InvalidOperationException">No monitor is reachable.</exception>
     public static void CompleteSourceRegistration(this IInterceptorSubjectContext context)
     {
-        var monitors = ResolveMonitorsOrThrow(context);
-        List<Exception>? exceptions = null;
-
-        foreach (var monitor in monitors)
-        {
-            try
-            {
-                monitor.CompleteSourceRegistration();
-            }
-            catch (Exception ex)
-            {
-                (exceptions ??= []).Add(ex);
-            }
-        }
-
-        ExceptionAggregation.ThrowIfAny(exceptions);
+        ExceptionAggregation.ForEach(
+            ResolveMonitorsOrThrow(context), monitor => monitor.CompleteSourceRegistration());
     }
 
     /// <summary>
@@ -123,24 +109,7 @@ public static class SourceMonitoringExtensions
 
     private sealed class CompositeDisposable(IDisposable[] disposables) : IDisposable
     {
-        public void Dispose()
-        {
-            List<Exception>? exceptions = null;
-
-            foreach (var disposable in disposables)
-            {
-                try
-                {
-                    disposable.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    (exceptions ??= []).Add(ex);
-                }
-            }
-
-            ExceptionAggregation.ThrowIfAny(exceptions);
-        }
+        public void Dispose() => ExceptionAggregation.ForEach(disposables, hold => hold.Dispose());
     }
 
     /// <summary>

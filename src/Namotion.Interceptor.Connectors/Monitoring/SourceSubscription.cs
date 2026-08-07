@@ -18,7 +18,7 @@ public sealed class SourceSubscription : IDisposable
     private readonly ConcurrentQueue<SourceEvent> _queue = new();
     private readonly Action<SourceEvent> _handler;
     private readonly Action<SourceSubscription> _onDisposed;
-    private readonly ILogger? _logger;
+    private readonly SourceMonitor _monitor;
     private readonly Action _drain;
 
     private int _draining;
@@ -28,12 +28,16 @@ public sealed class SourceSubscription : IDisposable
         Action<SourceEvent> handler,
         ImmutableArray<ISubjectSource> sources,
         Action<SourceSubscription> onDisposed,
-        ILogger? logger)
+        SourceMonitor monitor)
     {
         _handler = handler;
         Sources = sources;
         _onDisposed = onDisposed;
-        _logger = logger;
+        // The monitor, not a resolved ILogger: subscribing typically happens before the host is
+        // built, which is when the ILoggerFactory reaches the context, so a logger captured here
+        // would be null for this subscription's lifetime and every handler exception below would be
+        // swallowed silently.
+        _monitor = monitor;
         // Cached rather than a Task.Run(Drain) method-group conversion at each call site: that
         // allocates a fresh Action delegate on every wakeup, and Drain is only ever run this way.
         _drain = Drain;
@@ -83,25 +87,38 @@ public sealed class SourceSubscription : IDisposable
                 }
                 catch (Exception exception)
                 {
-                    _logger?.LogError(exception, "A source event handler threw and was ignored.");
+                    _monitor.ResolveLogger()?.LogError(exception, "A source event handler threw and was ignored.");
                 }
             }
 
-            // Must be Interlocked.Exchange, not Volatile.Write: Volatile.Write is a release only, so
-            // the !_queue.IsEmpty read right after it can be satisfied before this write is globally
-            // visible (StoreLoad reordering). A concurrent Enqueue that lands in that window sees
-            // _draining still 1 and declines to schedule a new drain, while this thread's own
-            // reordered read observes an empty queue and exits the loop - the event is then stranded
-            // forever, since nothing else is scheduled to look at it. Interlocked.Exchange is a full
-            // fence, so the write is visible to every other thread before this read runs, making the
-            // two misses mutually exclusive. Do not "simplify" this back to Volatile.Write. The
-            // reordering itself reproduces roughly once in 500 million aligned attempts, too rare for
-            // any dynamic test to catch reliably (see SourceSubscriptionTests' stress test); a
-            // companion test there instead pins the literal API used on this line, so at least the
-            // "simplification" itself fails the build even though the race it would reopen does not.
-            Interlocked.Exchange(ref _draining, 0);
         }
-        while (!_queue.IsEmpty && Interlocked.CompareExchange(ref _draining, 1, 0) == 0);
+        while (TryReacquireForPendingEvents());
+    }
+
+    /// <summary>
+    /// Releases the single-flight flag and takes it straight back if the queue turned out not to be
+    /// empty. Returns true when this thread must keep draining.
+    /// </summary>
+    /// <remarks>
+    /// Extracted from <see cref="Drain"/> so the handoff can be driven directly by a test: the
+    /// window it closes is a few nanoseconds wide inside a running drain, so no dynamic test can
+    /// reach it in place.
+    /// <para>
+    /// Must be Interlocked.Exchange, not Volatile.Write: Volatile.Write is a release only, so the
+    /// !_queue.IsEmpty read right after it can be satisfied before this write is globally visible
+    /// (StoreLoad reordering). A concurrent Enqueue landing in that window sees _draining still 1
+    /// and declines to schedule a new drain, while this thread's own reordered read observes an
+    /// empty queue and exits - the event is then stranded, since nothing is scheduled to look at it.
+    /// Interlocked.Exchange is a full fence, making the two misses mutually exclusive. Do not
+    /// "simplify" this back to Volatile.Write: the reordering reproduces roughly once in 500 million
+    /// aligned attempts, far beyond any test's reach, so a companion test pins the literal API used
+    /// on this line instead.
+    /// </para>
+    /// </remarks>
+    internal bool TryReacquireForPendingEvents()
+    {
+        Interlocked.Exchange(ref _draining, 0);
+        return !_queue.IsEmpty && Interlocked.CompareExchange(ref _draining, 1, 0) == 0;
     }
 
     /// <summary>

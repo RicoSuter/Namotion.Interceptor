@@ -16,6 +16,7 @@ namespace Namotion.Interceptor.Connectors;
 public sealed class SubjectPropertyWriter
 {
     private readonly ISubjectSource _source;
+    private readonly SubjectSourceBase? _sourceBase;
     private readonly ILogger _logger;
     private readonly Lock _lock = new();
 
@@ -35,6 +36,7 @@ public sealed class SubjectPropertyWriter
     public SubjectPropertyWriter(ISubjectSource source, ILogger logger)
     {
         _source = source;
+        _sourceBase = source as SubjectSourceBase;
         _logger = logger;
     }
 
@@ -55,7 +57,7 @@ public sealed class SubjectPropertyWriter
             // while still holding _lock, symmetric with LoadInitialStateAndResumeAsync's own
             // TransitionTo(Synchronized) call below: both transitions are paired with the generation
             // change that governs them so neither can be observed out of sync with it.
-            (_source as SubjectSourceBase)?.TransitionTo(SourceState.Connecting);
+            _sourceBase?.TransitionTo(SourceState.Connecting);
         }
     }
 
@@ -94,11 +96,9 @@ public sealed class SubjectPropertyWriter
     /// <returns>The task.</returns>
     public async Task LoadInitialStateAndResumeAsync(CancellationToken cancellationToken)
     {
-        int generation;
-        lock (_lock)
-        {
-            generation = _generation;
-        }
+        // Published under _lock by StartBuffering/InvalidateGeneration; the comparison that matters
+        // happens under the lock below, so this read needs no lock of its own.
+        var generation = Volatile.Read(ref _generation);
 
         var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
 
@@ -143,19 +143,11 @@ public sealed class SubjectPropertyWriter
                 _updates = null;
             }
 
-            // Reported while still holding _lock, atomically with the generation check above: this
-            // is the only place proven not-superseded. Reporting it after releasing the lock (as
-            // before) left a gap in which a StartBuffering landing between the check and the report
-            // would go unnoticed, so a stale cycle could still certify Synchronized - for the entire
-            // duration of the reconnect that superseded it, since the genuine cycle's own later
-            // transition to the same state is then a silent no-op (see TransitionTo).
-            // Note: this nests SubjectSourceBase's _stateLock inside this writer's _lock, and
-            // TransitionTo can itself synchronously invoke a registered SourceMonitor's
-            // OnSourceStateChanged handler, which takes the monitor's own _lock. That fixed order -
-            // writer._lock -> _stateLock -> monitor._lock - is never reversed anywhere in this
-            // codebase (nothing takes this writer's _lock while holding either of the other two), so
-            // it cannot deadlock.
-            (_source as SubjectSourceBase)?.TransitionTo(SourceState.Synchronized);
+            // Reported while still holding _lock, atomically with the generation check above, so a
+            // StartBuffering landing in between cannot let a superseded cycle certify Synchronized.
+            // Lock order writer._lock -> _stateLock -> monitor._lock (TransitionTo can reach a
+            // registered monitor synchronously) is never reversed anywhere, so it cannot deadlock.
+            _sourceBase?.TransitionTo(SourceState.Synchronized);
         }
     }
 

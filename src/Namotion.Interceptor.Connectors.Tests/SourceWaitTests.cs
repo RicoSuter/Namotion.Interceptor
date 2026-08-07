@@ -161,6 +161,63 @@ public class SourceWaitTests
         Assert.Equal(0, GetRegistrationHolds(monitor));
     }
 
+    private static int GetPendingWaitCount(SourceMonitor monitor)
+    {
+        var field = typeof(SourceMonitor).GetField("_waits", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var waits = field.GetValue(monitor)!;
+        return (int)waits.GetType().GetProperty("Length")!.GetValue(waits)!;
+    }
+
+    [Fact]
+    public async Task WhenAWaitCompletes_ThenItIsRemovedFromThePendingList()
+    {
+        // Arrange
+        // A wait that is never unregistered stays in _waits for the monitor's lifetime, pinning its
+        // anchor subject and being re-evaluated on every property-reference add/remove tree-wide -
+        // the documented hot path. Nothing else in the suite observes the list itself.
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var source = new TestStateSource(root);
+        monitor.Register(source);
+        monitor.CompleteSourceRegistration();
+
+        var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+        Assert.Equal(1, GetPendingWaitCount(monitor));
+
+        // Act
+        source.ReportSynchronized();
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => GetPendingWaitCount(monitor) == 0);
+    }
+
+    [Fact]
+    public async Task WhenAWaitIsCancelled_ThenItIsRemovedFromThePendingList()
+    {
+        // Arrange
+        // Companion to the test above for the cancellation path: the existing cancellation test
+        // asserts only that the token propagates, so the cleanup it is named for went unpinned.
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        monitor.Register(new TestStateSource(root));
+        monitor.CompleteSourceRegistration();
+
+        using var cancellation = new CancellationTokenSource();
+        var wait = root.WaitForSynchronizationAsync(cancellation.Token);
+        Assert.Equal(1, GetPendingWaitCount(monitor));
+
+        // Act
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => GetPendingWaitCount(monitor) == 0);
+    }
+
     private static int GetRegistrationHolds(SourceMonitor monitor)
     {
         var field = typeof(SourceMonitor).GetField("_registrationHolds", BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -466,7 +523,7 @@ public class SourceWaitTests
 
         // A hold keeps registration incomplete while both waits below are created, so their
         // fast-path IsSatisfied check short-circuits on IsRegistrationComplete before walking any
-        // scope - the poison wait must not throw until both waits are in the list.
+        // scope, so the poison wait cannot throw until both waits are in the list.
         var hold = monitor.DeferWaitCompletion();
         monitor.CompleteSourceRegistration();
 
@@ -496,6 +553,36 @@ public class SourceWaitTests
 
         // Assert
         await healthyWait.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task WhenASourceRegistersWhileAWaitIsPending_ThenTheWaitIsReEvaluated()
+    {
+        // Arrange
+        // A source arriving while a wait is already pending must be taken into account: the wait
+        // must not complete when only the original source synchronizes. Note this does NOT pin
+        // Register's own trailing OnWaitConditionChanged() - registering can only ever add
+        // constraints, never satisfy a wait, so that call is defensive rather than load-bearing
+        // (see the remark on Register).
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        var root = new Person(context);
+        var first = new TestStateSource(root);
+        monitor.Register(first);
+        monitor.CompleteSourceRegistration();
+
+        var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        // Act - a second in-scope source arrives while the wait is still pending, then both settle.
+        var second = new TestStateSource(root);
+        monitor.Register(second);
+        first.ReportSynchronized();
+        Assert.False(wait.IsCompleted);
+        second.ReportSynchronized();
+
+        // Assert
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -813,10 +900,12 @@ internal sealed class ThrowingScopeSource : TestStateSource
     public override IInterceptorSubject RootSubject => throw new InvalidOperationException("scope check failed");
 }
 
-/// <summary>Captures every warning message logged through it, to assert on the monitor's diagnostics.</summary>
+/// <summary>Captures warning and error messages logged through it, to assert on diagnostics.</summary>
 internal sealed class RecordingLogger : ILogger
 {
     public List<string> Warnings { get; } = [];
+
+    public List<string> Errors { get; } = [];
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -828,7 +917,17 @@ internal sealed class RecordingLogger : ILogger
     {
         if (logLevel == LogLevel.Warning)
         {
-            Warnings.Add(formatter(state, exception));
+            lock (Warnings)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
+        }
+        else if (logLevel == LogLevel.Error)
+        {
+            lock (Errors)
+            {
+                Errors.Add(formatter(state, exception));
+            }
         }
     }
 }

@@ -106,12 +106,12 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 Interlocked.Exchange(ref _lastSynchronizedTicks, now.UtcTicks);
             }
 
-            var sourceEvent = new SourceEvent(
-                SourceEventKind.StateChanged, this, null, oldState, newState, now);
-
             var handlers = StateChanged;
             if (handlers is not null)
             {
+                var sourceEvent = new SourceEvent(
+                    SourceEventKind.StateChanged, this, null, oldState, newState, now);
+
                 foreach (var handler in handlers.GetInvocationList())
                 {
                     try
@@ -204,12 +204,9 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         // never stays registered forever.
         //
         // Unwinds through the LOCAL monitors array, never by re-reading the field: a Dispose that
-        // interleaved between the assignment and the registration loop above has already taken the
-        // field and left it empty, so re-reading it here would unregister nothing and strand this
-        // call's own registrations forever - a Stopped source left in SourceMonitor.Sources with a
-        // live StateChanged subscription retaining the writer, retry queue and root subject.
-        // Unregister is a no-op for a source that is not registered, so unwinding a registration
-        // Dispose already removed is harmless.
+        // interleaved between the assignment and the loop above has already taken the field and left
+        // it empty, so re-reading here would strand this call's own registrations forever.
+        // Unregister is a no-op for an unregistered source, so a double unwind is harmless.
         if (State == SourceState.Stopped)
         {
             ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
@@ -227,7 +224,6 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        TransitionTo(SourceState.Connecting);   // no-op in practice, keeps the invariant local
         try
         {
             while (!stoppingToken.IsCancellationRequested)

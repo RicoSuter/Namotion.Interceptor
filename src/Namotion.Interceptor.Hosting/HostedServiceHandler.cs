@@ -1,10 +1,13 @@
 ﻿using System.Threading.Tasks.Dataflow;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting;
 
+[RunsAfter(typeof(ContextInheritanceHandler))]
 internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDisposable
 {
     private ILogger? _logger;
@@ -132,7 +135,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         }
     }
     
-    internal void AttachHostedService(IHostedService hostedService, IInterceptorSubjectContext? context = null)
+    internal void AttachHostedService(IHostedService hostedService, IInterceptorSubjectContext context)
     {
         lock (_hostedServices)
         {
@@ -162,13 +165,8 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     /// Empty for an application that configures no deferring subsystem (no source monitoring, for
     /// example), which is the common case and costs one empty-array check per attach.
     /// </remarks>
-    private static IDisposable[] TakeStartupHolds(IInterceptorSubjectContext? context)
+    private static IDisposable[] TakeStartupHolds(IInterceptorSubjectContext context)
     {
-        if (context is null)
-        {
-            return [];
-        }
-
         var deferrers = context.GetServices<IStartupCompletionDeferrer>();
         if (deferrers.IsEmpty)
         {
@@ -195,14 +193,19 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         }
     }
 
-    internal async Task AttachHostedServiceAsync(IHostedService hostedService, CancellationToken cancellationToken)
+    internal async Task AttachHostedServiceAsync(
+        IHostedService hostedService, IInterceptorSubjectContext context, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource();
         lock (_hostedServices)
         {
             if (_hostedServices.Add(hostedService))
             {
-                PostStartService(hostedService, tcs);
+                // Holds here too, even though this overload's caller awaits the start: the caller
+                // being blocked does not block the startup-completion gate, so without a hold
+                // ApplicationStarted can fire, drop the count to zero and let a wait complete
+                // vacuously while this start is still sitting in the queue.
+                PostStartService(hostedService, tcs, TakeStartupHolds(context));
             }
             else
             {

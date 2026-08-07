@@ -35,8 +35,7 @@ public static class SourcePropertyExtensions
         // fresh claim from a re-claim, and the stream must publish exactly the real transitions.
         if (property.TryAddPropertyData(SourceKey, source))
         {
-            PublishOwnershipChange(property, source, SourceEventKind.PropertyClaimed,
-                SourceState.Unclaimed, source.State);
+            PublishOwnershipChange(property, source, SourceEventKind.PropertyClaimed);
             return true;
         }
 
@@ -81,14 +80,12 @@ public static class SourcePropertyExtensions
             return false;
         }
 
-        PublishOwnershipChange(property, expectedSource, SourceEventKind.PropertyReleased,
-            expectedSource.State, SourceState.Unclaimed);
+        PublishOwnershipChange(property, expectedSource, SourceEventKind.PropertyReleased);
         return true;
     }
 
     private static void PublishOwnershipChange(
-        PropertyReference property, ISubjectSource source, SourceEventKind kind,
-        SourceState oldState, SourceState newState)
+        PropertyReference property, ISubjectSource source, SourceEventKind kind)
     {
         // Usually length 0 or 1 and cached on the context's copy-on-write state snapshot, so a tree
         // without monitoring pays one array check per claim and nothing else.
@@ -99,9 +96,11 @@ public static class SourcePropertyExtensions
         }
 
         // Lock-free HasSubscribers gate: with zero subscribers (the common shape - most trees have
-        // none or one dashboard-style consumer) this skips both UtcNow and the monitor's lock
-        // entirely for every claim and release, not just the timestamp.
-        DateTimeOffset? timestamp = null;
+        // none or one dashboard-style consumer) this skips the clock, the event and the monitor's
+        // lock entirely for every claim and release. The event is identical for every monitor, so it
+        // is built at most once. OldState/NewState follow from the kind and are for logging only;
+        // consumers apply SourceEvent.CurrentState.
+        SourceEvent? sourceEvent = null;
         foreach (var monitor in monitors)
         {
             if (!monitor.HasSubscribers)
@@ -109,8 +108,11 @@ public static class SourcePropertyExtensions
                 continue;
             }
 
-            timestamp ??= DateTimeOffset.UtcNow;
-            monitor.PublishUnderLock(new SourceEvent(kind, source, property, oldState, newState, timestamp.Value));
+            sourceEvent ??= kind == SourceEventKind.PropertyClaimed
+                ? new SourceEvent(kind, source, property, SourceState.Unclaimed, source.State, DateTimeOffset.UtcNow)
+                : new SourceEvent(kind, source, property, source.State, SourceState.Unclaimed, DateTimeOffset.UtcNow);
+
+            monitor.PublishUnderLock(sourceEvent.Value);
         }
     }
 }

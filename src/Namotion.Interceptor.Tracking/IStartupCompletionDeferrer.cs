@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Tracking.Lifecycle;
+namespace Namotion.Interceptor.Tracking;
 
 /// <summary>
 /// A service whose "everything has started" signal can be held open while another subsystem still

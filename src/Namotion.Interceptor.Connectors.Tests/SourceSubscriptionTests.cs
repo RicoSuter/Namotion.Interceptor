@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Testing;
@@ -32,7 +33,7 @@ public class SourceSubscriptionTests
             },
             ImmutableArray<ISubjectSource>.Empty,
             _ => { },
-            null);
+            new SourceMonitor());
 
         subscription.Enqueue(CreateEvent());
         Assert.True(handlerEntered.Wait(TimeSpan.FromSeconds(10)));
@@ -68,7 +69,7 @@ public class SourceSubscriptionTests
             },
             ImmutableArray<ISubjectSource>.Empty,
             _ => { },
-            null);
+            new SourceMonitor());
 
         subscription.Enqueue(CreateEvent());
         Assert.True(firstHandlerEntered.Wait(TimeSpan.FromSeconds(10)));
@@ -120,7 +121,7 @@ public class SourceSubscriptionTests
             },
             ImmutableArray<ISubjectSource>.Empty,
             _ => { },
-            null);
+            new SourceMonitor());
 
         var producers = Enumerable.Range(0, producerCount)
             .Select(_ => Task.Run(() =>
@@ -160,6 +161,11 @@ public class SourceSubscriptionTests
         // Act & Assert
         Assert.Contains("Interlocked.Exchange(ref _draining, 0)", source);
         Assert.DoesNotContain("Volatile.Write(ref _draining", source);
+
+        // Drain must actually run the handoff, not merely contain it: the two handoff tests drive
+        // TryReacquireForPendingEvents directly, so deleting the loop that calls it leaves them
+        // green. Nothing dynamic can reach that loop, so its presence is pinned here instead.
+        Assert.Contains("while (TryReacquireForPendingEvents());", source);
     }
 
     private static string GetSourceSubscriptionFilePath([CallerFilePath] string testFilePath = "")
@@ -184,5 +190,76 @@ public class SourceSubscriptionTests
         var source = new TestStateSource(new Person());
         return new SourceEvent(
             SourceEventKind.SourceRegistered, source, null, SourceState.Connecting, SourceState.Connecting, DateTimeOffset.UtcNow);
+    }
+}
+
+public class SourceSubscriptionHandoffTests
+{
+    [Fact]
+    public void WhenTheQueueIsEmptyAtHandoff_ThenTheDrainReleasesAndStops()
+    {
+        // Arrange
+        // The handoff is a few nanoseconds wide inside a running drain, so it is exercised directly:
+        // deleting the whole re-check loop leaves every other test in the suite green.
+        var subscription = CreateSubscription();
+
+        // Act
+        var keepDraining = subscription.TryReacquireForPendingEvents();
+
+        // Assert
+        Assert.False(keepDraining);
+        Assert.Equal(0, GetDrainingFlag(subscription));
+    }
+
+    [Fact]
+    public void WhenAnEventArrivedDuringHandoff_ThenTheDrainReacquiresAndKeepsGoing()
+    {
+        // Arrange
+        // This is the stranded-event case: a producer that enqueued while _draining was still 1
+        // declined to schedule a new drain, so this thread must notice the queue is non-empty and
+        // take the flag straight back. Without the re-check the event is never delivered.
+        var subscription = CreateSubscription();
+        subscription.Enqueue(CreateEvent());
+
+        // Act
+        var keepDraining = subscription.TryReacquireForPendingEvents();
+
+        // Assert
+        Assert.True(keepDraining);
+        Assert.Equal(1, GetDrainingFlag(subscription));
+    }
+
+    private static SourceSubscription CreateSubscription() =>
+        new(_ => { }, ImmutableArray<ISubjectSource>.Empty, _ => { }, new SourceMonitor());
+
+    private static int GetDrainingFlag(SourceSubscription subscription)
+    {
+        var field = typeof(SourceSubscription).GetField("_draining", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        return (int)field.GetValue(subscription)!;
+    }
+
+    private static SourceEvent CreateEvent() => new(
+        SourceEventKind.SourceRegistered, new HandoffTestSource(), null,
+        SourceState.Connecting, SourceState.Connecting, DateTimeOffset.UtcNow);
+
+    private sealed class HandoffTestSource : ISubjectSource
+    {
+        public IInterceptorSubject RootSubject => throw new NotSupportedException();
+        public int WriteBatchSize => 0;
+        public SourceState State => SourceState.Connecting;
+        public DateTimeOffset? LastSynchronizedAt => null;
+        public int PendingWriteCount => 0;
+
+        public event EventHandler<SourceEvent>? StateChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
+
+        public ValueTask<WriteResult> WriteChangesAsync(
+            ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+            => new(WriteResult.Success);
     }
 }

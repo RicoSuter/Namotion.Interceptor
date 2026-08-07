@@ -292,9 +292,9 @@ public class SourceMonitorTests
     /// Unregister has something to remove.
     /// </param>
     private static async Task<(bool WasInSnapshot, bool WasDelivered)> RaceActionAgainstSubscribeOnceAsync(
-        Action<SourceMonitor, GatedStateSource> act,
+        Action<SourceMonitor, GatedStateRaisingSource> act,
         SourceEventKind expectedEventKind,
-        Action<SourceMonitor, GatedStateSource>? preArrange = null)
+        Action<SourceMonitor, GatedStateRaisingSource>? preArrange = null)
     {
         var context = CreateContext();
         var monitor = context.GetSourceMonitor();
@@ -304,7 +304,7 @@ public class SourceMonitorTests
         // without blocking; reset both gates afterwards so the race below starts from a clean pause point.
         var reachedStateRead = new ManualResetEventSlim(false);
         var releaseStateRead = new ManualResetEventSlim(true);
-        var source = new GatedStateSource(new Person(context), reachedStateRead, releaseStateRead);
+        var source = new GatedStateRaisingSource(new Person(context), reachedStateRead, releaseStateRead);
 
         preArrange?.Invoke(monitor, source);
 
@@ -564,56 +564,9 @@ public class SourceMonitorTests
 }
 
 /// <summary>
-/// A source whose State getter blocks on first access until released. Used to pin Register at the
-/// exact point where it reads State to build the SourceRegistered event, so a test can control whether
-/// that read happens before or after the monitor's lock around it is released.
-/// </summary>
-internal sealed class GatedStateSource : ISubjectSource
-{
-    private readonly ManualResetEventSlim _reachedStateRead;
-    private readonly ManualResetEventSlim _releaseStateRead;
-
-    public GatedStateSource(IInterceptorSubject rootSubject, ManualResetEventSlim reachedStateRead, ManualResetEventSlim releaseStateRead)
-    {
-        RootSubject = rootSubject;
-        _reachedStateRead = reachedStateRead;
-        _releaseStateRead = releaseStateRead;
-    }
-
-    public IInterceptorSubject RootSubject { get; }
-
-    public int WriteBatchSize => 0;
-
-    public SourceState State
-    {
-        get
-        {
-            _reachedStateRead.Set();
-            _releaseStateRead.Wait(TimeSpan.FromSeconds(10));
-            return SourceState.Connecting;
-        }
-    }
-
-    public DateTimeOffset? LastSynchronizedAt => null;
-
-    public int PendingWriteCount => 0;
-
-    public event EventHandler<SourceEvent>? StateChanged
-    {
-        add { }
-        remove { }
-    }
-
-    public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
-
-    public ValueTask<WriteResult> WriteChangesAsync(
-        ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-        => new(WriteResult.Success);
-}
-
-/// <summary>
-/// Same gated State getter as <see cref="GatedStateSource"/>, but with a StateChanged event a test
-/// can actually raise, so a transition can be driven while Register is pinned mid-registration.
+/// A source whose State getter blocks on first access until released, with a raisable StateChanged
+/// event. Pins Register at the exact point where it reads State to build the SourceRegistered
+/// event, so a test controls what happens while the monitor lock is held.
 /// </summary>
 internal sealed class GatedStateRaisingSource : ISubjectSource
 {

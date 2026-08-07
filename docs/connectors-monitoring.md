@@ -4,7 +4,7 @@ Every `ISubjectSource` reports whether it's still connecting, has completed its 
 
 ## Getting Started
 
-Add source monitoring to the tree root context and register the completion hosted service in one call, then await synchronization from anywhere holding a reference to the tree (or a subtree):
+Add source monitoring to the tree root context, then await synchronization from anywhere holding a reference to the tree (or a subtree):
 
 ```csharp
 using Namotion.Interceptor.Connectors.Monitoring;
@@ -15,16 +15,13 @@ var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking()
     .WithRegistry()
-    .WithSourceMonitoring(builder.Services)
-    .WithHostedServices(builder.Services);
+    .WithSourceMonitoring(builder.Services);
 
 var root = new Root(context);
 builder.Services.AddSingleton(root);
 builder.Services.AddOpcUaSubjectClientSource<Root>("opc.tcp://localhost:4840", "opc");
 builder.Services.AddHostedService<Worker>();
 ```
-
-This works whether the sources are registered directly in DI, as above, or attached to the subject graph through `WithHostedServices` (see [Hosting](hosting.md)). An attached source is started from a queue rather than inline, so it has not registered by the time host startup finishes; registration is held open across that gap, so a wait cannot complete before the source is actually in.
 
 ```csharp
 using Namotion.Interceptor.Connectors.Monitoring;
@@ -57,6 +54,12 @@ After registration completes, a wait is not frozen to the sources that existed a
 
 Be aware of what that vacuous completion does and does not tell you. An empty scope is the correct and expected answer for a branch that genuinely has no external source, such as configuration or computed state. It is also what you get if the source for that branch was never created, or if you anchored on a branch unrelated to any source. Those are application bugs, and this library cannot distinguish them from the legitimate case, because both look identical from the inside: nothing claims here. A warning is logged the first time an empty scope is detected for a given anchor, and likewise the first time a wait on that anchor completes with every in-scope source `Stopped`. It is deduplicated per anchor rather than per wait deliberately: awaiting per operation on a local-only branch is a supported pattern, and a per-wait guard would have logged once per call forever. Treat it as a hint rather than a verdict - check that log line first if a branch you expected a source to drive completes immediately. A consumer that treats a completed wait as proof the branch is live can walk straight into a dead one.
 
+The warning needs an `ILoggerFactory` reachable from the **context**, not just from DI. `WithSourceMonitoring(builder.Services)` bridges one across for you. The parameterless overload cannot, so an application using it gets no warning at all unless it registers one itself:
+
+```csharp
+context.TryAddService(serviceProvider.GetRequiredService<ILoggerFactory>, _ => true);
+```
+
 A subject referenced from two trees only fully participates in the first one. The context machinery that lets a subject's own context reach its tree's services adds that fallback the first time the subject attaches, and leaves it alone on a second attach from a different tree, so the subject's context keeps resolving through the first tree only. In practice that means a source claiming a property on such a subject publishes to the first tree's stream, and a wait anchored on the subject through the second tree sees only the first tree's sources, not the second tree's. Avoid sharing a subject instance across two independently-monitored trees if you need it to fully participate in both.
 
 ## Reading Per-Property State
@@ -84,7 +87,7 @@ MQTT's `LoadInitialStateAsync` always returns `null`. Retained messages arrive i
 
 There are two ways to declare registration complete, and no third: pick by whether your sources exist before host startup finishes.
 
-`WithSourceMonitoring(builder.Services)` registers a `SourceRegistrationGate` hosted service that calls `CompleteSourceRegistration()` once `IHostApplicationLifetime.ApplicationStarted` fires. That covers every source that exists by the end of host startup, whether it is a DI-registered hosted service or one attached to the subject graph. Attaching a source queues its `StartAsync` rather than running it inline, so it has not registered yet when the attach returns; the hosting layer holds registration open from the attach until that start has actually run, and nested attaches compose, because a service that attaches children during its own start takes their holds before its own is released.
+`WithSourceMonitoring(builder.Services)` registers an internal hosted service that calls `CompleteSourceRegistration()` once `IHostApplicationLifetime.ApplicationStarted` fires. That covers every source that exists by the end of host startup, whether it is a DI-registered hosted service or one attached to the subject graph. Attaching a source queues its `StartAsync` rather than running it inline, so it has not registered yet when the attach returns; the hosting layer holds registration open from the attach until that start has actually run, and nested attaches compose, because a service that attaches children during its own start takes their holds before its own is released.
 
 An application that creates sources *after* startup, for example devices discovered at runtime, uses the parameterless `WithSourceMonitoring()` overload instead and declares registration complete itself:
 
@@ -113,7 +116,7 @@ Taking a hold blocks any wait that is still pending, but it never un-completes a
 
 Two ways to observe state, depending on what you're holding.
 
-A consumer that already holds a reference to a specific source, for example an application wrapper around one `IOpcUaSubjectClientSource`, subscribes to that source's own `StateChanged` event directly, with no enumeration and no stream filtering needed. `StateChanged` fires synchronously on the transitioning thread, inside the source's own transition lock, so handlers must be observe-only: they must not block, and must not cause a transition of any source, directly or indirectly (the lock is reentrant, and a nested transition would publish out of order).
+A consumer that already holds a reference to a specific source subscribes to that source's own `StateChanged` event directly, with no enumeration and no stream filtering needed. `StateChanged` is declared on `ISubjectSource`, so a connector-specific handle such as `IOpcUaSubjectClientSource` has to be cast to it first. `StateChanged` fires synchronously on the transitioning thread, inside the source's own transition lock, so handlers must be observe-only: they must not block, and must not cause a transition of any source, directly or indirectly (the lock is reentrant, and a nested transition would publish out of order).
 
 An aggregate consumer, a wait, a diagnostics dashboard, an index across every source in the tree, subscribes to the monitor stream instead:
 
@@ -132,7 +135,7 @@ Delivery here is queued per subscription and runs outside every lock, so a slowe
 
 Because of that, the stream is not a ledger: it cannot be replayed to reconstruct a history of transitions for a property, even in principle, since the order events arrive in is not the order the transitions actually happened in. A consumer built on it maintains a view of current state, kept up to date by whichever events arrive, not a log of what happened and when.
 
-`CurrentState` reports ownership and nothing else. It does not tell you whether the property's subject is still in the object graph, and this monitor publishes no events about that either: source monitoring answers "which source owns this property, and what state is that source in". Graph membership is a separate question with its own owner, so ask `ISubjectRegistry.TryGetRegisteredSubject(subject)` for it. In practice the two rarely need distinguishing, because every built-in connector releases its claims when a subject detaches, which publishes `PropertyReleased` and makes `CurrentState` report `Unclaimed`.
+For an event that carries a property, `CurrentState` reports ownership and nothing else (on `StateChanged`, which carries none, it is the source's own state). It does not tell you whether the property's subject is still in the object graph, and this monitor publishes no events about that either: source monitoring answers "which source owns this property, and what state is that source in". Graph membership is a separate question with its own owner, so ask `ISubjectRegistry.TryGetRegisteredSubject(subject)` for it. In practice the two rarely need distinguishing, because every built-in connector releases its claims when a subject detaches, which publishes `PropertyReleased` and makes `CurrentState` report `Unclaimed`.
 
 ## The State Model, Transitions, and Delivery Contract
 
@@ -148,7 +151,7 @@ public enum SourceState
 
 See the XML docs on `SourceState` for what each member means. On a source itself (as opposed to a property, via `GetSourceState()`), `Unclaimed` never occurs.
 
-A source's state is driven by its pump lifecycle: construction and pump entry start it at `Connecting`; `StartBuffering()`, called on every connect and every reconnect, transitions to `Connecting`; a completed initial load transitions to `Synchronized`; a pump failure that escapes the connector's own handling transitions back to `Connecting` before the retry delay. A connector that detects a connection loss before it starts buffering, OPC UA's keep-alive handler is the one built-in example, calls the protected `ReportConnectionLost()` to report `Connecting` immediately, rather than leaving `State` at `Synchronized` for the entire reconnect window.
+A source's state is driven by its pump lifecycle: construction and pump entry start it at `Connecting`; `StartBuffering()`, called on every connect and every reconnect, transitions to `Connecting`; a completed initial load transitions to `Synchronized`; a pump failure that escapes the connector's own handling transitions back to `Connecting` before the retry delay. A connector that detects a connection loss before it starts buffering calls the protected `ReportConnectionLost()`; the built-in examples are OPC UA's keep-alive handler and its manual reconnect path, which both to report `Connecting` immediately, rather than leaving `State` at `Synchronized` for the entire reconnect window.
 
 `Stopped` is terminal: once a source reports it, no further transition succeeds, and `ExecuteAsync` sets it in a `finally` block so it fires on every exit path, including cancellation. This is enforced by an explicit guard in `SubjectSourceBase.StartAsync`, not by the hosting platform: `BackgroundService.StartAsync` would happily run `ExecuteAsync` again on a second call, against a fresh, uncancelled token. Without the guard, a "restarted" stopped source would claim, load, and apply live values while `State` stayed `Stopped`. A stopped source instance is never restarted; create a new instance instead.
 
@@ -166,7 +169,7 @@ Every source metadata change is one `SourceEventKind`:
 | `PropertyClaimed` | set | A source took ownership of a property. |
 | `PropertyReleased` | set | A source gave up ownership of a property. |
 
-`SourceMonitor.Publish` enqueues every event onto each subscriber's own queue; each subscription drains its own queue on a single worker at a time, so a slow handler delays only that subscription. There is no ordering guarantee across subscriptions: two subscribers can observe events in different relative orders under concurrent activity.
+The monitor enqueues every event onto each subscriber's own queue; each subscription drains its own queue on a single worker at a time, so a slow handler delays only that subscription. There is no ordering guarantee across subscriptions: two subscribers can observe events in different relative orders under concurrent activity.
 
 ## Worked Sample: Availability Attributes
 
@@ -200,6 +203,8 @@ The updater subscribes once and reacts to every event kind that can change a pro
 ```csharp
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Registry;
 

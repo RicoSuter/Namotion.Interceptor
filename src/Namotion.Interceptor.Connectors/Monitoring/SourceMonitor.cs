@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 
@@ -22,9 +23,10 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 {
     private readonly Lock _lock = new();
-    private readonly Func<ILogger?>? _loggerResolver;
+    private Func<ILogger?>? _loggerResolver;
 
     private ILogger? _logger;
+
 
     // Boxed in a single-element array so the reference can be read with Volatile.Read: ImmutableArray<T>
     // is a struct, which Volatile/Interlocked cannot target directly. Writes happen under _lock and
@@ -43,15 +45,49 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// <summary>The sources registered right now. For a race-free baseline use SourceSubscription.Sources.</summary>
     public ImmutableArray<ISubjectSource> Sources => _sources[0];
 
-    /// <summary>True when at least one public subscriber exists. Gates the attach and detach catch-up scan.</summary>
+    /// <summary>True when at least one public subscriber exists. Gates ownership event publishing.</summary>
     internal bool HasSubscribers => !_subscriptions[0].IsEmpty;
 
     /// <summary>
     /// Resolves the logger on first use (Subscribe, or a wait engine warning), since the context is
-    /// configured before any logging provider exists (see WithSourceMonitoring). Every call site is
-    /// already under _lock, so the read-then-maybe-write here needs no synchronization of its own.
+    /// configured before any logging provider exists (see WithSourceMonitoring).
     /// </summary>
-    private ILogger? Logger => _logger ??= _loggerResolver?.Invoke();
+    /// <remarks>
+    /// Retries while the resolve returns null, and must keep doing so: with
+    /// WithSourceMonitoring(services) the ILoggerFactory is only bridged into the context when the
+    /// host is built, which is AFTER a consumer following the documented pattern has called
+    /// Subscribe. Latching that null would silently kill every warning for the lifetime of the
+    /// process, which is the exact defect this lazy resolution exists to avoid. The resolver is
+    /// dropped once it succeeds, so its captured context is not retained past that point.
+    /// <para>
+    /// Read from arbitrary threads (a subscription's drain calls it when a handler throws), so it
+    /// cannot rely on the monitor lock. Two threads racing here both resolve and store the same
+    /// logger, which is harmless.
+    /// </para>
+    /// </remarks>
+    internal ILogger? ResolveLogger()
+    {
+        var logger = Volatile.Read(ref _logger);
+        if (logger is not null)
+        {
+            return logger;
+        }
+
+        var resolver = Volatile.Read(ref _loggerResolver);
+        if (resolver is null)
+        {
+            return null;
+        }
+
+        logger = resolver.Invoke();
+        if (logger is not null)
+        {
+            Volatile.Write(ref _logger, logger);
+            Volatile.Write(ref _loggerResolver, null);
+        }
+
+        return logger;
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -60,10 +96,8 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// re-evaluated on every parent-link mutation. That is gated on reference mutation rather than
     /// on subscriber count, because a pending wait is the one consumer with no subscription.
     /// <para>
-    /// Ownership events are published from SetSource/RemoveSource, where ownership actually changes,
-    /// not from here. This monitor deliberately reports nothing about tree membership: a subject
-    /// entering or leaving the graph is a registry question (see
-    /// <c>ISubjectRegistry.TryGetRegisteredSubject</c>), not a source-ownership one.
+    /// Nothing else here needs lifecycle events: ownership events are published from
+    /// SetSource/RemoveSource, and graph membership is a registry question, not a source one.
     /// </para>
     /// </remarks>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
@@ -81,7 +115,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
         lock (_lock)
         {
-            var subscription = new SourceSubscription(handler, _sources[0], Remove, Logger);
+            var subscription = new SourceSubscription(handler, _sources[0], Remove, this);
             _subscriptions = [_subscriptions[0].Add(subscription)];
             return subscription;
         }
@@ -96,6 +130,12 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     }
 
     /// <summary>Registers a source. Idempotent.</summary>
+    /// <remarks>
+    /// The re-evaluation below is defensive, not load-bearing: registering only ever adds an
+    /// in-scope source, which can block a pending wait but never satisfy one, so no pending wait can
+    /// complete because of it. Unregister's counterpart IS load-bearing - removing the source a wait
+    /// is blocked on can satisfy it.
+    /// </remarks>
     public void Register(ISubjectSource source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -141,21 +181,16 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
     private void OnSourceStateChanged(object? sender, SourceEvent sourceEvent)
     {
-        // Under _lock, not a bare Publish: Register attaches this forwarder BEFORE it publishes
-        // SourceRegistered, both under _lock. A transition raised on another thread in that window
-        // would otherwise enqueue ahead of the registration event, so a consumer that starts
-        // tracking a source on SourceRegistered and applies NewState on StateChanged drops that
-        // first transition and stays permanently one state stale (Connecting -> Synchronized fires
-        // once for most sources, so there is no later event to correct it). Taking the lock here
-        // makes the transition wait for Register to finish publishing. No new lock edge: this runs
-        // inside the source's own transition lock, and OnWaitConditionChanged below already takes
-        // _lock on this same path.
+        // Under _lock so this cannot overtake the SourceRegistered event Register publishes under
+        // the same lock, having already attached this forwarder. A consumer tracking a source from
+        // SourceRegistered would otherwise drop its first transition, permanently, since most
+        // sources transition once. No new lock edge: OnWaitConditionChanged below already takes it.
         PublishUnderLock(sourceEvent);
         OnWaitConditionChanged();
     }
 
     /// <summary>Enqueues an event onto every subscriber's own queue.</summary>
-    internal void Publish(in SourceEvent sourceEvent)
+    private void Publish(in SourceEvent sourceEvent)
     {
         var subscriptions = _subscriptions[0];
         foreach (var subscription in subscriptions)
@@ -165,16 +200,10 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     }
 
     /// <summary>
-    /// Publishes under _lock. Register and Unregister do the same, because they publish alongside a
-    /// mutation of _sources and the lock keeps that atomic with a concurrent Subscribe's snapshot;
-    /// OnSourceStateChanged takes it to stay ordered behind the SourceRegistered event Register
-    /// publishes under the same lock (see OnSourceStateChanged). Used by SetSource/RemoveSource,
-    /// which mutate property data entirely outside this
-    /// monitor, so an ownership event has no snapshot baseline to reconcile against the way
-    /// registration does (see docs/connectors-monitoring.md, Worked Sample); only delivery order
-    /// relative to a concurrent Register/Unregister/Subscribe needs protecting. Cannot deadlock:
-    /// Publish only enqueues onto a ConcurrentQueue and, at most, schedules a Task.Run; it never runs
-    /// a handler synchronously or calls back into anything that takes _lock.
+    /// Publishes under _lock, which is what keeps delivery ordered against a concurrent
+    /// Register/Unregister/Subscribe. Cannot deadlock: Publish only enqueues onto a ConcurrentQueue
+    /// and at most schedules a Task.Run, never running a handler synchronously or calling back into
+    /// anything that takes _lock.
     /// </summary>
     internal void PublishUnderLock(in SourceEvent sourceEvent)
     {
@@ -244,23 +273,11 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     private readonly HashSet<IInterceptorSubject> _scopeVisitedScratch = new(ReferenceEqualityComparer.Instance);
     private readonly Stack<IInterceptorSubject> _scopePendingScratch = new();
 
-    // Warn-once bookkeeping, keyed on the ANCHOR rather than on an individual wait. The intended
-    // usage is an application re-awaiting per operation (see WaitForSynchronizationAsync), and an
-    // already-satisfied wait returns on the fast path without ever allocating a PendingWait, so
-    // per-wait flags left that path with nothing to deduplicate against: a per-request wait on a
-    // legitimately local-only branch logged one Warning per request, forever. The diagnostic is a
-    // property of the branch, not of one wait, so the flag belongs on the anchor.
-    //
-    // Stored in the subject's own data rather than in a table on this monitor, so the flag has
-    // exactly the subject's lifetime and needs no weak references or cleanup: a side table would
-    // either retain anchors forever or need weak keys to avoid it. Same (null, key) subject-scoped
-    // convention ParentsHandlerExtensions and LifecycleInterceptorExtensions use. ConcurrentDictionary
-    // .TryAdd IS the one-shot latch - it returns true exactly once per subject - so this needs no
-    // lock of its own either, though every caller happens to hold _lock anyway.
-    //
-    // Two monitors sharing an anchor therefore share the flag, and only the first to reach it warns.
-    // Multiple monitors over one subject is already an unusual topology, and this is a hint rather
-    // than a verdict, so that is preferred over reintroducing per-monitor state.
+    // Warn-once keys, on the ANCHOR rather than on a wait: an already-satisfied wait returns on the
+    // fast path without allocating a PendingWait, so per-wait flags never deduplicated the intended
+    // usage of re-awaiting per operation. Stored in the subject's own data, so the flag has exactly
+    // the subject's lifetime and needs no weak table. Two monitors sharing an anchor share the flag,
+    // and only the first warns; that is preferred over reintroducing per-monitor state.
     private const string EmptyScopeWarnedKey = "Namotion.Interceptor.Connectors.EmptyScopeWarned";
     private const string AllStoppedWarnedKey = "Namotion.Interceptor.Connectors.AllStoppedWarned";
 
@@ -280,10 +297,8 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
         lock (_lock)
         {
             // Checked first with no PendingWait allocated: the common case for an application
-            // re-awaiting per operation is already satisfied. Warning deduplication lives on the
-            // anchor (see _anchorWarnings), not on the wait, precisely so this path deduplicates
-            // too. Only the unsatisfied path below allocates a PendingWait (and its
-            // TaskCompletionSource).
+            // re-awaiting per operation is already satisfied. Only the unsatisfied path below
+            // allocates a PendingWait and its TaskCompletionSource.
             if (IsSatisfied(subject))
             {
                 return Task.CompletedTask;
@@ -333,44 +348,46 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
         if (!matched)
         {
-            // Warn once per anchor, not on every re-evaluation and not on every call. TryAdd both
-            // tests and sets in one step, and only here, right before the warning fires, so a later
-            // pass that finds the branch matched again never burns the flag.
-            if (anchor.Data.TryAdd((null, EmptyScopeWarnedKey), null))
-            {
-                Logger?.LogWarning(
-                    "A synchronization wait on {Subject} has no in-scope source, and source registration is complete. " +
-                    "The wait completes immediately: once registration is complete an empty scope is no longer " +
-                    "ambiguous between \"no source yet\" and \"no source ever\", so it definitively means this " +
-                    "branch is local-only and vacuously synchronized. Check that a source is configured for this " +
-                    "branch if that is unexpected.",
-                    anchor.GetType().Name);
-            }
+            WarnOnce(anchor, EmptyScopeWarnedKey,
+                "A synchronization wait on {Subject} has no in-scope source, and source registration is complete. " +
+                "The wait completes immediately: once registration is complete an empty scope is no longer " +
+                "ambiguous between \"no source yet\" and \"no source ever\", so it definitively means this " +
+                "branch is local-only and vacuously synchronized. Check that a source is configured for this " +
+                "branch if that is unexpected.");
 
-            // The blocking rule predates the registration-complete signal. Once the application has
-            // called CompleteSourceRegistration, an empty scope is no longer ambiguous, so it is
-            // vacuously satisfied - consistent with the all-Stopped rule below, which also completes
-            // vacuously rather than hanging. Before registration is complete this method already
-            // returned false above, so an empty scope still blocks during startup.
+            // Once the application has called CompleteSourceRegistration, an empty scope is no
+            // longer ambiguous, so it is vacuously satisfied - consistent with the all-Stopped rule
+            // below. Before registration is complete this method already returned false above, so an
+            // empty scope still blocks during startup.
             return true;
         }
 
-        // Same one-shot-per-anchor treatment as the empty-scope warning above, and for the same
-        // reasons: a wait can be re-evaluated again (e.g. by an unrelated Register/Unregister
-        // elsewhere in the tree) after it has already completed, in the window before its
-        // continuation removes it from _waits, and an application re-awaiting per operation would
-        // otherwise log once per call forever.
-        if (allInScopeStopped && anchor.Data.TryAdd((null, AllStoppedWarnedKey), null))
+        if (allInScopeStopped)
         {
-            // Stopped is terminal, so this branch will never become live. Completing beats
-            // hanging, but silence would look like success, so log it.
-            Logger?.LogWarning(
+            // Stopped is terminal, so this branch will never become live. Completing beats hanging,
+            // but silence would look like success, so log it.
+            WarnOnce(anchor, AllStoppedWarnedKey,
                 "A synchronization wait on {Subject} completed with every in-scope source stopped. " +
-                "Stopped is terminal, so this branch will not synchronize again.",
-                anchor.GetType().Name);
+                "Stopped is terminal, so this branch will not synchronize again.");
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Logs <paramref name="message"/> at most once per anchor, latched on the anchor's own subject
+    /// data. The latch is only taken right before the warning fires, so a pass that finds the branch
+    /// healthy again never burns it.
+    /// </summary>
+    private void WarnOnce(IInterceptorSubject anchor, string key, string message)
+    {
+        // Logger first: resolving it is cheap, and when no logger is configured this skips the
+        // dictionary write entirely, since the latch exists only to gate a warning.
+        var logger = ResolveLogger();
+        if (logger is not null && anchor.TryAddData(key, null))
+        {
+            logger.LogWarning(message, anchor.GetType().Name);
+        }
     }
 
     /// <summary>
@@ -401,9 +418,11 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
             }
 
             // A throw from one wait's IsSatisfied must not skip re-evaluating the rest - that would
-            // be a lost wakeup for every wait after it. Collect and rethrow once the full pass
-            // completes, matching SourceMonitoringExtensions.CompleteSourceRegistration and
-            // CompositeDisposable.Dispose (see ExceptionAggregation, shared with both).
+            // be a lost wakeup for every wait after it. Written out rather than delegated to
+            // ExceptionAggregation.ForEach, unlike the two cold call sites: this runs on every
+            // property-reference add/remove tree-wide while any wait is pending, and the helper's
+            // IEnumerable<T> parameter would box the ImmutableArray, heap-allocate its enumerator,
+            // and allocate a closure per pass, since the lambda captures this.
             foreach (var wait in _waits)
             {
                 try

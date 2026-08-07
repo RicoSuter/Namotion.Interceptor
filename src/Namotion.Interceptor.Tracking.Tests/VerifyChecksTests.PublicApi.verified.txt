@@ -87,6 +87,10 @@ namespace Namotion.Interceptor.Tracking.Change
 }
 namespace Namotion.Interceptor.Tracking
 {
+    public interface IStartupCompletionDeferrer
+    {
+        System.IDisposable DeferCompletion();
+    }
     public static class InterceptorSubjectContextExtensions
     {
         public static Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
@@ -145,10 +149,6 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value);
-    }
-    public interface IStartupCompletionDeferrer
-    {
-        System.IDisposable DeferCompletion();
     }
     public class LifecycleInterceptor : Namotion.Interceptor.Interceptors.ILifecycleInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {

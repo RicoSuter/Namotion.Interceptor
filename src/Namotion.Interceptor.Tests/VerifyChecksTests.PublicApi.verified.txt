@@ -99,6 +99,7 @@ namespace Namotion.Interceptor
     public static class InterceptorSubjectExtensions
     {
         public static void SetData(this Namotion.Interceptor.IInterceptorSubject subject, string key, object? value) { }
+        public static bool TryAddData(this Namotion.Interceptor.IInterceptorSubject subject, string key, object? value) { }
         public static bool TryGetData(this Namotion.Interceptor.IInterceptorSubject subject, string key, out object? value) { }
     }
     public static class PropertyChangedEventArgsCache
