@@ -317,6 +317,134 @@ public class ChangeMergerTests
         Assert.Equal(0, allocated);
     }
 
+    [Fact]
+    public void WhenABatchRepeatsFewProperties_ThenTheIndexIsSizedByPropertiesNotByChanges()
+    {
+        // Arrange: the index is keyed by property, so 50,000 changes to 4 of them need 4 entries.
+        // Sizing it by the batch retained ~11 MB for the merger's lifetime.
+        using var merger = new ChangeMerger();
+
+        // Act
+        merger.Merge(CreateWideBatch(changeCount: 50_000, distinctProperties: 4));
+        merger.Reset();
+
+        // Assert
+        Assert.True(GetPropertyIndexCapacity(merger) <= 293,
+            $"index capacity was {GetPropertyIndexCapacity(merger)}, so it is still sized by change count");
+    }
+
+    [Fact]
+    public void WhenAWideBatchIsFollowedByNarrowOnes_ThenTheIndexCapacityIsReleased()
+    {
+        // Arrange
+        using var merger = new ChangeMerger();
+
+        merger.Merge(CreateWideBatch(changeCount: 4096, distinctProperties: 4096));
+        merger.Reset();
+        Assert.True(GetPropertyIndexCapacity(merger) > PropertyIndexMaximum);
+
+        // Act
+        merger.Merge(CreateWideBatch(changeCount: 2, distinctProperties: 2));
+        merger.Reset();
+
+        // Assert
+        Assert.True(GetPropertyIndexCapacity(merger) <= 293,
+            $"index capacity stayed at {GetPropertyIndexCapacity(merger)} after a narrow batch");
+    }
+
+    [Fact]
+    public void WhenWideBatchesKeepArriving_ThenTheIndexCapacityIsNotChurned()
+    {
+        // Arrange: a large model whose properties all change every flush must keep its capacity, or the
+        // trim reintroduces the per-flush allocation it exists to remove.
+        using var merger = new ChangeMerger();
+
+        merger.Merge(CreateWideBatch(changeCount: 4096, distinctProperties: 4096));
+        merger.Reset();
+        var settledCapacity = GetPropertyIndexCapacity(merger);
+
+        // Act
+        for (var round = 0; round < 5; round++)
+        {
+            merger.Merge(CreateWideBatch(changeCount: 4096, distinctProperties: 4096));
+            merger.Reset();
+        }
+
+        // Assert
+        Assert.Equal(settledCapacity, GetPropertyIndexCapacity(merger));
+    }
+
+    [Fact]
+    public void WhenAShrinkFollowsABatchWiderThanTheFloor_ThenItDoesNotThrow()
+    {
+        // Arrange: TrimExcess throws when the requested capacity is below Count, and the shrink guard
+        // does not bound Count by the floor. A batch of 300 distinct properties is both above the 256
+        // floor and below a quarter of the capacity a 6000-property batch leaves behind, so this is the
+        // shape that throws if the trim runs before the clear. It would escape the flush task's finally
+        // and end the periodic flush loop for good.
+        using var merger = new ChangeMerger();
+
+        merger.Merge(CreateWideBatch(changeCount: 6000, distinctProperties: 6000));
+        merger.Reset();
+
+        // Act & Assert
+        merger.Merge(CreateWideBatch(changeCount: 300, distinctProperties: 300));
+        merger.Reset();
+    }
+
+    [Fact]
+    public void WhenManyChangesCollapseToFewProperties_ThenNothingIsAllocated()
+    {
+        // Arrange: the inverted shape of the survivor-check allocation test, which uses as many
+        // properties as changes and so cannot see an index sized by the batch.
+        using var merger = new ChangeMerger();
+        var changes = CreateWideBatch(changeCount: 4096, distinctProperties: 8);
+
+        for (var warmup = 0; warmup < 5; warmup++)
+        {
+            merger.Merge(changes);
+            merger.Reset();
+        }
+
+        // Act
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        merger.Merge(changes);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        merger.Reset();
+
+        // Assert
+        Assert.Equal(0, allocated);
+    }
+
+    private const int PropertyIndexMaximum = 1024;
+
+    private static SubjectPropertyChange[] CreateWideBatch(int changeCount, int distinctProperties)
+    {
+        var properties = new PropertyReference[distinctProperties];
+        for (var index = 0; index < distinctProperties; index++)
+        {
+            properties[index] = new PropertyReference(new Person(), nameof(Person.FirstName));
+        }
+
+        var changes = new SubjectPropertyChange[changeCount];
+        for (var index = 0; index < changeCount; index++)
+        {
+            changes[index] = CreateChange(
+                properties[index % distinctProperties], "Old", "New", revision: index + 1);
+        }
+
+        return changes;
+    }
+
+    private static int GetPropertyIndexCapacity(ChangeMerger merger)
+    {
+        var field = typeof(ChangeMerger)
+            .GetField("_propertyIndices", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        Assert.True(field is not null, "_propertyIndices was renamed, this test needs updating.");
+        return ((Dictionary<PropertyReference, (int, int, long, long)>)field!.GetValue(merger)!).Capacity;
+    }
+
     private static SubjectPropertyChange[] CreateBatch(int size)
     {
         // One subject per change, so every change is the only root of a subject of its own.
