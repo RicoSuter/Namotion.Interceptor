@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Generator.Tests.Models;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
@@ -82,6 +83,37 @@ public partial class InParameterMethodSubject
 
 #endregion
 
+#region Case NP: a "new" partial property that hides a plain base member
+
+public class NewPartialBase
+{
+    public string Label { get; set; } = "base";
+}
+
+[InterceptorSubject]
+public partial class NewPartialSubject : NewPartialBase
+{
+    public new partial string Label { get; set; }
+}
+
+#endregion
+
+#region Case SO: a "sealed override" partial property
+
+[InterceptorSubject]
+public partial class SealedOverrideBase
+{
+    public virtual partial string Label { get; set; }
+}
+
+[InterceptorSubject]
+public partial class SealedOverrideSubject : SealedOverrideBase
+{
+    public sealed override partial string Label { get; set; }
+}
+
+#endregion
+
 public class GeneratorShapeBehaviorTests
 {
     [Fact]
@@ -143,6 +175,35 @@ public class GeneratorShapeBehaviorTests
         Assert.NotNull(protectedInternalStatusProperty);
         Assert.Equal("internal-3", internalStatusProperty.GetValue());
         Assert.Equal("protected-internal-3", protectedInternalStatusProperty.GetValue());
+    }
+
+    [Fact]
+    public void WhenPartialPropertyBesideAccessibleDefaultsIsWrittenAndRead_ThenInterceptorsObserveTheAccessAndPropertyChangedFires()
+    {
+        // Arrange: "Value" is the partial property that actually routes through the interceptor
+        // chain, unlike the internal/protected internal interface defaults declared beside it,
+        // which stay direct computed reads and are asserted separately above.
+        var readInterceptor = new RecordingReadInterceptor();
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => readInterceptor)
+            .WithService(() => writeInterceptor);
+
+        var subject = new AccessibleDefaultsSubject(context);
+        var firedEvents = new List<string>();
+        subject.PropertyChanged += (_, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        subject.Value = 5;
+        var value = subject.Value;
+
+        // Assert
+        Assert.Equal(5, value);
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "Value" && Equals(write.Value, 5.0));
+        Assert.Contains(readInterceptor.Reads, read => read.PropertyName == "Value" && Equals(read.Value, 5.0));
+        Assert.Equal(["Value"], firedEvents);
     }
 
     [Fact]
@@ -221,6 +282,129 @@ public class GeneratorShapeBehaviorTests
         Assert.Equal(42, subject.Received);
         Assert.Contains(methodInterceptor.Invocations,
             invocation => invocation.MethodName == "Send" && invocation.Parameters.SequenceEqual(new object?[] { 42 }));
+    }
+
+    [Fact]
+    public void WhenBaseClassIsNamedOnADifferentPartialDeclaration_ThenBaseAndOwnPropertiesAreIntercepted()
+    {
+        // Arrange (Contractor): [InterceptorSubject] and the ": PersonBase" base list live on two
+        // different partial declarations of the same class, which is exactly the shape the
+        // base-class fix repaired. "Agency" is Contractor's own partial property, so it must
+        // round-trip through the interceptor chain like any other. "FirstName" is inherited
+        // (not redeclared) from PersonBase, a separately [InterceptorSubject]-attributed class.
+        //
+        // KNOWN GAP (pre-existing, not introduced by this branch, not fixed by it either): every
+        // [InterceptorSubject] class generates its own private "_context" field and its own
+        // explicit IInterceptorSubject.Context re-implementation (SubjectCodeGenerator.cs,
+        // EmitInterceptorSubjectImplementation, called unconditionally). Interface
+        // re-implementation means the derived class's Context wins for the whole object, so the
+        // constructor's AddFallbackContext(context) call only ever reaches Contractor's own field.
+        // PersonBase's own Context/_context is never touched, so PersonBase's own generated
+        // GetPropertyValue/SetPropertyValue see a permanently-null "_context" and take the
+        // no-interception fast path (SubjectCodeGenerator.cs, EmitHelperMethods) for any property
+        // it declares, regardless of the real context passed to the derived constructor. The
+        // value is still correct and PropertyChanged still fires (the setter calls
+        // RaisePropertyChanged directly, not through the interceptor chain), but read/write
+        // interceptors never observe the access. Confirmed to also affect the pre-existing
+        // Employee : PersonBase pair, so this is not specific to the differently-declared base
+        // list; it affects any multi-level [InterceptorSubject] hierarchy. Only "Agency" is
+        // asserted against the interceptors below; "FirstName" is asserted against value,
+        // PropertyChanged, and metadata/registry instead, which is what actually works today.
+        var readInterceptor = new RecordingReadInterceptor();
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithService(() => readInterceptor)
+            .WithService(() => writeInterceptor);
+
+        var contractor = new Contractor(context);
+        var firedEvents = new List<string>();
+        contractor.PropertyChanged += (_, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        contractor.FirstName = "Rico";
+        contractor.Agency = "Acme";
+        var firstName = contractor.FirstName;
+        var agency = contractor.Agency;
+
+        // Assert
+        Assert.Equal("Rico", firstName);
+        Assert.Equal("Acme", agency);
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "Agency" && Equals(write.Value, "Acme"));
+        Assert.Contains(readInterceptor.Reads, read => read.PropertyName == "Agency" && Equals(read.Value, "Acme"));
+        Assert.Equal(["FirstName", "Agency"], firedEvents);
+
+        Assert.True(Contractor.DefaultProperties.ContainsKey("FirstName"));
+        Assert.True(Contractor.DefaultProperties.ContainsKey("Agency"));
+
+        var registeredSubject = contractor.TryGetRegisteredSubject();
+        Assert.NotNull(registeredSubject);
+        var firstNameProperty = registeredSubject.TryGetProperty("FirstName");
+        var agencyProperty = registeredSubject.TryGetProperty("Agency");
+        Assert.NotNull(firstNameProperty);
+        Assert.NotNull(agencyProperty);
+        Assert.Equal("Rico", firstNameProperty.GetValue());
+        Assert.Equal("Acme", agencyProperty.GetValue());
+    }
+
+    [Fact]
+    public void WhenNewPartialPropertyHidesBaseMember_ThenInterceptorsObserveTheAccessAndPropertyChangedFires()
+    {
+        // Arrange (case NP): "new" hides NewPartialBase.Label, a plain auto-property with no
+        // interception of its own, so only the derived "new partial" half may legitimately route
+        // through the interceptor chain.
+        var readInterceptor = new RecordingReadInterceptor();
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => readInterceptor)
+            .WithService(() => writeInterceptor);
+
+        var subject = new NewPartialSubject(context);
+        var firedEvents = new List<string>();
+        subject.PropertyChanged += (_, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        subject.Label = "new-value";
+        var value = subject.Label;
+
+        // Assert
+        Assert.Equal("new-value", value);
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "Label" && Equals(write.Value, "new-value"));
+        Assert.Contains(readInterceptor.Reads, read => read.PropertyName == "Label" && Equals(read.Value, "new-value"));
+        Assert.Equal(["Label"], firedEvents);
+    }
+
+    [Fact]
+    public void WhenSealedOverridePartialPropertyIsWrittenAndRead_ThenInterceptorsObserveTheAccessAndPropertyChangedFires()
+    {
+        // Arrange (case SO): "sealed" is only legal paired with "override", so this proves the
+        // sealed override half is what is actually wired into the interceptor chain, not merely
+        // legal syntax accepted by the compiler.
+        var readInterceptor = new RecordingReadInterceptor();
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => readInterceptor)
+            .WithService(() => writeInterceptor);
+
+        var subject = new SealedOverrideSubject(context);
+        var firedEvents = new List<string>();
+        subject.PropertyChanged += (_, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        subject.Label = "sealed-value";
+        var value = subject.Label;
+
+        // Assert
+        Assert.Equal("sealed-value", value);
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "Label" && Equals(write.Value, "sealed-value"));
+        Assert.Contains(readInterceptor.Reads, read => read.PropertyName == "Label" && Equals(read.Value, "sealed-value"));
+        Assert.Equal(["Label"], firedEvents);
     }
 
     private sealed class RecordingReadInterceptor : IReadInterceptor

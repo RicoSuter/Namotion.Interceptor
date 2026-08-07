@@ -213,6 +213,35 @@ public class ExplicitInterfaceBehaviorTests
     }
 
     [Fact]
+    public void WhenOverridePartialPropertyIsWrittenAndRead_ThenInterceptorsObserveTheAccessAndPropertyChangedFires()
+    {
+        // Arrange: "Name" is virtual on OverrideBase and overridden on OverrideDerived, so this
+        // proves the override half is the one actually wired into the interceptor chain, rather
+        // than a shadow that only satisfies the generated-text assertions elsewhere.
+        var readInterceptor = new RecordingReadInterceptor();
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => readInterceptor)
+            .WithService(() => writeInterceptor);
+
+        var subject = new OverrideDerived(context);
+        var firedEvents = new List<string>();
+        subject.PropertyChanged += (_, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        subject.Name = "value";
+        var value = subject.Name;
+
+        // Assert
+        Assert.Equal("value", value);
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "Name" && Equals(write.Value, "value"));
+        Assert.Contains(readInterceptor.Reads, read => read.PropertyName == "Name" && Equals(read.Value, "value"));
+        Assert.Equal(["Name"], firedEvents);
+    }
+
+    [Fact]
     public void WhenDeclaredPropertyIsWrittenAndRead_ThenInterceptorsObserveTheAccessAndPropertyChangedFires()
     {
         // Arrange (case Z): "Kind" is the partial property, the one actually routed through the
