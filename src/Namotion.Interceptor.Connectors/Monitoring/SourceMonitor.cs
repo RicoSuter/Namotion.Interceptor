@@ -13,11 +13,8 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// Added to the tree root context by WithSourceMonitoring.
 /// </summary>
 /// <remarks>
-/// Must run after ParentTrackingHandler: OnWaitConditionChanged re-evaluates every pending wait via
-/// SourceScope.IsInScope, which walks the parent set ParentTrackingHandler maintains for the same
-/// lifecycle change, so that set must already reflect this change by the time this handler runs.
-/// Running after ContextInheritanceHandler keeps the two context-tracking handlers adjacent in the
-/// order; nothing here currently depends on the fallback context it maintains.
+/// Must run after ParentTrackingHandler: wait re-evaluation walks the parent set that handler
+/// maintains for the same lifecycle change, so it has to be up to date first.
 /// </remarks>
 [RunsAfter(typeof(ContextInheritanceHandler), typeof(ParentTrackingHandler))]
 public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
@@ -28,10 +25,9 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     private ILogger? _logger;
 
 
-    // Boxed in a single-element array so the reference can be read with Volatile.Read: ImmutableArray<T>
-    // is a struct, which Volatile/Interlocked cannot target directly. Writes happen under _lock and
-    // swap the box wholesale, so Sources, HasSubscribers and Publish can read the latest snapshot
-    // lock-free. Same technique as ParentsHandlerExtensions.ParentsSet._cache.
+    // Boxed so the reference can be read with Volatile.Read: ImmutableArray<T> is a struct, which
+    // Volatile cannot target. Writes swap the box under _lock, so readers stay lock-free.
+    // Same technique as ParentsHandlerExtensions.ParentsSet._cache.
     private volatile ImmutableArray<ISubjectSource>[] _sources = [ImmutableArray<ISubjectSource>.Empty];
     private volatile ImmutableArray<SourceSubscription>[] _subscriptions = [ImmutableArray<SourceSubscription>.Empty];
 
@@ -57,17 +53,10 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// configured before any logging provider exists (see WithSourceMonitoring).
     /// </summary>
     /// <remarks>
-    /// Retries while the resolve returns null, and must keep doing so: with
-    /// WithSourceMonitoring(services) the ILoggerFactory is only bridged into the context when the
-    /// host is built, which is AFTER a consumer following the documented pattern has called
-    /// Subscribe. Latching that null would silently kill every warning for the lifetime of the
-    /// process, which is the exact defect this lazy resolution exists to avoid. The resolver is
-    /// dropped once it succeeds, so its captured context is not retained past that point.
-    /// <para>
-    /// Read from arbitrary threads (a subscription's drain calls it when a handler throws), so it
-    /// cannot rely on the monitor lock. Two threads racing here both resolve and store the same
-    /// logger, which is harmless.
-    /// </para>
+    /// Must keep retrying while the resolve returns null: the ILoggerFactory only reaches the
+    /// context when the host is built, so latching an early null would kill logging for the process.
+    /// Read from arbitrary threads, so it cannot rely on the monitor lock; two threads racing both
+    /// resolve the same logger, which is harmless.
     /// </remarks>
     internal ILogger? ResolveLogger()
     {
@@ -95,19 +84,9 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
     /// <inheritdoc />
     /// <remarks>
-    /// The wait engine is the only thing here that cares about lifecycle changes: a reparent moves a
-    /// branch's scope with no attach or detach event of its own, so satisfaction has to be
-    /// re-evaluated on every parent-link mutation. That is gated on reference mutation rather than
-    /// on subscriber count, because a pending wait is the one consumer with no subscription.
-    /// <para>
-    /// Nothing may escape from here. This runs inside LifecycleInterceptor's attach lock, which
-    /// documents its handlers as exception-free, and a throw leaves the graph half-attached: later
-    /// handlers are skipped, SubjectAttached never fires, and child properties never attach.
-    /// </para>
-    /// <para>
-    /// Nothing else here needs lifecycle events: ownership events are published from
-    /// SetSource/RemoveSource, and graph membership is a registry question, not a source one.
-    /// </para>
+    /// Only the wait engine needs this: a reparent moves a branch's scope with no attach or detach
+    /// event of its own. Nothing may escape - this runs inside LifecycleInterceptor's attach lock,
+    /// and a throw would leave the graph half-attached.
     /// </remarks>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
@@ -250,11 +229,9 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
         }
     }
 
-    // Born at 1, taken at WithSourceMonitoring time (before the host is built), so no wait can
-    // complete until something explicitly releases it, regardless of hosted-service start order.
-    // _initialHold is what CompleteSourceRegistration disposes: its own Interlocked latch (see
-    // RegistrationHold.Dispose) is the idempotence guard, so a re-entrant loader guard calling
-    // CompleteSourceRegistration more than once is safe without a second latch field here.
+    // Born at 1 at WithSourceMonitoring time, before the host is built, so no wait can complete
+    // until something explicitly releases it. RegistrationHold's own latch makes the release
+    // idempotent, so CompleteSourceRegistration needs no second guard.
     private int _registrationHolds = 1;
     private readonly RegistrationHold _initialHold;
 
@@ -287,12 +264,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     }
 
     /// <inheritdoc />
-    /// <remarks>
-    /// Explicit, so the domain-named <see cref="DeferWaitCompletion"/> stays the single method on
-    /// this type's own surface. This is how Namotion.Interceptor.Hosting holds registration open
-    /// between attaching a source to the graph and that source's queued StartAsync actually running,
-    /// without either package referencing the other.
-    /// </remarks>
+    /// <remarks>Explicit, so <see cref="DeferWaitCompletion"/> stays this type's only surface.</remarks>
     IDisposable IStartupCompletionDeferrer.DeferCompletion() => DeferWaitCompletion();
 
     private void ReleaseHold()
@@ -308,12 +280,8 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     // use for lock-free reads.
     private ImmutableArray<PendingWait> _waits = ImmutableArray<PendingWait>.Empty;
 
-    // Reused across every scope walk inside IsSatisfied (see SourceScope.IsInScope). Every caller of
-    // IsSatisfied already holds _lock, and SearchGraph clears both collections before returning
-    // (even on an early match), so reuse across sources within one pass, and across passes, is safe
-    // and allocation-free. Otherwise a wait re-evaluation - which fires on every property-reference
-    // add/remove tree-wide while any wait is pending - would allocate a HashSet and a Stack per
-    // in-scope source check.
+    // Reused across every scope walk in IsSatisfied, which runs per wait on every property-reference
+    // add/remove tree-wide. Callers hold _lock and SearchGraph clears both on every return path.
     private readonly HashSet<IInterceptorSubject> _scopeVisitedScratch = new(ReferenceEqualityComparer.Instance);
     private readonly Stack<IInterceptorSubject> _scopePendingScratch = new();
 

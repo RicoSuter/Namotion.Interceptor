@@ -9,34 +9,15 @@ namespace Namotion.Interceptor.Connectors;
 /// Sources must claim ownership of properties by calling <c>SetSource(this)</c> during initialization.
 /// </summary>
 /// <remarks>
-/// <see cref="ISubjectConnector.RootSubject"/>, <see cref="State"/>, and <see cref="LastSynchronizedAt"/> must not
-/// acquire any lock that is held while <see cref="StateChanged"/> is raised. A registered source is
-/// read through these getters by <c>SourceMonitor</c>, which itself holds its own lock while doing
-/// so (building the SourceRegistered/SourceUnregistered event, and evaluating a branch-scoped wait).
-/// If a getter here acquired the source's own transition lock, a StateChanged raise on one thread
-/// (holding the transition lock, waiting to enter SourceMonitor's lock via the event handler) could
-/// deadlock against a SourceMonitor caller on another thread (holding SourceMonitor's lock, waiting
-/// to enter the transition lock via one of these getters) - a classic ABBA lock-order inversion.
-/// <see cref="SubjectSourceBase"/> is safe because these getters are lock-free (Volatile.Read /
-/// Interlocked.Read / a stored reference); a custom implementer overriding them, or wrapping a
-/// property with its own synchronization, must preserve that.
+/// <see cref="ISubjectConnector.RootSubject"/>, <see cref="State"/> and <see cref="LastSynchronizedAt"/>
+/// must be lock-free. <c>SourceMonitor</c> reads them while holding its own lock, and
+/// <see cref="StateChanged"/> is raised from inside the source's transition lock, so a getter that
+/// took that lock would close an ABBA cycle. <see cref="SubjectSourceBase"/> satisfies this.
 /// <para>
-/// A source implementing this interface directly, rather than deriving from
-/// <see cref="SubjectSourceBase"/>, is otherwise invisible to source monitoring: it must register
-/// itself with every monitor reachable from the subject's context, calling
-/// <see cref="SourceMonitor.Register(ISubjectSource)"/> when it starts and
-/// <see cref="SourceMonitor.Unregister(ISubjectSource)"/> when it stops or is disposed, once for
-/// each monitor returned by looping <c>subject.Context.GetServices&lt;SourceMonitor&gt;()</c>. Use
-/// that general service lookup, not <see cref="SourceMonitoringExtensions.GetSourceMonitor"/>: the
-/// singular convenience method throws when no monitor is reachable, which would crash a direct
-/// implementer calling it in any application that has not called <c>WithSourceMonitoring()</c>.
-/// Skipping registration is silent, not a hang: the source never appears in
-/// <see cref="SourceMonitor.Sources"/>, no <see cref="SourceEventKind.SourceRegistered"/> or
-/// <see cref="SourceEventKind.SourceUnregistered"/> event is ever published for it, and once
-/// registration is complete, any branch-scoped wait whose scope depends on it completes
-/// vacuously instead of blocking, since the wait engine cannot distinguish "no source registered
-/// for this branch" from "no source for this branch, ever". <see cref="SubjectSourceBase"/>
-/// performs this registration automatically around its pump lifecycle.
+/// Implementing this directly instead of deriving from <see cref="SubjectSourceBase"/> means
+/// registering with every monitor from <c>subject.Context.GetServices&lt;SourceMonitor&gt;()</c> on
+/// start and unregistering on stop. Skipping that is silent rather than fatal: the source never
+/// appears in the stream, and branch-scoped waits covering it complete vacuously.
 /// </para>
 /// </remarks>
 public interface ISubjectSource : ISubjectConnector
@@ -96,16 +77,10 @@ public interface ISubjectSource : ISubjectConnector
     /// Raised when <see cref="State"/> changes.
     /// </summary>
     /// <remarks>
-    /// Raised synchronously on the transitioning thread, inside the source's transition lock.
-    /// Handlers must be observe-only: no blocking, and no causing a transition of any source
-    /// (directly or indirectly), since the lock is reentrant and a nested transition would publish
-    /// out of order. Mutating consumers belong on the SourceMonitor stream, where delivery is
-    /// queued outside all locks.
-    /// <para>
-    /// A stub implementation that declares this event but does not yet raise it must still give it
-    /// an explicit body, <c>{ add { } remove { } }</c>, rather than a plain auto-event: an event
-    /// that is never raised is otherwise flagged as unused under warnings-as-errors (CS0067).
-    /// </para>
+    /// Raised synchronously on the transitioning thread, inside the source's transition lock, so
+    /// handlers must be observe-only: no blocking, and no causing a transition of any source. The
+    /// lock is reentrant, so a nested transition would publish out of order. Mutating consumers
+    /// belong on the SourceMonitor stream, where delivery is queued outside all locks.
     /// </remarks>
     event EventHandler<SourceEvent>? StateChanged;
 }

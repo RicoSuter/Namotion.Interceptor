@@ -23,9 +23,9 @@ public enum SourceEventKind
 /// A change to source metadata: registration, state, or ownership.
 /// </summary>
 /// <remarks>
-/// <see cref="OldState"/> and <see cref="NewState"/> record one transition and must not be applied
-/// blindly to a derived view, because events for the same property can be enqueued out of order:
-/// the ownership compare-and-set and the enqueue are not atomic. Use <see cref="CurrentState"/>.
+/// Events for one property can be enqueued out of order, because the ownership compare-and-set and
+/// the enqueue are not atomic, so <see cref="OldState"/> and <see cref="NewState"/> describe one
+/// transition and must not be applied blindly. Use <see cref="CurrentState"/>.
 /// </remarks>
 public readonly record struct SourceEvent(
     SourceEventKind Kind,
@@ -41,16 +41,9 @@ public readonly record struct SourceEvent(
     /// should apply.
     /// </summary>
     /// <remarks>
-    /// For <see cref="SourceEventKind.StateChanged"/> this is the SOURCE's state, not any one
-    /// property's; use <see cref="SourceMonitoringExtensions.GetSourceState"/> per property instead.
-    /// Not cached: hoist to a local if you read it more than once.
-    /// <para>
-    /// This reports ownership only, and says nothing about whether the property's subject is still
-    /// in the object graph. A source that has released the property reports
-    /// <see cref="SourceState.Unclaimed"/>, which is what every built-in connector does on detach;
-    /// a source that deliberately keeps ownership across a detach still reports its own state. Ask
-    /// <c>ISubjectRegistry.TryGetRegisteredSubject</c> if graph membership is the question.
-    /// </para>
+    /// For <see cref="SourceEventKind.StateChanged"/> this is the source's state, not any one
+    /// property's. Reports ownership only, never graph membership: ask
+    /// <c>ISubjectRegistry.TryGetRegisteredSubject</c> for that. Not cached.
     /// </remarks>
     public SourceState CurrentState =>
         Property is null ? Source.State : Property.Value.GetSourceState();

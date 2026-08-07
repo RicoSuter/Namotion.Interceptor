@@ -52,11 +52,11 @@ Two things about that scoping matter before you rely on a wait.
 
 No wait can complete before source registration is complete, whatever its scope: that is the first condition checked, ahead of any scope evaluation. So until `CompleteSourceRegistration()` has run (and any `DeferWaitCompletion()` holds are released), every wait blocks, empty scope or not.
 
-After registration completes, a wait is not frozen to the sources that existed at that moment. Satisfaction is re-evaluated on every registration, unregistration, and state change, against whichever sources are registered right now, so a source that registers later and falls in scope of a still-pending wait is picked up just like any earlier source and can block it. The only wait that is frozen is one that has already completed, because a completed task cannot be un-completed. A scope that currently matches no source is, for the same reason, vacuously satisfied rather than blocking, the same way a scope whose sources are all `Stopped` is (`Stopped` is terminal, see [The State Model, Transitions, and Delivery Contract](#the-state-model-transitions-and-delivery-contract)): both complete immediately instead of waiting.
+A pending wait is not frozen to the sources that existed when registration completed. It is re-evaluated on every registration, unregistration and state change, so a source registering later can block it. Only a wait that has already completed is frozen, since a completed task cannot be un-completed. A scope matching no source, or one where every source has `Stopped`, completes immediately rather than blocking.
 
 An empty scope is the expected answer for a branch with no external source, such as configuration or computed state. It is also what you get if you anchored on the wrong branch, or if the source was never created. The library cannot tell those apart, so treat a completed wait as "nothing here is still loading" rather than as proof the branch is live.
 
-A subject referenced from two trees only fully participates in the first one. The context machinery that lets a subject's own context reach its tree's services adds that fallback the first time the subject attaches, and leaves it alone on a second attach from a different tree, so the subject's context keeps resolving through the first tree only. In practice that means a source claiming a property on such a subject publishes to the first tree's stream, and a wait anchored on the subject through the second tree sees only the first tree's sources, not the second tree's. Avoid sharing a subject instance across two independently-monitored trees if you need it to fully participate in both.
+A subject referenced from two trees participates fully in only the first: the context fallback is added on first attach and left alone afterwards, so claims publish to the first tree's stream and a wait anchored through the second tree sees only the first tree's sources. Avoid sharing a subject across two independently monitored trees.
 
 ## Reading Per-Property State
 
@@ -77,13 +77,13 @@ See the XML docs on `SourceState` for what each member means. `Synchronized` spe
 
 [OPC UA](connectors-opcua-client.md)'s `LoadInitialStateAsync` batch-reads every owned property from the session before returning, and WebSocket's applies the full-state message the server sends on connect. For both, reaching `Synchronized` means real values were confirmed from the external system.
 
-[MQTT](connectors-mqtt.md)'s `LoadInitialStateAsync` always returns `null`. Retained messages arrive indistinguishably from any other message, through the normal subscription handler, and neither MQTT 3.1.1 nor 5.0 defines a signal that says "no more retained messages are coming" for a subscription. `SubjectSourceBase` therefore reaches `Synchronized` once the client's subscriptions are established, not once retained values have actually arrived. This is a protocol limitation, not something left unfinished: raising `DefaultQualityOfService` does not change it, since QoS governs delivery guarantees for messages that are sent, not whether the broker tells the client when a topic's retained backlog is exhausted. See [#418](https://github.com/RicoSuter/Namotion.Interceptor/issues/418) for an opt-in barrier that would wait for the first message (retained or live) per subscribed topic before declaring `Synchronized`.
+[MQTT](connectors-mqtt.md) is weaker: `Synchronized` means the subscriptions are established, not that retained values have arrived. Retained messages are indistinguishable from live ones and neither 3.1.1 nor 5.0 signals when a topic's retained backlog is exhausted, so there is nothing to wait for. Raising QoS does not help, since it governs delivery of messages that are sent. [#418](https://github.com/RicoSuter/Namotion.Interceptor/issues/418) tracks an opt-in per-topic barrier.
 
 ## Applications That Create Sources at Runtime
 
 There are two ways to declare registration complete, and no third: pick by whether your sources exist before host startup finishes.
 
-`WithSourceMonitoring(builder.Services)` registers an internal hosted service that calls `CompleteSourceRegistration()` once `IHostApplicationLifetime.ApplicationStarted` fires. That covers every source that exists by the end of host startup, whether it is a DI-registered hosted service or one attached to the subject graph. Attaching a source queues its `StartAsync` rather than running it inline, so it has not registered yet when the attach returns; the hosting layer holds registration open from the attach until that start has actually run, and nested attaches compose, because a service that attaches children during its own start takes their holds before its own is released.
+`WithSourceMonitoring(builder.Services)` completes registration once `IHostApplicationLifetime.ApplicationStarted` fires, which covers every source existing by the end of host startup - DI-registered or attached to the subject graph. Attaching queues a source's `StartAsync` rather than running it inline, so the hosting layer holds registration open from the attach until that start has run. Nested attaches compose.
 
 Because that gate opens only after every `IHostedService.StartAsync` has returned, **do not await `WaitForSynchronizationAsync` inside a `StartAsync` override, or before `host.RunAsync()`** when using this overload: registration can never complete while the host is still starting, so the wait blocks host startup and neither ever finishes. Await it from `ExecuteAsync`, or from any code that runs once the host is up, as the sample above does.
 
@@ -116,7 +116,7 @@ That is also the limit of this feature: waits describe startup, not steady state
 
 Two ways to observe state, depending on what you're holding.
 
-A consumer that already holds a reference to a specific source subscribes to that source's own `StateChanged` event directly, with no enumeration and no stream filtering needed. `StateChanged` is declared on `ISubjectSource`, so a connector-specific handle such as `IOpcUaSubjectClientSource` has to be cast to it first. `StateChanged` fires synchronously on the transitioning thread, inside the source's own transition lock, so handlers must be observe-only: they must not block, and must not cause a transition of any source, directly or indirectly (the lock is reentrant, and a nested transition would publish out of order).
+A consumer holding one specific source subscribes to its `StateChanged` directly. That event is declared on `ISubjectSource`, so a connector-specific handle such as `IOpcUaSubjectClientSource` must be cast first. It fires synchronously inside the source's transition lock, so handlers must be observe-only: no blocking, and no causing a transition of any source.
 
 An aggregate consumer, a wait, a diagnostics dashboard, an index across every source in the tree, subscribes to the monitor stream instead:
 
@@ -129,13 +129,13 @@ using var subscription = context.GetSourceMonitor().Subscribe(sourceEvent =>
 });
 ```
 
-Delivery here is queued per subscription and runs outside every lock, so a slower or mutating handler only delays its own subscription, never the transitioning thread or other subscribers. Handlers run on a thread-pool thread, so a UI consumer must marshal to its own dispatcher. `Subscribe` also returns the source snapshot at the moment of subscribing (`SourceSubscription.Sources`), captured atomically with the subscription, so a consumer that seeds its own state from that snapshot and then processes the stream sees every source exactly once.
+Delivery is queued per subscription and runs outside every lock, so a slow handler delays only itself. Handlers run on a thread-pool thread, so a UI consumer must marshal. `Subscribe` also returns the sources registered at that moment (`SourceSubscription.Sources`), captured atomically with the subscription, so seeding from that snapshot and then processing the stream sees every source exactly once.
 
-`SourceEvent.OldState` and `NewState` record one specific transition and must not be applied blindly to a derived view: events for the same property can be enqueued out of order, because the ownership compare-and-set and the stream enqueue are not atomic, so a release can be delivered before the claim it followed. Use `SourceEvent.CurrentState` instead, which re-resolves the authoritative state at read time rather than replaying what the event captured.
+`OldState` and `NewState` describe one transition and must not be applied blindly: the ownership compare-and-set and the enqueue are not atomic, so events for one property can arrive inverted. Apply `CurrentState`, which re-resolves at read time.
 
-Because of that, the stream is not a ledger: it cannot be replayed to reconstruct a history of transitions for a property, even in principle, since the order events arrive in is not the order the transitions actually happened in. A consumer built on it maintains a view of current state, kept up to date by whichever events arrive, not a log of what happened and when.
+So the stream is not a ledger. It cannot reconstruct a history, because the arrival order is not the transition order. Build a view of current state on it, not a log.
 
-For an event that carries a property, `CurrentState` reports ownership and nothing else (on `StateChanged`, which carries none, it is the source's own state). It does not tell you whether the property's subject is still in the object graph, and this monitor publishes no events about that either: source monitoring answers "which source owns this property, and what state is that source in". Graph membership is a separate question with its own owner, so ask `ISubjectRegistry.TryGetRegisteredSubject(subject)` for it. In practice the two rarely need distinguishing, because every built-in connector releases its claims when a subject detaches, which publishes `PropertyReleased` and makes `CurrentState` report `Unclaimed`.
+`CurrentState` reports ownership only, never whether the subject is still in the object graph - ask `ISubjectRegistry.TryGetRegisteredSubject` for that. On `StateChanged`, which carries no property, it is the source's own state. The two rarely need distinguishing: built-in connectors release their claims on detach, which publishes `PropertyReleased`.
 
 ## The State Model, Transitions, and Delivery Contract
 
@@ -151,9 +151,9 @@ public enum SourceState
 
 See the XML docs on `SourceState` for what each member means. On a source itself (as opposed to a property, via `GetSourceState()`), `Unclaimed` never occurs.
 
-A source's state is driven by its pump lifecycle: construction and pump entry start it at `Connecting`; `StartBuffering()`, called on every connect and every reconnect, transitions to `Connecting`; a completed initial load transitions to `Synchronized`; a pump failure that escapes the connector's own handling transitions back to `Connecting` before the retry delay. A connector that detects a connection loss before it starts buffering calls the protected `ReportConnectionLost()`; the built-in examples are OPC UA's keep-alive handler and its manual reconnect path, which both report `Connecting` immediately rather than leaving `State` at `Synchronized` for the entire reconnect window.
+State follows the pump: construction starts at `Connecting`, `StartBuffering()` returns to `Connecting` on every connect and reconnect, a completed initial load reaches `Synchronized`, and a pump failure falls back to `Connecting` before the retry delay. A connector that detects a loss *before* it buffers calls the protected `ReportConnectionLost()` so `State` does not sit at `Synchronized` for the whole reconnect window; OPC UA does this from its keep-alive handler and its manual reconnect path.
 
-`Stopped` is terminal: once a source reports it, no further transition succeeds, and `ExecuteAsync` sets it in a `finally` block so it fires on every exit path, including cancellation. This is enforced by an explicit guard in `SubjectSourceBase.StartAsync`, not by the hosting platform: `BackgroundService.StartAsync` would happily run `ExecuteAsync` again on a second call, against a fresh, uncancelled token. Without the guard, a "restarted" stopped source would claim, load, and apply live values while `State` stayed `Stopped`. A stopped source instance is never restarted; create a new instance instead.
+`Stopped` is terminal: no further transition succeeds, and `ExecuteAsync` sets it in a `finally` so it fires on every exit path. A guard in `SubjectSourceBase.StartAsync` enforces this, because `BackgroundService` would otherwise happily run `ExecuteAsync` again against a fresh token. Create a new instance rather than restarting a stopped one.
 
 `LastSynchronizedAt` records when the most recent initial synchronization completed (`null` if it never has), so a source that is `Connecting` after a drop can still be reported as "stale, last confirmed at T" rather than just "not synchronized." `PendingWriteCount` is orthogonal to `State`: it describes the outbound write retry queue and can be non-empty during entirely normal synchronized operation.
 
@@ -196,7 +196,7 @@ var isAvailable = device
     .GetValue();
 ```
 
-This pattern depends on construction order: the updater must be constructed, and `Subscribe` called, before any source it cares about starts claiming properties. `ISubjectSource` exposes no way to enumerate the properties a source has already claimed, so `PropertyClaimed` is the only way this updater ever learns about a claim. A property claimed before the updater subscribed never gets an `IsAvailable` attribute at all, with no later event to fill the gap.
+Subscribe before any source starts claiming: `PropertyClaimed` is the only way this updater learns about a claim, and there is no way to enumerate what a source has already claimed. A property claimed earlier never gets the attribute.
 
 The updater subscribes once and reacts to every event kind that can change a property's availability. `SourceRegistered` and `SourceUnregistered` carry no property, so nothing needs applying until a property is actually claimed:
 

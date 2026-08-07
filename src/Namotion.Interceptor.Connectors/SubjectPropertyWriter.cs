@@ -55,11 +55,8 @@ public sealed class SubjectPropertyWriter
             _updates = [];
             _generation++;
 
-            // Buffering starts exactly when the source has stopped trusting its live feed, on first
-            // connect and on every reconnect, including reconnects the base pump never sees. Reported
-            // while still holding _lock, symmetric with LoadInitialStateAndResumeAsync's own
-            // TransitionTo(Synchronized) call below: both transitions are paired with the generation
-            // change that governs them so neither can be observed out of sync with it.
+            // Under _lock, paired with the generation change that governs it, so the transition
+            // cannot be observed out of sync with the buffer it belongs to.
             _source.TransitionTo(SourceState.Connecting);
         }
     }
@@ -69,15 +66,11 @@ public sealed class SubjectPropertyWriter
     /// detected before the reconnect's own <see cref="StartBuffering"/> call runs.
     /// </summary>
     /// <remarks>
-    /// A <see cref="LoadInitialStateAndResumeAsync"/> call already in flight when the connection
-    /// drops captured the OLD generation before it started awaiting; without this call it has no way
-    /// to learn the connection went away mid-load; it would apply pre-outage data and report
-    /// Synchronized once its await returns, and that false state would persist until the next
-    /// reconnect cycle's own StartBuffering. Bumping the generation here makes that in-flight call's
-    /// own check see itself as superseded, so it discards instead. Deliberately does not reset
-    /// _updates the way StartBuffering does: replacing the buffer here would discard whatever has
-    /// been collected since the outage was detected, and the reconnect's own StartBuffering, which
-    /// runs later, is what actually needs a fresh buffer to start from.
+    /// An in-flight <see cref="LoadInitialStateAndResumeAsync"/> captured the old generation before
+    /// it started awaiting, so bumping it here is what makes that call discard its pre-outage
+    /// snapshot instead of applying it and reporting Synchronized. Deliberately does not reset
+    /// _updates: whatever has been buffered since the outage must survive until the reconnect's own
+    /// StartBuffering.
     /// </remarks>
     internal void InvalidateGeneration()
     {
@@ -109,11 +102,8 @@ public sealed class SubjectPropertyWriter
         {
             if (generation != _generation)
             {
-                // A later StartBuffering happened while this call was awaiting LoadInitialStateAsync,
-                // so the snapshot just returned is stale: applying it now would overwrite whatever
-                // the newer cycle has already written (or will write), and reporting Synchronized
-                // would certify that stale data as current. Discard the apply action entirely, don't
-                // touch _updates (the newer cycle owns that buffer), and skip the report below.
+                // Superseded by a later StartBuffering: applying this snapshot would overwrite the
+                // newer cycle's writes, and reporting Synchronized would certify stale data.
                 _logger.LogDebug("LoadInitialStateAndResumeAsync discarded a stale snapshot superseded by a later reconnect.");
                 return;
             }

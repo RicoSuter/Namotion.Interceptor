@@ -31,17 +31,14 @@ public static class SourcePropertyExtensions
     /// </returns>
     public static bool SetSource(this PropertyReference property, ISubjectSource source)
     {
-        // TryAddPropertyData rather than GetOrSetPropertyData: only the atomic add-if-absent tells a
-        // fresh claim from a re-claim, and the stream must publish exactly the real transitions.
+        // Add-if-absent, not GetOrSet: only this distinguishes a fresh claim from a re-claim.
         if (property.TryAddPropertyData(SourceKey, source))
         {
             PublishOwnershipChange(property, source, SourceEventKind.PropertyClaimed);
             return true;
         }
 
-        // Check-then-act: another thread can change ownership between the failed add above and this
-        // read. The returned boolean reflects the state observed at the moment of THIS read, not a
-        // guarantee that it still holds by the time the caller inspects it.
+        // Check-then-act: the result reflects ownership at this read, not a lasting guarantee.
         return property.TryGetPropertyData(SourceKey, out var existing) && ReferenceEquals(existing, source);
     }
 
@@ -95,11 +92,8 @@ public static class SourcePropertyExtensions
             return;
         }
 
-        // Lock-free HasSubscribers gate: with zero subscribers (the common shape - most trees have
-        // none or one dashboard-style consumer) this skips the clock, the event and the monitor's
-        // lock entirely for every claim and release. The event is identical for every monitor, so it
-        // is built at most once. OldState/NewState follow from the kind and are for logging only;
-        // consumers apply SourceEvent.CurrentState.
+        // With no subscribers this skips the clock, the event and the monitor's lock entirely,
+        // which is the common shape. The event is identical per monitor, so build it at most once.
         SourceEvent? sourceEvent = null;
         foreach (var monitor in monitors)
         {

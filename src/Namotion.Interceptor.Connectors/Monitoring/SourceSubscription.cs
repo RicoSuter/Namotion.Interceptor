@@ -8,10 +8,9 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// One subscriber to the source event stream, with its own queue and its own drain.
 /// </summary>
 /// <remarks>
-/// Per-subscriber queues mean a slow handler delays only itself, and remove the need for sequence
-/// stamping: a queue is created empty, so it cannot hold events enqueued before the subscription
-/// existed. Pair with <see cref="Sources"/> (captured atomically with the subscription) to observe
-/// every change exactly once.
+/// A slow handler delays only its own subscription. The queue starts empty, so it cannot hold
+/// events from before the subscription existed; pair with <see cref="Sources"/> to observe every
+/// change exactly once.
 /// </remarks>
 public sealed class SourceSubscription : IDisposable
 {
@@ -33,10 +32,8 @@ public sealed class SourceSubscription : IDisposable
         _handler = handler;
         Sources = sources;
         _onDisposed = onDisposed;
-        // The monitor, not a resolved ILogger: subscribing typically happens before the host is
-        // built, which is when the ILoggerFactory reaches the context, so a logger captured here
-        // would be null for this subscription's lifetime and every handler exception below would be
-        // swallowed silently.
+        // The monitor, not a resolved ILogger: subscribing usually happens before the host is
+        // built, so a logger captured here would be null for this subscription's lifetime.
         _monitor = monitor;
         // Cached rather than a Task.Run(Drain) method-group conversion at each call site: that
         // allocates a fresh Action delegate on every wakeup, and Drain is only ever run this way.
@@ -110,19 +107,15 @@ public sealed class SourceSubscription : IDisposable
     /// empty. Returns true when this thread must keep draining.
     /// </summary>
     /// <remarks>
-    /// Extracted from <see cref="Drain"/> so the handoff can be driven directly by a test: the
-    /// window it closes is a few nanoseconds wide inside a running drain, so no dynamic test can
-    /// reach it in place.
+    /// Extracted from <see cref="Drain"/> so a test can drive the handoff directly; the window it
+    /// closes is nanoseconds wide inside a running drain.
     /// <para>
-    /// Must be Interlocked.Exchange, not Volatile.Write: Volatile.Write is a release only, so the
-    /// !_queue.IsEmpty read right after it can be satisfied before this write is globally visible
-    /// (StoreLoad reordering). A concurrent Enqueue landing in that window sees _draining still 1
-    /// and declines to schedule a new drain, while this thread's own reordered read observes an
-    /// empty queue and exits - the event is then stranded, since nothing is scheduled to look at it.
-    /// Interlocked.Exchange is a full fence, making the two misses mutually exclusive. Do not
-    /// "simplify" this back to Volatile.Write: the reordering reproduces roughly once in 500 million
-    /// aligned attempts, far beyond any test's reach, so a companion test pins the literal API used
-    /// on this line instead.
+    /// Must be Interlocked.Exchange, not Volatile.Write. Volatile.Write is release-only, so the
+    /// !_queue.IsEmpty read below can be satisfied before the write is globally visible; a
+    /// concurrent Enqueue in that window sees _draining still 1 and declines to schedule, while this
+    /// thread sees an empty queue and exits, stranding the event. The full fence makes those two
+    /// misses mutually exclusive. The race is beyond any test's reach, so a test pins this literal
+    /// line instead - do not "simplify" it.
     /// </para>
     /// </remarks>
     internal bool TryReacquireForPendingEvents()
