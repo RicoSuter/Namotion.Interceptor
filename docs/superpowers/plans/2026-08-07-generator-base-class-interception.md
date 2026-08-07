@@ -2624,6 +2624,170 @@ git commit -m "Docs: describe base class interception, the base class contract a
 
 ---
 
+### Task 12: Simplification sweep
+
+> **Runs after Task 6 and before Task 7**, not last. Task 6 is the final task that adds generator
+> production code, and Tasks 7 to 11 are tests, verification and documentation. Simplifying before
+> Task 6 would mean simplifying code that is about to grow. It is numbered 12 only so the task
+> extraction script keeps working.
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Generator/SubjectBaseContract.cs`
+- Modify: `src/Namotion.Interceptor.Generator/SubjectMetadataExtractor.cs`
+- Modify: `src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs`
+- Modify: `src/Namotion.Interceptor.Generator/SymbolExtensions.cs`
+- Modify: `src/Namotion.Interceptor.Generator/Models/SubjectMetadata.cs`
+- Create: `src/Namotion.Interceptor.Generator/Models/BaseClassInfo.cs`
+
+This change grew the generator from 1,764 to 2,238 lines, and Task 6 adds more. The sweep pays some
+of that back and removes one real drift risk. It is strictly behaviour preserving: **the generated
+output for every subject in the repository must be byte identical before and after.**
+
+Scope is limited to code this change introduced or touched. Do **not** touch the property and method
+extraction that this change never went near, and do not merge the four diagnostic descriptors into a
+shared reporting helper: that makes each rule harder to read and saves nothing.
+
+- [ ] **Step 1: Capture the pre-sweep baseline**
+
+This is the gate, so capture it before touching anything.
+
+```bash
+cd /Users/ricosuter/Projects/GitHub/Namotion.Interceptor/.claude/worktrees/generator-base-class-interception
+dotnet build src/Namotion.Interceptor.slnx -p:EmitCompilerGeneratedFiles=true -p:CompilerGeneratedFilesOutputPath=/tmp/ni-sweep-before
+find /tmp/ni-sweep-before -name '*.g.cs' | wc -l
+```
+
+Expected: a file count in the hundreds. Record it; the after count must match exactly.
+
+- [ ] **Step 2: One interface helper instead of two**
+
+`SubjectBaseContract.ImplementsInterfaceThroughChain` is `type.AllInterfaces.Any(...)`.
+`SubjectMetadataExtractor.ImplementsInterface` is the same, plus a `TypeKind.Interface` self check,
+plus `BaseType` recursion that is redundant for classes because `AllInterfaces` already includes
+interfaces inherited from base classes.
+
+Move one implementation to `SymbolExtensions`, where the other symbol helpers already live, and call
+it from both places:
+
+```csharp
+    /// <summary>
+    /// Whether the type implements the named interface, including through a base class and through
+    /// interface inheritance. AllInterfaces already covers both, so no recursion is needed.
+    /// </summary>
+    public static bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)
+    {
+        if (type is null)
+        {
+            return false;
+        }
+
+        if (type.TypeKind == TypeKind.Interface &&
+            type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName)
+        {
+            return true;
+        }
+
+        return type.AllInterfaces.Any(i =>
+            i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName);
+    }
+```
+
+Do **not** touch `SubjectBaseContract.DeclaresInterceptorSubject`. It deliberately reads
+`Interfaces` rather than `AllInterfaces` and deliberately does not recurse; two tests pin that and
+will fail if it is folded into this helper.
+
+- [ ] **Step 3: Group the base class facts**
+
+`SubjectMetadata` now takes 15 positional parameters, five of which are base class facts that travel
+together and whose invariants only make sense as a group. Create
+`src/Namotion.Interceptor.Generator/Models/BaseClassInfo.cs`:
+
+```csharp
+using System.Collections.Generic;
+
+namespace Namotion.Interceptor.Generator.Models;
+
+/// <summary>
+/// What the generator knows about the class a subject inherits from. All of it is resolved from the
+/// nearest subject ancestor rather than the immediate base, because a plain class may sit in
+/// between, except <see cref="HasInpc"/>, whose second disjunct is asked of the subject itself.
+/// </summary>
+/// <param name="TypeName">The ancestor's fully qualified name, or null when there is no subject ancestor.</param>
+/// <param name="HasInterceptorSubject">Whether that ancestor carries the attribute.</param>
+/// <param name="HasInpc">Whether the INotifyPropertyChanged plumbing is already inherited.</param>
+/// <param name="EmitsSharedPlumbing">True in root mode, where this class emits the whole IInterceptorSubject block.</param>
+/// <param name="HiddenPlumbingMemberNames">Root mode members that need a 'new' modifier because the ancestor already exposes that name.</param>
+internal sealed record BaseClassInfo(
+    string? TypeName,
+    bool HasInterceptorSubject,
+    bool HasInpc,
+    bool EmitsSharedPlumbing,
+    IReadOnlyList<string> HiddenPlumbingMemberNames);
+```
+
+Replace those five parameters on `SubjectMetadata` with a single `BaseClassInfo BaseClass,` and
+update every reader in `SubjectCodeGenerator` accordingly (`metadata.BaseClassHasInpc` becomes
+`metadata.BaseClass.HasInpc`, and so on).
+
+- [ ] **Step 4: Move mode selection out of the extractor**
+
+The mode selection block in `SubjectMetadataExtractor` is about 45 lines of base class reasoning in
+a file that is already 988 lines, and `SubjectBaseContract` exists precisely to hold that reasoning.
+Move it behind one call that returns the record from step 3 plus any diagnostics it produced:
+
+```csharp
+    /// <summary>
+    /// Resolves everything the emitter needs to know about the base class, and reports NI0011 to
+    /// NI0014. A null result means generation is suppressed and the caller must emit nothing.
+    /// </summary>
+    public static BaseClassInfo? Resolve(
+        INamedTypeSymbol typeSymbol,
+        Compilation compilation,
+        Location location,
+        List<Diagnostic> diagnostics)
+```
+
+The extractor then reads as one call and a null check. Keep every diagnostic, every message argument
+and every branch exactly as it is; this is a move, not a redesign.
+
+- [ ] **Step 5: One table for the generated member names**
+
+The names of the generated plumbing members appear in three places: the per member checks in
+`SatisfiesContract`, the candidate array used for the `new` lookup, and the string literals
+`SubjectCodeGenerator` emits. The last review found the hiding check and the emitter had already
+drifted apart on signatures, so this one prevents a real defect rather than only saving lines.
+
+Define one table in `SubjectBaseContract` holding, per member, its name, type parameter count and
+parameter count, and drive all three uses from it. The emitter still writes its own signatures, but
+the names come from the table.
+
+- [ ] **Step 6: The gate, byte identical output**
+
+```bash
+dotnet build src/Namotion.Interceptor.slnx -p:EmitCompilerGeneratedFiles=true -p:CompilerGeneratedFilesOutputPath=/tmp/ni-sweep-after
+diff -r /tmp/ni-sweep-before /tmp/ni-sweep-after
+```
+
+Expected: **no output at all**, and the same file count as step 1. Any difference means the sweep
+changed behaviour and must be reverted or corrected, not accepted. This is a stronger check than the
+test suite, because it covers every real subject shape in the repository including the ones no test
+asserts on.
+
+- [ ] **Step 7: Corroborate with the suites**
+
+Run: `DiffEngine_Disabled=true dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`
+Expected: all green, and no `.received.txt` file anywhere. A snapshot change here would contradict
+step 6 and means something is wrong with the measurement rather than with the snapshot.
+
+- [ ] **Step 8: Report the size change**
+
+```bash
+find src/Namotion.Interceptor.Generator -name '*.cs' -not -path '*/obj/*' -not -path '*/bin/*' | while read f; do wc -l < "$f"; done | awk '{s+=$1} END {print s}'
+```
+
+Record the before and after totals. The number is not a target: a sweep that shrinks the code while
+making it harder to read has failed. Report both the line count and what became easier to follow.
+
 ## Final verification
 
 - [ ] `dotnet build src/Namotion.Interceptor.slnx` succeeds with zero warnings.
