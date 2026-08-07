@@ -640,9 +640,9 @@ Otherwise the structure stays. `StartClientAsync` keeps its place in `ExecuteAsy
 keeps setting `Status` and `StatusMessage` from the outcome:
 
 ```csharp
-if (_attachment is null)                                    // 1. guard
+if (_attachment is null)                                    // guard
 {
-    _attachment = await this.AttachHostedServiceAsync(() =>  // 2. factory, live state
+    _attachment = await this.AttachHostedServiceAsync(() =>  // factory, reads live state
     {
         var root = new OpcUaDynamicSubject(RootSegmentName);
         Root = root;
