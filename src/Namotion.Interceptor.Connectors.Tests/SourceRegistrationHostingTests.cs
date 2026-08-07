@@ -203,6 +203,47 @@ public class SourceRegistrationHostingTests
     }
 
     [Fact]
+    public async Task WhenAStartingServiceAttachesAChild_ThenRegistrationStaysHeldUntilTheChildStarts()
+    {
+        // Arrange
+        // HostedServiceHandler guarantees that nested attaches compose: a service that attaches
+        // children during its own StartAsync takes their holds before its own is released, so the
+        // count never reaches zero in between. Nothing tested that, and it is the case where a
+        // single-level barrier would let go too early.
+        var builder = Host.CreateApplicationBuilder();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithSourceMonitoring(builder.Services)
+            .WithHostedServices(builder.Services);
+
+        var root = new Person(context);
+        var monitor = context.GetSourceMonitor();
+        using var child = new GatedStartHostedService();
+
+        // The parent attaches the child from inside its own StartAsync, so the child's hold must be
+        // taken before the parent's is released.
+        var parent = new ChildAttachingHostedService(root, child);
+        root.AttachHostedService(parent);
+
+        var host = builder.Build();
+
+        // Act
+        await host.StartAsync();
+        await AsyncTestHelpers.WaitUntilAsync(() => parent.HasStarted);
+
+        // Assert - the parent has finished starting and released its hold, but the child is still
+        // inside StartAsync, so registration must still be held open by the child's hold.
+        Assert.False(monitor.IsRegistrationComplete);
+
+        child.ReleaseStart();
+        await AsyncTestHelpers.WaitUntilAsync(() => monitor.IsRegistrationComplete);
+
+        await host.StopAsync();
+    }
+
+    [Fact]
     public async Task WhenNoHostedServiceIsAttached_ThenHostStartAloneCompletesRegistration()
     {
         // Arrange
@@ -244,6 +285,21 @@ internal sealed class GatedStartHostedService : IHostedService, IDisposable
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public void Dispose() => _release.Dispose();
+}
+
+/// <summary>A hosted service that attaches another one from inside its own StartAsync.</summary>
+internal sealed class ChildAttachingHostedService(IInterceptorSubject subject, IHostedService child) : IHostedService
+{
+    public bool HasStarted { get; private set; }
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        subject.AttachHostedService(child);
+        HasStarted = true;
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 /// <summary>A hosted service whose StartAsync always fails.</summary>

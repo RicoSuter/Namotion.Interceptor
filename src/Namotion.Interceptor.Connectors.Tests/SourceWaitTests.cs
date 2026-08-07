@@ -498,8 +498,8 @@ public class SourceWaitTests
 
         var anchor = new Person(context);
 
-        // Act - WaitForSynchronizationAsync's fast-path check passes a null PendingWait to
-        // IsSatisfied, and a null wait always warns (no dedup needed for an evaluation that is
+        // Act - WaitForSynchronizationAsync's fast-path check runs IsSatisfied directly, and the
+        // warn-once latch lives on the anchor's own subject data (no dedup needed for an evaluation that is
         // never re-run), so the empty-scope warning fires right here, on the very first evaluation,
         // without ever calling Subscribe, without allocating a PendingWait, and without needing a
         // later re-evaluation.
@@ -766,6 +766,11 @@ public class SourceWaitTests
     public async Task WhenASourceIsConstructedButNeverStarted_ThenItDoesNotAffectAWait()
     {
         // Arrange
+        // neverStarted is rooted at the SAME subject as started, so it would be squarely in scope if
+        // registration were what put a source there. It never registers, so it must not count - and
+        // because it stays Connecting forever, a wait that did count it could never complete. An
+        // earlier version of this test let neverStarted stay Connecting but asserted only that it
+        // was absent from Sources, which holds trivially whether or not the wait consults it.
         var context = CreateContext();
         var monitor = context.GetSourceMonitor();
         var root = new Person(context);
@@ -774,12 +779,16 @@ public class SourceWaitTests
         monitor.Register(started);
         monitor.CompleteSourceRegistration();
 
+        var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
         // Act
         started.ReportSynchronized();
 
-        // Assert
-        await root.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        // Assert - completes despite neverStarted being in scope and never synchronizing.
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.DoesNotContain(neverStarted, monitor.Sources);
+        Assert.Equal(SourceState.Connecting, neverStarted.State);
     }
 
     [Fact]

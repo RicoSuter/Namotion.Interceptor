@@ -317,20 +317,12 @@ public class SourceMonitorTests
 
         var subscribeTask = Task.Run(() => monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent)));
 
-        // Give Subscribe every opportunity to fully finish while the action is paused. Against the pre-fix
-        // code the lock is already released at this point, so Subscribe races ahead and completes here;
-        // against the fixed code the action still holds the lock, so Subscribe stays blocked and this times out.
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => subscribeTask.IsCompleted,
-                timeout: TimeSpan.FromMilliseconds(200),
-                pollInterval: TimeSpan.FromMilliseconds(2));
-        }
-        catch (TimeoutException)
-        {
-            // Subscribe is still blocked acquiring the lock the action holds. That is the fixed, race-free outcome.
-        }
+        // Subscribe must be BLOCKED here, on the lock the paused action still holds. Asserted
+        // directly rather than by catching a timeout as the pass path: under load that catch fires
+        // for both the fixed and the broken code, silently turning the whole race harness into a
+        // no-op that still reports green.
+        var settledFirst = await Task.WhenAny(subscribeTask, Task.Delay(TimeSpan.FromMilliseconds(200)));
+        Assert.NotSame(subscribeTask, settledFirst);
 
         releaseStateRead.Set();
 
