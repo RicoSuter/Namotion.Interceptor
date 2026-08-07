@@ -68,11 +68,11 @@ internal static class Diagnostics
     public static readonly DiagnosticDescriptor ExplicitImplementationAttributesIgnored = new(
         id: "NI0007",
         title: "Attributes on an explicit interface implementation are ignored",
-        messageFormat: "Attributes on the explicit implementation of '{0}' are ignored; declare them on the interface member instead",
+        messageFormat: "Attributes on the explicit implementation of '{0}' are absent from the subject's property metadata; an attribute the library reads, such as Derived or a validation attribute, belongs on the interface member",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
+        defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Property metadata reflects the interface member, so a Derived or validation attribute on the implementation would be silently lost.");
+        description: "Property metadata reflects the interface member, so an attribute the library reads only takes effect when it is declared there. An implementation-local attribute such as SuppressMessage or ExcludeFromCodeCoverage keeps its usual meaning on the implementation and is simply not part of the metadata.");
 
     public static readonly DiagnosticDescriptor PropertyNameCollision = new(
         id: "NI0008",

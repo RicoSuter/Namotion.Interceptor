@@ -459,7 +459,7 @@ namespace Repro
 
         // Assert
         var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0007");
-        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
     }
 
     [Fact]
@@ -487,7 +487,7 @@ namespace Repro
 
         // Assert
         var diagnostic = Assert.Single(generated.GeneratorDiagnostics, d => d.Id == "NI0007");
-        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
     }
 
     [Fact]

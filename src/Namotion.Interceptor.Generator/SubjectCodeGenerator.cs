@@ -69,6 +69,7 @@ internal static class SubjectCodeGenerator
             #pragma warning disable CS8669
             #pragma warning disable CS0649
             #pragma warning disable CS0067
+            #pragma warning disable CS9193
 
 
             """);

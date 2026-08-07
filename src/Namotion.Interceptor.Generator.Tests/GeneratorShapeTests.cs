@@ -602,4 +602,47 @@ namespace Repro
         Assert.Contains(skipped, diagnostic => diagnostic.GetMessage().Contains("PushWithoutInterceptor"));
         Assert.Contains(skipped, diagnostic => diagnostic.GetMessage().Contains("PullWithoutInterceptor"));
     }
+
+    [Fact]
+    public void WhenWithoutInterceptorMethodTakesRefReadonlyParameter_ThenWrapperIsGeneratedWhileRefAndOutStaySkipped()
+    {
+        // Arrange: a "ref readonly" argument accepts a temporary, so the wrapper compiles and only
+        // warns with CS9193, which the generated file suppresses. A plain "ref" or an "out" argument
+        // is a hard error (CS1620), so those shapes stay skipped, and so does a method that mixes a
+        // "ref readonly" parameter with a plain "ref" one.
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+namespace Repro
+{
+    [InterceptorSubject]
+    public partial class Machine
+    {
+        public partial string Name { get; set; }
+
+        public void SendWithoutInterceptor(ref readonly int value) { }
+        public void PushWithoutInterceptor(ref int value) { }
+        public void PullWithoutInterceptor(out int value) { value = 0; }
+        public void MixWithoutInterceptor(ref readonly int first, ref int second) { }
+    }
+}";
+
+        // Act
+        var generated = GeneratorTestHost.RunExpectingCleanCompilation(source);
+
+        // Assert
+        var generatedSource = generated.SingleSource();
+        Assert.Contains("#pragma warning disable CS9193", generatedSource);
+        Assert.Contains("public void Send(int value)", generatedSource);
+        Assert.Contains("SendWithoutInterceptor((int)p[0]!)", generatedSource);
+        Assert.DoesNotContain("public void Push(", generatedSource);
+        Assert.DoesNotContain("public void Pull(", generatedSource);
+        Assert.DoesNotContain("public void Mix(", generatedSource);
+
+        var skipped = generated.GeneratorDiagnostics.Where(diagnostic => diagnostic.Id == "NI0006").ToList();
+        Assert.Equal(3, skipped.Count);
+        Assert.All(skipped, diagnostic => Assert.DoesNotContain("SendWithoutInterceptor", diagnostic.GetMessage()));
+        Assert.Contains(skipped, diagnostic => diagnostic.GetMessage().Contains("PushWithoutInterceptor"));
+        Assert.Contains(skipped, diagnostic => diagnostic.GetMessage().Contains("PullWithoutInterceptor"));
+        Assert.Contains(skipped, diagnostic => diagnostic.GetMessage().Contains("MixWithoutInterceptor"));
+    }
 }

@@ -398,19 +398,17 @@ internal static class SubjectMetadataExtractor
 
                 // The emitter drops static and generic shapes, and cannot route an explicit interface
                 // implementation through the executor. The wrapper forwards its parameters by value,
-                // which a "ref" or an "out" parameter rejects (CS1620) but an "in" parameter accepts,
-                // so only the first two are skipped.
+                // which a plain "ref" or an "out" parameter rejects (CS1620), while "in" and
+                // "ref readonly" accept it, so only the first two are skipped.
                 if (method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword)) ||
                     method.TypeParameterList is not null ||
                     method.ExplicitInterfaceSpecifier is not null ||
-                    method.ParameterList.Parameters.Any(parameter => parameter.Modifiers.Any(modifier =>
-                        modifier.IsKind(SyntaxKind.RefKeyword) ||
-                        modifier.IsKind(SyntaxKind.OutKeyword))))
+                    method.ParameterList.Parameters.Any(HasUnsupportedByReferenceModifier))
                 {
                     diagnostics.Add(Diagnostic.Create(
                         Diagnostics.MemberSkipped, location,
                         $"{typeSymbol.Name}.{fullMethodName}",
-                        "the method shape is not supported (static, generic, a 'ref' or 'out' parameter, or an explicit interface implementation)"));
+                        "the method shape is not supported (static, generic, a by-reference parameter other than 'in' or 'ref readonly', or an explicit interface implementation)"));
                     continue;
                 }
 
@@ -432,6 +430,18 @@ internal static class SubjectMetadataExtractor
         }
 
         return methods;
+    }
+
+    /// <summary>
+    /// A "ref readonly" parameter carries both the "ref" and the "readonly" modifier, and unlike a
+    /// plain "ref" it binds to the temporary the wrapper forwards, which only warns with CS9193.
+    /// The generated file suppresses that warning, so only plain "ref" and "out" remain unsupported.
+    /// </summary>
+    private static bool HasUnsupportedByReferenceModifier(ParameterSyntax parameter)
+    {
+        var modifiers = parameter.Modifiers;
+        return modifiers.Any(SyntaxKind.OutKeyword) ||
+               (modifiers.Any(SyntaxKind.RefKeyword) && !modifiers.Any(SyntaxKind.ReadOnlyKeyword));
     }
 
     /// <summary>

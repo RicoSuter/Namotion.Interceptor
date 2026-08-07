@@ -188,7 +188,7 @@ public partial class John : IMale
 
 The property is reached by casting to the interface that declares the member (`IHuman` here), so it always resolves through the normal dispatch rules for interface default implementations. A property reached this way is not intercepted, because an explicitly implemented member cannot be routed through the interception pipeline.
 
-Attributes such as `[Derived]` must be declared on the interface member rather than on the explicit implementation. An attribute placed on the implementation is silently lost, and doing so reports NI0007 (see [Diagnostics](#diagnostics)).
+Attributes such as `[Derived]` must be declared on the interface member rather than on the explicit implementation, because the property metadata reflects the interface member. Any attribute on the implementation reports NI0007 (see [Diagnostics](#diagnostics)), including an implementation-local one such as `[SuppressMessage]`, which keeps its usual meaning but is simply not part of the metadata.
 
 ### Method Interception
 
@@ -209,6 +209,8 @@ public partial class Calculator
 ```
 
 The generated method routes through the interception pipeline, enabling cross-cutting concerns.
+
+Parameters are forwarded by value, so `in` and `ref readonly` parameters are supported, while a plain `ref` or an `out` parameter is not and makes the method skipped with NI0006.
 
 ### Virtual and Override Properties
 
@@ -359,7 +361,7 @@ internal partial class InternalSubject
 | Structs and interfaces cannot be subjects | Use a class. The compiler itself rejects a plain struct or interface as CS0592, because `InterceptorSubjectAttribute` only targets classes. A record struct is reported by NI0003 instead |
 | Generic subjects, or subjects nested in a generic containing type, are not supported | Use non-generic types. See NI0009 in [Diagnostics](#diagnostics) |
 | File-local subjects are not supported | Remove the `file` modifier. See NI0010 in [Diagnostics](#diagnostics) |
-| Attributes on an explicit interface implementation are ignored | Declare the attribute on the interface member instead. See NI0007 in [Diagnostics](#diagnostics) |
+| Attributes on an explicit interface implementation are not part of the property metadata | Declare an attribute the library reads on the interface member. See NI0007 in [Diagnostics](#diagnostics) |
 | Abstract properties not supported | Use `virtual` instead |
 | Init-only properties cannot be set after construction | Design constraint of C# |
 | Partial properties cannot have field initializers | Initialize in constructor |
@@ -375,8 +377,8 @@ The generator reports the following diagnostics, all in the `Namotion.Intercepto
 | NI0003 | Error | `[InterceptorSubject]` is placed on a record or a record struct. A plain struct or interface never reaches this diagnostic; the compiler already rejects those with CS0592, because the attribute only targets classes | Use a class |
 | NI0004 | Error | The generator threw an unhandled exception while processing the subject | Report the issue. The generated file contains the full stack trace |
 | NI0005 | Warning | A derived subject re-declares a property whose interface implementation is already provided by a base class, so reading through the subject and reading through the interface return different values | Rename the property, or suppress the warning if the divergence is intended |
-| NI0006 | Warning | A member was skipped because it cannot be supported: an interface default property is an indexer or a static member, or is not accessible from generated code (only when neither accessor is reachable; a single inaccessible accessor keeps the property and drops just that accessor); or a `WithoutInterceptor` method has no name before the suffix, is static or generic, takes a `ref` or `out` parameter, or is itself an explicit interface implementation | Remove or rename the member, widen its accessibility, or adjust the method signature |
-| NI0007 | Error | Any attribute, not only `[Derived]`, is placed on an explicit interface implementation. The emitted metadata reflects the interface member, so the attribute would be silently lost | Move the attribute to the interface member |
+| NI0006 | Warning | A member was skipped because it cannot be supported: an interface default property is an indexer or a static member, or is not accessible from generated code (only when neither accessor is reachable; a single inaccessible accessor keeps the property and drops just that accessor); or a `WithoutInterceptor` method has no name before the suffix, is static or generic, takes a by-reference parameter other than `in` or `ref readonly` (a plain `ref` or an `out` parameter), or is itself an explicit interface implementation | Remove or rename the member, widen its accessibility, or adjust the method signature |
+| NI0007 | Warning | Any attribute, not only `[Derived]`, is placed on an explicit interface implementation. The emitted metadata reflects the interface member, so the attribute is not part of the subject's property metadata | Move an attribute the library reads, such as `[Derived]` or a validation attribute, to the interface member. An implementation-local attribute such as `[SuppressMessage]` or `[ExcludeFromCodeCoverage]` keeps its usual meaning where it is and can be suppressed |
 | NI0008 | Warning | Two interface members resolve to the same property name; the first one found wins and the rest are dropped | Rename one of the members, or suppress the warning to accept the first-wins behavior |
 | NI0009 | Error | The subject itself is generic, or the subject is nested inside a generic containing type | Remove the type parameters from the subject or its containing type |
 | NI0010 | Error | The subject is declared `file`-local | Remove the `file` modifier |
