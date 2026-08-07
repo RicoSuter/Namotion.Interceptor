@@ -191,48 +191,103 @@ and completes successfully. Without this, dropped fire and forget transitions ra
 `UnobservedTaskException` (200 of 200 in the replica) and a faulted `_tail` is retained until the target
 transitions again, so a failed graph driven start could surface nowhere at all.
 
-**Context detach of a subject is one composite transition, not several.** Today's global FIFO gives an
-ordering the wrappers depend on: `BackgroundService.StopAsync` awaits `_executeTask`, so the subject's
-`ExecuteAsync` has fully unwound before the handler touches its attachments. Independent chains lose
-that, and a replica of the `OpcUaClient` detach trace saw the unwind observe its own source already
-disposed in 50 of 50 runs, while `StopClientAsync` was still reading it. So the handler appends a single
-transition to the *subject's* chain that stops the subject and then stops and disposes each attachment.
-This does not reintroduce the deadlock, because that step never appends to its own chain, and by the time
-it reaches the attachment chains they are free.
+**Every append happens at event time, never deferred into another transition.** This is the rule that makes
+a graph move work, and getting it wrong is subtle enough to be worth showing. `BackgroundService.StopAsync`
+awaits `_executeTask`, so a subject's stop is slow, and its attachments must not be disposed until it has
+unwound: a replica of the `OpcUaClient` detach trace saw the unwind observe its own source already disposed
+in 50 of 50 runs. The tempting fix is one composite transition on the subject's chain that stops the
+subject and then stops its attachments. That is wrong. On `detach` immediately followed by `attach`, the
+re-attach's create-and-start lands on the attachment's own chain and runs first, and the composite's stop
+is issued afterwards against the *new* instance. A replica of that shape leaves the pre-detach instance
+never disposed and the post-re-attach instance stopped and disposed, in 20 of 20 runs, so the subject sits
+in the graph with nothing running.
 
-**The gate has three states.** Transitions wait until the handler has started, so nothing runs before host
-start. After shutdown has drained, new appends complete immediately as no-ops rather than running or
-hanging. `EnsureStartedAsync` is idempotent and is called from `SubjectActivation<T>` *and* from the attach
-and detach extension methods, so no caller can hang by being started before the handler.
-`ParticipantHostBundle.cs:35-69` is a live example of a hosted service that awaits attach and could be
-ordered ahead of the handler.
+So on context detach, under `lock (_attachedSubjects)`, the handler appends immediately to every affected
+chain:
 
-**What is ordered, and what is not.** Global ordering exists, at append time: every lifecycle event fires
-under `lock (_attachedSubjects)` and the handler appends inside it, so appends are globally serialised in
-event order. Execution is then per target. That combination is what gives quiescent consistency: each
-chain drains in append order, so once events settle every target is in the state its last event demanded.
+- If the subject is an `IHostedService`, a stop transition on the subject's chain. It signals a
+  `subjectStopped` completion in a `finally`, so cancellation and failure release it too.
+- For each attachment, a stop transition on that attachment's chain which first awaits `subjectStopped`,
+  then stops, disposes, and clears `Current`. The attachment record stays on the subject.
 
-A globally serialised *executor* would add cross target ordering, a strictly stronger property, at the
-cost of the deadlock, the shutdown hang and N times 50 ms of startup. It is needed in exactly one place, a
-subject finishing its stop before its own attachments are disposed, and the composite transition below
-buys that without serialising unrelated services.
+When the subject is not an `IHostedService`, `subjectStopped` is already completed, so a plain subject with
+attachments needs no chain of its own. Ordering is preserved because both appends happen under the
+lifecycle lock, so any later re-attach queues behind them on the same chains. The wait is acyclic: an
+attachment chain waits on the subject's signal, and the subject's chain waits on nothing.
+
+Context attach is the mirror image, also under the lock: a start transition on the subject's chain if it is
+an `IHostedService`, and a create-and-start on each attachment's chain. Host shutdown uses the same shape
+per owned subject rather than stopping targets independently, because the ordering hazard is identical
+there.
+
+**A start transition re-checks liveness before doing anything.** Ordering by the chain covers
+lifecycle-driven appends, which are serialised by `lock (_attachedSubjects)`, but a user-driven
+`AttachHostedService` appends under the target's own lock only and is unordered against them. So the start
+transition first confirms this handler still owns the target; if not, it completes without creating or
+starting anything. Ownership doubles as the liveness signal, which also gives the documented behaviour that
+attaching to a subject outside a hosting enabled context stores the factory and runs nothing.
+
+**The gate has four states**, and the fourth is not optional. `NotStarted`, `Running`, `Draining`,
+`Drained`. Transitions wait for `Running`, so nothing runs before host start. Once shutdown flips the state
+to `Draining`, start transitions complete as no-ops while stops still run, which closes a race a replica hit
+3 times in 400: with only three states, a target attached during the drain is started after the running set
+was snapshotted and is never stopped. After `Drained`, every append completes immediately as a no-op.
+
+`EnsureStartedAsync` moves `NotStarted` to `Running` and is idempotent, so `HostedServiceHandler.StartAsync`
+becomes a call to it. Which callers may open the gate is a real decision, because "nothing runs before host
+start" and "a caller started before the handler must not hang" pull in opposite directions:
+
+- `SubjectActivation<T>` and the **awaitable** attach and detach overloads call `EnsureStartedAsync`, so
+  they open it. Awaiting is an explicit request for the service to be running, and this is what stops a
+  hosted service registered ahead of the handler from hanging. `ParticipantHostBundle.cs:35-69` starts a
+  participant's hosted services in registration order and awaits each, so that shape is live.
+- The **synchronous** overloads and every graph driven append only wait for the gate. They cannot await an
+  async method anyway, and this preserves the invariant for `new Car(context)` at configuration time.
+
+**What is ordered, and what is not.** Lifecycle-driven appends are globally serialised in event order,
+because every lifecycle event fires under `lock (_attachedSubjects)` and the handler appends inside it.
+User-driven appends are not ordered against them, which is why the liveness re-check above exists.
+Execution is then per target, and that is what gives quiescent consistency: each chain drains in append
+order, so once events settle every target is in the state its last event demanded.
+
+A globally serialised *executor* would add cross target ordering, a strictly stronger property, at the cost
+of the deadlock, the shutdown hang and N times 50 ms of startup. The one place it is genuinely needed, a
+subject finishing its stop before its own attachments are disposed, is bought by the `subjectStopped`
+signal without serialising unrelated services.
 
 One ordering guarantee is deliberately dropped. `LifecycleInterceptor.DetachFromProperty` invokes a
 parent's handlers at `:258` before recursing into children at `:260-268`, so today a parent hosted subject
-stops before hosted descendants. Under per target chains they stop concurrently. No dependency between
-them exists in this repository, and hosted services at different depths of the graph are independent by
-construction, so this is accepted rather than preserved. If a consumer ever needs it, the fix is the same
-composite transition applied one level up, not a global executor.
+stops before hosted descendants. Under per target chains they stop concurrently. No dependency between them
+exists in this repository, and hosted services at different depths of the graph are independent by
+construction, so this is accepted rather than preserved. If a consumer ever needs it, the fix is another
+completion signal, not a global executor.
 
-**Records are published safely.** `Data` is a `ConcurrentDictionary`, whose `AddOrUpdate` update delegate
-may run more than once with no rollback, so a record is built outside and published with `GetOrAdd`, and
-handler ownership is taken with `Interlocked.CompareExchange`. A second handler that loses the exchange
-does nothing, which makes the two context case benign instead of a double start. Ownership is released on
-context detach, so a subject moved between contexts is not permanently owned by the first.
+**Records are published safely.** `IInterceptorSubject.Data` is a
+`ConcurrentDictionary<(string? property, string key), object?>` (`IInterceptorSubject.cs:20`), and
+`GetHostedServiceAttachments` has to enumerate them, so attachments live under one key as an
+`ImmutableArray` of records, mutated with `AddOrUpdate` as today (`InterceptorHostingExtensions.cs:40-55`).
+`AddOrUpdate`'s update delegate can run more than once with no rollback, so the record is constructed
+outside the delegate and the delegate only appends it. Handler ownership is taken with
+`Interlocked.CompareExchange`, where an exchange that finds *this* handler already installed counts as
+success; only losing to a different handler means do nothing, which makes the two context case benign
+instead of a double start.
+
+**Ownership is released on context detach and on drain.** Detach release is what allows a subject moved
+between contexts to be picked up by the next handler, and drain release is what allows a second host over
+the same subjects, which the HomeBlaze end to end tests do. Without the latter every record stays owned by
+a dead handler and nothing ever starts again.
+
+**Publication.** `Current` and `Fault` are written with `Volatile.Write` and read with `Volatile.Read`.
+Awaiting a transition gives `WaitForStartAsync` a happens before edge, but the wrappers' diagnostics polls
+read `Current` from a different chain with no such edge, so this is required rather than decorative.
+`Current` is published after `StartAsync` returns successfully, and a faulted start leaves it null.
 
 **Target lifetime.** A target leaves the handler's running set on context detach and rejoins on attach.
 The record itself stays in the subject's `Data`, because the factory has to survive for goal 3. Nothing in
 the handler roots a detached subject.
+
+**Stop and dispose are idempotent per record**, because an explicit detach can race a context detach and
+both will reach the same instance.
 
 ### Residual hazards, stated rather than solved
 
@@ -241,6 +296,15 @@ An attachment whose own `StopAsync` detaches itself deadlocks on its own chain, 
 services detach each other's attachments deadlock on each other. Both were reproduced in the replica.
 Neither occurs in this repository and neither is detected. They are documented as unsupported rather than
 guarded, because detection costs more than the shapes are worth.
+
+Moving disposal from the wrapper to the handler also puts a constraint on connectors that must be stated,
+because nothing enforces it. `SourceOwnershipManager.Dispose()` takes its own lock and then invokes the
+`onReleasing` callback (`:136`), while `OnSubjectDetaching` reaches that same lock from inside
+`lock (_attachedSubjects)` (`LifecycleInterceptor.cs:194,255`). Today the wrapper disposes, so the two
+never interleave; under this design the handler disposes from a transition that can run while a detach
+cascade still holds `_attachedSubjects`. It is safe for OPC UA only because its `onReleasing`
+(`OpcUaSubjectClientSource.cs:78-87`) touches property data and never writes a subject property. That is
+the contract for any connector's dispose path: it must not write subject properties.
 
 ### Part 1: `AddSubject<T>` replaces `AddHostedSubject<T>`
 
@@ -331,9 +395,11 @@ subjects that only need to exist and be attached at startup.
 an unchanged signature. A rename turns that into a build failure. This is only partly reachable: the six
 `Add*Device` extensions keep their signatures and forward to the new method, so their consumers get
 changed behaviour with no compile error. The change is corrective, since those subjects go from having no
-context to having one, but two behavioural consequences must be in the release notes: they now participate
-in tracking and the registry, and `configure` now runs against an attached subject, so its assignments are
-intercepted and tracked.
+context to having one, but three consequences must be in the release notes: those subjects now participate
+in tracking and the registry, `configure` now runs against an attached subject so its assignments are
+intercepted and tracked, and the constraint change from `IHostedService` to `IInterceptorSubject` means
+`AddSubject` can no longer register a plain hosted service that is not a subject, which
+`AddHostedSubject<T> where T : class, IHostedService` allowed.
 
 ### Part 2: attachment becomes factory only
 
@@ -383,9 +449,9 @@ since a struct argument admits no variance conversion.
 | Attach while the subject is outside a hosting enabled context | The factory is stored on the subject. Nothing runs. `Current` is null |
 | Attach while the subject is inside one | A create and start transition is appended |
 | Context attach | For each stored attachment, append a create and start transition |
-| Context detach | Within the subject's composite transition: stop, dispose, clear `Current`. **The attachment stays on the subject** |
+| Context detach | A stop transition is appended at event time; it awaits `subjectStopped`, then stops, disposes, clears `Current`. **The attachment stays on the subject** |
 | Explicit detach | Stop, dispose, clear `Current`, and remove the attachment from the subject |
-| Host shutdown | Every running target is stopped and, if handler created, disposed. Appends after the drain are no-ops |
+| Host shutdown | Same shape as context detach, per owned subject, with the host's stopping token. Starts appended while draining are no-ops, and everything after `Drained` is a no-op |
 
 Keeping the attachment across a context detach is what makes goal 3 work: the factory survives, so the next
 context attach produces a fresh instance and no restart contract is needed.
@@ -393,7 +459,11 @@ context attach produces a fresh instance and no restart contract is needed.
 Further details:
 
 - **The factory runs inside the transition**, outside every lock, and reads live state rather than a
-  snapshot. Ordering against a detach is guaranteed by the chain, so no liveness re-check is needed.
+  snapshot. It runs only after the liveness re-check confirms this handler still owns the target.
+- **A faulted start disposes the instance it created.** `Current` stays null and the exception goes to
+  `Fault`. Leaving a half started connector undisposed would be defect 2 with extra steps:
+  `OpcUaSubjectClientSource` holds a `SemaphoreSlim`, a `SessionManager` and a lifecycle subscription
+  released only through `DisposeAsync` (`:31,702-722`).
 - **`AttachHostedServiceAsync` is transactional only when its own transition is the first one.** If a
   context attach already appended a create, the caller awaits the second transition. The documentation
   states this rather than pretending otherwise. When the caller's own transition faults, the attachment is
@@ -402,7 +472,10 @@ Further details:
   context attach retries.
 - **The cancellation token bounds the wait, not the work.** A cancelled await leaves the transition running
   and holding its chain slot, matching today's `WaitAsync` behaviour at
-  `InterceptorHostingExtensions.cs:172,190`.
+  `HostedServiceHandler.cs:172,190`.
+- **Stop transitions take the host's stopping token during shutdown** so a wedged connector cannot hold the
+  process past `ShutdownTimeout`, and `CancellationToken.None` for graph driven detaches, which have no
+  deadline to inherit.
 - **The synchronous overloads return once the transition is appended**, so their `bool` means "accepted",
   not "started". `Fault` and `Current` are how a caller observes the outcome.
 - **Dispose policy.** `IAsyncDisposable` preferred, `IDisposable` fallback, otherwise dropped. Dispose
@@ -455,7 +528,7 @@ state the attachment work introduces, so a first PR would build scaffolding a se
 | `Namotion.Interceptor.Hosting/HostedSubjectServiceCollectionExtensions.cs` | Renamed `SubjectServiceCollectionExtensions.cs`. `AddSubject`, unconditional `AddFallbackContext`, registers `SubjectActivation<T>` |
 | `Namotion.Interceptor.Hosting/SubjectActivation.cs` | New |
 | `Namotion.Interceptor.Hosting/HostedServiceTarget.cs` | New. Record, chain, transitions |
-| `Namotion.Interceptor.Hosting/HostedServiceHandler.cs` | Loop and `HashSet` replaced by target set, composite detach, gate, `EnsureStartedAsync`, `WaitForStartAsync`, disposal |
+| `Namotion.Interceptor.Hosting/HostedServiceHandler.cs` | Loop and `HashSet` replaced by target set, event time appends with the `subjectStopped` signal, four state gate, `EnsureStartedAsync`, `WaitForStartAsync`, ownership, disposal. `Dispose` no longer cancels a loop token; it is a no-op after `StopAsync` |
 | `Namotion.Interceptor.Hosting/InterceptorHostingExtensions.cs` | Factory based API, attachment handles |
 | `Namotion.Interceptor.Hosting/InterceptorSubjectContextExtensions.cs` | `AddSingleton<IHostedService>`, defect 4 |
 | `HomeBlaze/Namotion.Devices.*/6 × *ServiceCollectionExtensions.cs` | One identifier each |
@@ -474,30 +547,52 @@ injects `IHttpClientFactory`; `HueBridge.cs:115` takes only a logger.
 
 ### The two HomeBlaze wrappers
 
-The attach moves **out** of `ExecuteAsync` and into the enable path, and the factory reads live
-configuration when invoked instead of capturing a snapshot:
+The structure stays. `StartClientAsync` keeps its place in `ExecuteAsync`, awaits the attach, and keeps
+setting `Status` and `StatusMessage` from the outcome. Three changes:
 
 ```csharp
-_attachment = this.AttachHostedService(() =>
+if (_attachment is null)                                    // 1. guard
 {
-    var root = new OpcUaDynamicSubject(RootSegmentName);
-    Root = root;
-    return root.CreateOpcUaClientSource(BuildConfiguration(), _logger);
-});
+    _attachment = await this.AttachHostedServiceAsync(() =>  // 2. factory, live state
+    {
+        var root = new OpcUaDynamicSubject(RootSegmentName);
+        Root = root;
+        return root.CreateOpcUaClientSource(BuildConfiguration(), _logger);
+    }, cancellationToken);
+}
 ```
 
-This is required, not stylistic. If the attach stayed in `ExecuteAsync` while the attachment survives a
-context detach, a re-attach would re-invoke the surviving factory *and* the restarted `ExecuteAsync` would
-create a second one. With the attach outside, `ExecuteAsync` keeps only the ten second diagnostics poll,
-`IsEnabled` means "the attachment exists", the Start and Stop operations attach and detach, and
-`UpdateDiagnostics` reads `_attachment?.Current`. The manual dispose block and its comment are deleted.
+and the manual dispose block with its comment is deleted, because the handler now disposes.
 
-`OpcUaServer` gets the same treatment, with one real difference to carry into the plan: its
-`targetSubject` comes from `_pathResolver.ResolveSubject(Path, …)` (`OpcUaServer.cs:239`), a lookup into
-the existing graph rather than a construction, so its factory must re-resolve the path on each invocation
-or it will bind a server to a subject that has since been replaced.
+The guard is what makes a re-attach correct. The attachment survives a context detach, so on re-attach the
+handler re-invokes the factory; a restarted `ExecuteAsync` that attached unconditionally would create a
+second source alongside it. With the guard it sees the surviving attachment and does nothing, and the
+factory produces exactly one new instance with a fresh root and current configuration.
+
+An earlier draft moved the attach out of `ExecuteAsync` into an enable path. That was wrong on three
+counts, all of which the guard avoids. `IConfigurable.ApplyConfigurationAsync` runs only on configuration
+edits (`JsonSubjectSynchronizer.cs:98`), never at load, so `ExecuteAsync`'s `if (IsEnabled)` is the only
+auto start hook there is and a saved, enabled client would never start. `OpcUaServer.StartServerAsync`
+awaits `while (!_rootManager.IsLoaded)` before resolving its path (`:227-230,239`), which a synchronous
+`Func<T>` cannot express but an awaited call inside `ExecuteAsync` can. And an awaited attach is what lets
+both wrappers report a real `Status`, where a synchronous attach would return "accepted" and leave a
+failure to surface on a 10 or 60 second poll (`OpcUaClient.cs:199`, `OpcUaServer.cs:196`).
+
+`OpcUaServer` takes the same three changes. Its factory closes over the `targetSubject` resolved at
+`:239`, which is a lookup into the existing graph rather than a construction, so the factory re-resolves
+the path on each invocation rather than capturing the result.
+
+`UpdateDiagnostics` reads `_attachment?.Current` in both, and `StopClientAsync` and `StopServerAsync`
+detach and null the field.
 
 ## Documentation
+
+Three existing passages invert under the new rule and must be rewritten rather than merely re-read.
+`docs/hosting.md:91-102` says attached services are "stopped and removed" on detach, which becomes stopped,
+disposed and kept. `docs/hosting.md:145` links to a `subject-guidelines.md` anchor that the rename changes.
+And `Namotion.Interceptor.SampleWeb/Program.cs:64` carries a commented explanation of `WithHostedServices`
+auto start. The existing assertion at `HostedServiceHandlerTests.cs:108`, `Assert.Empty` after a context
+detach, inverts for the same reason; the test file is rewritten anyway.
 
 `docs/hosting.md` is restructured around the ownership rule rather than the API surface, and gains the
 "which pattern when" section whose absence caused this investigation:
@@ -521,46 +616,71 @@ the context, so constructing them up front is the better pattern and the docs no
 
 `Namotion.Interceptor.Hosting.Tests` currently has no concurrency or ordering test at all.
 
+Two conventions apply throughout. "Attached to the context" must be asserted through an observable, either
+registry membership or the subject's own start, never by inspecting handler internals, or the test passes
+vacuously. And the context used by these tests must include `WithContextInheritance`, which
+`WithHostedServices` does not pull in (`InterceptorSubjectContextExtensions.cs:24-25`): without it a child
+subject's `Context` never resolves the handler, so every child scenario is unreachable. The existing
+harness at `HostedServiceHandlerTests.cs:182-185` has this gap.
+
 **Registration and activation**
 
 1. `AddSubject` on a subject with a generated context constructor starts it exactly once with hosting
-   enabled. Currently returns 2.
-2. `AddSubject` on a subject with DI constructor parameters and no generated context constructor still
-   receives the context and is started by the handler. Currently fails.
+   enabled. This is the probe that returns 2 today.
+2. `AddSubject` on a subject with DI constructor parameters and no generated context constructor is
+   attached and started by the handler. Fails today.
 3. `AddSubject` on a subject with a hand written `IInterceptorSubjectContext` parameter that ignores it is
-   still attached.
+   still attached. Fails today.
 4. `AddSubject` with no hosting handler starts and stops the subject itself.
-5. `AddSubject` on a plain subject constructs and attaches it at host start.
-6. `AddSubject` called twice registers one activation.
-7. A subject whose `StartAsync` throws aborts host startup.
-8. `AddSubject<T>` registered **before** `WithHostedServices` does not hang.
-9. Two contexts on one `IServiceCollection` both get a running handler.
+5. `AddSubject` on a plain subject constructs and attaches it at host start, and its attachments are not
+   awaited by host startup.
+6. `AddSubject` called twice registers one activation, and the second `configure` is dropped.
+7. A hand written `IHostedService` whose `StartAsync` throws aborts host startup. Not a `BackgroundService`,
+   which does not surface `ExecuteAsync` failures through `StartAsync`. Also asserts what happens to
+   already started targets when startup aborts.
+8. `AddSubject<T>` registered **before** `WithHostedServices` does not hang. This test is the specification
+   for `EnsureStartedAsync` opening the gate.
+9. Two contexts on one `IServiceCollection` both get a running handler, and separately, one subject
+   reachable from two hosting enabled contexts is started once.
 
 **Concurrency and ordering**
 
-10. Concurrent appends to one target never overlap. This is the test that would have caught the
-    unsynchronised chain, and must drive appends from two threads with the head transition stalled.
+10. Concurrent appends to one target never overlap. Drives an attach and an explicit detach of the same
+    attachment from two threads with the head transition stalled, since distinct attach calls produce
+    distinct targets and cannot contend. Needs a test seam to stall a transition.
 11. On context detach the subject's `StopAsync` completes before its attachment is disposed.
-12. A factory that constructs a subject, re-entering the lifecycle lock, does not deadlock.
-13. Stopping the host while a wrapper's `ExecuteAsync` is unwinding completes rather than hanging, and the
-    attachment is stopped and disposed.
-14. A transition appended after the shutdown drain completes as a no-op.
+12. **Context detach immediately followed by re-attach, with no quiescing in between**, leaves exactly one
+    running instance, the pre-detach instance disposed, and the post-attach instance alive. The test must
+    forbid a `WaitUntilAsync` between the two events, or it passes while the move is broken. This is the
+    20 of 20 failure.
+13. A factory that constructs a subject, re-entering the lifecycle lock, does not deadlock.
+14. Stopping the host while a wrapper's `ExecuteAsync` is unwinding completes rather than hanging, and the
+    attachment is stopped and disposed in that order.
+15. A target attached **during** the drain is not left running. This is the 3 in 400 race.
+16. A transition appended after the drain completes as a no-op.
 
 **Attachment lifecycle**
 
-15. Attach, context detach, context re-attach produces a different instance, and the first was disposed.
-16. Context detach disposes exactly once.
-17. Explicit detach removes the attachment, so a later context attach starts nothing.
-18. A factory that throws leaves `Current` null, sets `Fault`, is logged, and does not fault the chain.
-19. A dropped fire and forget faulted transition raises no `UnobservedTaskException`.
-20. An instance whose `StartAsync` faults is not left in the running set.
-21. Host shutdown disposes handler created instances. Asserted as "the handler did not dispose the
-    subject", not "the subject was not disposed", since the container disposes `AddSubject` singletons.
+17. Attach, context detach, context re-attach produces a different instance, and the first was disposed.
+18. Context detach disposes exactly once, including when an explicit detach races it.
+19. Explicit detach removes the attachment, so a later context attach starts nothing.
+20. An attachment added while a detach is in flight is not left running.
+21. A factory that throws leaves `Current` null, sets `Fault`, is logged, and does not fault the chain.
+22. An instance whose `StartAsync` faults is disposed, and `Current` stays null.
+23. `AttachHostedServiceAsync` removes the attachment before propagating its own start fault.
+24. A cancelled `AttachHostedServiceAsync` await leaves the transition running to completion.
+25. A dropped fire and forget faulted transition raises no `UnobservedTaskException`. Needs `GC.Collect`
+    plus `WaitForPendingFinalizers`, a non parallel collection so another test's dropped task cannot
+    pollute the handler, and a positive control proving the assertion can fail.
+26. Host shutdown disposes handler created instances and releases ownership, so a second host over the same
+    subjects starts them again. Disposal of the subject is asserted as "the handler did not dispose it",
+    since the container disposes `AddSubject` singletons.
+27. A type implementing both `IAsyncDisposable` and `IDisposable` is disposed through the async path.
 
 **Subject as hosted service**
 
-22. A subject implementing `IHostedService` is restarted on re-attach.
-23. Re-parenting in add then remove order, where the reference count never reaches zero, neither stops nor
+28. A subject implementing `IHostedService` is restarted on re-attach.
+29. Re-parenting in add then remove order, where the reference count never reaches zero, neither stops nor
     restarts anything.
 
 ## Out of scope
@@ -573,9 +693,9 @@ attaches last, so the hazard is caller side: `new Car(context) { Name = "x" }`, 
 `configure?.Invoke` all assign after the attach has already fired. Removing the delay needs a "subject
 fully constructed" signal, which is a separate design problem touching the generator.
 
-The delay stays, in both the start and stop paths, and moves inside each target's transition. Two
-consequences are worth stating rather than discovering. It no longer serialises across targets, so N
-subjects cost 50 ms rather than N times 50 ms, which is a real improvement to host startup now that
-`SubjectActivation<T>` awaits the start. But it also protects strictly less than before: under the old
-global loop targets woke at 50 ms intervals, and now they all wake at T plus 50 ms together. And because
+The delay stays, in both the start and stop paths, and moves inside each target's transition. It no longer
+serialises across targets, so N subjects cost 50 ms rather than N times 50 ms, which is a real improvement
+to host startup now that `SubjectActivation<T>` awaits the start. What protects against the hazard is the
+gap between a target's own attach event and its start, and that is 50 ms either way; the old loop's
+staggering was a side effect of serialisation, not a guarantee, so nothing is lost. Because
 the start transition no longer receives a cancellable token, shutdown waits it out per target.
