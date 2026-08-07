@@ -1,235 +1,297 @@
-﻿using System.Threading.Tasks.Dataflow;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting;
 
-internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDisposable
+// No longer IDisposable: the old implementation existed only to cancel the action loop's token
+// source, and there is no such token under per target chains.
+internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 {
-    private ILogger? _logger;
-
-    private Task? _executeTask;
-    private CancellationTokenSource? _stoppingCts;
+    private const int StartDelayMilliseconds = 50;
 
     private readonly Func<ILogger?> _loggerResolver;
-    private readonly BufferBlock<Func<CancellationToken, Task>> _actions = new();
-    private readonly HashSet<IHostedService> _hostedServices = [];
+    private readonly HostedServiceGate _gate = new();
+    private readonly ConcurrentDictionary<HostedServiceTarget, IInterceptorSubject> _running = new();
+    private readonly ConcurrentDictionary<IInterceptorSubject, byte> _liveSubjects = new();
+
+    private ILogger? _logger;
 
     public HostedServiceHandler(Func<ILogger?> loggerResolver)
     {
         _loggerResolver = loggerResolver;
     }
 
+    private ILogger? Logger => _logger ??= _loggerResolver();
+
+    /// <summary>
+    /// Test seam, awaited in <see cref="StopAsync"/> after the gate begins draining and before the
+    /// running set is snapshotted. Null in production. Lets a test hold the drain open so the
+    /// "attached during a drain" race does not depend on timing.
+    /// </summary>
+    internal Func<Task>? DrainGate { get; set; }
+
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        _logger ??= _loggerResolver();
-
+        // Invoked from inside LifecycleInterceptor's lock (_attachedSubjects). Everything here must
+        // only append; appending never blocks and never runs user code.
         if (change.IsContextAttach)
         {
-            if (change.Subject is IHostedService hostedService)
-            {
-                AttachHostedService(hostedService);
-            }
-
-            foreach (var hostedService2 in change.Subject.GetAttachedHostedServices())
-            {
-                AttachHostedService(hostedService2);
-            }
+            AttachSubject(change.Subject);
         }
         else if (change.IsContextDetach)
         {
-            if (change.Subject is IHostedService hostedService)
-            {
-                DetachHostedService(hostedService);
-            }
+            DetachSubject(change.Subject);
+        }
+    }
 
-            foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices())
+    private void AttachSubject(IInterceptorSubject subject)
+    {
+        _liveSubjects[subject] = 0;
+
+        if (subject is IHostedService hostedService)
+        {
+            var target = subject.GetOrAddSubjectTarget(hostedService);
+            if (target.TryTakeOwnership(this))
             {
-                change.Subject.DetachHostedService(attachedHostedService);
+                AppendStart(subject, target, CancellationToken.None);
+            }
+        }
+
+        foreach (var attachment in subject.GetHostedServiceAttachments())
+        {
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            if (target.TryTakeOwnership(this))
+            {
+                AppendStart(subject, target, CancellationToken.None);
             }
         }
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    private void DetachSubject(IInterceptorSubject subject)
     {
-        if (_executeTask is not null)
+        // Liveness is per subject and cleared here, under the lifecycle lock. It cannot be per target,
+        // because the attaching path takes target ownership itself and would pass its own check.
+        _liveSubjects.TryRemove(subject, out _);
+
+        var subjectStopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var subjectTarget = subject.TryGetSubjectTarget();
+
+        // Stops are appended NOW, not issued later from inside another transition. Deferring them
+        // lets a re-attach's create land first on the attachment chain, after which the deferred stop
+        // disposes the NEW instance and leaks the old one.
+        if (subjectTarget is not null)
         {
-            return _executeTask.IsCompleted ? _executeTask : Task.CompletedTask;
+            AppendStop(subject, subjectTarget, subjectStopped, waitFor: null, CancellationToken.None);
         }
-        
-        _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _executeTask = ExecuteAsync(_stoppingCts.Token);
-        return _executeTask.IsCompleted ? _executeTask : Task.CompletedTask;
+        else
+        {
+            subjectStopped.TrySetResult();
+        }
+
+        foreach (var attachment in subject.GetHostedServiceAttachments())
+        {
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            AppendStop(subject, target, signal: null, waitFor: subjectStopped.Task, CancellationToken.None);
+        }
+
+        // Released after the stops are appended, and never from inside a transition body: releasing
+        // from the body would clobber ownership a re-attach has already retaken, and the re-attach's
+        // start would then no-op itself.
+        subjectTarget?.ReleaseOwnership(this);
+        foreach (var attachment in subject.GetHostedServiceAttachments())
+        {
+            ((IHostedServiceAttachmentTarget)attachment).Target.ReleaseOwnership(this);
+        }
     }
 
-    private async Task ExecuteAsync(CancellationToken stoppingToken)
+    internal Task AppendStart(IInterceptorSubject subject, HostedServiceTarget target, CancellationToken cancellationToken)
     {
-        _logger ??= _loggerResolver();
+        _running[target] = subject;
 
-        while (!stoppingToken.IsCancellationRequested)
+        return target.AppendAsync(async _ =>
         {
+            target.SetFault(null);
+
+            await _gate.WaitForOpenAsync().ConfigureAwait(false);
+            if (_gate.State != HostedServiceGateState.Running)
+            {
+                // Read inside the body, never at append time: a start already queued when shutdown
+                // begins must re-read the state, and a body skipped at append time would never run
+                // its signalling.
+                return;
+            }
+
+            if (!_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
+            {
+                return;
+            }
+
             try
             {
-                var action = await _actions.ReceiveAsync(stoppingToken);
-                await action(stoppingToken);
+                await Task.Delay(StartDelayMilliseconds, cancellationToken).ConfigureAwait(false);
+
+                var instance = target.Subject ?? target.Factory!();
+                try
+                {
+                    await instance.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch
+                {
+                    if (target.IsHandlerOwnedInstance)
+                    {
+                        await DisposeInstanceAsync(instance).ConfigureAwait(false);
+                    }
+
+                    throw;
+                }
+
+                target.SetCurrent(instance);
             }
             catch (Exception exception)
             {
-                if (exception is not OperationCanceledException)
+                target.SetFault(exception);
+                Logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
+            }
+        }, cancellationToken);
+    }
+
+    internal Task AppendStop(
+        IInterceptorSubject subject,
+        HostedServiceTarget target,
+        TaskCompletionSource? signal,
+        Task? waitFor,
+        CancellationToken cancellationToken)
+    {
+        _running.TryRemove(target, out _);
+
+        return target.AppendAsync(async _ =>
+        {
+            try
+            {
+                if (waitFor is not null)
                 {
-                    _logger?.LogError(exception, "Failed to execute hosted service action.");
+                    // Orders a subject's stop ahead of its attachments. Acyclic: the subject's chain
+                    // waits on nothing. A hosted service must therefore not detach an attachment from
+                    // inside its own stop path, or this becomes a cycle.
+                    await waitFor.ConfigureAwait(false);
+                }
+
+                await _gate.WaitForOpenAsync().ConfigureAwait(false);
+                if (_gate.State == HostedServiceGateState.Drained)
+                {
+                    return;
+                }
+
+                var instance = target.Current;
+                if (instance is null)
+                {
+                    return;
+                }
+
+                target.SetCurrent(null);
+
+                await Task.Delay(StartDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
+
+                try
+                {
+                    await instance.StopAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    target.SetFault(exception);
+                    Logger?.LogError(exception, "Failed to stop hosted service for subject {Subject}.", subject);
+                }
+
+                if (target.IsHandlerOwnedInstance)
+                {
+                    await DisposeInstanceAsync(instance).ConfigureAwait(false);
                 }
             }
+            finally
+            {
+                // Always signals, including on the gated-out and cancelled paths, or a paired
+                // attachment stop parks forever on a signal that is never set.
+                signal?.TrySetResult();
+            }
+        }, cancellationToken);
+    }
+
+    private async Task DisposeInstanceAsync(IHostedService instance)
+    {
+        try
+        {
+            switch (instance)
+            {
+                case IAsyncDisposable asyncDisposable:
+                    await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                    break;
+                case IDisposable disposable:
+                    disposable.Dispose();
+                    break;
+            }
         }
+        catch (Exception exception)
+        {
+            // Detach runs inside a property write, so throwing here would surface at an unrelated assignment.
+            Logger?.LogError(exception, "Failed to dispose hosted service {Service}.", instance.ToString());
+        }
+    }
+
+    internal Task EnsureStartedAsync()
+    {
+        _gate.EnsureStarted();
+        return Task.CompletedTask;
+    }
+
+    internal async Task WaitForStartAsync(IInterceptorSubject subject, IHostedService hostedService, CancellationToken cancellationToken)
+    {
+        var target = subject.GetOrAddSubjectTarget(hostedService);
+        target.TryTakeOwnership(this);
+
+        await target.AppendAsync(_ => Task.CompletedTask, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        if (target.Fault is { } fault)
+        {
+            throw fault;
+        }
+    }
+
+    internal bool IsLive(IInterceptorSubject subject) => _liveSubjects.ContainsKey(subject);
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _logger ??= _loggerResolver();
+        return EnsureStartedAsync();
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (_executeTask == null)
+        _gate.BeginDraining();
+
+        if (DrainGate is { } drainGate)
         {
-            return;
+            await drainGate().ConfigureAwait(false);
         }
 
-        try
-        {
-            if (_stoppingCts is not null)
-            {
-                await _stoppingCts.CancelAsync();
-            }
-            
-            Task[] tasks;
-            lock (_hostedServices)
-            {
-                tasks = _hostedServices
-                    .Select(async hostedService =>
-                    {
-                        try
-                        {
-                            _logger?.LogInformation("Stopping hosted service {Service}.", hostedService.ToString());
-                            await hostedService.StopAsync(cancellationToken);
-                        }
-                        catch (Exception exception)
-                        {
-                            if (exception is not OperationCanceledException)
-                            {
-                                _logger?.LogError(exception, "Failed to stop hosted service {Service}.", hostedService.ToString());
-                            }
-                        }
-                    })
-                    .ToArray();
-                
-                _hostedServices.Clear();
-            }
-            
-            await Task.WhenAll(tasks);
-        }
-        finally
-        {
-            await _executeTask
-                .WaitAsync(cancellationToken)
-                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-        }
-    }
-    
-    internal void AttachHostedService(IHostedService hostedService)
-    {
-        lock (_hostedServices)
-        {
-            if (_hostedServices.Add(hostedService))
-            {
-                PostStartService(hostedService, null);
-            }
-        }
-    }
+        var snapshot = _running.ToArray();
+        var stops = new List<Task>(snapshot.Length);
 
-    internal void DetachHostedService(IHostedService hostedService)
-    {
-        lock (_hostedServices)
+        foreach (var (target, subject) in snapshot)
         {
-            if (_hostedServices.Remove(hostedService))
-            {
-                PostStopService(hostedService, null);
-            }
-        }
-    }
-
-    internal async Task AttachHostedServiceAsync(IHostedService hostedService, CancellationToken cancellationToken)
-    {
-        var tcs = new TaskCompletionSource();
-        lock (_hostedServices)
-        {
-            if (_hostedServices.Add(hostedService))
-            {
-                PostStartService(hostedService, tcs);
-            }
-            else
-            {
-                tcs.TrySetResult(); // Already attached
-            }
+            stops.Add(AppendStop(subject, target, signal: null, waitFor: null, cancellationToken));
         }
 
-        await tcs.Task.WaitAsync(cancellationToken);
-    }
-    
-    internal async Task DetachHostedServiceAsync(IHostedService hostedService, CancellationToken cancellationToken)
-    {
-        var tcs = new TaskCompletionSource();
-        lock (_hostedServices)
+        await Task.WhenAll(stops).ConfigureAwait(false);
+
+        foreach (var (target, _) in snapshot)
         {
-            if (_hostedServices.Remove(hostedService))
-            {
-                PostStopService(hostedService, tcs);
-            }
-            else
-            {
-                tcs.TrySetResult(); // Already removed
-            }
+            // Released after the stops so a second host cannot start ahead of this host's stop,
+            // and released at all so a second host over the same subjects is not blocked forever.
+            target.ReleaseOwnership(this);
         }
 
-        await tcs.Task.WaitAsync(cancellationToken);
-    }
-
-    private void PostStartService(IHostedService hostedService, TaskCompletionSource? tcs)
-    {
-        _actions.Post(async token =>
-        {
-            try
-            {
-                await Task.Delay(50, token); // TODO: Fix small delay to let sync property assignments/deserialization complete
-
-                _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
-                await hostedService.StartAsync(token);
-                tcs?.TrySetResult();
-            }
-            catch (Exception ex)
-            {
-                tcs?.TrySetException(ex);
-            }
-        });
-    }
-
-    private void PostStopService(IHostedService hostedService, TaskCompletionSource? tcs)
-    {
-        _actions.Post(async token =>
-        {
-            try
-            {
-                await Task.Delay(50, token); // TODO: Fix small delay to let sync property assignments/deserialization complete
-
-                _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
-                await hostedService.StopAsync(token);
-                tcs?.TrySetResult();
-            }
-            catch (Exception ex)
-            {
-                tcs?.TrySetException(ex);
-            }
-        });
-    }
-
-    public void Dispose()
-    {
-        _stoppingCts?.Cancel();
+        _gate.CompleteDraining();
     }
 }

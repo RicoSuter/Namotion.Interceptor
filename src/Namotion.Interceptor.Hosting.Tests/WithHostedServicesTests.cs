@@ -31,8 +31,8 @@ public class WithHostedServicesTests
             // Act
             var firstPerson = new Person(firstContext);
             var secondPerson = new Person(secondContext);
-            firstPerson.AttachHostedService(new PersonBackgroundService(firstPerson));
-            secondPerson.AttachHostedService(new PersonBackgroundService(secondPerson));
+            firstPerson.AttachHostedService(() => new PersonBackgroundService(firstPerson));
+            secondPerson.AttachHostedService(() => new PersonBackgroundService(secondPerson));
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(() => firstPerson.FirstName == "John");

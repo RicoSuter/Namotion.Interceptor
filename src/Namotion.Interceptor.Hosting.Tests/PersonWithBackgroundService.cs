@@ -9,7 +9,15 @@ namespace Namotion.Interceptor.Hosting.Tests
         public partial string? FirstName { get; set; }
 
         public partial string? LastName { get; set; }
-        
+
+        public bool WasDisposedByHandler { get; private set; }
+
+        public override void Dispose()
+        {
+            WasDisposedByHandler = true;
+            base.Dispose();
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             try

@@ -8,13 +8,25 @@ namespace Namotion.Interceptor.Hosting
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHostedSubject<T>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<T>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null)
             where T :  class, Microsoft.Extensions.Hosting.IHostedService { }
     }
+    public interface IHostedServiceAttachment
+    {
+        Microsoft.Extensions.Hosting.IHostedService? Current { get; }
+        System.Exception? Fault { get; }
+    }
+    public interface IHostedServiceAttachment<out T> : Namotion.Interceptor.Hosting.IHostedServiceAttachment
+        where out T :  class, Microsoft.Extensions.Hosting.IHostedService
+    {
+        T Current { get; }
+    }
     public static class InterceptorHostingExtensions
     {
-        public static bool AttachHostedService(this Namotion.Interceptor.IInterceptorSubject subject, Microsoft.Extensions.Hosting.IHostedService hostedService) { }
-        public static System.Threading.Tasks.Task<bool> AttachHostedServiceAsync(this Namotion.Interceptor.IInterceptorSubject subject, Microsoft.Extensions.Hosting.IHostedService hostedService, System.Threading.CancellationToken cancellationToken) { }
-        public static bool DetachHostedService(this Namotion.Interceptor.IInterceptorSubject subject, Microsoft.Extensions.Hosting.IHostedService hostedService) { }
-        public static System.Threading.Tasks.Task<bool> DetachHostedServiceAsync(this Namotion.Interceptor.IInterceptorSubject subject, Microsoft.Extensions.Hosting.IHostedService hostedService, System.Threading.CancellationToken cancellationToken) { }
-        public static System.Collections.Immutable.ImmutableArray<Microsoft.Extensions.Hosting.IHostedService> GetAttachedHostedServices(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static Namotion.Interceptor.Hosting.IHostedServiceAttachment<T> AttachHostedService<T>(this Namotion.Interceptor.IInterceptorSubject subject, System.Func<T> factory)
+            where T :  class, Microsoft.Extensions.Hosting.IHostedService { }
+        public static System.Threading.Tasks.Task<Namotion.Interceptor.Hosting.IHostedServiceAttachment<T>> AttachHostedServiceAsync<T>(this Namotion.Interceptor.IInterceptorSubject subject, System.Func<T> factory, System.Threading.CancellationToken cancellationToken)
+            where T :  class, Microsoft.Extensions.Hosting.IHostedService { }
+        public static bool DetachHostedService(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Hosting.IHostedServiceAttachment attachment) { }
+        public static System.Threading.Tasks.Task<bool> DetachHostedServiceAsync(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Hosting.IHostedServiceAttachment attachment, System.Threading.CancellationToken cancellationToken) { }
+        public static System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Hosting.IHostedServiceAttachment> GetHostedServiceAttachments(this Namotion.Interceptor.IInterceptorSubject subject) { }
     }
     public static class InterceptorSubjectContextExtensions
     {
