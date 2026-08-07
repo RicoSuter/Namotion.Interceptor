@@ -89,24 +89,14 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Gets the revision of the last write to this property that reached a write terminal, and whether
-    /// a sink has already published this property's value.
+    /// Gets the revision of the last non-source write to this property that reached a write terminal,
+    /// and whether a sink has already published its value. Returns false when the property has never
+    /// been written.
     /// </summary>
     /// <remarks>
-    /// The revision is comparable against the revision carried by a change to the same property, because
-    /// both are stamped by the same terminal under the subject's lock. Revisions of different subjects
-    /// are not comparable, and neither are revisions of two properties, so a caller may only compare a
-    /// change against the property it belongs to.
-    /// <para>
-    /// The store happens after the value store and inside the lock, so a reader that observes revision
-    /// N is guaranteed to observe the value committed at N. Returns false when the property has never
-    /// been written, and a revision of 0 when only a path that stamps no revision has written it (a
-    /// derived recomputation, for instance).
-    /// </para>
-    /// <para>
-    /// Both values come from one lookup on purpose. This runs per delivered change, and a property data
-    /// lookup hashes the property name and the key, so splitting it in two doubles that cost.
-    /// </para>
+    /// The revision is only comparable against a change to the same property: revisions are per subject,
+    /// and two properties of one subject draw from the same counter. Both values come from one lookup
+    /// because this runs per delivered change.
     /// </remarks>
     public bool TryGetWriteState(out long lastNonSourceCommitRevision, out bool published)
     {
@@ -123,10 +113,8 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Records that a sink has published this property's value. Sticky: see
-    /// <see cref="PropertyWriteState.Published"/> for why it is never cleared and why an over-eager
-    /// mark is harmless. Callers are expected to check <see cref="TryGetWriteState(out long, out bool)"/>
-    /// first, which makes this a once-per-property cost rather than a per-change one.
+    /// Records that a sink has published this property's value. Sticky; see
+    /// <see cref="PropertyWriteState.Published"/>.
     /// </summary>
     public void MarkPublished()
     {
@@ -134,18 +122,11 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Records what the terminal just committed: the write timestamp as raw UTC ticks, avoiding
-    /// DateTimeOffset conversion on the hot path, and the commit revision.
-    /// The revision is recorded only for commits that did not come from a source; see
-    /// <see cref="PropertyWriteState.LastNonSourceCommitRevision"/> for why that exclusion is required
-    /// rather than merely convenient. The timestamp is recorded either way, which preserves what
-    /// <see cref="TryGetWriteTimestamp"/> has always reported.
-    /// Uses <see cref="Interlocked.Exchange(ref long, long)"/> to guarantee atomic 64-bit writes
-    /// on 32-bit runtimes (the library targets netstandard2.0, which includes x86 .NET Framework;
-    /// ECMA-335 only guarantees atomicity for writes up to <c>native int</c> size, so plain stores
-    /// of a <c>long</c> can tear on 32-bit). Paired with <see cref="Interlocked.Read(ref long)"/>
-    /// on the read side for symmetric atomicity. The exchange's return value is intentionally
-    /// unused.
+    /// Records what the terminal just committed: the write timestamp as raw UTC ticks, avoiding a
+    /// DateTimeOffset conversion on the hot path, and the commit revision. The revision is recorded only
+    /// for commits that did not come from a source; see
+    /// <see cref="PropertyWriteState.LastNonSourceCommitRevision"/> for why that exclusion is required.
+    /// The timestamp is recorded either way, preserving what <see cref="TryGetWriteTimestamp"/> reports.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void SetWriteState(long timestamp, long revision, bool isFromSource)

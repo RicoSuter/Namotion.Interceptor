@@ -21,11 +21,9 @@ internal sealed class ChangeMerger : IDisposable
     private const int BufferMinimumSize = 256;
     private const int BufferMaximumSize = 1024;
 
-    // The property index is sized by the properties it holds, never by the batch it was fed, so these
-    // mirror the buffer's rental policy above. The minimum is deliberately both the pre-size cap and the
-    // shrink floor: if they differed, a narrow burst would grow the index to the cap, shrink it back to
-    // the floor on reset, and regrow it on the next batch, paying two allocations forever. Equal, the
-    // pre-size becomes a permanent no-op once the index exists and steady state allocates nothing.
+    // Mirrors the buffer policy above. The minimum is deliberately both the pre-size cap and the shrink
+    // floor: if they differed, a narrow burst would grow to the cap, shrink to the floor on reset and
+    // regrow on the next batch, allocating forever.
     private const int PropertyIndexMinimumCapacity = 256;
     private const int PropertyIndexMaximumCapacity = 1024;
 
@@ -102,10 +100,8 @@ internal sealed class ChangeMerger : IDisposable
             return ReadOnlyMemory<SubjectPropertyChange>.Empty;
         }
 
-        // Pre-size to avoid resizes under bursts, capped because the index is keyed by property and a
-        // batch says nothing about how many distinct ones it carries: 200k changes to 10 properties needs
-        // 10 entries, and sizing for 200k would retain ~11 MB for this merger's lifetime. Above the cap
-        // the index grows organically and keeps that capacity while it keeps using it.
+        // Capped because the index is keyed by property and the batch length says nothing about how many
+        // distinct ones it carries. Above the cap it grows organically and keeps that capacity.
         _propertyIndices.EnsureCapacity(Math.Min(changes.Length, PropertyIndexMinimumCapacity));
 
         // Ensure the buffer is large enough (rent from pool to avoid allocations). Returning without
@@ -240,11 +236,9 @@ internal sealed class ChangeMerger : IDisposable
         var distinctPropertyCount = _propertyIndices.Count;
         _propertyIndices.Clear();
 
-        // Same hysteresis as the buffer below, so one wide batch does not pin its capacity for this
-        // merger's lifetime. Ordering matters: TrimExcess throws when the requested capacity is below
-        // Count, and the guard below does not bound Count by the floor (at capacity 225289 a Count of
-        // 50000 satisfies it), so trimming before the Clear would throw for exactly the batch shape this
-        // exists for, out of the flush task's finally, which ends the periodic loop for good.
+        // Same hysteresis as the buffer below. Must run after the Clear: TrimExcess throws when the
+        // requested capacity is below Count, and the guard does not bound Count by the floor, so trimming
+        // first would throw for exactly the wide batch this exists for.
         if (_propertyIndices.Capacity >= PropertyIndexMaximumCapacity &&
             distinctPropertyCount < _propertyIndices.Capacity / 4)
         {

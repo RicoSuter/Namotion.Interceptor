@@ -343,19 +343,16 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 
                 if (!ChangeDeliveryFilter.IsCurrent(in change))
                 {
-                    // A later local commit supersedes this write, and that commit's own change is
-                    // delivered, so it carries the settled value in this one's place.
+                    // A later local commit supersedes it, and that commit's change is delivered in its
+                    // place.
                     dropped++;
                     continue;
                 }
 
-                // Not superseded, so this write is still the latest local intent for the property and has
-                // to reach the source. Deciding that by commit order rather than by comparing values is
-                // what makes it safe: the initial-state load writes the source's value into the model
-                // without advancing the local commit marker, so a value comparison sees a model that
-                // matches neither this write's new value nor its baseline and cannot tell "the load moved
-                // the model" from "a newer local write superseded this one". It then discards a live user
-                // write, which is permanent, because nothing re-enqueues it.
+                // Still the latest local intent, so it has to reach the source. Decided by commit order
+                // rather than by comparing values: the load writes the source's value into the model
+                // without advancing the marker, and a value comparison cannot tell that apart from a
+                // newer local write, so it discarded live writes.
                 var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
                 if (Equals(currentValue, change.GetNewValue<object?>()))
                 {
@@ -369,9 +366,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 }
                 else
                 {
-                    // The load moved the model off this write: restore it locally, so the connected
-                    // phase captures the re-applied write and sends it, leaving model and source agreeing
-                    // on the value the user last wrote.
+                    // The load moved the model off it: restore locally so the connected phase captures
+                    // and sends the re-applied write.
                     property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object?>());
                     restored++;
                 }

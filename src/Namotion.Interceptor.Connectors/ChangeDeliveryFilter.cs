@@ -6,23 +6,17 @@ namespace Namotion.Interceptor.Connectors;
 /// Delivers a property's settled state and nothing else.
 ///
 /// A change is enqueued after its commit and outside the subject lock, so a writer preempted between the
-/// two can present revision 8 after revision 10 has already gone out. Nothing bounds that preemption, so
-/// no amount of buffering closes it. What does close it is that every committed write stamps its revision
-/// on the property it wrote: a change whose revision the property has moved past was superseded by a
-/// commit that is still to come, or has already gone out, so dropping it can never lose the settled state.
+/// two can present an older commit after a newer one has gone out. Nothing bounds that preemption, so no
+/// amount of buffering closes it; comparing against the property's own commit marker does.
 ///
-/// This also decides the cases no local ordering can (see #373, #346). An inbound notification is stamped
-/// with a revision when it is applied here, not when the source produced it, so revisions cannot rank it
-/// against our writes across systems. That question does not arise here: the comparison is between a
-/// change and the property it belongs to, both stamped by the same terminal under the same lock, which
-/// asks only whether this subject has committed something newer.
+/// The marker excludes source-originated commits, which is what makes dropping safe rather than merely
+/// plausible: see the last-non-source-commit revision on the property write state.
 /// </summary>
 internal static class ChangeDeliveryFilter
 {
     /// <summary>
-    /// Decides a survivor on the flush path: whether it still carries the settled state, marking it
-    /// published when it does. One property data lookup for both, because this runs per delivered change
-    /// and the lookup hashes the property name and the key.
+    /// Decides a survivor on the flush path and marks it published, in one property data lookup because
+    /// this runs per delivered change.
     /// </summary>
     public static bool TryAcceptForDelivery(in SubjectPropertyChange change)
     {
@@ -49,9 +43,8 @@ internal static class ChangeDeliveryFilter
     }
 
     /// <summary>
-    /// Whether the property has not committed anything newer than this change. For the paths that decide
-    /// a change one at a time rather than a merged batch, and therefore have nothing to share a lookup
-    /// with.
+    /// Whether the property has not committed anything newer than this change. For paths that decide one
+    /// change at a time and so have no lookup to share.
     /// </summary>
     public static bool IsCurrent(in SubjectPropertyChange change)
     {
@@ -60,19 +53,17 @@ internal static class ChangeDeliveryFilter
     }
 
     /// <summary>
-    /// Records that a connector has written this property out. Deliberately not per source: the mark only
-    /// ever decides whether a transaction confirmation is written back, and a confirmation carries the
-    /// current value, so the worst a foreign processor's mark can cost is one redundant write of the value
-    /// the source is owed anyway. Keeping it source-agnostic is what lets it be a bare flag with no source
-    /// reference to release and nothing to evict.
+    /// Records that a connector has written this property out. Deliberately not per source: it only
+    /// decides whether a transaction confirmation is written back, and a confirmation carries the current
+    /// value, so a foreign processor's mark costs at most one redundant write. That is what lets it be a
+    /// bare flag with no source reference to release.
     /// </summary>
     public static void MarkWrittenOut(in SubjectPropertyChange change)
     {
         var property = change.Property;
 
-        // Read before write: the store is a dictionary write, the read is a lookup that allocates
-        // nothing, and the flag never clears, so after the first delivery of a property every later one
-        // takes the cheap path.
+        // Read before write: the flag never clears, so after a property's first delivery every later
+        // one avoids the dictionary write.
         if (!property.TryGetWriteState(out _, out var published) || !published)
         {
             property.MarkPublished();
@@ -89,17 +80,13 @@ internal static class ChangeDeliveryFilter
 
     private static bool IsSuperseded(in SubjectPropertyChange change, long lastNonSourceCommitRevision)
     {
-        // Revision 0 is a change constructed outside a write terminal, which orders against nothing, so
-        // staleness is unprovable and it is delivered. A redundant write costs one message, while a wrong
-        // drop is permanent, because the transition that would re-enqueue the value is the very change
-        // being dropped. Note this is a guard, not a path the write pipeline takes: every published change
-        // comes from a terminal and carries a revision, including a derived property's recomputation,
-        // which reaches the terminal with a no-op write delegate and takes a revision of its own.
+        // Revision 0 orders against nothing, so staleness is unprovable and the change is delivered: a
+        // redundant write costs one message, a wrong drop is permanent. This is a guard rather than a
+        // path the pipeline takes, since every published change comes from a terminal and carries a
+        // revision, including a derived recomputation.
         //
-        // The comparison is an inequality rather than equality: the property's revision is stamped inside
-        // the write lock and the change is enqueued after it, so a terminal-stamped change can never
-        // exceed it. The inequality can only trigger on a path that stamps a change without advancing the
-        // property, and delivering there keeps the bias above.
+        // Inequality rather than equality, so that a path which stamps a change without advancing the
+        // property delivers instead of dropping.
         return change.Revision != 0 && change.Revision < lastNonSourceCommitRevision;
     }
 }
