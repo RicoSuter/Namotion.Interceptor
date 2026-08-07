@@ -267,6 +267,28 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
             Revision);
 
     /// <summary>
+    /// Copies this change with its old and new values swapped, without re-boxing them, so applying the
+    /// result undoes this change. Values keep the type they were stored with, so typed reads behave as
+    /// they do on this change.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="WithOrigin"/> and <see cref="MergeWithNewer"/>, the result carries no
+    /// <see cref="Revision"/>: it is a write to perform, not a commit that happened. Applying it commits
+    /// with a revision of its own.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public SubjectPropertyChange ToRollbackChange() =>
+        new(Property,
+            Origin,
+            ChangedTimestamp,
+            ReceivedTimestamp,
+            _newValueStorage,
+            _oldValueStorage,
+            _newBoxedHolder,
+            _oldBoxedHolder,
+            revision: 0);
+
+    /// <summary>
     /// Equality based on PropertyReference only for efficient HashSet/Dictionary usage.
     /// </summary>
     public bool Equals(SubjectPropertyChange other) => Property.Equals(other.Property);
