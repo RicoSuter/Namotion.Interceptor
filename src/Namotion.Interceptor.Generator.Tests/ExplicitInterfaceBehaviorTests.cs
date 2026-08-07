@@ -1,4 +1,7 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Generator.Tests;
 
@@ -204,5 +207,105 @@ public class ExplicitInterfaceBehaviorTests
         // Assert
         Assert.Single(properties, p => p.Key == "Name");
         Assert.Equal("value", properties["Name"].GetValue?.Invoke(subject));
+    }
+
+    [Fact]
+    public void WhenDeclaredPropertyIsWrittenAndRead_ThenInterceptorsObserveTheAccessAndPropertyChangedFires()
+    {
+        // Arrange (case Z): "Kind" is the partial property, the one actually routed through the
+        // interceptor chain, as opposed to its same-named explicit interface member below.
+        var readInterceptor = new RecordingReadInterceptor();
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => readInterceptor)
+            .WithService(() => writeInterceptor);
+
+        var subject = new CaseZSubject(context);
+        var firedEvents = new List<string>();
+        subject.PropertyChanged += (_, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        subject.Kind = "tracked";
+        var value = subject.Kind;
+
+        // Assert
+        Assert.Equal("tracked", value);
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "Kind" && Equals(write.Value, "tracked"));
+        Assert.Contains(readInterceptor.Reads, read => read.PropertyName == "Kind" && Equals(read.Value, "tracked"));
+        Assert.Equal(["Kind"], firedEvents);
+    }
+
+    [Fact]
+    public void WhenExplicitlyImplementedPropertyIsRead_ThenItIsNotInterceptedButRegistryReportsTheValue()
+    {
+        // Arrange (case A): ICaseAMale explicitly implements Gender with a fixed value, so there is
+        // no generated wrapper for it, and reading it can never reach the interceptor chain.
+        var readInterceptor = new RecordingReadInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService(() => readInterceptor);
+
+        var john = new CaseAJohn(context);
+
+        // Act
+        var genderThroughInterface = ((ICaseAHuman)john).Gender;
+        var registeredSubject = john.TryGetRegisteredSubject();
+
+        // Assert
+        Assert.Equal(CaseAGender.Male, genderThroughInterface);
+        Assert.Empty(readInterceptor.Reads);
+        Assert.False(CaseAJohn.DefaultProperties["Gender"].IsIntercepted);
+
+        Assert.NotNull(registeredSubject);
+        var genderProperty = registeredSubject.TryGetProperty("Gender");
+        Assert.NotNull(genderProperty);
+        Assert.Equal(CaseAGender.Male, genderProperty.GetValue());
+    }
+
+    [Fact]
+    public void WhenExplicitlyImplementedPropertyIsRegistered_ThenRegistryReportsTheValue()
+    {
+        // Arrange: Alice (defined in ReportedIssueTests.cs) reaches Rank through ISenior's explicit
+        // implementation of IEmployee.Rank, the same shape as CaseAJohn's Gender above.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var alice = new Alice(context);
+
+        // Act
+        var registeredSubject = alice.TryGetRegisteredSubject();
+
+        // Assert
+        Assert.NotNull(registeredSubject);
+        var rankProperty = registeredSubject.TryGetProperty("Rank");
+        Assert.NotNull(rankProperty);
+        Assert.Equal(Rank.Senior, rankProperty.GetValue());
+    }
+
+    private sealed class RecordingReadInterceptor : IReadInterceptor
+    {
+        public List<(string PropertyName, object? Value)> Reads { get; } = [];
+
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
+        {
+            var value = next(ref context);
+            Reads.Add((context.Property.Name, value));
+            return value;
+        }
+    }
+
+    private sealed class RecordingWriteInterceptor : IWriteInterceptor
+    {
+        public List<(string PropertyName, object? Value)> Writes { get; } = [];
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            Writes.Add((context.Property.Name, context.NewValue));
+            next(ref context);
+        }
     }
 }
