@@ -18,12 +18,9 @@ using System.Text.Json.Serialization;
 #pragma warning disable CS8669
 #pragma warning disable CS0649
 #pragma warning disable CS0067
+#pragma warning disable CS9193
 
-namespace TestNamespace
-{
-    partial class OuterClass
-    {
-    public partial class NestedSubject : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class Sensor : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -60,23 +57,20 @@ namespace TestNamespace
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Name",
-                    new SubjectPropertyMetadata(
-                        typeof(NestedSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((NestedSubject)o).Name,
-                        (o, v) => ((NestedSubject)o).Name = (string)v,
+                    ["Name"] = new SubjectPropertyMetadata(
+                        typeof(Sensor).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Sensor)o).Name,
+                        (o, v) => ((Sensor)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 
-        public NestedSubject()
+        public Sensor()
         {
         }
 
-        public NestedSubject(IInterceptorSubjectContext context) : this()
+        public Sensor(IInterceptorSubjectContext context) : this()
         {
             ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }
@@ -87,14 +81,14 @@ namespace TestNamespace
         {
             get
             {
-                return GetPropertyValue<string>(nameof(Name), static (o) => ((NestedSubject)o)._Name);
+                return GetPropertyValue<string>(nameof(Name), static (o) => ((Sensor)o)._Name);
             }
             set
             {
                 var newValue = value;
                 var cancel = false;
                 OnNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) => ((NestedSubject)o)._Name = v))
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) => ((Sensor)o)._Name = v))
                 {
                     OnNameChanged(_Name);
                     RaisePropertyChanged(nameof(Name));
@@ -132,5 +126,3 @@ namespace TestNamespace
             return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
-    }
-}

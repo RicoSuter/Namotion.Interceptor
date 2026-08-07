@@ -18,9 +18,8 @@ using System.Text.Json.Serialization;
 #pragma warning disable CS8669
 #pragma warning disable CS0649
 #pragma warning disable CS0067
+#pragma warning disable CS9193
 
-namespace YourDefaultNamespace
-{
     public partial class BaseClass : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -58,15 +57,12 @@ namespace YourDefaultNamespace
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "VirtualProp",
-                    new SubjectPropertyMetadata(
+                    ["VirtualProp"] = new SubjectPropertyMetadata(
                         typeof(BaseClass).GetProperty(nameof(VirtualProp), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((BaseClass)o).VirtualProp,
                         (o, v) => ((BaseClass)o).VirtualProp = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 
@@ -130,4 +126,3 @@ namespace YourDefaultNamespace
             return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
-}

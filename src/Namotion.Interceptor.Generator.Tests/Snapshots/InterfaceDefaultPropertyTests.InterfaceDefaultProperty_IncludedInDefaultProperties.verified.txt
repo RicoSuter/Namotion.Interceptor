@@ -18,10 +18,9 @@ using System.Text.Json.Serialization;
 #pragma warning disable CS8669
 #pragma warning disable CS0649
 #pragma warning disable CS0067
+#pragma warning disable CS9193
 
-namespace YourDefaultNamespace
-{
-    public partial class Implementation : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class Sensor : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -58,41 +57,26 @@ namespace YourDefaultNamespace
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Value",
-                    new SubjectPropertyMetadata(
-                        typeof(Implementation).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((Implementation)o).Value,
-                        (o, v) => ((Implementation)o).Value = (double)v,
+                    ["Value"] = new SubjectPropertyMetadata(
+                        typeof(Sensor).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Sensor)o).Value,
+                        (o, v) => ((Sensor)o).Value = (double)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "DerivedStatus",
-                    new SubjectPropertyMetadata(
-                        typeof(global::IDerived).GetProperty(nameof(global::IDerived.DerivedStatus), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((global::IDerived)o).DerivedStatus,
+                        isDynamic: false),
+                    ["Status"] = new SubjectPropertyMetadata(
+                        typeof(global::ISensor).GetProperty(nameof(global::ISensor.Status), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((global::ISensor)o).Status,
                         null,
                         isIntercepted: false,
-                        isDynamic: false)
-                },
-                {
-                    "BaseStatus",
-                    new SubjectPropertyMetadata(
-                        typeof(global::IBase).GetProperty(nameof(global::IBase.BaseStatus), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((global::IBase)o).BaseStatus,
-                        null,
-                        isIntercepted: false,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 
-        public Implementation()
+        public Sensor()
         {
         }
 
-        public Implementation(IInterceptorSubjectContext context) : this()
+        public Sensor(IInterceptorSubjectContext context) : this()
         {
             ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }
@@ -103,14 +87,14 @@ namespace YourDefaultNamespace
         {
             get
             {
-                return GetPropertyValue<double>(nameof(Value), static (o) => ((Implementation)o)._Value);
+                return GetPropertyValue<double>(nameof(Value), static (o) => ((Sensor)o)._Value);
             }
             set
             {
                 var newValue = value;
                 var cancel = false;
                 OnValueChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Value), newValue, _Value, static (o, v) => ((Implementation)o)._Value = v))
+                if (!cancel && SetPropertyValue(nameof(Value), newValue, _Value, static (o, v) => ((Sensor)o)._Value = v))
                 {
                     OnValueChanged(_Value);
                     RaisePropertyChanged(nameof(Value));
@@ -148,4 +132,3 @@ namespace YourDefaultNamespace
             return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
-}

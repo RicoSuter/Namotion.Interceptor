@@ -164,6 +164,34 @@ public partial class Sensor : ITemperatureSensor
 
 **Note:** If a class implements a property that an interface also provides as a default, the class implementation takes precedence.
 
+Explicit interface implementations are also supported and are keyed by the member's simple name:
+
+```csharp
+public enum Gender { Male, Female }
+
+public interface IHuman
+{
+    Gender Gender { get; }
+}
+
+public interface IMale : IHuman
+{
+    Gender IHuman.Gender => Gender.Male;
+}
+
+[InterceptorSubject]
+public partial class John : IMale
+{
+    // "Gender" is included in DefaultProperties and reads as Gender.Male
+}
+```
+
+The property is reached by casting to the interface that declares the member (`IHuman` here), so it always resolves through the normal dispatch rules for interface default implementations. A property reached this way is not intercepted, because an explicitly implemented member cannot be routed through the interception pipeline.
+
+An explicit implementation written directly in the subject class is included only when the implemented member is reachable from generated code (at least one accessor accessible through a cast to the declaring interface); if neither accessor is reachable, the member is skipped and reported as NI0006, because writing the explicit implementation in the subject's own file is an opt-in the author can act on. The same accessibility check on an explicit implementation declared inside an interface (not the subject class) is silent when it fails, because there is no remedy to offer the subject's author for code they do not own.
+
+Attributes such as `[Derived]` must be declared on the interface member rather than on the explicit implementation, because the property metadata reflects the interface member. Any attribute on the implementation reports NI0007 (see [Diagnostics](#diagnostics)), including an implementation-local one such as `[SuppressMessage]`, which keeps its usual meaning but is simply not part of the metadata.
+
 ### Method Interception
 
 Methods ending with `WithoutInterceptor` get public wrapper methods:
@@ -184,6 +212,8 @@ public partial class Calculator
 
 The generated method routes through the interception pipeline, enabling cross-cutting concerns.
 
+Parameters are forwarded by value, so `in` and `ref readonly` parameters are supported, while a plain `ref` or an `out` parameter is not and makes the method skipped with NI0006. A by-reference return type is skipped the same way: no wrapper is generated, so a caller that relied on one fails to compile with CS1061 rather than silently losing the ref semantics.
+
 ### Virtual and Override Properties
 
 ```csharp
@@ -197,6 +227,29 @@ public partial class Animal
 public partial class Dog : Animal
 {
     public override partial string Name { get; protected set; }
+}
+```
+
+### New and Sealed Properties
+
+`new` and `sealed` are supported on partial properties. Both modifiers are repeated on the generated half of the property automatically, so the hand-written declaration only needs to carry them once:
+
+```csharp
+public interface IHuman { string Origin { get; } }
+public class BaseSubject : IHuman { public string Origin => "base"; }
+
+[InterceptorSubject]
+public partial class DerivedSubject : BaseSubject
+{
+    // "new" hides BaseSubject.Origin with a tracked partial property and silences the CS0108
+    // warning that accompanies NI0005 (see Diagnostics).
+    public new partial string Origin { get; set; }
+}
+
+[InterceptorSubject]
+public partial class SealedDog : Animal
+{
+    public sealed override partial string Name { get; protected set; }
 }
 ```
 
@@ -258,6 +311,19 @@ public partial class Outer
 }
 ```
 
+The containing type does not need to be a class. It can also be a record, a record struct, a struct, or an interface, as long as every containing type is `partial`:
+
+```csharp
+public partial record Outer
+{
+    [InterceptorSubject]
+    public partial class Nested
+    {
+        public partial string Name { get; set; }
+    }
+}
+```
+
 ### Inheritance
 
 Child classes can also be `[InterceptorSubject]`:
@@ -299,15 +365,51 @@ public partial class Person
 
 Both properties are included in the generated code.
 
+### Namespaces and Accessibility
+
+Subjects can be declared inside a namespace, inside a file-scoped namespace, or directly in the global namespace. The subject class does not need to be public either; the generator honors whatever accessibility it declares:
+
+```csharp
+[InterceptorSubject]
+internal partial class InternalSubject
+{
+    public partial string Name { get; set; }
+}
+```
+
 ## Limitations
 
 | Limitation | Workaround |
 |------------|------------|
 | Only partial properties are intercepted | Mark properties with `partial` keyword |
-| Explicit interface implementation not supported | Use implicit implementation |
+| Records cannot be subjects | Use a class. See NI0003 in [Diagnostics](#diagnostics) |
+| Structs and interfaces cannot be subjects | Use a class. The compiler itself rejects a plain struct or interface as CS0592, because `InterceptorSubjectAttribute` only targets classes. A record struct is reported by NI0003 instead |
+| Generic subjects, or subjects nested in a generic containing type, are not supported | Use non-generic types. See NI0009 in [Diagnostics](#diagnostics) |
+| File-local subjects are not supported | Remove the `file` modifier. See NI0010 in [Diagnostics](#diagnostics) |
+| Attributes on an explicit interface implementation are not part of the property metadata | Declare an attribute the library reads on the interface member. See NI0007 in [Diagnostics](#diagnostics) |
 | Abstract properties not supported | Use `virtual` instead |
 | Init-only properties cannot be set after construction | Design constraint of C# |
 | Partial properties cannot have field initializers | Initialize in constructor |
+| A `WithoutInterceptor` method whose stripped name collides with an existing method fails with CS0111 | Rename one of the two. No `NI` diagnostic is reported for this |
+
+## Diagnostics
+
+The generator reports the following diagnostics, all in the `Namotion.Interceptor` category:
+
+| ID | Severity | Cause | Fix |
+|----|----------|-------|-----|
+| NI0001 | Error | The subject class is not declared `partial` | Add the `partial` modifier |
+| NI0002 | Error | A containing type of the subject is not declared `partial` | Add `partial` to every containing type |
+| NI0003 | Error | `[InterceptorSubject]` is placed on a record or a record struct. A plain struct or interface never reaches this diagnostic; the compiler already rejects those with CS0592, because the attribute only targets classes | Use a class |
+| NI0004 | Error | The generator threw an unhandled exception while processing the subject | Report the issue. The full stack trace is embedded in the generated source, which only reaches disk if the project sets `EmitCompilerGeneratedFiles` |
+| NI0005 | Warning | A derived subject re-declares a property whose interface implementation is already provided by a base class, so reading through the subject and reading through the interface return different values | Add `new` to the property declaration, which acknowledges the shadowing and silences the accompanying CS0108; rename the property; or suppress the warning if the divergence is intended |
+| NI0006 | Warning | A member the author plausibly offered as a subject property could not be supported: a `*WithoutInterceptor` method with no name before the suffix, that is static or generic, takes a plain `ref` or an `out` parameter, has a by-reference return type, or is itself an explicit interface implementation; or an explicit interface implementation **declared in the subject class** whose implemented member has no accessor reachable from generated code. A static member, an indexer (class-declared or an interface default), any other interface default member that is unreachable from generated code, and an explicit implementation **declared in an interface** are never candidates for a subject property and stay silent | Remove or rename the `*WithoutInterceptor` method, adjust its signature, widen the implemented member's accessibility, or drop the explicit implementation |
+| NI0007 | Warning | Any attribute, not only `[Derived]`, is placed on an explicit interface implementation. The emitted metadata reflects the interface member, so the attribute is not part of the subject's property metadata | Move an attribute the library reads, such as `[Derived]` or a validation attribute, to the interface member. An implementation-local attribute such as `[SuppressMessage]` or `[ExcludeFromCodeCoverage]` keeps its usual meaning where it is and can be suppressed |
+| NI0008 | Warning | More than one member provides the same simple property name. A class-declared property always takes the name; between colliding interface members, the first one the generator reaches takes it. One warning is reported per member that ends up unreachable, naming both the member that took the name and the member that was dropped | Rename one of the colliding members, or suppress the warning to accept the resolution rule |
+| NI0009 | Error | The subject itself is generic, or the subject is nested inside a generic containing type | Remove the type parameters from the subject or its containing type |
+| NI0010 | Error | The subject is declared `file`-local | Remove the `file` modifier |
+
+Suppress a rule at the point of use with `#pragma warning disable NI0005`, or project-wide through `<NoWarn>` in the project file. This is a real fix for the four warning rules (NI0005 through NI0008): generation still succeeds, so suppressing only silences advice about a shape the author has chosen to accept. It does not help for the six rules that stop generation (NI0001 through NI0004, NI0009, NI0010): suppressing one of those silences the message, but the class still never becomes an interceptor subject, leaving an inert type with none of the generated members and no further compiler feedback pointing at why. Fix the underlying shape instead.
 
 ## Requirements
 
@@ -343,9 +445,10 @@ The generator is optimized for performance:
 
 ### Compilation errors in generated code
 
-1. Ensure you're using C# 13 or later
-2. Check that property types are accessible from the generated code
-3. Verify namespace imports are correct
+1. Check the build output for an `NI####` diagnostic first. Where one is reported it names the cause directly; see [Diagnostics](#diagnostics). Not every generator problem has a diagnostic, so also check the [Limitations](#limitations) table for the compiler error you are seeing
+2. Ensure you're using C# 13 or later
+3. Check that property types are accessible from the generated code
+4. Verify namespace imports are correct
 
 ### Changes not being tracked
 
