@@ -94,7 +94,7 @@ public class HostedServiceHandlerRaceTests
 
         // Act
         var stopping = host.StopAsync();
-        await drainStopEntered.Task;
+        await drainStopEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         // The subject is still in the graph, so the explicit detach still resolves the handler.
         var detached = child.DetachHostedServiceAsync(attachment, CancellationToken.None);
@@ -137,7 +137,7 @@ public class HostedServiceHandlerRaceTests
 
         // Act
         var stopping = host.StopAsync();
-        await drainEntered.Task;
+        await drainEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         var created = 0;
         var attachment = child.AttachHostedService(() =>
