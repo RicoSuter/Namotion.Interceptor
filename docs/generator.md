@@ -365,6 +365,8 @@ internal partial class InternalSubject
 | Abstract properties not supported | Use `virtual` instead |
 | Init-only properties cannot be set after construction | Design constraint of C# |
 | Partial properties cannot have field initializers | Initialize in constructor |
+| A `WithoutInterceptor` method whose stripped name collides with an existing method fails with CS0111 | Rename one of the two. No `NI` diagnostic is reported for this |
+| Repeating the `new` modifier on a partial property fails with CS8800 | Remove `new` from the property declaration. No `NI` diagnostic is reported for this |
 
 ## Diagnostics
 
@@ -419,7 +421,7 @@ The generator is optimized for performance:
 
 ### Compilation errors in generated code
 
-1. Check the build output for an `NI####` diagnostic first. It names the cause directly; see [Diagnostics](#diagnostics)
+1. Check the build output for an `NI####` diagnostic first. Where one is reported it names the cause directly; see [Diagnostics](#diagnostics). Not every generator problem has a diagnostic, so also check the [Limitations](#limitations) table for the compiler error you are seeing
 2. Ensure you're using C# 13 or later
 3. Check that property types are accessible from the generated code
 4. Verify namespace imports are correct
