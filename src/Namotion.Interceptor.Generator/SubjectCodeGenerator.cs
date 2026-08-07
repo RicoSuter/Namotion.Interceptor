@@ -26,7 +26,7 @@ internal static class SubjectCodeGenerator
         EmitHelperMethods(builder);
         EmitClassClosing(builder);
         EmitContainingTypeClosing(builder, metadata.ContainingTypes);
-        EmitNamespaceClosing(builder);
+        EmitNamespaceClosing(builder, metadata.NamespaceName);
 
         return builder.ToString();
     }
@@ -37,9 +37,13 @@ internal static class SubjectCodeGenerator
     public static string GetFileName(SubjectMetadata metadata)
     {
         var containingTypesPath = metadata.ContainingTypes.Length > 0
-            ? string.Join(".", metadata.ContainingTypes) + "."
+            ? string.Join(".", metadata.ContainingTypes.Select(t => t.Name)) + "."
             : "";
-        return $"{metadata.NamespaceName}.{containingTypesPath}{metadata.ClassName}.g.cs";
+        var namespacePrefix = metadata.NamespaceName is null
+            ? ""
+            : metadata.NamespaceName + ".";
+
+        return $"{namespacePrefix}{containingTypesPath}{metadata.ClassName}.g.cs";
     }
 
     private static void EmitFileHeader(StringBuilder builder)
@@ -65,32 +69,43 @@ internal static class SubjectCodeGenerator
             #pragma warning disable CS8669
             #pragma warning disable CS0649
             #pragma warning disable CS0067
+            #pragma warning disable CS9193
 
 
             """);
     }
 
-    private static void EmitNamespaceOpening(StringBuilder builder, string namespaceName)
+    private static void EmitNamespaceOpening(StringBuilder builder, string? namespaceName)
     {
+        if (namespaceName is null)
+        {
+            return;
+        }
+
         builder.AppendLine($"namespace {namespaceName}");
         builder.AppendLine("{");
     }
 
-    private static void EmitNamespaceClosing(StringBuilder builder)
+    private static void EmitNamespaceClosing(StringBuilder builder, string? namespaceName)
     {
+        if (namespaceName is null)
+        {
+            return;
+        }
+
         builder.AppendLine("}");
     }
 
-    private static void EmitContainingTypeOpening(StringBuilder builder, string[] containingTypes)
+    private static void EmitContainingTypeOpening(StringBuilder builder, ContainingType[] containingTypes)
     {
-        foreach (var type in containingTypes)
+        foreach (var containingType in containingTypes)
         {
-            builder.AppendLine($"    partial class {type}");
+            builder.AppendLine($"    partial {containingType.Keyword} {containingType.Name}");
             builder.AppendLine("    {");
         }
     }
 
-    private static void EmitContainingTypeClosing(StringBuilder builder, string[] containingTypes)
+    private static void EmitContainingTypeClosing(StringBuilder builder, ContainingType[] containingTypes)
     {
         foreach (var _ in containingTypes)
         {
@@ -104,7 +119,7 @@ internal static class SubjectCodeGenerator
             ? "IInterceptorSubject"
             : "IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged";
 
-        builder.AppendLine($"    public partial class {metadata.ClassName} : {interfaces}");
+        builder.AppendLine($"    {metadata.AccessModifier} partial class {metadata.ClassName} : {interfaces}");
         builder.AppendLine("    {");
     }
 
@@ -172,27 +187,35 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("            new Dictionary<string, SubjectPropertyMetadata>");
         builder.AppendLine("            {");
 
+        // Each entry below is emitted as an indexer assignment (["Name"] = ...) rather than a
+        // collection-initializer Add(...), so a duplicate key silently overwrites the earlier entry
+        // instead of throwing at type-init. The extractor already dedups property names and reports
+        // NI0008 on a genuine collision, so this should never trigger today, but the trade-off is
+        // worth keeping in mind: a future extractor bug that lets a duplicate through would silently
+        // drop a property here rather than fail loudly.
         foreach (var property in metadata.Properties)
         {
-            if (property.IsFromInterface)
+            // An explicitly implemented member is unreachable through the class, so it is emitted
+            // through the interface exactly like an interface default property.
+            var accessorInterfaceTypeName = property.IsFromInterface
+                ? property.InterfaceTypeName
+                : property.ExplicitInterfaceTypeName;
+
+            if (accessorInterfaceTypeName is not null)
             {
-                // Interface default properties: cast to interface to invoke default implementation
                 var getterLambda = property.HasGetter
-                    ? $"(o) => (({property.InterfaceTypeName})o).{property.Name}"
+                    ? $"(o) => (({accessorInterfaceTypeName})o).{property.Name}"
                     : "null";
                 var setterLambda = property.HasSetter
-                    ? $"(o, v) => (({property.InterfaceTypeName})o).{property.Name} = ({property.FullTypeName})v"
+                    ? $"(o, v) => (({accessorInterfaceTypeName})o).{property.Name} = ({property.FullTypeName})v"
                     : "null";
 
-                builder.AppendLine("                {");
-                builder.AppendLine($"                    \"{property.Name}\",");
-                builder.AppendLine("                    new SubjectPropertyMetadata(");
-                builder.AppendLine($"                        typeof({property.InterfaceTypeName}).GetProperty(nameof({property.InterfaceTypeName}.{property.Name}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,");
+                builder.AppendLine($"                    [\"{property.Name}\"] = new SubjectPropertyMetadata(");
+                builder.AppendLine($"                        typeof({accessorInterfaceTypeName}).GetProperty(nameof({accessorInterfaceTypeName}.{property.Name}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,");
                 builder.AppendLine($"                        {getterLambda},");
                 builder.AppendLine($"                        {setterLambda},");
                 builder.AppendLine("                        isIntercepted: false,");
-                builder.AppendLine("                        isDynamic: false)");
-                builder.AppendLine("                },");
+                builder.AppendLine("                        isDynamic: false),");
             }
             else
             {
@@ -204,15 +227,12 @@ internal static class SubjectCodeGenerator
                     ? $"(o, v) => (({metadata.ClassName})o).{property.Name} = ({property.FullTypeName})v"
                     : "null";
 
-                builder.AppendLine("                {");
-                builder.AppendLine($"                    \"{property.Name}\",");
-                builder.AppendLine("                    new SubjectPropertyMetadata(");
+                builder.AppendLine($"                    [\"{property.Name}\"] = new SubjectPropertyMetadata(");
                 builder.AppendLine($"                        typeof({metadata.ClassName}).GetProperty(nameof({property.Name}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,");
                 builder.AppendLine($"                        {getterLambda},");
                 builder.AppendLine($"                        {setterLambda},");
                 builder.AppendLine($"                        isIntercepted: {(property.IsPartial ? "true" : "false")},");
-                builder.AppendLine("                        isDynamic: false)");
-                builder.AppendLine("                },");
+                builder.AppendLine("                        isDynamic: false),");
             }
         }
 
@@ -263,15 +283,28 @@ internal static class SubjectCodeGenerator
         builder.AppendLine($"        private {property.FullTypeName} _{property.Name};");
         builder.AppendLine();
 
-        // Build modifiers
+        // Every modifier the declaring half carries has to be repeated here, or the two halves of
+        // the partial property disagree and the compiler reports CS8800. 'new' matters beyond
+        // symmetry: it is the only way to silence the CS0108 that accompanies NI0005.
         var additionalModifiers = "";
+        if (property.IsNew)
+        {
+            additionalModifiers += "new ";
+        }
+
         if (property.IsVirtual)
         {
-            additionalModifiers = "virtual ";
+            additionalModifiers += "virtual ";
         }
-        else if (property.IsOverride)
+
+        if (property.IsSealed)
         {
-            additionalModifiers = "override ";
+            additionalModifiers += "sealed ";
+        }
+
+        if (property.IsOverride)
+        {
+            additionalModifiers += "override ";
         }
 
         var requiredModifier = property.IsRequired ? "required " : "";
