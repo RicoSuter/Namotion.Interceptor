@@ -18,10 +18,9 @@ using System.Text.Json.Serialization;
 #pragma warning disable CS8669
 #pragma warning disable CS0649
 #pragma warning disable CS0067
+#pragma warning disable CS9193
 
-namespace YourDefaultNamespace
-{
-    public partial class WeatherStation : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class TemperatureSensor : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -58,103 +57,54 @@ namespace YourDefaultNamespace
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Temperature",
-                    new SubjectPropertyMetadata(
-                        typeof(WeatherStation).GetProperty(nameof(Temperature), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((WeatherStation)o).Temperature,
-                        (o, v) => ((WeatherStation)o).Temperature = (double)v,
+                    ["Celsius"] = new SubjectPropertyMetadata(
+                        typeof(TemperatureSensor).GetProperty(nameof(Celsius), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((TemperatureSensor)o).Celsius,
+                        (o, v) => ((TemperatureSensor)o).Celsius = (double)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Humidity",
-                    new SubjectPropertyMetadata(
-                        typeof(WeatherStation).GetProperty(nameof(Humidity), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((WeatherStation)o).Humidity,
-                        (o, v) => ((WeatherStation)o).Humidity = (double)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "IsHot",
-                    new SubjectPropertyMetadata(
-                        typeof(global::IHasTemperature).GetProperty(nameof(global::IHasTemperature.IsHot), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((global::IHasTemperature)o).IsHot,
+                        isDynamic: false),
+                    ["Fahrenheit"] = new SubjectPropertyMetadata(
+                        typeof(global::ITemperatureSensor).GetProperty(nameof(global::ITemperatureSensor.Fahrenheit), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((global::ITemperatureSensor)o).Fahrenheit,
                         null,
                         isIntercepted: false,
-                        isDynamic: false)
-                },
-                {
-                    "IsHumid",
-                    new SubjectPropertyMetadata(
-                        typeof(global::IHasHumidity).GetProperty(nameof(global::IHasHumidity.IsHumid), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((global::IHasHumidity)o).IsHumid,
-                        null,
-                        isIntercepted: false,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 
-        public WeatherStation()
+        public TemperatureSensor()
         {
         }
 
-        public WeatherStation(IInterceptorSubjectContext context) : this()
+        public TemperatureSensor(IInterceptorSubjectContext context) : this()
         {
             ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }
 
-        private double _Temperature;
+        private double _Celsius;
 
-        public partial double Temperature
+        public partial double Celsius
         {
             get
             {
-                return GetPropertyValue<double>(nameof(Temperature), static (o) => ((WeatherStation)o)._Temperature);
+                return GetPropertyValue<double>(nameof(Celsius), static (o) => ((TemperatureSensor)o)._Celsius);
             }
             set
             {
                 var newValue = value;
                 var cancel = false;
-                OnTemperatureChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Temperature), newValue, _Temperature, static (o, v) => ((WeatherStation)o)._Temperature = v))
+                OnCelsiusChanging(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof(Celsius), newValue, _Celsius, static (o, v) => ((TemperatureSensor)o)._Celsius = v))
                 {
-                    OnTemperatureChanged(_Temperature);
-                    RaisePropertyChanged(nameof(Temperature));
+                    OnCelsiusChanged(_Celsius);
+                    RaisePropertyChanged(nameof(Celsius));
                 }
             }
         }
 
-        partial void OnTemperatureChanging(ref double newValue, ref bool cancel);
+        partial void OnCelsiusChanging(ref double newValue, ref bool cancel);
 
-        partial void OnTemperatureChanged(double newValue);
-
-        private double _Humidity;
-
-        public partial double Humidity
-        {
-            get
-            {
-                return GetPropertyValue<double>(nameof(Humidity), static (o) => ((WeatherStation)o)._Humidity);
-            }
-            set
-            {
-                var newValue = value;
-                var cancel = false;
-                OnHumidityChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Humidity), newValue, _Humidity, static (o, v) => ((WeatherStation)o)._Humidity = v))
-                {
-                    OnHumidityChanged(_Humidity);
-                    RaisePropertyChanged(nameof(Humidity));
-                }
-            }
-        }
-
-        partial void OnHumidityChanging(ref double newValue, ref bool cancel);
-
-        partial void OnHumidityChanged(double newValue);
+        partial void OnCelsiusChanged(double newValue);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
@@ -182,4 +132,3 @@ namespace YourDefaultNamespace
             return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
-}

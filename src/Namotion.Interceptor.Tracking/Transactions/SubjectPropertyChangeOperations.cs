@@ -148,22 +148,6 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Creates the inverse of a change (old and new values swapped) for undoing an applied change.
-    /// Carries no revision on purpose: this describes a write to perform, not a commit that happened.
-    /// Applying it locally goes through the terminal and takes a fresh, higher revision of its own,
-    /// which is what consumers observe. Copying the original's revision instead would give two changes
-    /// on one property the same revision, the tie the flush merging relies on being impossible.
-    /// </summary>
-    internal static SubjectPropertyChange ToRollbackChange(this SubjectPropertyChange change) =>
-        SubjectPropertyChange.Create(
-            change.Property,
-            origin: change.Origin,
-            changedTimestamp: change.ChangedTimestamp,
-            receivedTimestamp: change.ReceivedTimestamp,
-            oldValue: change.GetNewValue<object?>(),
-            newValue: change.GetOldValue<object?>());
-
-    /// <summary>
     /// Returns the subset of <paramref name="written"/> whose property also appears in
     /// <paramref name="failed"/> (matched by <see cref="SubjectPropertyChange.Property"/>).
     /// </summary>

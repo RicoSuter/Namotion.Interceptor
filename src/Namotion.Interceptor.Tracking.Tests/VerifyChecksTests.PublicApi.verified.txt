@@ -1,5 +1,4 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
@@ -76,6 +75,7 @@ namespace Namotion.Interceptor.Tracking.Change
         public TValue GetNewValue<TValue>() { }
         public TValue GetOldValue<TValue>() { }
         public Namotion.Interceptor.Tracking.Change.SubjectPropertyChange MergeWithNewer(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange newerChange) { }
+        public Namotion.Interceptor.Tracking.Change.SubjectPropertyChange ToRollbackChange() { }
         public bool TryGetNewValue<TValue>(out TValue value) { }
         public bool TryGetOldValue<TValue>(out TValue value) { }
         public Namotion.Interceptor.Tracking.Change.SubjectPropertyChange WithOrigin(Namotion.Interceptor.ChangeOrigin origin) { }

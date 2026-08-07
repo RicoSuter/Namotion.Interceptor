@@ -18,14 +18,9 @@ using System.Text.Json.Serialization;
 #pragma warning disable CS8669
 #pragma warning disable CS0649
 #pragma warning disable CS0067
+#pragma warning disable CS9193
 
-namespace TestNamespace
-{
-    partial class Level1
-    {
-    partial class Level2
-    {
-    public partial class DeepNestedSubject : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class SampleSubject : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -62,51 +57,48 @@ namespace TestNamespace
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
-                {
-                    "Value",
-                    new SubjectPropertyMetadata(
-                        typeof(DeepNestedSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((DeepNestedSubject)o).Value,
-                        (o, v) => ((DeepNestedSubject)o).Value = (int)v,
+                    ["Name"] = new SubjectPropertyMetadata(
+                        typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((SampleSubject)o).Name,
+                        (o, v) => ((SampleSubject)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
+                        isDynamic: false),
             }
             .ToFrozenDictionary();
 
-        public DeepNestedSubject()
+        public SampleSubject()
         {
         }
 
-        public DeepNestedSubject(IInterceptorSubjectContext context) : this()
+        public SampleSubject(IInterceptorSubjectContext context) : this()
         {
             ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }
 
-        private int _Value;
+        private string _Name;
 
-        public partial int Value
+        private protected partial string Name
         {
             get
             {
-                return GetPropertyValue<int>(nameof(Value), static (o) => ((DeepNestedSubject)o)._Value);
+                return GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
             }
             set
             {
                 var newValue = value;
                 var cancel = false;
-                OnValueChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Value), newValue, _Value, static (o, v) => ((DeepNestedSubject)o)._Value = v))
+                OnNameChanging(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) => ((SampleSubject)o)._Name = v))
                 {
-                    OnValueChanged(_Value);
-                    RaisePropertyChanged(nameof(Value));
+                    OnNameChanged(_Name);
+                    RaisePropertyChanged(nameof(Name));
                 }
             }
         }
 
-        partial void OnValueChanging(ref int newValue, ref bool cancel);
+        partial void OnNameChanging(ref string newValue, ref bool cancel);
 
-        partial void OnValueChanged(int newValue);
+        partial void OnNameChanged(string newValue);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
@@ -134,6 +126,3 @@ namespace TestNamespace
             return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
-    }
-    }
-}
