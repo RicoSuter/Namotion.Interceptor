@@ -145,7 +145,8 @@ public class ChangeDeliveryFilterTests
             },
             bufferTime: TimeSpan.FromMilliseconds(8),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Both commit before processing starts, so the loop meets the local write with the model
         // already holding source B's value.
@@ -185,18 +186,18 @@ public class ChangeDeliveryFilterTests
             .AddProperty("Dynamic", typeof(int), _ => stored, (_, value) => stored = value);
 
         property.SetValue(1);
-        Assert.True(property.Reference.TryGetWriteState(out var earlierRevision, out _));
+        Assert.True(property.Reference.TryGetWriteState(out var earlierRevision, out _, out _));
 
         property.SetValue(2);
-        Assert.True(property.Reference.TryGetWriteState(out var settledRevision, out _));
+        Assert.True(property.Reference.TryGetWriteState(out var settledRevision, out _, out _));
         Assert.True(settledRevision > earlierRevision);
 
         var earlier = CreateChange(property.Reference, 0, 1, earlierRevision);
         var settled = CreateChange(property.Reference, 1, 2, settledRevision);
 
         // Act & Assert
-        Assert.False(ChangeDeliveryFilter.IsCurrent(in earlier));
-        Assert.True(ChangeDeliveryFilter.IsCurrent(in settled));
+        Assert.False(ChangeDeliveryFilter.IsCurrent(in earlier, ChangeSupersessionRule.SourceValuesMayBeStale));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in settled, ChangeSupersessionRule.SourceValuesMayBeStale));
     }
 
     [Fact]
@@ -206,17 +207,17 @@ public class ChangeDeliveryFilterTests
         var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = 1 };
         var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
 
-        Assert.True(property.TryGetWriteState(out var earlierRevision, out _));
+        Assert.True(property.TryGetWriteState(out var earlierRevision, out _, out _));
 
         subject.First = 2;
-        Assert.True(property.TryGetWriteState(out var settledRevision, out _));
+        Assert.True(property.TryGetWriteState(out var settledRevision, out _, out _));
 
         var earlier = CreateChange(property, 0, 1, earlierRevision);
         var settled = CreateChange(property, 1, 2, settledRevision);
 
         // Act & Assert
-        Assert.False(ChangeDeliveryFilter.IsCurrent(in earlier));
-        Assert.True(ChangeDeliveryFilter.IsCurrent(in settled));
+        Assert.False(ChangeDeliveryFilter.IsCurrent(in earlier, ChangeSupersessionRule.SourceValuesMayBeStale));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in settled, ChangeSupersessionRule.SourceValuesMayBeStale));
     }
 
     [Fact]
@@ -232,7 +233,7 @@ public class ChangeDeliveryFilterTests
         var change = CreateChange(property, 0, 1, revision: 0);
 
         // Act & Assert
-        Assert.True(ChangeDeliveryFilter.IsCurrent(in change));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in change, ChangeSupersessionRule.SourceValuesMayBeStale));
     }
 
     [Fact]
@@ -242,12 +243,12 @@ public class ChangeDeliveryFilterTests
         var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create());
         var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
 
-        Assert.False(property.TryGetWriteState(out _, out _));
+        Assert.False(property.TryGetWriteState(out _, out _, out _));
 
         var change = CreateChange(property, 0, 1, revision: 7);
 
         // Act & Assert
-        Assert.True(ChangeDeliveryFilter.IsCurrent(in change));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in change, ChangeSupersessionRule.SourceValuesMayBeStale));
     }
 
     private static SubjectPropertyChange CreateChange(
@@ -255,6 +256,42 @@ public class ChangeDeliveryFilterTests
     {
         return SubjectPropertyChange.Create(
             property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, oldValue, newValue, revision);
+    }
+
+    /// <summary>
+    /// The two rules differ on exactly one input: a commit applied from a source. Pinned here on one
+    /// property so that neither can be changed without the other's case failing.
+    /// </summary>
+    [Fact]
+    public void WhenASourceCommitFollowsALocalOne_ThenOnlyTheServerRuleTreatsItAsSuperseding()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        var source = new object();
+
+        subject.FirstName = "local";
+        Assert.True(property.TryGetWriteState(out var localRevision, out _, out _));
+
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(source), "from source"))
+        {
+            subject.FirstName = "from source";
+        }
+
+        Assert.True(property.TryGetWriteState(out var nonSourceMarker, out var anyMarker, out _));
+        Assert.Equal(localRevision, nonSourceMarker);
+        Assert.True(anyMarker > nonSourceMarker, "the applied commit must advance only the any-commit marker");
+
+        var local = CreateChange(property, 0, 1, localRevision);
+
+        // Act & Assert: identical change, opposite outcomes.
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in local, ChangeSupersessionRule.SourceValuesMayBeStale));
+        Assert.False(ChangeDeliveryFilter.IsCurrent(in local, ChangeSupersessionRule.SourceValuesAreSettled));
     }
 
     private static ChangeQueueProcessor CreateProcessor(
@@ -277,7 +314,8 @@ public class ChangeDeliveryFilterTests
             },
             bufferTime: TimeSpan.FromMilliseconds(8),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
     }
 
     private static async Task StopAsync(CancellationTokenSource cancellation, Task processing)

@@ -92,6 +92,8 @@ In both, "source wins" resolves an ambiguity by discarding a write that already 
 
 **What keeps the two ends in sync** is not the conflict rule but two properties of the delivery path: the newest local commit is never dropped, so the source always receives the model's settled value; and the source's notifications carry its own value back, so the model converges to whatever the source actually holds. A source that neither reports values back nor answers reads is outside that guarantee, which is what the last limitation below covers.
 
+**Servers are the opposite case.** A client's write to a server is not a value produced before it saw ours, it is the newer write, so the ordering ambiguity above does not exist and it does win over an older local commit. Delivering the older one instead would leave every client on a value the model has moved past. The three servers select this with `ChangeSupersessionRule.SourceValuesAreSettled`, whose documentation gives the precondition to check before adding a fourth.
+
 ### Write Consistency Guarantees
 
 Property writes to sources follow a **local-first** model: the local property is updated immediately, and the change is sent to the source asynchronously. This means the local model and the source can be temporarily out of sync.
@@ -107,6 +109,8 @@ Property writes to sources follow a **local-first** model: the local property is
 | Queued write superseded by a later local write | Later write kept | Receives only the later write | In sync |
 
 In all cases the local model and the source converge. A write that has already committed locally is never discarded, so in the reconnect rows the source ends up with the local write rather than the value it held during the outage. A write is only dropped when a *later local* write supersedes it, and that later write is delivered in its place. Source-wins still applies wherever no local write is pending: an inbound value is accepted and produces no outbound write.
+
+The table describes a connector talking to a remote source. A server also drops a write superseded by a client's write, since that write is the newer one; see [Why the source does not always win](#why-the-source-does-not-always-win). Convergence is unaffected, because the superseding value is the one the clients already have.
 
 #### Confirmed writes with transactions
 

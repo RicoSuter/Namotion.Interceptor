@@ -72,12 +72,12 @@ internal sealed class ChangeMerger : IDisposable
     /// <returns>The merged changes. The memory points into the pooled buffer and stays valid until
     /// the next <see cref="Merge"/>, <see cref="Reset"/> or <see cref="Dispose"/> call, so the caller
     /// can await a write handler on it before resetting. Empty once <see cref="Dispose"/> has run.</returns>
-    /// <param name="suppressSupersededChanges">When set, drops survivors the model has already moved
-    /// past, which is what makes delivery converge across flushes rather than only within one. Off by
-    /// default so the batch collapse can be exercised on its own.</param>
+    /// <param name="supersessionRule">When set, drops survivors the model has already moved past under
+    /// that rule, which is what makes delivery converge across flushes rather than only within one. Null
+    /// by default so the batch collapse can be exercised on its own.</param>
     public ReadOnlyMemory<SubjectPropertyChange> Merge(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        bool suppressSupersededChanges = false)
+        ChangeSupersessionRule? supersessionRule = null)
     {
         if (_buffer is null)
         {
@@ -185,9 +185,9 @@ internal sealed class ChangeMerger : IDisposable
             Array.Reverse(_buffer, 0, _count);
         }
 
-        if (suppressSupersededChanges && _count > 0)
+        if (supersessionRule is { } rule && _count > 0)
         {
-            SuppressSupersededChanges();
+            SuppressSupersededChanges(rule);
         }
 
         return new ReadOnlyMemory<SubjectPropertyChange>(_buffer, 0, _count);
@@ -196,12 +196,12 @@ internal sealed class ChangeMerger : IDisposable
     /// <summary>
     /// Drops survivors the model has already moved past, compacting what remains.
     /// </summary>
-    private void SuppressSupersededChanges()
+    private void SuppressSupersededChanges(ChangeSupersessionRule rule)
     {
         var kept = 0;
         for (var i = 0; i < _count; i++)
         {
-            if (!ChangeDeliveryFilter.TryAcceptForDelivery(in _buffer[i]))
+            if (!ChangeDeliveryFilter.TryAcceptForDelivery(in _buffer[i], rule))
             {
                 continue;
             }

@@ -32,7 +32,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Act - enqueue multiple changes to the same property and trigger flush
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -75,7 +76,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Act - enqueue changes to different properties
         var firstNameProperty = new PropertyReference(subject, nameof(Person.FirstName));
@@ -118,7 +120,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Act - enqueue in order: A, B, A (last occurrence of A is after B)
         var firstNameProperty = new PropertyReference(subject, nameof(Person.FirstName));
@@ -165,7 +168,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Act - trigger flush without enqueuing anything
         await TriggerFlushAsync(processor);
@@ -191,7 +195,8 @@ public class ChangeQueueProcessorTests
             writeHandler: (_, _) => ValueTask.CompletedTask,
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Act & Assert - should not throw
         processor.Dispose();
@@ -223,7 +228,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Act - enqueue and start first flush
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -269,7 +275,8 @@ public class ChangeQueueProcessorTests
             writeHandler: (_, _) => ValueTask.CompletedTask,
             bufferTime: TimeSpan.FromMinutes(10),
             maxQueueDepth: 2,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -317,7 +324,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.FromMilliseconds(20),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -364,7 +372,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Act
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -436,7 +445,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.FromMilliseconds(5),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -467,6 +477,160 @@ public class ChangeQueueProcessorTests
         // considered rather than merely still in flight, and it was written.
         await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("SecondFence"));
         Assert.Contains("Straggler", written);
+
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    /// <summary>
+    /// The mirror of the echo case, for a source that hosts the state it serves. A client writing to an
+    /// OPC UA server lands in the server's own node tree before the subject ever sees it, so the value is
+    /// already settled there when we apply it. An older local commit arriving late must not be pushed over
+    /// it: the apply is skipped as an echo, so nothing would then carry the client's value back, leaving
+    /// the node on our older value and the subject on the client's, permanently.
+    /// </summary>
+    [Fact]
+    public async Task WhenTheSourceAlreadyHoldsWhatItPushed_ThenAnOlderLocalWriteIsNotWrittenBack()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var source = new object();
+        var written = new ConcurrentQueue<string?>();
+
+        var firstName = new PropertyReference(subject, nameof(Person.FirstName));
+        var lastName = new PropertyReference(subject, nameof(Person.LastName));
+
+        long inboundRevision = 0;
+        using var observed = firstName.Subscribe((in SubjectPropertyChange change) =>
+        {
+            if (change.GetNewValue<string>() == "FromClient")
+            {
+                inboundRevision = change.Revision;
+            }
+        });
+
+        using var processor = new ChangeQueueProcessor(
+            source: source,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.GetNewValue<string>());
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMilliseconds(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesAreSettled);
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Leaves a usable revision below the inbound one, which 1 would not.
+        subject.LastName = "Warmup";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Warmup"));
+
+        // Act: a client writes into the server's own store, and we apply what it wrote.
+        using (PendingOrigin.Set(firstName, ChangeOrigin.FromSource(source), "FromClient"))
+        {
+            subject.FirstName = "FromClient";
+        }
+
+        // The dequeue loop is FIFO, so seeing this proves the apply ahead of it was already handled.
+        subject.LastName = "Fence";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Fence"));
+        Assert.True(inboundRevision > 1, "the inbound apply needs a revision with room below it");
+
+        // A commit that predates the client's write, arriving late because enqueuing happens after the
+        // commit and outside the subject lock.
+        EnqueueChange(processor, firstName, "Old", "Straggler", inboundRevision - 1);
+        EnqueueChange(processor, lastName, "Fence", "SecondFence", long.MaxValue);
+        subject.LastName = "SecondFence";
+
+        // Assert: the second fence shares the straggler's flush, so its arrival means the straggler was
+        // decided rather than merely still in flight.
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("SecondFence"));
+        Assert.DoesNotContain("Straggler", written);
+
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    /// <summary>
+    /// A zero buffer time has no batch to merge, so the flush path's supersession check never runs there.
+    /// A server must still not serve a value it has moved past, or the whole rule is inoperative for any
+    /// connector configured that way.
+    /// </summary>
+    [Fact]
+    public async Task WhenAServerHasNoBufferTime_ThenASupersededChangeIsStillNotWritten()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var source = new object();
+        var written = new ConcurrentQueue<string?>();
+
+        var firstName = new PropertyReference(subject, nameof(Person.FirstName));
+        var lastName = new PropertyReference(subject, nameof(Person.LastName));
+
+        // Owned here rather than by the processor, because the immediate path reads straight from the
+        // subscription and never touches the buffer the other tests inject into.
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        using var processor = new ChangeQueueProcessor(
+            source: source,
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.GetNewValue<string>());
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesAreSettled);
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "Warmup";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Warmup"));
+
+        subject.FirstName = "Settled";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Settled"));
+        Assert.True(firstName.TryGetWriteState(out _, out var settledRevision, out _));
+
+        // Act: a commit that predates the settled one, arriving late.
+        subscription.Enqueue(SubjectPropertyChange.Create(
+            firstName, ChangeOrigin.Local, DateTimeOffset.UtcNow, null,
+            "Old", "Straggler", settledRevision - 1));
+
+        subscription.Enqueue(SubjectPropertyChange.Create(
+            lastName, ChangeOrigin.Local, DateTimeOffset.UtcNow, null,
+            null, "Fence", long.MaxValue));
+
+        // Assert: the fence is behind the straggler in a FIFO queue, so its arrival proves the straggler
+        // was decided rather than still in flight.
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Fence"));
+        Assert.DoesNotContain("Straggler", written);
 
         await cancellation.CancelAsync();
         try { await processing; } catch (OperationCanceledException) { /* expected */ }
@@ -560,7 +724,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         return (context, subject, written, source, processor);
     }
@@ -627,7 +792,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Act: both writes are queued before processing starts; the second supersedes the first.
         subject.FirstName = "superseded";
@@ -666,7 +832,8 @@ public class ChangeQueueProcessorTests
             writeHandler: (_, _) => ValueTask.CompletedTask,
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Act
         processor.Dispose();
@@ -733,7 +900,8 @@ public class ChangeQueueProcessorTests
             },
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);

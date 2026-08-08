@@ -32,6 +32,21 @@ internal sealed class PropertyWriteState
     internal long LastNonSourceCommitRevision;
 
     /// <summary>
+    /// The revision of the last source-originated write to this property that reached a terminal.
+    /// </summary>
+    /// <remarks>
+    /// Kept disjoint from <see cref="LastNonSourceCommitRevision"/> rather than as a combined
+    /// last-of-any-kind field so that a commit writes exactly one of the two, which keeps the write path
+    /// at the one interlocked store it had before this existed. The last commit of any kind is their
+    /// maximum, computed on the read side, which runs per delivered change rather than per write.
+    /// <para>
+    /// Only a sink that can prove the value is already at its destination may rank against the maximum;
+    /// the connectors express that as a supersession rule.
+    /// </para>
+    /// </remarks>
+    internal long LastSourceCommitRevision;
+
+    /// <summary>
     /// Whether a sink has published this property's value. Sticky. Volatile because a stale read of
     /// false skips a transaction confirmation write-back, leaving the divergence it exists to repair.
     /// </summary>

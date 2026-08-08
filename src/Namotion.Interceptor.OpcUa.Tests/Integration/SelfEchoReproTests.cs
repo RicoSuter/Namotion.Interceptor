@@ -23,11 +23,14 @@ public class SelfEchoReproTests
     public async Task WhenAClientWriteLandsBetweenTheAssignmentAndTheFlush_ThenItIsNotSwallowedAsOurOwn()
     {
         // Arrange: the write loop assigns node.Value and then flushes it, and the flush reports whatever
-        // the node holds at that moment. A client write landing in between is therefore reported on the
-        // loop's own thread. Suppressing by "we are flushing" alone drops it: the node keeps the client's
-        // value and serves it to every client, while the subject never receives it, so the server sits
-        // behind its clients until that property is written again. Found by the connector tester, which
-        // failed to converge on one property in three, with no chaos involved.
+        // the node holds at that moment, so a write landing in between is reported on the loop's own
+        // thread. Suppressing by "we are flushing" alone drops it: the node keeps that value and serves
+        // it to every client, while the subject never receives it, so the server sits behind its clients
+        // until the property is written again.
+        //
+        // The SDK's write service cannot produce this, since it takes the node manager lock the loop
+        // holds for the whole batch. Pinned anyway, because that is what makes identifying our own
+        // reflection by value exact rather than a bet on who else can write a node.
         var logger = new TestLogger(_output);
         using var port = await OpcUaTestPortPool.AcquireAsync();
 

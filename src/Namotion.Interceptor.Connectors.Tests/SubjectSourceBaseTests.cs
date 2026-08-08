@@ -445,7 +445,7 @@ public class SubjectSourceBaseTests
         var property = new PropertyReference(subject, nameof(Person.FirstName));
 
         subject.FirstName = "userwrite";
-        Assert.True(property.TryGetWriteState(out var markerAfterLocalWrite, out _));
+        Assert.True(property.TryGetWriteState(out var markerAfterLocalWrite, out _, out _));
 
         // Act: an inbound apply the hook rewrites, so the origin demotes to Local.
         using (PendingOrigin.Set(property, ChangeOrigin.FromSource(source), "server-value"))
@@ -455,7 +455,7 @@ public class SubjectSourceBaseTests
 
         // Assert
         Assert.Equal("SERVER-VALUE", subject.FirstName);
-        Assert.True(property.TryGetWriteState(out var markerAfterInboundApply, out _));
+        Assert.True(property.TryGetWriteState(out var markerAfterInboundApply, out _, out _));
         Assert.Equal(markerAfterLocalWrite, markerAfterInboundApply);
     }
 
@@ -532,7 +532,7 @@ public class SubjectSourceBaseTests
         // the send branch and this test would pass with the production drop deleted.
         subject.FirstName = "SecondAttempt";
         Assert.True(new PropertyReference(subject, nameof(Person.FirstName))
-            .TryGetWriteState(out var firstNameMarker, out _));
+            .TryGetWriteState(out var firstNameMarker, out _, out _));
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "FirstAttempt",
             revision: firstNameMarker - 1);
 
@@ -1047,7 +1047,7 @@ public class SubjectSourceBaseTests
         // later local commit and must drop, LastName's is not and must be restored and sent.
         subject.FirstName = "NewerFirst";
         Assert.True(new PropertyReference(subject, nameof(Person.FirstName))
-            .TryGetWriteState(out var firstNameMarker, out _));
+            .TryGetWriteState(out var firstNameMarker, out _, out _));
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst",
             revision: firstNameMarker - 1);
 
@@ -1291,11 +1291,11 @@ public class SubjectSourceBaseTests
         IInterceptorSubject subject, string propertyName, TValue oldValue, TValue newValue)
     {
         var property = new PropertyReference(subject, propertyName);
-        property.TryGetWriteState(out var revisionBefore, out _);
+        property.TryGetWriteState(out var revisionBefore, out _, out _);
 
         property.Metadata.SetValue?.Invoke(subject, newValue);
 
-        Assert.True(property.TryGetWriteState(out var revision, out _) && revision > revisionBefore,
+        Assert.True(property.TryGetWriteState(out var revision, out _, out _) && revision > revisionBefore,
             "the write did not reach a terminal, so the parked change would carry no revision");
 
         EnqueueRetryChange(source, subject, propertyName, oldValue, newValue, revision);

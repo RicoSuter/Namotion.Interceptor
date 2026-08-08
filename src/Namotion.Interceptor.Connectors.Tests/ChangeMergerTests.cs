@@ -291,7 +291,7 @@ public class ChangeMergerTests
             var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = index };
             var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
 
-            Assert.True(property.TryGetWriteState(out var revision, out _),
+            Assert.True(property.TryGetWriteState(out var revision, out _, out _),
                 "The write did not reach a terminal, so this measures the wrong path.");
             Assert.NotEqual(0, revision);
 
@@ -303,13 +303,13 @@ public class ChangeMergerTests
         // mark are all one-time costs that would otherwise land inside the measurement.
         for (var warmup = 0; warmup < 5; warmup++)
         {
-            merger.Merge(changes, suppressSupersededChanges: true);
+            merger.Merge(changes, ChangeSupersessionRule.SourceValuesMayBeStale);
             merger.Reset();
         }
 
         // Act
         var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        var merged = merger.Merge(changes, suppressSupersededChanges: true);
+        var merged = merger.Merge(changes, ChangeSupersessionRule.SourceValuesMayBeStale);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
         // Assert
@@ -545,10 +545,10 @@ public class ChangeMergerTests
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
         subject.FirstName = "Stale";
-        Assert.True(firstName.TryGetWriteState(out var stragglerRevision, out _));
+        Assert.True(firstName.TryGetWriteState(out var stragglerRevision, out _, out _));
 
         subject.LastName = "Newer";
-        Assert.True(lastName.TryGetWriteState(out var lastNameRevision, out _));
+        Assert.True(lastName.TryGetWriteState(out var lastNameRevision, out _, out _));
 
         subject.FirstName = "Newest";
 
@@ -559,7 +559,7 @@ public class ChangeMergerTests
         ];
 
         // Act
-        var merged = merger.Merge(straggler, suppressSupersededChanges: true).ToArray();
+        var merged = merger.Merge(straggler, ChangeSupersessionRule.SourceValuesMayBeStale).ToArray();
 
         // Assert: the superseded commit is dropped, the one carrying the current value still flows.
         var survivor = Assert.Single(merged);
@@ -583,17 +583,17 @@ public class ChangeMergerTests
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
         subject.FirstName = "Stale";
-        Assert.True(firstName.TryGetWriteState(out var stragglerRevision, out _));
+        Assert.True(firstName.TryGetWriteState(out var stragglerRevision, out _, out _));
 
         subject.LastName = "Newer";
-        Assert.True(lastName.TryGetWriteState(out var lastNameRevision, out _));
+        Assert.True(lastName.TryGetWriteState(out var lastNameRevision, out _, out _));
 
         subject.FirstName = "Newest";
 
         // Act: the first is superseded and dropped, the second survives.
         var merged = merger.Merge(
             [CreateChange(firstName, "Old", "Stale", stragglerRevision), CreateChange(lastName, "Newest", "Newer", lastNameRevision)],
-            suppressSupersededChanges: true);
+            ChangeSupersessionRule.SourceValuesMayBeStale);
 
         // Assert
         Assert.Equal(1, merged.Length);

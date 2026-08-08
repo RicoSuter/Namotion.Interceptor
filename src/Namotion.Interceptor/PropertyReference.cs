@@ -103,25 +103,37 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Gets the revision of the last non-source write to this property that reached a write terminal,
-    /// and whether a sink has already published its value. Returns false when the property has never
-    /// been written.
+    /// Gets the revision of the last write to this property that reached a write terminal, both counting
+    /// source-originated commits and excluding them, and whether a sink has already published its value.
+    /// Returns false when the property has never been written.
     /// </summary>
     /// <remarks>
-    /// The revision is only comparable against a change to the same property: revisions are per subject,
-    /// and two properties of one subject draw from the same counter. Both values come from one lookup
-    /// because this runs per delivered change.
+    /// A revision is only comparable against a change to the same property: revisions are per subject,
+    /// and two properties of one subject draw from the same counter. The values come from one lookup
+    /// because this runs per delivered change, but they are read independently and are not a snapshot:
+    /// rank against one of them, never against a difference between them. Which one a sink may rank
+    /// against is a property of the sink, not of the change; see
+    /// <see cref="PropertyWriteState.LastSourceCommitRevision"/>.
     /// </remarks>
-    public bool TryGetWriteState(out long lastNonSourceCommitRevision, out bool published)
+    public bool TryGetWriteState(out long lastNonSourceCommitRevision, out long lastCommitRevision, out bool published)
     {
         if (TryGetWriteState(out var state))
         {
             lastNonSourceCommitRevision = Interlocked.Read(ref state.LastNonSourceCommitRevision);
+
+            // Each commit advances exactly one of the two, so the last of any kind is their maximum.
+            // A stale read of either can only lower it, which delivers a redundant change rather than
+            // dropping a live one.
+            lastCommitRevision = Math.Max(
+                lastNonSourceCommitRevision,
+                Interlocked.Read(ref state.LastSourceCommitRevision));
+
             published = state.Published;
             return true;
         }
 
         lastNonSourceCommitRevision = 0;
+        lastCommitRevision = 0;
         published = false;
         return false;
     }
@@ -137,10 +149,10 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
 
     /// <summary>
     /// Records what the terminal just committed: the write timestamp as raw UTC ticks, avoiding a
-    /// DateTimeOffset conversion on the hot path, and the commit revision. The revision is recorded only
-    /// for commits that did not come from a source; see
-    /// <see cref="PropertyWriteState.LastNonSourceCommitRevision"/> for why that exclusion is required.
-    /// The timestamp is recorded either way, preserving what <see cref="TryGetWriteTimestamp"/> reports.
+    /// DateTimeOffset conversion on the hot path, and the commit revision. The revision goes to whichever
+    /// of the two slots the origin selects, never both, so this stays at one interlocked store per commit;
+    /// see <see cref="PropertyWriteState.LastSourceCommitRevision"/>. The timestamp is recorded either
+    /// way, preserving what <see cref="TryGetWriteTimestamp"/> reports.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void SetWriteState(long timestamp, long revision, bool isFromSource)
@@ -148,7 +160,11 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
         var state = GetOrAddWriteState();
         Interlocked.Exchange(ref state.TimestampTicks, timestamp);
 
-        if (!isFromSource)
+        if (isFromSource)
+        {
+            Interlocked.Exchange(ref state.LastSourceCommitRevision, revision);
+        }
+        else
         {
             Interlocked.Exchange(ref state.LastNonSourceCommitRevision, revision);
         }

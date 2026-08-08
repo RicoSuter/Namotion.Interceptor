@@ -18,6 +18,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly object? _source;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
+    private readonly ChangeSupersessionRule _supersessionRule;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -56,6 +57,10 @@ public class ChangeQueueProcessor : IDisposable
     /// this case explicitly — typically by resolving via <c>TryGetRegisteredProperty()</c> and
     /// returning <c>false</c> when null.</param>
     /// <param name="writeHandler">Handler to write batched changes.</param>
+    /// <param name="supersessionRule">Which commits may supersede a change this processor is about to
+    /// write; see <see cref="ChangeSupersessionRule"/> for the condition that decides it. Deliberately
+    /// has no default: picking the wrong one is silent and its damage is permanent, so every connector
+    /// states which it is.</param>
     /// <param name="bufferTime">Time to buffer changes before flushing.</param>
     /// <param name="maxQueueDepth">Bound on the buffered change queue, or null for unbounded (existing
     /// connector behavior). When set, enqueuing past the bound drops the oldest unprocessed change and
@@ -66,6 +71,7 @@ public class ChangeQueueProcessor : IDisposable
         IInterceptorSubjectContext context,
         Func<PropertyReference, bool> propertyFilter,
         Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
+        ChangeSupersessionRule supersessionRule,
         TimeSpan? bufferTime,
         int? maxQueueDepth,
         ILogger logger)
@@ -76,6 +82,7 @@ public class ChangeQueueProcessor : IDisposable
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _maxQueueDepth = maxQueueDepth;
+        _supersessionRule = supersessionRule;
 
         try
         {
@@ -99,6 +106,7 @@ public class ChangeQueueProcessor : IDisposable
         PropertyChangeQueueSubscription subscription,
         Func<PropertyReference, bool> propertyFilter,
         Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
+        ChangeSupersessionRule supersessionRule,
         TimeSpan? bufferTime,
         int? maxQueueDepth,
         ILogger logger)
@@ -111,6 +119,7 @@ public class ChangeQueueProcessor : IDisposable
         _maxQueueDepth = maxQueueDepth;
         _subscription = subscription;
         _ownsSubscription = false;
+        _supersessionRule = supersessionRule;
     }
 
     /// <summary>
@@ -188,14 +197,29 @@ public class ChangeQueueProcessor : IDisposable
                     continue;
                 }
 
-                if (wasQueuedBeforeStart && !ChangeDeliveryFilter.IsCurrent(in change))
+                if (wasQueuedBeforeStart && !ChangeDeliveryFilter.IsCurrent(in change, _supersessionRule))
                 {
                     continue;
                 }
 
                 if (periodicTimer is null)
                 {
-                    ChangeDeliveryFilter.MarkWrittenOut(in change);
+                    // A zero buffer time is the no-coalescing mode: every change reaches the source,
+                    // including ones the model has since moved past. Suppressing under the client rule
+                    // would break that, since a busy property has committed again by the time the
+                    // previous write returns. A server has no such contract and must not serve a value
+                    // it has moved past, so there the same rule applies as on the flush path.
+                    if (_supersessionRule == ChangeSupersessionRule.SourceValuesAreSettled)
+                    {
+                        if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, _supersessionRule))
+                        {
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        ChangeDeliveryFilter.MarkWrittenOut(in change);
+                    }
 
                     // Immediate path: send a single change without buffering (zero allocation)
                     _immediateBuffer[0] = change;
@@ -268,7 +292,7 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            var mergedChanges = _changeMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), suppressSupersededChanges: true);
+            var mergedChanges = _changeMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), _supersessionRule);
 
             if (mergedChanges.Length > 0)
             {

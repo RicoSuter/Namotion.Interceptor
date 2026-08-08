@@ -225,6 +225,9 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                         subscription,
                         propertyReference => propertyReference.TryGetSource(out var source) && source == this,
                         WriteChangesViaRetryQueueAsync,
+                        // A source we talk to over a wire: what it hands us was produced before it saw
+                        // our write, so it cannot rank against our commits. See issue #373.
+                        ChangeSupersessionRule.SourceValuesMayBeStale,
                         _bufferTime,
                         maxQueueDepth: null,
                         logger: _logger);
@@ -430,7 +433,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
             {
                 var property = change.Property;
 
-                if (!ChangeDeliveryFilter.IsCurrent(in change))
+                if (!ChangeDeliveryFilter.IsCurrent(in change, ChangeSupersessionRule.SourceValuesMayBeStale))
                 {
                     // A later local commit supersedes it, and that commit's change is delivered in its
                     // place.
