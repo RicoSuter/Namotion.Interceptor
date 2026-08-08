@@ -2788,6 +2788,51 @@ find src/Namotion.Interceptor.Generator -name '*.cs' -not -path '*/obj/*' -not -
 Record the before and after totals. The number is not a target: a sweep that shrinks the code while
 making it harder to read has failed. Report both the line count and what became easier to follow.
 
+### Task 13: Full benchmark suite against master
+
+> **Runs last**, after every code change is in. Task 10 measured the shapes this change targets;
+> this one checks that nothing *else* moved. The generated code changed for 269 subjects, and every
+> existing benchmark runs against generated subjects, so the whole suite is a regression surface.
+
+**Files:** none modified. This task produces evidence.
+
+The repository has a comparison harness that runs a benchmark on the current branch and on a base
+branch and diffs them, so use it rather than hand-rolling a comparison.
+
+- [ ] **Step 1: Smoke test with the registry benchmarks first**
+
+```bash
+cd /Users/ricosuter/Projects/GitHub/Namotion.Interceptor/.claude/worktrees/generator-base-class-interception
+pwsh scripts/benchmark.ps1 -Filter "*Registry*" -Short -Stash
+```
+
+The registry walks `IInterceptorSubject.Properties` for every subject it attaches
+(`SubjectRegistryExtensions.cs:72`, `SubjectRegistry.cs:202`), so it is the suite most exposed to the
+`Properties` member changing shape, and it is quick. Expected: same or faster. If it regresses,
+stop and report rather than running the full suite.
+
+- [ ] **Step 2: Run the full suite**
+
+```bash
+pwsh scripts/benchmark.ps1 -Short -LaunchCount 3
+```
+
+`-LaunchCount 3` runs three process launches per benchmark, which is what makes a small difference
+distinguishable from process-to-process variation. The script writes `benchmark_<timestamp>.md`.
+
+- [ ] **Step 3: Classify every moved row**
+
+A row that moved by more than the noise floor needs an explanation, and "probably noise" is not one.
+Re-run just that filter with a higher launch count to separate a real change from variance. The only
+rows expected to move are ones that write or read a property declared on a **base** subject, which
+are now intercepted rather than silently skipping the chain.
+
+- [ ] **Step 4: Record the result**
+
+Write the comparison table, the configuration, the machine and runtime, and a verdict per moved row
+to `docs/superpowers/evidence/2026-08-07-full-benchmark-suite.md`. State plainly whether anything
+regressed. Do not average a fix into a verdict.
+
 ## Final verification
 
 - [ ] `dotnet build src/Namotion.Interceptor.slnx` succeeds with zero warnings.
