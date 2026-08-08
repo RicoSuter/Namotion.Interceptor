@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -7,6 +8,18 @@ namespace Namotion.Interceptor.Connectors;
 /// The external system is the source of truth; the C# object is a replica.
 /// Sources must claim ownership of properties by calling <c>SetSource(this)</c> during initialization.
 /// </summary>
+/// <remarks>
+/// <see cref="ISubjectConnector.RootSubject"/>, <see cref="State"/> and <see cref="LastSynchronizedAt"/>
+/// must be lock-free. <c>SourceMonitor</c> reads them while holding its own lock, and
+/// <see cref="StateChanged"/> is raised from inside the source's transition lock, so a getter that
+/// took that lock would close an ABBA cycle. <see cref="SubjectSourceBase"/> satisfies this.
+/// <para>
+/// Implementing this directly instead of deriving from <see cref="SubjectSourceBase"/> means
+/// registering with every monitor from <c>subject.Context.GetServices&lt;SourceMonitor&gt;()</c> on
+/// start and unregistering on stop. Skipping that is silent rather than fatal: the source never
+/// appears in the stream, and branch-scoped waits covering it complete vacuously.
+/// </para>
+/// </remarks>
 public interface ISubjectSource : ISubjectConnector
 {
     /// <summary>
@@ -40,4 +53,34 @@ public interface ISubjectSource : ISubjectConnector
     /// A delegate that applies the initial state to the subject. Returns <c>null</c> if there is no state to apply.
     /// </returns>
     Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets the source's synchronization state. Describes the inbound direction only: the model
+    /// mirroring the external system. Outbound backlog is <see cref="PendingWriteCount"/>.
+    /// </summary>
+    SourceState State { get; }
+
+    /// <summary>
+    /// Gets when the most recent initial synchronization completed, or <c>null</c> if it never has.
+    /// While <see cref="SourceState.Synchronizing"/> after a drop, this is how a dashboard says
+    /// "stale, last confirmed at T".
+    /// </summary>
+    DateTimeOffset? LastSynchronizedAt { get; }
+
+    /// <summary>
+    /// Gets the number of writes currently queued for retry. Orthogonal to <see cref="State"/>:
+    /// this queue can be non-empty during entirely normal synchronized operation.
+    /// </summary>
+    int PendingWriteCount { get; }
+
+    /// <summary>
+    /// Raised when <see cref="State"/> changes.
+    /// </summary>
+    /// <remarks>
+    /// Raised synchronously on the transitioning thread, inside the source's transition lock, so
+    /// handlers must be observe-only: no blocking, and no causing a transition of any source. The
+    /// lock is reentrant, so a nested transition would publish out of order. Mutating consumers
+    /// belong on the SourceMonitor stream, where delivery is queued outside all locks.
+    /// </remarks>
+    event EventHandler<SourceEvent>? StateChanged;
 }

@@ -1,4 +1,5 @@
 using Moq;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -492,29 +493,49 @@ public class SubjectSourceExtensionsTests
     }
 
     /// <summary>
-    /// Test source that implements ISupportsConcurrentWrites to opt-out of automatic synchronization.
+    /// Shared ISubjectSource member implementation for the two hand-rolled test doubles below,
+    /// which differ only in RootSubject and WriteChangesAsync. Neither exercises state transitions,
+    /// so State is fixed at Synchronizing for the lifetime of the double.
     /// </summary>
-    private sealed class ConcurrentTestSource(Func<Task<WriteResult>> writeCallback) : ISubjectSource, ISupportsConcurrentWrites
+    private abstract class StateTrackingTestSource : ISubjectSource
     {
         public IInterceptorSubject RootSubject => throw new NotSupportedException();
         public int WriteBatchSize => 0;
-        public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-            => await writeCallback();
+        public abstract ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
         public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
+
+        public SourceState State => SourceState.Synchronizing;
+
+        public DateTimeOffset? LastSynchronizedAt => null;
+
+        public int PendingWriteCount => 0;
+
+        public event EventHandler<SourceEvent>? StateChanged
+        {
+            add { }
+            remove { }
+        }
+    }
+
+    /// <summary>
+    /// Test source that implements ISupportsConcurrentWrites to opt-out of automatic synchronization.
+    /// </summary>
+    private sealed class ConcurrentTestSource(Func<Task<WriteResult>> writeCallback)
+        : StateTrackingTestSource, ISupportsConcurrentWrites
+    {
+        public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+            => await writeCallback();
     }
 
     /// <summary>
     /// Test source that blocks on write until explicitly unblocked.
     /// </summary>
-    private sealed class BlockingTestSource : ISubjectSource
+    private sealed class BlockingTestSource : StateTrackingTestSource
     {
         private readonly TaskCompletionSource _writeStarted = new();
         private readonly TaskCompletionSource _canComplete = new();
 
-        public IInterceptorSubject RootSubject => throw new NotSupportedException();
-        public int WriteBatchSize => 0;
-
-        public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             _writeStarted.TrySetResult();
             await _canComplete.Task;
@@ -522,7 +543,5 @@ public class SubjectSourceExtensionsTests
         }
 
         public void UnblockWrite() => _canComplete.TrySetResult();
-
-        public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
     }
 }

@@ -1,6 +1,8 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -22,6 +24,13 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private readonly SubjectPropertyWriter _propertyWriter;
 
     private static readonly TimeSpan ConnectWindowDrainInterval = TimeSpan.FromSeconds(1);
+
+    private readonly Lock _stateLock = new();
+    private int _state = (int)SourceState.Synchronizing;
+    private long _lastSynchronizedTicks;
+    private int _started;
+
+    private ImmutableArray<SourceMonitor> _registeredMonitors = [];
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
@@ -78,6 +87,74 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
 
     /// <inheritdoc />
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        // Stopped is terminal, but the platform won't enforce it: BackgroundService.StartAsync
+        // creates a fresh CancellationTokenSource each call, so a second StartAsync would run
+        // ExecuteAsync again against an uncancelled token. Without this guard, a "restarted" source
+        // would claim, load and apply live values while State stayed Stopped.
+        if (State == SourceState.Stopped)
+        {
+            _logger.LogWarning(
+                "Source {Source} was stopped and cannot be restarted. Create a new instance instead.",
+                GetType().Name);
+            return Task.CompletedTask;
+        }
+
+        // A source registered in DI AND attached to the subject graph is started down both paths.
+        // Without this latch both run a pump: the first to exit latches Stopped in its finally while
+        // the second is still applying live values.
+        if (Interlocked.Exchange(ref _started, 1) == 1)
+        {
+            _logger.LogWarning(
+                "Source {Source} is already started and the duplicate start was ignored. It is most " +
+                "likely both registered in DI and attached to the subject graph; use one or the other.",
+                GetType().Name);
+            return Task.CompletedTask;
+        }
+
+        // Registration precedes the pump so SourceRegistered precedes any StateChanged of this source.
+        var monitors = RootSubject.Context.GetSourceMonitors();
+        ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, monitors);
+        try
+        {
+            foreach (var monitor in monitors)
+            {
+                monitor.Register(this);
+            }
+        }
+        catch
+        {
+            // A half-registered source that never pumps hangs every in-scope wait, which is worse
+            // than not being monitored at all. Unwind and let the failure propagate.
+            ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
+            foreach (var monitor in monitors)
+            {
+                monitor.Unregister(this);
+            }
+
+            throw;
+        }
+
+        // Dispose can interleave with the registration above. Stopped is terminal, so seeing it here
+        // means Dispose already ran: unwind what was just registered. Through the LOCAL array, not
+        // the field, which Dispose has already emptied - re-reading it would strand these
+        // registrations. Unregister no-ops on an unregistered source, so a double unwind is safe.
+        if (State == SourceState.Stopped)
+        {
+            ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
+            foreach (var monitor in monitors)
+            {
+                monitor.Unregister(this);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        return base.StartAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // A missing PropertyChangeInterceptor means the source can capture no writes: a configuration error,
@@ -94,73 +171,82 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         // continuously (including during the retry delay) and never fall into a no-subscription gap.
         using var subscription = _context.CreatePropertyChangeQueueSubscription();
 
-        var firstAttempt = true;
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            var firstAttempt = true;
+            while (!stoppingToken.IsCancellationRequested)
             {
-                if (!firstAttempt)
+                try
                 {
-                    await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
+                    if (!firstAttempt)
+                    {
+                        await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
+                    }
+                    firstAttempt = false;
+
+                    // Park writes captured since the previous attempt (retry delay + any failed attempt).
+                    // This also caps memory across repeated failed attempts.
+                    DrainOwnedWritesToRetryQueue(subscription);
+
+                    _propertyWriter.StartBuffering();
+                    await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
+
+                    // Loading initial state is the long leg of the window (an OPC UA browse of a large
+                    // address space runs for minutes), and the subscription is unbounded, so without this
+                    // the window's memory is bounded by nothing but how long the load takes. Draining into
+                    // the retry queue caps it at that queue's size instead, which is the bound this class
+                    // already owns. Started only once StartListeningAsync has returned, because ownership is
+                    // established in there and the drain discards what it cannot attribute to a source.
+                    using (var windowDrain = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+                    {
+                        var windowDrainTask = DrainConnectWindowPeriodicallyAsync(subscription, windowDrain.Token);
+                        try
+                        {
+                            await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            // Awaited before the drain below runs, so the subscription keeps a single consumer.
+                            await windowDrain.CancelAsync().ConfigureAwait(false);
+                            await windowDrainTask.ConfigureAwait(false);
+                        }
+                    }
+
+                    // Park connect-window writes captured during listen/load.
+                    DrainOwnedWritesToRetryQueue(subscription);
+
+                    // Single reconcile point: send (model already holds it), restore (the load moved the
+                    // model off it), drop (a later local write supersedes it).
+                    await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
+
+                    // Connected phase reuses the source-lifetime subscription and does not own it.
+                    using var processor = new ChangeQueueProcessor(
+                        this,
+                        subscription,
+                        propertyReference => propertyReference.TryGetSource(out var source) && source == this,
+                        WriteChangesViaRetryQueueAsync,
+                        _bufferTime,
+                        maxQueueDepth: null,
+                        logger: _logger);
+
+                    await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
                 }
-                firstAttempt = false;
-
-                // Park writes captured since the previous attempt (retry delay + any failed attempt).
-                // This also caps memory across repeated failed attempts.
-                DrainOwnedWritesToRetryQueue(subscription);
-
-                _propertyWriter.StartBuffering();
-                await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
-
-                // Loading initial state is the long leg of the window (an OPC UA browse of a large
-                // address space runs for minutes), and the subscription is unbounded, so without this
-                // the window's memory is bounded by nothing but how long the load takes. Draining into
-                // the retry queue caps it at that queue's size instead, which is the bound this class
-                // already owns. Started only once StartListeningAsync has returned, because ownership is
-                // established in there and the drain discards what it cannot attribute to a source.
-                using (var windowDrain = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
-                    var windowDrainTask = DrainConnectWindowPeriodicallyAsync(subscription, windowDrain.Token);
-                    try
-                    {
-                        await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        // Awaited before the drain below runs, so the subscription keeps a single consumer.
-                        await windowDrain.CancelAsync().ConfigureAwait(false);
-                        await windowDrainTask.ConfigureAwait(false);
-                    }
+                    return;
                 }
-
-                // Park connect-window writes captured during listen/load.
-                DrainOwnedWritesToRetryQueue(subscription);
-
-                // Single reconcile point: send (model already holds it), restore (the load moved the model off it),
-                // drop (a later local write supersedes it).
-                await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
-
-                // Connected phase reuses the source-lifetime subscription and does not own it.
-                using var processor = new ChangeQueueProcessor(
-                    this,
-                    subscription,
-                    propertyReference => propertyReference.TryGetSource(out var source) && source == this,
-                    WriteChangesViaRetryQueueAsync,
-                    _bufferTime,
-                    maxQueueDepth: null,
-                    logger: _logger);
-
-                await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                catch (Exception ex)
+                {
+                    // Whatever it reported before the failure, the source is no longer serving the model.
+                    TransitionStateTo(SourceState.Synchronizing);
+                    _logger.LogError(ex, "Failed to listen for changes in source.");
+                    // The next iteration delays before reconnecting, with the subscription still capturing.
+                }
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to listen for changes in source.");
-                // The next iteration delays before reconnecting, with the subscription still capturing.
-            }
+        }
+        finally
+        {
+            TransitionStateTo(SourceState.Stopped);
         }
     }
 
@@ -413,9 +499,118 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         }
     }
 
+    // ---- Source monitoring surface ----
+
+    /// <inheritdoc />
+    public SourceState State => (SourceState)Volatile.Read(ref _state);
+
+    /// <inheritdoc />
+    public DateTimeOffset? LastSynchronizedAt
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _lastSynchronizedTicks);
+            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+    }
+
+    /// <inheritdoc />
+    public event EventHandler<SourceEvent>? StateChanged;
+
+    /// <summary>
+    /// Reports that the connection was lost, for connectors that detect an outage before they
+    /// start buffering.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately separate from <see cref="SubjectPropertyWriter.StartBuffering"/>: calling that
+    /// at detection time would replace the buffer with a fresh list, and the later StartBuffering
+    /// on the reconnect path would then discard everything buffered in between. Protected rather
+    /// than public: application code holding an ISubjectSource reference must not be able to flip a
+    /// synchronized source back to Synchronizing. A concrete source in another assembly that needs to
+    /// call this from a helper object outside its own inheritance hierarchy (SessionManager for
+    /// OpcUaSubjectClientSource) needs an internal forwarder on that source; see
+    /// OpcUaSubjectClientSource for the pattern.
+    /// <para>
+    /// Also invalidates the property writer's generation (see
+    /// <see cref="SubjectPropertyWriter.InvalidateGeneration"/>): an initial load already in flight
+    /// when the connection drops must not apply the pre-outage snapshot it eventually returns, or
+    /// certify it as Synchronized. Without this, that stale report would stand until the reconnect's
+    /// own StartBuffering runs - the whole tail of the in-flight load, not a narrow race.
+    /// </para>
+    /// </remarks>
+    protected void ReportConnectionLost()
+    {
+        _propertyWriter.InvalidateGeneration();
+        TransitionStateTo(SourceState.Synchronizing);
+    }
+
+    /// <summary>
+    /// Moves to <paramref name="newState"/> and publishes the change, or does nothing when the
+    /// transition is a no-op or the source has already stopped.
+    /// </summary>
+    /// <remarks>
+    /// The state write, timestamp write and event raise are all inside one lock: a bare
+    /// compare-exchange is not enough, since a writer could set Synchronized, be preempted, let
+    /// disposal set Stopped and unregister, then resume and publish Synchronized after Stopped -
+    /// both compare-exchanges would have succeeded, so no stickiness rule could prevent it.
+    /// </remarks>
+    internal void TransitionStateTo(SourceState newState)
+    {
+        lock (_stateLock)
+        {
+            var oldState = (SourceState)_state;
+            if (oldState == newState || oldState == SourceState.Stopped)
+            {
+                return;
+            }
+
+            _state = (int)newState;
+
+            var now = DateTimeOffset.UtcNow;
+            if (newState == SourceState.Synchronized)
+            {
+                Interlocked.Exchange(ref _lastSynchronizedTicks, now.UtcTicks);
+            }
+
+            var handlers = StateChanged;
+            if (handlers is not null)
+            {
+                var sourceEvent = new SourceEvent(
+                    SourceEventKind.StateChanged, this, null, oldState, newState, now);
+
+                foreach (var handler in handlers.GetInvocationList())
+                {
+                    try
+                    {
+                        ((EventHandler<SourceEvent>)handler)(this, sourceEvent);
+                    }
+                    catch (Exception exception)
+                    {
+                        // A buggy handler must not be mistaken for a source failure, and must not
+                        // prevent the remaining subscribers from observing the transition.
+                        _logger.LogError(exception, "A StateChanged handler threw and was ignored.");
+                    }
+                }
+            }
+        }
+    }
+
     /// <inheritdoc />
     public override void Dispose()
     {
+        // Publish the final Stopped while still registered, so a dispose without a stop is not silent.
+        TransitionStateTo(SourceState.Stopped);
+
+        // Take-and-clear in one step, so a concurrent StartAsync unwinding through its own local
+        // array (see StartAsync) cannot have this method unregister the same entries a second time
+        // on a later call, and so the field is never read while another thread is writing it.
+        var monitors = ImmutableInterlocked.InterlockedExchange(
+            ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
+        foreach (var monitor in monitors)
+        {
+            monitor.Unregister(this);
+        }
+
         WriteRetryQueue?.Dispose();
         base.Dispose();
     }
