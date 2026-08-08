@@ -295,6 +295,69 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
+    public async Task WhenADrainedHandlerIsAskedToWaitForAStart_ThenItClaimsNothingAndReportsNothingStarted()
+    {
+        // Arrange - WaitForStartAsync is what an activation calls after resolving a subject, and it
+        // needs the same guards as the attach paths. A drained handler releases only what its own
+        // drain snapshotted, so a claim taken here is never released and the live handler below would
+        // lose the compare and exchange forever. Reporting a start it never appended is the other
+        // half: the caller would treat the subject as running.
+        var (firstHost, firstContext) = await StartHostAsync();
+        var (secondHost, secondContext) = await StartHostAsync();
+
+        var subject = new CountingHostedSubject();
+        var drainedHandler = firstContext.TryGetService<HostedServiceHandler>()!;
+        await firstHost.StopAsync();
+
+        // The drained handler still sees this attach and must take nothing on.
+        ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+
+        try
+        {
+            // Act
+            var started = await drainedHandler.WaitForStartAsync(subject, CancellationToken.None);
+
+            // Assert
+            Assert.False(started);
+            Assert.Equal(0, subject.StartCount);
+            Assert.Null(((IInterceptorSubject)subject).TryGetSubjectTarget()?.Owner);
+
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => subject.StartCount == 1,
+                message: "The drained handler claimed the target and never released it, so the live handler could not take it.");
+        }
+        finally
+        {
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAStartFaultedForAWaitingCaller_ThenTheFaultIsRethrown()
+    {
+        // Arrange - the AddHostedService guarantee the activation preserves: a subject that fails to
+        // start aborts host startup rather than leaving ApplicationStarted claiming it is running.
+        var (host, context) = await StartHostAsync();
+
+        try
+        {
+            var subject = new ThrowingHostedSubject(context);
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+
+            // Act & Assert
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => handler.WaitForStartAsync(subject, CancellationToken.None));
+
+            Assert.Equal("start failed", exception.Message);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenTheAttachAwaitIsCancelled_ThenTheStartStillRunsToCompletion()
     {
         // Arrange - the token bounds the caller's wait, not the transition. Aborting the work instead

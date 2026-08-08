@@ -312,17 +312,41 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         return Task.CompletedTask;
     }
 
-    internal async Task WaitForStartAsync(IInterceptorSubject subject, IHostedService hostedService, CancellationToken cancellationToken)
+    /// <summary>
+    /// Waits for the start this handler appended for the subject and rethrows the fault it recorded,
+    /// so a subject that fails to start aborts host startup the way <c>AddHostedService</c> does.
+    /// Returns false when nothing was started, which the caller must not read as a start.
+    /// </summary>
+    internal async Task<bool> WaitForStartAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        var target = subject.GetOrAddSubjectTarget(hostedService);
-        target.TryTakeOwnership(this);
+        // Reads the target and never creates one, and never takes ownership: this handler either
+        // already claimed the target in AttachSubject or has no business claiming it. A drained
+        // handler releases only what its own drain snapshotted, so a claim taken here would never be
+        // released and the next handler over the same subject would lose the compare and exchange
+        // forever. The liveness read is the same guard the attach paths use, and it is what excludes
+        // a draining or drained handler, which has no start queued and never will have one.
+        var target = subject.TryGetSubjectTarget();
+        if (target is null || !_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
+        {
+            return false;
+        }
 
-        await target.AppendAsync(_ => Task.CompletedTask, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+        // An empty transition on the same chain. Appending never runs a body, so this completes only
+        // once the start appended ahead of it has run.
+        await target
+            .AppendAsync(_ => Task.CompletedTask, cancellationToken)
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
 
         if (target.Fault is { } fault)
         {
             throw fault;
         }
+
+        // Read after the fault, and read at all because the guards above cannot cover a drain that
+        // begins while this wait is queued behind the start: the start body then gates itself out and
+        // sets nothing, and only the start body ever sets Current.
+        return target.Current is not null;
     }
 
     internal bool IsLive(IInterceptorSubject subject) => _liveSubjects.ContainsKey(subject);
