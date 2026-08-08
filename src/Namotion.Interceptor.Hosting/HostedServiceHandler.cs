@@ -141,62 +141,137 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     {
         _running[target] = subject;
 
+        // Taken here, synchronously, and not inside the body: appending never runs the body, so the
+        // service is not running when the attach returns. Anything that treats "the graph has
+        // finished starting" as a completion point would otherwise reach it while this start is
+        // still queued - concretely, a source attached here would not have registered with its
+        // SourceMonitor yet, and a synchronization wait would complete against a tree that is not
+        // synchronized. Taking the hold before the append leaves no window in which that can happen.
+        //
+        // Nested attaches compose because holds are counted: a service that attaches children during
+        // its own StartAsync takes their holds before its own is released below.
+        var startupHolds = TakeStartupHolds(subject.Context);
+
         return target.AppendAsync(async _ =>
         {
-            await _gate.WaitForOpenAsync().ConfigureAwait(false);
-            if (_gate.State != HostedServiceGateState.Running)
-            {
-                // Read inside the body, never at append time: a start already queued when shutdown
-                // begins must re-read the state, and a body skipped at append time would never run
-                // its signalling.
-                return;
-            }
-
-            if (!_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
-            {
-                return;
-            }
-
-            if (target.Current is not null)
-            {
-                // One instance per target, checked in the body where the chain serializes it. Ownership
-                // stops a second handler, but a subject reachable from two hosting enabled contexts
-                // raises one context attach per context, and the owning handler sees both: measured as
-                // StartCount 2 without this guard.
-                return;
-            }
-
-            // Cleared after every guard, never before: a start that is gated out or skipped must not
-            // drop a fault that a caller has not read yet.
-            target.SetFault(null);
-
             try
             {
-                await Task.Delay(StartDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
+                await _gate.WaitForOpenAsync().ConfigureAwait(false);
+                if (_gate.State != HostedServiceGateState.Running)
+                {
+                    // Read inside the body, never at append time: a start already queued when shutdown
+                    // begins must re-read the state, and a body skipped at append time would never run
+                    // its signalling.
+                    return;
+                }
 
-                var instance = target.Subject ?? target.Factory!();
+                if (!_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
+                {
+                    return;
+                }
+
+                if (target.Current is not null)
+                {
+                    // One instance per target, checked in the body where the chain serializes it. Ownership
+                    // stops a second handler, but a subject reachable from two hosting enabled contexts
+                    // raises one context attach per context, and the owning handler sees both: measured as
+                    // StartCount 2 without this guard.
+                    return;
+                }
+
+                // Cleared after every guard, never before: a start that is gated out or skipped must not
+                // drop a fault that a caller has not read yet.
+                target.SetFault(null);
+
                 try
                 {
-                    await instance.StartAsync(CancellationToken.None).ConfigureAwait(false);
-                }
-                catch
-                {
-                    if (target.IsHandlerOwnedInstance)
+                    await Task.Delay(StartDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
+
+                    var instance = target.Subject ?? target.Factory!();
+                    try
                     {
-                        await DisposeInstanceAsync(instance).ConfigureAwait(false);
+                        await instance.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        if (target.IsHandlerOwnedInstance)
+                        {
+                            await DisposeInstanceAsync(instance).ConfigureAwait(false);
+                        }
+
+                        throw;
                     }
 
-                    throw;
+                    target.SetCurrent(instance);
                 }
+                catch (Exception exception)
+                {
+                    target.SetFault(exception);
+                    Logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
+                }
+            }
+            finally
+            {
+                // In a finally, so every way out releases: gated out by a drain, not live, skipped by
+                // the one instance guard, or a start that threw. A leaked hold blocks every
+                // synchronization wait on the tree forever, which is a hang rather than a wrong
+                // answer, and worse than never having taken the hold.
+                ReleaseStartupHolds(startupHolds);
+            }
+        }, CancellationToken.None);
+    }
 
-                target.SetCurrent(instance);
+    /// <summary>
+    /// Takes a completion hold on every deferrer reachable from <paramref name="context"/>.
+    /// </summary>
+    /// <remarks>
+    /// Empty for an application that configures no deferring subsystem (no source monitoring, for
+    /// example), which is the common case and costs one empty check per attach.
+    /// </remarks>
+    private IDisposable[] TakeStartupHolds(IInterceptorSubjectContext context)
+    {
+        var deferrers = context.GetServices<IStartupCompletionDeferrer>();
+        if (deferrers.IsEmpty)
+        {
+            return [];
+        }
+
+        var holds = new IDisposable[deferrers.Length];
+        var taken = 0;
+        foreach (var deferrer in deferrers)
+        {
+            try
+            {
+                holds[taken] = deferrer.DeferCompletion();
+                taken++;
             }
             catch (Exception exception)
             {
-                target.SetFault(exception);
-                Logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
+                // One deferrer throwing must not abandon the holds already taken, and must not
+                // propagate: an attach runs under the lifecycle lock inside a property write, so the
+                // exception would surface at an unrelated assignment.
+                Logger?.LogError(exception, "Taking a startup completion hold threw and was ignored.");
             }
-        }, CancellationToken.None);
+        }
+
+        return taken == holds.Length ? holds : holds[..taken];
+    }
+
+    private void ReleaseStartupHolds(IDisposable[] startupHolds)
+    {
+        foreach (var hold in startupHolds)
+        {
+            try
+            {
+                hold.Dispose();
+            }
+            catch (Exception exception)
+            {
+                // One deferrer throwing must not strand the others, for the same reason the release
+                // sits in a finally at all.
+                Logger?.LogError(exception, "Releasing a startup completion hold threw and was ignored.");
+            }
+        }
     }
 
     internal Task AppendStop(
