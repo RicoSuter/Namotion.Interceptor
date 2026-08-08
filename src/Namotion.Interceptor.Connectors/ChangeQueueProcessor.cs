@@ -114,24 +114,6 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     /// <summary>
-    /// Whether a change this processor would normally skip has to be sent out after all.
-    ///
-    /// A transaction writes its value to the source itself and then applies it locally, and that local
-    /// apply arrives here as a confirmation. Normally there is nothing to send: the source already has
-    /// it. But a write of ours can land on the source between those two steps, leaving the source
-    /// holding an older commit while the subject holds the confirmed one, and nothing would ever
-    /// correct it. Sending the confirmation out repairs that.
-    ///
-    /// Only when a connector actually wrote the property since, so a property that is only ever written
-    /// through transactions never pays for it.
-    /// </summary>
-    private static bool NeedsWriteBack(in SubjectPropertyChange change)
-    {
-        return change.Origin.Kind == ChangeOriginKind.Confirmed
-               && ChangeDeliveryFilter.WasWrittenOut(change.Property);
-    }
-
-    /// <summary>
     /// Processes changes from the queue until cancellation is requested.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -196,7 +178,7 @@ public class ChangeQueueProcessor : IDisposable
                     queuedBeforeStart--;
                 }
 
-                if (ReferenceEquals(change.Origin.Source, _source) && !NeedsWriteBack(in change))
+                if (ReferenceEquals(change.Origin.Source, _source) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
                 {
                     continue;
                 }

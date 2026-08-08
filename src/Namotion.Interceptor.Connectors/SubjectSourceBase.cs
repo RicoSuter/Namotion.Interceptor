@@ -256,9 +256,12 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         List<SubjectPropertyChange>? owned = null;
         while (subscription.TryDequeueImmediate(out var change))
         {
-            if (ReferenceEquals(change.Origin.Source, this))
+            if (ReferenceEquals(change.Origin.Source, this) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
             {
-                continue; // this source's own applies (inbound / source-tagged)
+                // This source's own applies (inbound / source-tagged). The exception is a transaction
+                // confirmation on a property a connector has written out, which has to reach the source
+                // to repair it; skipping it here would discard the repair for the whole connect window.
+                continue;
             }
 
             if (!(change.Property.TryGetSource(out var source) && source == this))
@@ -364,12 +367,22 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     (toSend ??= []).Add(change);
                     sent++;
                 }
-                else
+                else if (property.Metadata.SetValue is { } setValue)
                 {
                     // The load moved the model off it: restore locally so the connected phase captures
                     // and sends the re-applied write.
-                    property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object?>());
+                    setValue(property.Subject, change.GetNewValue<object?>());
                     restored++;
+                }
+                else
+                {
+                    // No setter, so there is nothing to restore and the change has already left the
+                    // queue. Derived properties reach this: their recomputation commits as Local and is
+                    // parked like any other write. Counted as dropped rather than reported as restored.
+                    dropped++;
+                    _logger.LogWarning(
+                        "Cannot restore the queued write for property '{PropertyName}': it has no setter, so the change is dropped.",
+                        property.Name);
                 }
             }
             catch (Exception exception)

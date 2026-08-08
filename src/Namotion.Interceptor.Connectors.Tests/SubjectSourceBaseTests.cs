@@ -406,6 +406,59 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenATransactionConfirmationNeedsWriteBackDuringConnect_ThenItIsNotDiscarded()
+    {
+        // Arrange: a transaction writes to the source itself and then applies locally as a confirmation.
+        // That apply is normally skipped as an echo, except when a connector has written the property
+        // since, because our write can have landed on the source afterwards and left it holding an older
+        // value. The connected processor makes that exception; the connect-window drain did not, so a
+        // transaction committing while the source reloaded initial state lost the repair permanently.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var receivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        TestSubjectSource source = null!;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            LoadInitialStateOverride = _ =>
+            {
+                // Inside the connect window, where the drain is what decides the change's fate.
+                var property = new PropertyReference(subject, nameof(Person.FirstName));
+                property.MarkPublished();
+
+                using (PendingOrigin.Set(property, ChangeOrigin.Confirmed(source), "confirmed"))
+                {
+                    subject.FirstName = "confirmed";
+                }
+
+                return Task.FromResult<Action?>(null);
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedChanges.Enqueue(change);
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.FirstName)),
+            message: "Expected the transaction confirmation to reach the source rather than being dropped by the connect-window drain");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(receivedChanges, c => c.GetNewValue<string?>() == "confirmed");
+    }
+
+    [Fact]
     public async Task WhenAParkedWriteIsSupersededByALaterLocalWrite_ThenOnlyTheLaterOneIsSent()
     {
         // Arrange: this is the case that must still drop. The second local write supersedes the first,

@@ -71,6 +71,19 @@ internal static class ChangeDeliveryFilter
     }
 
     /// <summary>
+    /// Whether a change from our own source still has to be written back rather than skipped as an echo.
+    /// A transaction writes to the source itself and then applies locally, so that apply arrives as a
+    /// confirmation. Normally there is nothing to send, since the source already has it, but a write of
+    /// ours can land on the source in between, leaving it holding an older commit than the subject with
+    /// nothing to correct it. Only when a connector actually wrote the property since, so a property
+    /// written only through transactions never pays for it.
+    /// </summary>
+    public static bool NeedsWriteBack(in SubjectPropertyChange change)
+    {
+        return change.Origin.Kind == ChangeOriginKind.Confirmed && WasWrittenOut(change.Property);
+    }
+
+    /// <summary>
     /// Whether any connector has written this property out.
     /// </summary>
     public static bool WasWrittenOut(PropertyReference property)
