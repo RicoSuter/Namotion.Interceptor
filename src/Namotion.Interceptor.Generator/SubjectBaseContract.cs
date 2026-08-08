@@ -82,14 +82,6 @@ internal static class SubjectBaseContract
                     location,
                     subjectAncestor.ToDisplayString(),
                     typeSymbol.ToDisplayString()));
-
-                // A generated ancestor's plumbing does not exist as a symbol during this pass, so
-                // the lookup below cannot see it, but the generator knows it is about to emit it.
-                // Without this, every member root mode re-emits here hides the generated ancestor's
-                // copy and produces a CS0108 in a file the consumer cannot edit.
-                hiddenPlumbingMembers = HasGeneratedSubjectAncestor(typeSymbol, cancellationToken)
-                    ? RootModePlumbingMemberNames
-                    : FindHiddenPlumbingMembers(subjectAncestor, typeSymbol, compilation);
             }
             else
             {
@@ -101,6 +93,24 @@ internal static class SubjectBaseContract
 
                 return null;
             }
+        }
+
+        // Asked for every root-mode subject with a base class, not only for the NI0012 one: the
+        // base does not have to be a subject at all for a collision to happen. An MVVM base
+        // carrying PropertyChanged and RaisePropertyChanged is the common shape, and root mode
+        // re-emits both, which is a CS0108 in a file the consumer cannot edit.
+        //
+        // The walk starts at the immediate base rather than at the subject ancestor, because
+        // hiding is decided against the nearest declaration of the name anywhere above, including
+        // a plain class sitting in between.
+        //
+        // A generated ancestor's plumbing does not exist as a symbol during this pass, so the
+        // lookup cannot see it, but the generator knows it is about to emit it.
+        if (emitsPlumbingHere)
+        {
+            hiddenPlumbingMembers = HasGeneratedSubjectAncestor(typeSymbol, cancellationToken)
+                ? RootModePlumbingMemberNames
+                : FindHiddenPlumbingMembers(typeSymbol.BaseType, typeSymbol, compilation, !baseClassHasInpc);
         }
 
         return new BaseClassInfo(
@@ -337,8 +347,10 @@ internal static class SubjectBaseContract
 
     /// <summary>
     /// Every member root mode emits that a generated copy further up the chain would hide. The two
-    /// INPC members are part of it although nothing else in this file reads them: they are emitted
-    /// by the same root-mode block and hide the ancestor's copies exactly like the helpers do.
+    /// INPC members are part of it because they are emitted by the same root-mode block and hide
+    /// the ancestor's copies exactly like the helpers do. This is the answer for a generated
+    /// ancestor, whose members have no symbol yet; <see cref="FindHiddenPlumbingMembers"/> reaches
+    /// the same set member by member for a base that already exists.
     /// </summary>
     private static readonly string[] RootModePlumbingMemberNames =
         GeneratedMemberNames.Concat([MemberNames.PropertyChanged, MemberNames.RaisePropertyChanged]).ToArray();
@@ -470,11 +482,12 @@ internal static class SubjectBaseContract
     /// TreatWarningsAsErrors, so the modifier has to be decided per member.
     /// </summary>
     private static IReadOnlyList<string> FindHiddenPlumbingMembers(
-        INamedTypeSymbol? ancestor,
+        INamedTypeSymbol? baseType,
         INamedTypeSymbol subject,
-        Compilation compilation)
+        Compilation compilation,
+        bool emitsNotifyPropertyChanged)
     {
-        if (ancestor is null)
+        if (baseType is null || baseType.SpecialType == SpecialType.System_Object)
         {
             return [];
         }
@@ -483,7 +496,7 @@ internal static class SubjectBaseContract
 
         foreach (var plumbingMethod in PlumbingMethods)
         {
-            var isHidden = AccessibleMembers(ancestor, subject, compilation, plumbingMethod.Name)
+            var isHidden = HidableMembers(baseType, subject, compilation, plumbingMethod.Name)
                 .Any(member => IsHiddenByEmittedMember(member, plumbingMethod));
 
             if (isHidden)
@@ -492,8 +505,52 @@ internal static class SubjectBaseContract
             }
         }
 
+        if (!emitsNotifyPropertyChanged)
+        {
+            return hidden;
+        }
+
+        // The emitted PropertyChanged is an event, and every member kind except a method hides by
+        // name alone, so any inherited member of that name is hidden by it. A base that implements
+        // INotifyPropertyChanged explicitly declares a private member, which the accessibility
+        // filter drops, and that is correct: an explicit implementation neither hides nor is found
+        // by member lookup.
+        if (HidableMembers(baseType, subject, compilation, MemberNames.PropertyChanged).Any())
+        {
+            hidden.Add(MemberNames.PropertyChanged);
+        }
+
+        // The emitted raise is a method, so only a member C#'s hiding rule really hides counts. A
+        // RaisePropertyChanged(PropertyChangedEventArgs) overload hides nothing, and a 'new' for it
+        // would be CS0109, which is a build error under TreatWarningsAsErrors just like the CS0108
+        // it is meant to prevent. Parameter types are compared here, unlike in PlumbingMethods,
+        // because that overload is an ordinary shape on an MVVM base rather than a contrivance.
+        var raiseIsHidden = HidableMembers(baseType, subject, compilation, MemberNames.RaisePropertyChanged)
+            .Any(member => member is not IMethodSymbol method || IsRaisePropertyChangedSignature(method));
+
+        if (raiseIsHidden)
+        {
+            hidden.Add(MemberNames.RaisePropertyChanged);
+        }
+
         return hidden;
     }
+
+    /// <summary>
+    /// The members of a given name on the base chain that the emitted member can hide. Same as
+    /// <see cref="AccessibleMembers"/> except that statics are kept: C# hiding is not
+    /// staticness-sensitive, so a static base member of a plumbing name is hidden by the emitted
+    /// instance member and produces the same CS0108 an instance one would. Accessibility still
+    /// applies, because an inaccessible member is neither hidden nor found by member lookup.
+    /// </summary>
+    private static IEnumerable<ISymbol> HidableMembers(
+        INamedTypeSymbol baseType,
+        INamedTypeSymbol subject,
+        Compilation compilation,
+        string name)
+        => EnumerateChain(baseType)
+            .SelectMany(type => type.GetMembers(name))
+            .Where(member => compilation.IsSymbolAccessibleWithin(member, subject));
 
     /// <summary>
     /// A method is hidden only when its signature matches the emitted one, so an unrelated overload
@@ -528,9 +585,10 @@ internal static class SubjectBaseContract
     /// The members of a given name that member lookup from the subject would find on the ancestor
     /// chain. Statics are dropped because none of the emitted call sites can reach one, and
     /// inaccessible members because they neither hide nor bind. Callers add the part that actually
-    /// differs between them: the contract check tests the signature, the hiding check tests C#'s
-    /// hiding rule, and <see cref="HasCallableRaisePropertyChanged"/> tests the emitted call's one
-    /// argument. Deliberately not used by <see cref="FindHidingMembers"/>, which must see statics.
+    /// differs between them: the contract check tests the signature, and
+    /// <see cref="HasCallableRaisePropertyChanged"/> tests the emitted call's one argument.
+    /// Deliberately not used by <see cref="FindHidingMembers"/> or <see cref="HidableMembers"/>,
+    /// both of which must see statics.
     /// </summary>
     private static IEnumerable<ISymbol> AccessibleMembers(
         INamedTypeSymbol ancestor,

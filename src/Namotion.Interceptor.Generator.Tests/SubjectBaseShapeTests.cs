@@ -887,4 +887,115 @@ public class SubjectBaseShapeTests
         Assert.Contains("private protected partial class NestedLeaf : IInterceptorSubject", leaf);
         Assert.DoesNotContain("private IInterceptorExecutor? _context;", leaf);
     }
+
+    [Fact]
+    public void WhenRootModeSitsOnAnMvvmBase_ThenTheRedeclaredNotifyMembersCarryNew()
+    {
+        // Arrange: an ordinary MVVM base. It is not a subject ancestor, so root mode re-emits the
+        // whole notify block, and both members it emits already exist above it. The base also
+        // carries a plumbing name to cover the helper half of the same lookup.
+        const string source = """
+            using System.ComponentModel;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public class ViewModelBase : INotifyPropertyChanged
+                {
+                    public event PropertyChangedEventHandler? PropertyChanged;
+
+                    public object? InvokeMethod { get; set; }
+
+                    protected void RaisePropertyChanged(string propertyName)
+                        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+                }
+
+                [InterceptorSubject]
+                public partial class OnViewModelBase : ViewModelBase
+                {
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunExpectingNoWarnings(source);
+        var generated = result.SingleSource();
+
+        // Assert: without the modifiers this is three CS0108 in a file the consumer cannot edit.
+        Assert.Contains("new public event PropertyChangedEventHandler? PropertyChanged;", generated);
+        Assert.Contains("new protected void RaisePropertyChanged(string propertyName)", generated);
+        Assert.Contains("new protected object? InvokeMethod(", generated);
+    }
+
+    [Fact]
+    public void WhenTheCollidingBaseMemberIsStatic_ThenTheRedeclaredMemberStillCarriesNew()
+    {
+        // Arrange: C# hiding is not staticness-sensitive, so a static base member of a plumbing
+        // name is hidden by the emitted instance member exactly like an instance one.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public class StaticHolderBase
+                {
+                    public static object? GetInstanceProperties { get; set; }
+
+                    protected static void RaisePropertyChanged(string propertyName) { }
+                }
+
+                [InterceptorSubject]
+                public partial class OnStaticHolderBase : StaticHolderBase
+                {
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunExpectingNoWarnings(source);
+        var generated = result.SingleSource();
+
+        // Assert
+        Assert.Contains("new protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()", generated);
+        Assert.Contains("new protected void RaisePropertyChanged(string propertyName)", generated);
+    }
+
+    [Fact]
+    public void WhenTheBaseRaiseTakesEventArgs_ThenNoNewModifierIsEmitted()
+    {
+        // Arrange: RaisePropertyChanged(PropertyChangedEventArgs) shares only the name with the
+        // emitted RaisePropertyChanged(string), so C# hiding does not apply to it. A 'new' here
+        // would be CS0109, which fails a consumer build exactly like the CS0108 it guards against.
+        const string source = """
+            using System.ComponentModel;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public class ArgsOnlyBase
+                {
+                    protected void RaisePropertyChanged(PropertyChangedEventArgs args) { }
+                }
+
+                [InterceptorSubject]
+                public partial class OnArgsOnlyBase : ArgsOnlyBase
+                {
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunExpectingNoWarnings(source);
+        var generated = result.SingleSource();
+
+        // Assert
+        Assert.DoesNotContain("new protected void RaisePropertyChanged", generated);
+        Assert.Contains("protected void RaisePropertyChanged(string propertyName)", generated);
+    }
 }

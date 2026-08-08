@@ -511,8 +511,15 @@ One thing to avoid anywhere below a subject: do not declare a member named `GetP
 `SetPropertyValue`, `InvokeMethod` or `GetInstanceProperties` for something else, and do not implement
 `IInterceptorSubject.Context`, `Data`, `SyncRoot` or `AddProperties` yourself. Either one takes over
 what the base class provides. Where a generated subject declares such a member, or sits below a class
-that does, the generator reports NI0013 or NI0014. A hand-written class with no subject below it is
-not scanned by the generator at all, so there the same member takes over silently. See
+that does, the generator reports NI0013 or NI0014.
+
+A hand-written class with no subject below it is not scanned by the generator at all, so no NI0013
+reaches it. The compiler covers that case instead. The four helpers are `protected`, so a member that
+genuinely hides one of them is CS0108, and `TreatWarningsAsErrors` turns that into a build error: a
+method with the same signature as one of the four, or a field, property or event named `InvokeMethod`
+or `GetInstanceProperties`, the two helpers that are not generic. Add `new` where the hiding is
+intended, or rename the member. An overload that differs in signature stays silent, and there it is
+also harmless, because the generated calls sit in the subject's own file above such a class. See
 [Hierarchy Hazards](generator.md#hierarchy-hazards) for why it matters.
 
 ## Property Change Hooks

@@ -358,10 +358,12 @@ properties, so it adds noise to an already red build rather than hiding anything
 not in that list, because `WillBeGeneratedInThisCompilation` already excludes a non-partial declaration
 and a record declaration.
 
-## NI0013 and NI0014 are breaking changes
+## Three breaking changes
 
-Both are errors, both are new, and both reject source that compiled before. They are listed here rather
-than presented as pure safety nets.
+Two of them, NI0013 and NI0014, are new errors of this generator, and both reject source that compiled
+before. The third is not a diagnostic of this generator at all: sharing the plumbing widened the
+inherited helper surface, so the compiler now reports hiding where it reported nothing. All three are
+listed here rather than presented as pure safety nets.
 
 **NI0013** fires in derived mode when the subject, or any class between it and its subject ancestor,
 declares a member named `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` or
@@ -375,10 +377,18 @@ would be a pure false positive.
 
 The break is asymmetric. A subject may legally declare `public void InvokeMethod(string name)` today,
 since the signature differs from the generated private helper. After this change the same source is an
-error in derived mode and stays legal in root mode, where the class declares the helpers itself and a
-colliding member is already a hard CS0111. `RaisePropertyChanged` is deliberately outside the rule: it
-was already inherited whenever the base provided the notify plumbing, so a `new` annotated override of
-it may well be deliberate and predates this change.
+error in derived mode and stays legal in root mode. The rationale for leaving root mode unguarded is
+narrower than it first looks. An *identical* signature there is a hard CS0111, so that half really is
+covered by the compiler. A different signature is not covered by anything: a root subject declaring
+`protected bool SetPropertyValue(string, string, string, Action<IInterceptorSubject, string>)`
+alongside a `string` partial property compiles with zero diagnostics, wins overload resolution against
+the generated generic helper, and captures every write to that property. That residual case is a known
+gap rather than a guarded one. It is left open because the colliding member and the generated call are
+two halves of one class the author owns, so the fix is local and the shape is visible from the
+declaration, whereas in derived mode the capturing member and the code it captures live in different
+classes. `RaisePropertyChanged` is deliberately outside the rule: it was already inherited whenever
+the base provided the notify plumbing, so a `new` annotated override of it may well be deliberate and
+predates this change.
 
 **NI0014** fires in the same range for the four hijackable interface members. Two details differ from
 the first draft of the design and are worth knowing before the rule is narrowed again. The public
@@ -398,6 +408,29 @@ Both rules are scoped from the subject up to, but not including, the nearest sub
 design first specified a per member contract provider located by re-running mode selection upward; the
 implementation uses the nearest subject ancestor for both rules, which is the same class in every shape
 where the contract is satisfied as a whole and is simpler to reason about.
+
+**The inherited helper surface is wider.** `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` and
+`GetInstanceProperties` are emitted `protected` instead of `private`, because that is what lets a
+derived subject inherit them instead of re-emitting them. A private member is invisible to a subclass
+and hides nothing, so on master a hand-written class deriving from a generated subject could name its
+own members anything it liked. It now inherits four `protected` members, and a member that genuinely
+hides one of them is CS0108. `src/Directory.Build.props` sets `TreatWarningsAsErrors`, so that is a
+build failure on source that compiled clean before.
+
+This break reaches a class the generator never scans. NI0013 covers a class that is itself
+`[InterceptorSubject]`, or one sitting between a subject and its subject ancestor.
+`SubjectBaseContract.Resolve` is only ever asked about a subject, so a plain hand-written subclass of a
+generated subject is not examined and no NI0013 can fire on it. That is not a hole, because this break
+is loud rather than silent: the compiler names the file, the line and the hidden member. The consumer
+adds `new` where the hiding is intended, or renames the member. The one shape CS0108 does not cover is
+an overload that differs in signature, and there it is also harmless, because nothing generated calls
+the helpers from such a class.
+
+Only two of the four report CS0108 for a member of another kind. `GetPropertyValue` and
+`SetPropertyValue` are generic, and the compiler does not report a field or property as hiding a
+generic method, so only a method matching their signature is caught. `InvokeMethod` and
+`GetInstanceProperties` are not generic, and a field, property or method of that name is caught for
+both.
 
 ## Known gaps
 

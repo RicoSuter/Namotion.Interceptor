@@ -137,7 +137,7 @@ internal static class Diagnostics
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "The subject still compiles and behaves as it did before the plumbing was shared.");
+        description: "The subject still generates and behaves as it did before the plumbing was shared, but a project that treats warnings as errors fails on this rule.");
 
     public static readonly DiagnosticDescriptor HidesGeneratedMember = new(
         id: "NI0013",

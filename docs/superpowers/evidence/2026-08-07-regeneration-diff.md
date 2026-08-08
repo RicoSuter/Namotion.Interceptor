@@ -4,33 +4,43 @@ Non-regression evidence for `fix/generator-base-class-interception`. The unit su
 shapes someone thought to write. This compares the generated output for every `[InterceptorSubject]`
 in the repository, including the HomeBlaze device models, against the baseline.
 
+Re-run on 2026-08-08 against branch head `508bcff4` ("Docs: describe base class interception, the
+base class contract and its limits"). The first run predated the merge of `origin/master` into the
+branch, so both its baseline rationale and its counts were stale; everything below is measured at
+the current head.
+
 ## Baseline choice
 
-The baseline is the merge base `0530d75f` ("generator: Explicit interface implementations and
-generator defects (#432)"), not `origin/master`. At the time of this run `origin/master` was
-`7b578023` and carried one commit that is not in the branch's history ("Add source monitoring
-(synchronization state, source event stream) (#354)"). Diffing against it would have mixed
-generated output for subjects that commit adds or changes into the classification, and none of that
-belongs to this branch. `git merge-base master fix/generator-base-class-interception` and
-`git merge-base origin/master fix/generator-base-class-interception` both resolve to `0530d75f`,
-so the merge base isolates exactly this branch's generator change.
+The baseline is `origin/master` (`7b578023`, "Add source monitoring (synchronization state, source
+event stream) (#354)"), which is the merge base. Commit `2d2fa82b` merged `origin/master` into the
+branch, so `origin/master` is now an ancestor of the branch head:
+
+```bash
+git merge-base origin/master HEAD          # 7b5780234b69ed1dd130125191a8509651bfe392
+git rev-parse origin/master                # 7b5780234b69ed1dd130125191a8509651bfe392
+git merge-base --is-ancestor origin/master HEAD   # exit 0
+```
+
+Everything between the two trees is therefore this branch's own work and nothing else. This agrees
+with `2026-08-07-hierarchy-benchmark.md`, which uses the same baseline for the same reason.
 
 ## Commands
 
 ```bash
-# Baseline
-cd /Users/ricosuter/Projects/GitHub/Namotion.Interceptor
-git worktree add --detach /tmp/ni-baseline 0530d75f74978c2d6a532620f3946881961dae76
-cd /tmp/ni-baseline
+# Baseline: the merge base tree, materialized outside the repository
+SCRATCH=/tmp/regen
+mkdir -p $SCRATCH/ni-baseline
+git archive origin/master | tar -x -C $SCRATCH/ni-baseline
+cd $SCRATCH/ni-baseline
 dotnet build src/Namotion.Interceptor.slnx --no-incremental \
-  -p:EmitCompilerGeneratedFiles=true -p:CompilerGeneratedFilesOutputPath=/tmp/ni-generated-base
+  -p:EmitCompilerGeneratedFiles=true -p:CompilerGeneratedFilesOutputPath=$SCRATCH/ni-generated-base
 
 # Branch
-cd /Users/ricosuter/Projects/GitHub/Namotion.Interceptor/.claude/worktrees/generator-base-class-interception
+cd <branch worktree>
 dotnet build src/Namotion.Interceptor.slnx --no-incremental \
-  -p:EmitCompilerGeneratedFiles=true -p:CompilerGeneratedFilesOutputPath=/tmp/ni-generated-head
+  -p:EmitCompilerGeneratedFiles=true -p:CompilerGeneratedFilesOutputPath=$SCRATCH/ni-generated-head
 
-diff -ru /tmp/ni-generated-base /tmp/ni-generated-head > /tmp/ni-generated.diff
+diff -ru $SCRATCH/ni-generated-base $SCRATCH/ni-generated-head > $SCRATCH/ni-generated.diff
 ```
 
 Both builds: 89 projects, `Build succeeded`, 0 warnings, 0 errors.
@@ -46,11 +56,11 @@ differs because the two trees live at different locations. The two trees were co
 root paths rewritten to a common `<REPO>` placeholder before the classification diff:
 
 ```bash
-cp -R /tmp/ni-generated-base /tmp/ni-norm-base
-cp -R /tmp/ni-generated-head /tmp/ni-norm-head
-find /tmp/ni-norm-base -name '*.cs' -print0 | xargs -0 perl -pi -e 's{/private/tmp/ni-baseline/}{<REPO>/}g; s{/tmp/ni-baseline/}{<REPO>/}g;'
-find /tmp/ni-norm-head -name '*.cs' -print0 | xargs -0 perl -pi -e 's{/Users/.../generator-base-class-interception/}{<REPO>/}g;'
-diff -ru /tmp/ni-norm-base /tmp/ni-norm-head > /tmp/ni-generated.diff
+cp -R $SCRATCH/ni-generated-base $SCRATCH/ni-norm-base
+cp -R $SCRATCH/ni-generated-head $SCRATCH/ni-norm-head
+find $SCRATCH/ni-norm-base -name '*.cs' -print0 | xargs -0 perl -pi -e 's{\Q$SCRATCH/ni-baseline/\E}{<REPO>/}g;'
+find $SCRATCH/ni-norm-head -name '*.cs' -print0 | xargs -0 perl -pi -e 's{<branch worktree>/}{<REPO>/}g;'
+diff -ru $SCRATCH/ni-norm-base $SCRATCH/ni-norm-head > $SCRATCH/ni-generated.diff
 ```
 
 After normalization, zero Razor files differ. Every remaining difference is in
@@ -60,39 +70,39 @@ After normalization, zero Razor files differ. Every remaining difference is in
 
 | Measure | Baseline | Branch |
 | --- | ---: | ---: |
-| Generated `.g.cs` files | 335 | 340 |
-| Generated subject files | 269 | 274 |
-| Changed subject files | | 269 |
-| Changed lines (excluding diff headers) | | 4001 |
+| Generated `.g.cs` files | 335 | 343 |
+| Generated subject files | 270 | 278 |
+| Changed subject files | | 270 |
+| Changed lines (excluding diff headers) | | 4014 |
 | Distinct changed lines | | 34 |
 
-All 269 baseline subject files changed. Every changed file matches one of exactly two diff shapes,
-verified mechanically by comparing each file's removed and added line sets against the expected
-sets: 255 root mode files (5 removed, 8 added, 13 lines each) and 14 derived mode files
-(48 removed, 1 added, 49 lines each). The 14 derived files all share a single identical removal
-shape. Unclassified files: 0. Line accounting: 255 x 13 + 14 x 49 = 4001, which is the whole diff.
+All 270 baseline subject files changed. Every changed file matches one of exactly two diff shapes,
+verified mechanically by normalizing each file's class name away and grouping the resulting removed
+and added line sets: the grouping yields exactly two groups, 256 root mode files (5 removed, 8
+added, 13 lines each) and 14 derived mode files (48 removed, 1 added, 49 lines each). Unclassified
+files: 0. Line accounting: 256 x 13 + 14 x 49 = 4014, which is the whole diff.
 
 ## Classification
 
 | Category | Lines | Files |
 | --- | ---: | ---: |
-| 1. `private` becoming `protected` on `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` | 1530 | 255 |
-| 2. The new `GetInstanceProperties()` member | 765 | 255 |
-| 3. `_properties ?? DefaultProperties` becoming `GetInstanceProperties() ?? DefaultProperties` | 510 | 255 |
-| 4. The `AddProperties` operand becoming `((IInterceptorSubject)this).Properties` | 510 | 255 |
+| 1. `private` becoming `protected` on `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` | 1536 | 256 |
+| 2. The new `GetInstanceProperties()` member | 768 | 256 |
+| 3. `_properties ?? DefaultProperties` becoming `GetInstanceProperties() ?? DefaultProperties` | 512 | 256 |
+| 4. The `AddProperties` operand becoming `((IInterceptorSubject)this).Properties` | 512 | 256 |
 | 5. In a derived subject, removal of the whole plumbing block and the helpers | 686 | 14 |
 | 6. A `new` modifier or a `.Concat` target that moved to the subject ancestor | 0 | 0 |
 | 7. A `new` modifier appearing on a plumbing member | 0 | 0 |
 | 8. A `RaisePropertyChanged` call moving to the `((IRaisePropertyChanged)this)` form | 0 | 0 |
-| **Total** | **4001** | **269** |
+| **Total** | **4014** | **270** |
 
 Categories 7 and 8 were added to the original six because two later commits on the branch can
 produce them. Neither appears in this repository. Unclassified lines: 0.
 
-### Category 1 (1530 lines)
+### Category 1 (1536 lines)
 
-Three helper signatures, removed as `private` and re-added as `protected`, in each of the 255 root
-mode subjects. 255 x 3 removed plus 255 x 3 added.
+Three helper signatures, removed as `private` and re-added as `protected`, in each of the 256 root
+mode subjects. 256 x 3 removed plus 256 x 3 added.
 
 No subject kept the `private` form. No sealed subject class exists in the repository at all: the
 only `sealed` keyword anywhere near a subject is the `sealed override partial string Label` on
@@ -102,18 +112,18 @@ non-sealed class and has nothing to do with this rule, since the generator keys 
 is covered by the generator unit suite instead, which asserts on a real Roslyn emit and would see
 the CS0628 a regression would produce.
 
-### Category 2 (765 lines)
+### Category 2 (768 lines)
 
 Three added lines per root mode subject: the `[MethodImpl(MethodImplOptions.AggressiveInlining)]`
 attribute, the `protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;`
 member, and the blank line separating it from the next member.
 
-### Category 3 (510 lines)
+### Category 3 (512 lines)
 
 One removed and one added line per root mode subject, on the explicit
 `IInterceptorSubject.Properties` implementation.
 
-### Category 4 (510 lines)
+### Category 4 (512 lines)
 
 One removed and one added line per root mode subject, inside `IInterceptorSubject.AddProperties`.
 `_properties = (_properties ?? DefaultProperties)` becomes
@@ -154,19 +164,21 @@ No `.Concat` target changed. All 14 subjects whose `DefaultProperties` concatena
 base type before and after (`HueDevice`, `Person`, `PersonBase`, `PersonWithVirtualHooks`,
 `OverrideBase`, `SealedOverrideBase`, `Light`, `PolymorphicBase`, `VirtualPerson`,
 `VirtualEmployee`). No `new` modifier moved: the changed line set contains no line carrying a `new`
-member modifier at all. The only `new` keyword among changed lines is the `new KeyValuePair<...>`
-expression inside the removed `AddProperties` body, which is object creation, not a modifier.
+member modifier at all. The only `new` keyword among changed lines is in the three object creation
+expressions inside the removed derived-mode block (`new KeyValuePair<...>`, `new()` for `Data` and
+`new object()` for `SyncRoot`), none of which is a modifier.
 
 The count of `public new static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties`
-goes from 14 to 17, and all three additions are in files that exist only on the branch (see below),
+goes from 14 to 19, and all five additions are in files that exist only on the branch (see below),
 not in any pre-existing subject.
 
 ### Category 7 (0 lines)
 
 No `new` modifier appears on any plumbing member. That shape needs a base type that already carries
-a colliding member of its own (an older-generator base, or a hand-written member with the same
-name), which no subject in this repository has. It is covered by the generator unit suite through
-inline sources and by NI0013 and NI0014.
+a colliding member of its own (an older-generator base, a hand-written member with the same name, or
+an MVVM style base carrying `PropertyChanged` and `RaisePropertyChanged`), which no subject in this
+repository has. It is covered by the generator unit suite through inline sources and by NI0013 and
+NI0014.
 
 ### Category 8 (0 lines)
 
@@ -179,14 +191,17 @@ changes no repository subject; it is exercised only by inline generator test sou
 
 ## Files that exist only on the branch
 
-Five generated files have no baseline counterpart. All five are the output for test fixture types
-that this branch's own test sources add, not regenerations of anything that existed before.
+Eight generated files have no baseline counterpart. All eight are the output for fixture types that
+this branch's own test and benchmark sources add, not regenerations of anything that existed before.
 
 - `Namotion.Interceptor.Generator.Tests.HierarchyRoot.g.cs`
 - `Namotion.Interceptor.Generator.Tests.HierarchyMiddle.g.cs`
 - `Namotion.Interceptor.Generator.Tests.HierarchyLeaf.g.cs`
 - `Namotion.Interceptor.Generator.Tests.HierarchyChild.g.cs`
 - `Namotion.Interceptor.Generator.Tests.HierarchyContextLeaf.g.cs`
+- `Namotion.Interceptor.Benchmark.BenchmarkRoot.g.cs`
+- `Namotion.Interceptor.Benchmark.BenchmarkMiddle.g.cs`
+- `Namotion.Interceptor.Benchmark.BenchmarkLeaf.g.cs`
 
 No baseline file is missing from the branch output.
 
@@ -198,26 +213,27 @@ last wins, so a changed entry would not show up as a key difference.
 Resolved metadata entry lines across every generated file:
 
 ```bash
-find /tmp/ni-norm-base -name '*.g.cs' -print0 | xargs -0 grep -h '^\s*\["' | sort > /tmp/ni-keys-base.txt
-find /tmp/ni-norm-head -name '*.g.cs' -print0 | xargs -0 grep -h '^\s*\["' | sort > /tmp/ni-keys-head.txt
+find $SCRATCH/ni-norm-base -name '*.g.cs' -print0 | xargs -0 grep -h '^\s*\["' | sort > /tmp/ni-keys-base.txt
+find $SCRATCH/ni-norm-head -name '*.g.cs' -print0 | xargs -0 grep -h '^\s*\["' | sort > /tmp/ni-keys-head.txt
 diff /tmp/ni-keys-base.txt /tmp/ni-keys-head.txt
 ```
 
-1188 entries at baseline, 1194 on the branch. The diff is six pure additions and nothing else:
-`Child`, `ChildName`, `ContextLeafProperty`, `LeafProperty`, `MiddleProperty` and `RootProperty`,
-all belonging to the five branch-only fixture files above. No entry was removed and none changed.
+1189 entries at baseline, 1198 on the branch. The diff is nine pure additions and nothing else:
+`Child`, `ChildName`, `ContextLeafProperty`, `LeafProperty`, `LeafValue`, `MiddleProperty`,
+`MiddleValue`, `RootProperty` and `RootValue`, all belonging to the eight branch-only fixture files
+above. No entry was removed and none changed.
 
 Whole `DefaultProperties` initializer blocks, compared per file rather than per key, so that a
 changed metadata argument or a changed `.Concat` target would be caught even when the key text is
 identical. The block is taken from the line containing `DefaultProperties { get; } =` through
 `.ToFrozenDictionary();`:
 
-- Shared subject files compared: 269
+- Shared subject files compared: 270
 - `DefaultProperties` blocks that differ: 0
 - Files whose `DefaultProperties` `.Concat` target changed: 0
 
 ## Verdict
 
-Pass. Every one of the 4001 changed lines falls into exactly one expected category, with zero
+Pass. Every one of the 4014 changed lines falls into exactly one expected category, with zero
 unclassified lines and zero unclassified files. No property set changed for any pre-existing
 subject. No defect found.
