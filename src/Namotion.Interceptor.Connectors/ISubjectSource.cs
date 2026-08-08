@@ -62,7 +62,7 @@ public interface ISubjectSource : ISubjectConnector
 
     /// <summary>
     /// Gets when the most recent initial synchronization completed, or <c>null</c> if it never has.
-    /// While <see cref="SourceState.Connecting"/> after a drop, this is how a dashboard says
+    /// While <see cref="SourceState.Synchronizing"/> after a drop, this is how a dashboard says
     /// "stale, last confirmed at T".
     /// </summary>
     DateTimeOffset? LastSynchronizedAt { get; }

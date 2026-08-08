@@ -176,7 +176,7 @@ public class SubjectPropertyWriterTests
         };
 
         // A standalone writer, separate from the source's own internal pump (never started here):
-        // ReportConnecting/ReportSynchronized still drive the same source's real state machine,
+        // ReportSynchronizing/ReportSynchronized still drive the same source's real state machine,
         // since TransitionTo operates on the source instance, not on any one writer.
         var writer = new SubjectPropertyWriter(source, NullLogger.Instance);
 
@@ -192,7 +192,7 @@ public class SubjectPropertyWriterTests
 
         // Assert
         Assert.False(staleApplied, "The superseded cycle's stale snapshot must never be applied.");
-        Assert.Equal(SourceState.Connecting, source.State);
+        Assert.Equal(SourceState.Synchronizing, source.State);
     }
 
     [Fact]
@@ -298,7 +298,7 @@ public class SubjectPropertyWriterTests
 
         // Assert
         Assert.False(applied, "A load that completes after a reported connection loss must not apply pre-outage data.");
-        Assert.Equal(SourceState.Connecting, source.State);
+        Assert.Equal(SourceState.Synchronizing, source.State);
     }
 
     /// <summary>

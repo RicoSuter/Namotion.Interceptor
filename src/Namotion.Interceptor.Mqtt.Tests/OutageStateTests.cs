@@ -55,7 +55,7 @@ public partial class OutageStateTests
     }
 
     [Fact]
-    public async Task WhenTheConnectionIsLost_ThenTheSourceReportsConnectingUntilItRecovers()
+    public async Task WhenTheConnectionIsLost_ThenTheSourceReportsSynchronizingUntilItRecovers()
     {
         // Arrange
         var brokerPort = GetFreeTcpPort();
@@ -119,9 +119,9 @@ public partial class OutageStateTests
             // retained values have been received: MQTT provides no end-of-retained signal, so
             // asserting anything about received property values here would be dishonest.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.State == SourceState.Connecting,
+                () => source.State == SourceState.Synchronizing,
                 timeout: TimeSpan.FromSeconds(15),
-                message: "Source should report Connecting during the outage");
+                message: "Source should report Synchronizing during the outage");
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.State == SourceState.Synchronized,
                 timeout: TimeSpan.FromSeconds(30),

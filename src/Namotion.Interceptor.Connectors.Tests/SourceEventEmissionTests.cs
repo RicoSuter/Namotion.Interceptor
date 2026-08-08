@@ -37,7 +37,7 @@ public class SourceEventEmissionTests
         await AsyncTestHelpers.WaitUntilAsync(() => received.Any(e => e.Kind == SourceEventKind.PropertyClaimed));
         var claimEvent = received.First(e => e.Kind == SourceEventKind.PropertyClaimed);
         Assert.Equal(SourceState.Unclaimed, claimEvent.OldState);
-        Assert.Equal(SourceState.Connecting, claimEvent.NewState);
+        Assert.Equal(SourceState.Synchronizing, claimEvent.NewState);
     }
 
     [Fact]
@@ -200,12 +200,12 @@ public class SourceEventEmissionTests
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var source = new TestStateSource(person);
         property.SetSource(source);
-        // Captured while the source is still Connecting, so NewState here is Connecting - a
+        // Captured while the source is still Synchronizing, so NewState here is Synchronizing - a
         // regression that made CurrentState just return NewState instead of re-resolving fresh
         // would still pass if the source never moved on after capture. It does, below.
         var sourceEvent = new SourceEvent(
             SourceEventKind.PropertyClaimed, source, property,
-            SourceState.Unclaimed, SourceState.Connecting, DateTimeOffset.UtcNow);
+            SourceState.Unclaimed, SourceState.Synchronizing, DateTimeOffset.UtcNow);
 
         // Act - the source synchronizes after the event was captured.
         source.ReportSynchronized();
@@ -213,7 +213,7 @@ public class SourceEventEmissionTests
 
         // Assert
         Assert.Equal(SourceState.Synchronized, current);
-        Assert.Equal(SourceState.Connecting, sourceEvent.NewState);
+        Assert.Equal(SourceState.Synchronizing, sourceEvent.NewState);
     }
 
     /// <summary>

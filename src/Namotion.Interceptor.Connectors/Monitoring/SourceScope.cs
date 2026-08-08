@@ -14,8 +14,8 @@ internal static class SourceScope
     /// connection from blocking a wait. Walks using caller-supplied scratch collections.
     /// </summary>
     /// <remarks>
-    /// Every caller of this overload is <c>SourceMonitor.IsSatisfied</c>, which already holds the
-    /// monitor's lock and re-evaluates on every property-reference add/remove tree-wide while any
+    /// Every caller of this overload is <c>SourceMonitor.IsBranchSynchronized</c>, which already
+    /// holds the monitor's lock and re-evaluates on every property-reference add/remove while any
     /// wait is pending - reusing scratch collections there turns a per-source, per-re-evaluation
     /// allocation into none. <paramref name="visitedScratch"/> and <paramref name="pendingScratch"/>
     /// are cleared before this method returns, so passing the same instances into a later,

@@ -128,7 +128,7 @@ public class SubjectTransactionBenchmark
             return Task.FromResult<Action?>(null);
         }
 
-        public SourceState State => SourceState.Connecting;
+        public SourceState State => SourceState.Synchronizing;
 
         public DateTimeOffset? LastSynchronizedAt => null;
 

@@ -1,6 +1,6 @@
 # Source Monitoring
 
-Every `ISubjectSource` reports whether it's still connecting, has completed its initial load, or has stopped. The `Namotion.Interceptor.Connectors.Monitoring` namespace turns that per-source state into a per-tree registry, a typed event stream, and an awaitable primitive, so an application can ask "is my tree live yet" instead of polling `TryGetSource()` in a loop.
+Every `ISubjectSource` reports whether it's still synchronizing, has completed its initial load, or has stopped. The `Namotion.Interceptor.Connectors.Monitoring` namespace turns that per-source state into a per-tree registry, a typed event stream, and an awaitable primitive, so an application can ask "is my tree live yet" instead of polling `TryGetSource()` in a loop.
 
 ## Getting Started
 
@@ -48,11 +48,13 @@ await root.Kitchen.WaitForSynchronizationAsync(stoppingToken);
 
 A source is in scope for an anchor when its root subject and the anchor lie on the same root-to-leaf path, in either direction: the source's root is an ancestor of (or is) the anchor, so it may claim into the awaited branch, or the source's root sits inside the anchor's own subtree. A source on a sibling branch is in neither set, so a source that never connects, or fails, on an unrelated branch never blocks a wait scoped to a branch it cannot claim into.
 
+Given that scope, the rule is short: once registration is complete, a wait completes when no in-scope source is `Synchronizing`. `Synchronized` and `Stopped` both count as settled, so a scope matching no source at all, or one where every source has stopped, completes rather than blocks.
+
 Two things about that scoping matter before you rely on a wait.
 
 No wait can complete before source registration is complete, whatever its scope: that is the first condition checked, ahead of any scope evaluation. So until `CompleteSourceRegistration()` has run (and any `DeferWaitCompletion()` holds are released), every wait blocks, empty scope or not.
 
-A pending wait is not frozen to the sources that existed when registration completed. It is re-evaluated on every registration, unregistration and state change, so a source registering later can block it. Only a wait that has already completed is frozen, since a completed task cannot be un-completed. A scope matching no source, or one where every source has `Stopped`, completes immediately rather than blocking.
+A pending wait is not frozen to the sources that existed when registration completed. It is re-evaluated on every registration, unregistration and state change, so a source registering later can block it. Only a wait that has already completed is frozen, since a completed task cannot be un-completed.
 
 An empty scope is the expected answer for a branch with no external source, such as configuration or computed state. It is also what you get if you anchored on the wrong branch, or if the source was never created. The library cannot tell those apart, so treat a completed wait as "nothing here is still loading" rather than as proof the branch is live.
 
@@ -71,7 +73,7 @@ var state = property.GetSourceState();
 
 See the XML docs on `SourceState` for what each member means. `Synchronized` specifically means the owning source completed its initial load, and what that guarantees differs per protocol; see [What Synchronized Means per Protocol](#what-synchronized-means-per-protocol).
 
-`GetSourceState()` is only fully meaningful once the branch containing the property has been awaited through `WaitForSynchronizationAsync`. Before any claiming has happened, `Unclaimed` cannot be distinguished from "not yet claimed, but will be." After a claim it reports `Connecting`, so "will synchronize, still loading" is already distinguishable from "no source" even before the wait completes.
+`GetSourceState()` is only fully meaningful once the branch containing the property has been awaited through `WaitForSynchronizationAsync`. Before any claiming has happened, `Unclaimed` cannot be distinguished from "not yet claimed, but will be." After a claim it reports `Synchronizing`, so "will synchronize, still loading" is already distinguishable from "no source" even before the wait completes.
 
 ## What Synchronized Means per Protocol
 
@@ -143,7 +145,7 @@ So the stream is not a ledger. It cannot reconstruct a history, because the arri
 public enum SourceState
 {
     Unclaimed,
-    Connecting,
+    Synchronizing,
     Synchronized,
     Stopped
 }
@@ -151,11 +153,11 @@ public enum SourceState
 
 See the XML docs on `SourceState` for what each member means. On a source itself (as opposed to a property, via `GetSourceState()`), `Unclaimed` never occurs.
 
-State follows the pump: construction starts at `Connecting`, `StartBuffering()` returns to `Connecting` on every connect and reconnect, a completed initial load reaches `Synchronized`, and a pump failure falls back to `Connecting` before the retry delay. A connector that detects a loss *before* it buffers calls the protected `ReportConnectionLost()` so `State` does not sit at `Synchronized` for the whole reconnect window; OPC UA does this from its keep-alive handler and its manual reconnect path.
+State follows the pump: construction starts at `Synchronizing`, `StartBuffering()` returns to `Synchronizing` on every connect and reconnect, a completed initial load reaches `Synchronized`, and a pump failure falls back to `Synchronizing` before the retry delay. A connector that detects a loss *before* it buffers calls the protected `ReportConnectionLost()` so `State` does not sit at `Synchronized` for the whole reconnect window; OPC UA does this from its keep-alive handler and its manual reconnect path.
 
 `Stopped` is terminal: no further transition succeeds, and `ExecuteAsync` sets it in a `finally` so it fires on every exit path. A guard in `SubjectSourceBase.StartAsync` enforces this, because `BackgroundService` would otherwise happily run `ExecuteAsync` again against a fresh token. Create a new instance rather than restarting a stopped one.
 
-`LastSynchronizedAt` records when the most recent initial synchronization completed (`null` if it never has), so a source that is `Connecting` after a drop can still be reported as "stale, last confirmed at T" rather than just "not synchronized." `PendingWriteCount` is orthogonal to `State`: it describes the outbound write retry queue and can be non-empty during entirely normal synchronized operation.
+`LastSynchronizedAt` records when the most recent initial synchronization completed (`null` if it never has), so a source that is `Synchronizing` after a drop can still be reported as "stale, last confirmed at T" rather than just "not synchronized." `PendingWriteCount` is orthogonal to `State`: it describes the outbound write retry queue and can be non-empty during entirely normal synchronized operation.
 
 ### The Event Stream
 

@@ -48,7 +48,7 @@ public class SourceStateTests
         var state = property.GetSourceState();
 
         // Assert
-        Assert.Equal(SourceState.Connecting, state);
+        Assert.Equal(SourceState.Synchronizing, state);
     }
 
     [Fact]
@@ -60,10 +60,10 @@ public class SourceStateTests
         source.StateChanged += (_, _) => Interlocked.Increment(ref raised);
 
         // Act
-        source.ReportConnecting();
+        source.ReportSynchronizing();
 
         // Assert
-        Assert.Equal(SourceState.Connecting, source.State);
+        Assert.Equal(SourceState.Synchronizing, source.State);
         Assert.Equal(0, raised);
     }
 
@@ -96,7 +96,7 @@ public class SourceStateTests
         var timestampAtStop = source.LastSynchronizedAt;
 
         // Act
-        source.ReportConnecting();
+        source.ReportSynchronizing();
         source.ReportSynchronized();
 
         // Assert
@@ -139,7 +139,7 @@ public class SourceStateTests
                 barrier.SignalAndWait();
                 for (var i = 0; i < hammerCountPerIteration; i++)
                 {
-                    source.ReportConnecting();
+                    source.ReportSynchronizing();
                     source.ReportSynchronized();
                 }
             });
@@ -219,7 +219,7 @@ public class SourceStateTests
     }
 
     [Fact]
-    public void WhenBufferingStartsOutsideThePump_ThenTheSourceReportsConnecting()
+    public void WhenBufferingStartsOutsideThePump_ThenTheSourceReportsSynchronizing()
     {
         // Arrange
         var person = new Person();
@@ -231,7 +231,7 @@ public class SourceStateTests
         writer.StartBuffering();
 
         // Assert
-        Assert.Equal(SourceState.Connecting, source.State);
+        Assert.Equal(SourceState.Synchronizing, source.State);
     }
 
     [Fact]
@@ -262,7 +262,7 @@ public class SourceStateTests
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => writer.LoadInitialStateAndResumeAsync(CancellationToken.None));
-        Assert.Equal(SourceState.Connecting, source.State);
+        Assert.Equal(SourceState.Synchronizing, source.State);
     }
 
     [Fact]
@@ -276,7 +276,7 @@ public class SourceStateTests
         source.SimulateConnectionLost();
 
         // Assert
-        Assert.Equal(SourceState.Connecting, source.State);
+        Assert.Equal(SourceState.Synchronizing, source.State);
     }
 }
 
@@ -298,7 +298,7 @@ internal class TestStateSource : SubjectSourceBase
     // SubjectPropertyWriter's direct TransitionTo calls now (see SubjectPropertyWriter.StartBuffering
     // and LoadInitialStateAndResumeAsync), but the test suite still drives state machine behaviour
     // through named, state-specific entry points rather than a bare TransitionTo call.
-    public void ReportConnecting() => TransitionStateTo(SourceState.Connecting);
+    public void ReportSynchronizing() => TransitionStateTo(SourceState.Synchronizing);
 
     public void ReportSynchronized() => TransitionStateTo(SourceState.Synchronized);
 

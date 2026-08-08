@@ -221,7 +221,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring
     public enum SourceState
     {
         Unclaimed = 0,
-        Connecting = 1,
+        Synchronizing = 1,
         Synchronized = 2,
         Stopped = 3,
     }

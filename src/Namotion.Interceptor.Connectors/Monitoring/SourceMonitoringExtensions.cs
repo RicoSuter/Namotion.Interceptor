@@ -19,7 +19,7 @@ public static class SourceMonitoringExtensions
     /// <remarks>
     /// Only fully meaningful once the branch containing the property has been awaited through
     /// WaitForSynchronizationAsync: before claiming has happened, Unclaimed cannot be distinguished
-    /// from not-yet-claimed. After a claim it reports Connecting, so "will sync, still loading" is
+    /// from not-yet-claimed. After a claim it reports Synchronizing, so "will sync, still loading" is
     /// already distinguishable from "no source" even before the wait completes.
     /// </remarks>
     public static SourceState GetSourceState(this PropertyReference property)
