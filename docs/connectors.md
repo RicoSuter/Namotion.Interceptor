@@ -15,6 +15,7 @@ In practice, sources act as network clients and servers act as network servers, 
 - [MQTT](connectors-mqtt.md) - MQTT client/server integration for IoT scenarios
 - [OPC UA](connectors-opcua.md) - OPC UA client/server integration for industrial automation ([Client](connectors-opcua-client.md) | [Server](connectors-opcua-server.md) | [Mapping](connectors-opcua-mapping.md))
 - [Subject Updates](connectors-subject-updates.md) - Wire format for serializing subject state
+- [Source Monitoring](connectors-monitoring.md) - Synchronization state, waits, and the source event stream
 
 ## Sources
 
@@ -123,6 +124,20 @@ A write's origin moves through a lifecycle: it starts as a pending stamp set by 
 - Optimistic re-apply on reconnection: after loading initial state, queued changes are compared against the current (post-reconnection) property values. Only changes where the source hasn't modified the property are re-applied locally and sent to the source as fresh writes. Changes where the source value diverged are dropped (source wins).
 - In-memory only: queued writes are lost on process restart
 
+### Monitoring Synchronization State
+
+Every source reports whether it is connecting, synchronized, or stopped, through a per-tree registry, a typed event stream, and an awaitable wait. Add `WithSourceMonitoring()` to the context recipe to enable it:
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithRegistry()
+    .WithSourceMonitoring(builder.Services);
+```
+
+See [Source Monitoring](connectors-monitoring.md) for waiting on synchronization, reading per-property state, and the event stream.
+
 ### Inbound Update Error Handling
 
 When applying inbound updates (writing data from the external system to the local subject model), if an individual update fails (the action throws an exception), the error is logged and **the update is dropped**. There is no retry mechanism for inbound updates.
@@ -171,10 +186,15 @@ public interface ISubjectSource : ISubjectConnector
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken);
     Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken);
+
+    SourceState State { get; }
+    DateTimeOffset? LastSynchronizedAt { get; }
+    int PendingWriteCount { get; }
+    event EventHandler<SourceEvent>? StateChanged;
 }
 ```
 
-Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch.
+Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See the XML docs on `ISubjectSource` for their exact contract, including the lock-free requirement on `State`/`LastSynchronizedAt`/`RootSubject` and the obligation to register with every reachable `SourceMonitor`.
 
 #### Custom Source Example
 

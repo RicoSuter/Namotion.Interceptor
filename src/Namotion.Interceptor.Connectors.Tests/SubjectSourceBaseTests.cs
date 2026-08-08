@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
@@ -21,6 +24,9 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        subjectContextMock
+            .Setup(context => context.GetServices<SourceMonitor>())
+            .Returns(ImmutableArray<SourceMonitor>.Empty);
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock
@@ -59,6 +65,86 @@ public class SubjectSourceBaseTests
         // then replay since requesting complete state
         Assert.Equal("Update1", updates.ElementAt(1));
         Assert.Equal("Update2", updates.ElementAt(2));
+    }
+
+    [Fact]
+    public async Task WhenThePumpFailsAfterReachingSynchronized_ThenTheCatchTransitionsBackToSynchronizing()
+    {
+        // Arrange
+        // A first-iteration failure can never distinguish ExecuteAsync's catch-block transition
+        // from the entry-line transition that always runs first (both land on Synchronizing, which is
+        // already the source's default state, so neither publishes an event). To observe the
+        // catch's OWN transition, the pump must first genuinely reach Synchronized and then fail.
+        // The mock context deliberately does not configure GetService<PropertyChangeInterceptor>(),
+        // so constructing the ChangeQueueProcessor - which happens right after LoadInitialStateAsync
+        // has already transitioned the source to Synchronized - throws and lands in the catch.
+        var subjectContextMock = new Mock<IInterceptorSubjectContext>();
+        subjectContextMock
+            .Setup(s => s.TryGetService<ISubjectRegistry>())
+            .Returns(new SubjectRegistry());
+        subjectContextMock
+            .Setup(context => context.GetServices<SourceMonitor>())
+            .Returns(ImmutableArray<SourceMonitor>.Empty);
+
+        var subjectMock = new Mock<IInterceptorSubject>();
+        subjectMock
+            .Setup(s => s.Context)
+            .Returns(subjectContextMock.Object);
+
+        var observedStates = new ConcurrentQueue<SourceState>();
+        var sawSynchronizingAfterSynchronized = new ManualResetEventSlim(false);
+
+        var source = new TestSubjectSource(subjectMock.Object, subjectContextMock.Object, NullLogger.Instance,
+            retryTime: TimeSpan.FromSeconds(30))
+        {
+            LoadInitialStateOverride = _ => Task.FromResult<Action?>(null),
+        };
+
+        source.StateChanged += (_, sourceEvent) =>
+        {
+            observedStates.Enqueue(sourceEvent.NewState);
+            if (sourceEvent.NewState == SourceState.Synchronizing && observedStates.Contains(SourceState.Synchronized))
+            {
+                sawSynchronizingAfterSynchronized.Set();
+            }
+        };
+
+        using var cancellationTokenSource = new CancellationTokenSource();
+
+        // Act
+        await source.StartAsync(cancellationTokenSource.Token);
+        var caughtBackToSynchronizing = sawSynchronizingAfterSynchronized.Wait(TimeSpan.FromSeconds(10));
+        await source.StopAsync(cancellationTokenSource.Token);
+        await cancellationTokenSource.CancelAsync();
+
+        // Assert
+        Assert.True(caughtBackToSynchronizing,
+            "Expected the pump to reach Synchronized and then be caught back to Synchronizing after the failure.");
+    }
+
+    [Fact]
+    public async Task WhenExecuteAsyncExitsViaCancellation_ThenTheFinallyTransitionsToStopped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithLifecycle();
+        var source = new TestStateSource(new Person(context));
+        var stoppedRaised = new ManualResetEventSlim(false);
+        source.StateChanged += (_, sourceEvent) =>
+        {
+            if (sourceEvent.NewState == SourceState.Stopped)
+            {
+                stoppedRaised.Set();
+            }
+        };
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.ExecuteCount >= 1);
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(stoppedRaised.Wait(TimeSpan.FromSeconds(10)), "Expected the finally block to publish Stopped.");
+        Assert.Equal(SourceState.Stopped, source.State);
     }
 
     [Fact]
@@ -884,6 +970,9 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        subjectContextMock
+            .Setup(context => context.GetServices<SourceMonitor>())
+            .Returns(ImmutableArray<SourceMonitor>.Empty);
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock
@@ -964,6 +1053,51 @@ public class SubjectSourceBaseTests
         Assert.True(spawnedTaskCompleted, "Spawned task should run to completion (cancelled), not be left dangling.");
     }
 
+    [Fact]
+    public void WhenSubjectSourceBaseDeclaresState_ThenItReadsLockFreeNotUnderStateLock()
+    {
+        // Arrange
+        // The docs' lock-free getter contract (docs/connectors-monitoring.md: State, LastSynchronizedAt
+        // and RootSubject must not acquire any lock held while StateChanged is raised) has no dynamic
+        // test: SourceMonitor reads source.State while holding its own _lock, and TransitionTo raises
+        // StateChanged while holding _stateLock - a regression that made State take _stateLock too
+        // would only deadlock under a genuinely concurrent, cross-thread interleaving between a
+        // transitioning thread and a monitor read, not something a unit test can force deterministically.
+        // Same not-dynamically-testable shape as the drain fence pinned in SourceSubscriptionTests
+        // (WhenTheDrainLoopClearsTheDrainingFlag...); use the same static-scan technique: pin the
+        // literal implementation actually used, so a regression back to a locking getter is at least
+        // caught here, even though the deadlock it would reintroduce is not independently exercised.
+        var sourceFilePath = GetSubjectSourceBaseFilePath();
+        var source = File.ReadAllText(sourceFilePath);
+        var stateProperty = ExtractExpressionBodiedMember(source, "public SourceState State =>");
+
+        // Act & Assert
+        Assert.Contains("Volatile.Read", stateProperty);
+        Assert.DoesNotContain("_stateLock", stateProperty);
+        Assert.DoesNotContain("lock (", stateProperty);
+    }
+
+    private static string ExtractExpressionBodiedMember(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Expected to find '{signature}' in the source file.");
+
+        var end = source.IndexOf(';', start);
+        Assert.True(end >= 0, $"Expected '{signature}' to end with a ';' (expression-bodied member).");
+
+        return source[start..(end + 1)];
+    }
+
+    private static string GetSubjectSourceBaseFilePath([CallerFilePath] string testFilePath = "")
+    {
+        // CallerFilePath is resolved at this call's compile time, from this test file's own path -
+        // resilient to whatever the test runner's current directory happens to be (bin/Debug/...),
+        // unlike a path built from Environment.CurrentDirectory or the test assembly's location.
+        var testDirectory = Path.GetDirectoryName(testFilePath)!;
+        return Path.GetFullPath(Path.Combine(
+            testDirectory, "..", "Namotion.Interceptor.Connectors", "SubjectSourceBase.cs"));
+    }
+
     /// <summary>
     /// Builds a write context the way the interceptor chain would, so a single interceptor can be driven
     /// with a stub terminal. The executor is the subject's own, matching what the chain threads through
@@ -977,5 +1111,44 @@ public class SubjectSourceBaseTests
             subject.GetPropertyReference(propertyName),
             currentValue,
             newValue);
+    }
+
+    [Fact]
+    public async Task WhenStartAsyncIsCalledTwice_ThenTheSecondStartIsIgnored()
+    {
+        // Arrange
+        // A source registered in DI AND attached to the subject graph is started down both paths.
+        // Two pumps then run against one source: the first to exit latches Stopped in its finally,
+        // terminally, while the second is still listening and applying live values.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithSourceMonitoring();
+
+        var subject = new Person(context);
+        var recordingLogger = new RecordingLogger();
+        var loads = 0;
+        using var loaded = new ManualResetEventSlim(false);
+        using var source = new TestSubjectSource(subject, context, recordingLogger, writeRetryQueueSize: 0)
+        {
+            LoadInitialStateOverride = _ =>
+            {
+                Interlocked.Increment(ref loads);
+                loaded.Set();
+                return Task.FromResult<Action?>(null);
+            }
+        };
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        Assert.True(loaded.Wait(TimeSpan.FromSeconds(10)));
+        await source.StartAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(recordingLogger.Warnings, message => message.Contains("already started"));
+        await AsyncTestHelpers.WaitUntilAsync(() => source.State == SourceState.Synchronized);
+        Assert.Equal(1, Volatile.Read(ref loads));
     }
 }

@@ -71,6 +71,7 @@ namespace Namotion.Interceptor.Tracking.Change
         public long Revision { get; }
         public bool Equals(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange other) { }
         public override bool Equals(object? obj) { }
+        public TValue GetCurrentValue<TValue>() { }
         public override int GetHashCode() { }
         public TValue GetNewValue<TValue>() { }
         public TValue GetOldValue<TValue>() { }
@@ -86,6 +87,10 @@ namespace Namotion.Interceptor.Tracking.Change
 }
 namespace Namotion.Interceptor.Tracking
 {
+    public interface IStartupCompletionDeferrer
+    {
+        System.IDisposable DeferCompletion();
+    }
     public static class InterceptorSubjectContextExtensions
     {
         public static Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this Namotion.Interceptor.IInterceptorSubjectContext context) { }

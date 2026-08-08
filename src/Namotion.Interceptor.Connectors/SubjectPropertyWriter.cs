@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors.Monitoring;
 
 namespace Namotion.Interceptor.Connectors;
 
@@ -14,18 +15,29 @@ namespace Namotion.Interceptor.Connectors;
 /// </remarks>
 public sealed class SubjectPropertyWriter
 {
-    private readonly ISubjectSource _source;
+    private readonly SubjectSourceBase _source;
     private readonly ILogger _logger;
     private readonly Lock _lock = new();
 
     private List<Action>? _updates = [];
+
+    // Bumped by every StartBuffering call. LoadInitialStateAndResumeAsync captures the generation
+    // in effect when it starts and compares it again after its (possibly long) await: if a later
+    // StartBuffering happened in between, this call's snapshot is stale and must not be applied,
+    // replayed, or certified as Synchronized - see LoadInitialStateAndResumeAsync.
+    private int _generation;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
     /// </summary>
     /// <param name="source">The source associated with this writer.</param>
     /// <param name="logger">The logger.</param>
-    public SubjectPropertyWriter(ISubjectSource source, ILogger logger)
+    /// <remarks>
+    /// Typed to the concrete base rather than <see cref="ISubjectSource"/> because this writer
+    /// drives the source's state transitions, which only <see cref="SubjectSourceBase"/> defines. A
+    /// source implementing the interface directly owns its own write path and its own transitions.
+    /// </remarks>
+    public SubjectPropertyWriter(SubjectSourceBase source, ILogger logger)
     {
         _source = source;
         _logger = logger;
@@ -41,6 +53,30 @@ public sealed class SubjectPropertyWriter
         lock (_lock)
         {
             _updates = [];
+            _generation++;
+
+            // Under _lock, paired with the generation change that governs it, so the transition
+            // cannot be observed out of sync with the buffer it belongs to.
+            _source.TransitionStateTo(SourceState.Synchronizing);
+        }
+    }
+
+    /// <summary>
+    /// Invalidates the current generation without touching the update buffer, for a connection loss
+    /// detected before the reconnect's own <see cref="StartBuffering"/> call runs.
+    /// </summary>
+    /// <remarks>
+    /// An in-flight <see cref="LoadInitialStateAndResumeAsync"/> captured the old generation before
+    /// it started awaiting, so bumping it here is what makes that call discard its pre-outage
+    /// snapshot instead of applying it and reporting Synchronized. Deliberately does not reset
+    /// _updates: whatever has been buffered since the outage must survive until the reconnect's own
+    /// StartBuffering.
+    /// </remarks>
+    internal void InvalidateGeneration()
+    {
+        lock (_lock)
+        {
+            _generation++;
         }
     }
 
@@ -56,9 +92,22 @@ public sealed class SubjectPropertyWriter
     /// <returns>The task.</returns>
     public async Task LoadInitialStateAndResumeAsync(CancellationToken cancellationToken)
     {
+        // Published under _lock by StartBuffering/InvalidateGeneration; the comparison that matters
+        // happens under the lock below, so this read needs no lock of its own.
+        var generation = Volatile.Read(ref _generation);
+
         var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
+
         lock (_lock)
         {
+            if (generation != _generation)
+            {
+                // Superseded by a later StartBuffering: applying this snapshot would overwrite the
+                // newer cycle's writes, and reporting Synchronized would certify stale data.
+                _logger.LogDebug("LoadInitialStateAndResumeAsync discarded a stale snapshot superseded by a later reconnect.");
+                return;
+            }
+
             applyAction?.Invoke();
 
             // Replay previously buffered updates
@@ -68,23 +117,30 @@ public sealed class SubjectPropertyWriter
                 // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
                 // This is safe - it means another reconnection cycle already loaded state and replayed updates.
                 _logger.LogDebug("LoadInitialStateAndResumeAsync called but updates already replayed by concurrent reconnection.");
-                return;
             }
-
-            foreach (var action in updates)
+            else
             {
-                try
+                foreach (var action in updates)
                 {
-                    action();
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception e)
+                    {
+                        _logger.LogError(e, "Failed to apply subject update.");
+                    }
                 }
-                catch (Exception e)
-                {
-                    _logger.LogError(e, "Failed to apply subject update.");
-                }
+
+                // Must be after replay: Write() reads _updates without lock on the fast path.
+                _updates = null;
             }
 
-            // Must be after replay: Write() reads _updates without lock on the fast path.
-            _updates = null;
+            // Reported while still holding _lock, atomically with the generation check above, so a
+            // StartBuffering landing in between cannot let a superseded cycle certify Synchronized.
+            // Lock order writer._lock -> _stateLock -> monitor._lock (TransitionTo can reach a
+            // registered monitor synchronously) is never reversed anywhere, so it cannot deadlock.
+            _source.TransitionStateTo(SourceState.Synchronized);
         }
     }
 

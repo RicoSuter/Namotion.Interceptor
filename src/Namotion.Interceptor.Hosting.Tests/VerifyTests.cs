@@ -12,7 +12,7 @@ namespace Namotion.Interceptor.Hosting.Tests
         /// review the diff and accept by replacing the .verified.txt file with the test's .received.txt.
         /// </summary>
         [Fact]
-        public Task PublicApi() => Verify(typeof(InterceptorHostingExtensions).Assembly.GeneratePublicApi(new ApiGeneratorOptions
+        public Task PublicApi() => Verify(typeof(InterceptorSubjectContextExtensions).Assembly.GeneratePublicApi(new ApiGeneratorOptions
         {
             DenyNamespacePrefixes = ["System", "XamlGeneratedNamespace"]
         }));
