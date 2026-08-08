@@ -37,6 +37,13 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     [ThreadStatic]
     internal static bool IsWritingOwnNodeValues;
 
+    // The value the loop just wrote. The flag alone cannot identify our own reflection: a client write
+    // can land between the assignment to node.Value and our ClearChangeMasks, and the flush then reports
+    // THEIR value on our thread. Dropping it loses it permanently, because the node keeps serving it to
+    // clients while the subject never receives it.
+    [ThreadStatic]
+    internal static object? SelfWrittenNodeValue;
+
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
 
@@ -151,6 +158,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
                         node.Value = convertedValue;
                         node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+                        SelfWrittenNodeValue = convertedValue;
                         node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
                     }
                 }
@@ -158,6 +166,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
             finally
             {
                 IsWritingOwnNodeValues = false;
+                SelfWrittenNodeValue = null;
             }
         }
 
@@ -369,9 +378,10 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
     {
-        if (IsWritingOwnNodeValues)
+        if (IsWritingOwnNodeValues && Equals(value, SelfWrittenNodeValue))
         {
-            // Our own node write, reflected back synchronously by ClearChangeMasks.
+            // Our own node write, reflected back synchronously by ClearChangeMasks. Compared by value
+            // rather than by the flag alone, for the reason on the field above.
             return;
         }
 
