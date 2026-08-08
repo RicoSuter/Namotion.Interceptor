@@ -27,6 +27,13 @@ internal sealed class ChangeMerger : IDisposable
     private const int PropertyIndexMinimumCapacity = 256;
     private const int PropertyIndexMaximumCapacity = 1024;
 
+    // A trim releases a burst's high-water mark, but the index cannot tell a burst from a working set by
+    // looking at one batch. Flush widths vary constantly under load, so trimming on the first narrow batch
+    // makes a wide one regrow it immediately: measured at +17% allocation on the connector delivery
+    // benchmark. Requiring the narrow condition to persist distinguishes "the load went quiet" from
+    // "this flush happened to be small".
+    private const int NarrowBatchesBeforeTrim = 4;
+
     // Per property: the slot of its surviving change, the arrival index that seeded that slot, and the
     // revision bounds seen so far. Bounds are running, not global, which is what lets one pass do the
     // work: the walk goes backwards, so the last extension on each side is the batch extremum.
@@ -42,6 +49,7 @@ internal sealed class ChangeMerger : IDisposable
     // Reusable buffer for merged changes (rented from ArrayPool to avoid allocations on resize)
     private SubjectPropertyChange[] _buffer = RentClearedBuffer(BufferMinimumSize);
     private int _count;
+    private int _consecutiveNarrowBatches;
 
     /// <summary>
     /// Rents a buffer and clears it once. <see cref="ArrayPool{T}"/> hands out whatever the previous
@@ -242,7 +250,15 @@ internal sealed class ChangeMerger : IDisposable
         if (_propertyIndices.Capacity >= PropertyIndexMaximumCapacity &&
             distinctPropertyCount < _propertyIndices.Capacity / 4)
         {
-            _propertyIndices.TrimExcess(PropertyIndexMinimumCapacity);
+            if (++_consecutiveNarrowBatches >= NarrowBatchesBeforeTrim)
+            {
+                _propertyIndices.TrimExcess(PropertyIndexMinimumCapacity);
+                _consecutiveNarrowBatches = 0;
+            }
+        }
+        else
+        {
+            _consecutiveNarrowBatches = 0;
         }
 
         // Only the prefix Merge filled can hold object references (subjects, boxed values): every

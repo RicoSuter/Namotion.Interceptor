@@ -343,13 +343,41 @@ public class ChangeMergerTests
         merger.Reset();
         Assert.True(GetPropertyIndexCapacity(merger) > PropertyIndexMaximum);
 
-        // Act
-        merger.Merge(CreateWideBatch(changeCount: 2, distinctProperties: 2));
-        merger.Reset();
+        // Act: the trim waits for the narrow condition to persist, so one batch is not enough.
+        for (var round = 0; round < 4; round++)
+        {
+            merger.Merge(CreateWideBatch(changeCount: 2, distinctProperties: 2));
+            merger.Reset();
+        }
 
         // Assert
         Assert.True(GetPropertyIndexCapacity(merger) <= 293,
-            $"index capacity stayed at {GetPropertyIndexCapacity(merger)} after a narrow batch");
+            $"index capacity stayed at {GetPropertyIndexCapacity(merger)} after sustained narrow batches");
+    }
+
+    [Fact]
+    public void WhenNarrowAndWideBatchesAlternate_ThenTheIndexCapacityIsNotChurned()
+    {
+        // Arrange: flush widths vary constantly under load. Trimming on the first narrow batch makes the
+        // next wide one regrow the index, which measured as +17% allocation on the connector delivery
+        // benchmark, so the trim must not fire on routine variation.
+        using var merger = new ChangeMerger();
+
+        merger.Merge(CreateWideBatch(changeCount: 4096, distinctProperties: 4096));
+        merger.Reset();
+        var settledCapacity = GetPropertyIndexCapacity(merger);
+
+        // Act
+        for (var round = 0; round < 5; round++)
+        {
+            merger.Merge(CreateWideBatch(changeCount: 2, distinctProperties: 2));
+            merger.Reset();
+            merger.Merge(CreateWideBatch(changeCount: 4096, distinctProperties: 4096));
+            merger.Reset();
+        }
+
+        // Assert
+        Assert.Equal(settledCapacity, GetPropertyIndexCapacity(merger));
     }
 
     [Fact]
