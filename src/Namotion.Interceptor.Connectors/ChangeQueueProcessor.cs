@@ -34,7 +34,7 @@ public class ChangeQueueProcessor : IDisposable
 
     // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
-    private readonly ChangeMerger _flushMerger = new();
+    private readonly ChangeMerger _changeMerger = new();
 
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
@@ -84,7 +84,7 @@ public class ChangeQueueProcessor : IDisposable
         }
         catch
         {
-            _flushMerger.Dispose();
+            _changeMerger.Dispose();
             throw;
         }
     }
@@ -268,7 +268,7 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            var mergedChanges = _flushMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), suppressSupersededChanges: true);
+            var mergedChanges = _changeMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), suppressSupersededChanges: true);
 
             if (mergedChanges.Length > 0)
             {
@@ -294,11 +294,11 @@ public class ChangeQueueProcessor : IDisposable
             if (Volatile.Read(ref _disposed) == 1)
             {
                 // Disposed while flushing - return buffer to pool now
-                _flushMerger.Dispose();
+                _changeMerger.Dispose();
             }
             else
             {
-                _flushMerger.Reset();
+                _changeMerger.Reset();
             }
 
             Volatile.Write(ref _flushGate, 0);
@@ -327,7 +327,7 @@ public class ChangeQueueProcessor : IDisposable
             try
             {
                 // Clear and return the buffer to the pool
-                _flushMerger.Dispose();
+                _changeMerger.Dispose();
             }
             finally
             {
