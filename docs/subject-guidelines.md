@@ -303,6 +303,218 @@ public partial class Sensor
 }
 ```
 
+## Base Classes and Subclasses
+
+A subject can derive from another subject, and properties declared anywhere in the hierarchy are
+intercepted. The plumbing that interception needs (the context, the property table, the sync root and
+the helper methods the generated accessors call) is emitted once, in the class at the root of the
+hierarchy, and every subject below it inherits it.
+
+```csharp
+[InterceptorSubject]
+public partial class PersonBase
+{
+    public partial string Name { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Employee : PersonBase
+{
+    public partial string Department { get; set; }
+}
+```
+
+Writing `Name` on an `Employee` goes through the interceptor chain exactly like writing `Department`.
+A plain class with no attribute may sit between two subjects, and a subject may be `sealed` at any
+level. Nothing below is needed for this case.
+
+The rest of this section covers the two hand-written directions: a base class you write yourself that
+hosts generated subclasses, and a subclass you write yourself under a generated base class.
+
+### Writing a base class by hand
+
+A class can host generated subclasses when it exposes all of the following. A generated subject
+satisfies this by construction, so this only matters for a base class you write yourself.
+
+| Member | Needed by |
+|--------|-----------|
+| implements `IInterceptorSubject` | everything else |
+| implements `IRaisePropertyChanged`, on the base class or on the subject | the subject not re-declaring `PropertyChanged` and `RaisePropertyChanged` |
+| `protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)` | generated getters |
+| `protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)` | generated setters |
+| `protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)` | generated method wrappers |
+| `protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()` | the subject's own `IInterceptorSubject.Properties` |
+| `public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties` | merging the subject's properties with the base class ones |
+
+Details that are easy to get wrong:
+
+- Members may be more accessible than listed, and a member the base class itself inherits from
+  further up counts. A generic base class is checked with its type arguments substituted.
+- `InvokeMethod`'s last parameter must really be `params`. The generated call site passes arguments in
+  expanded form, so the same parameter types without `params` pass the check and then fail to compile.
+- `DefaultProperties` may be a static property or a static field, but its type has to be
+  `IReadOnlyDictionary<string, SubjectPropertyMetadata>` or something that implements it. A static of
+  that name with any other type is reported rather than accepted.
+- The `IRaisePropertyChanged` row is the only one that is not needed for the generated code to
+  compile. A base class that satisfies everything else but not that one still works, and the subject
+  declares its own change notification plumbing.
+
+What happens when a base class does not satisfy the contract depends on `DefaultProperties`. If it is
+present and usable, the subject falls back to emitting its own plumbing and the generator reports
+NI0012: the code compiles and behaves as it did before the plumbing became shared, which means
+properties declared on that base class are not intercepted. If `DefaultProperties` is missing or
+unusable as well, the generator reports NI0011 and generates nothing for the subject.
+
+Here is a base class that satisfies the whole contract:
+
+```csharp
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Linq;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
+
+public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+{
+    private IInterceptorExecutor? _context;
+    private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    IInterceptorSubjectContext IInterceptorSubject.Context
+        => InterceptorExecutor.GetOrCreate(ref _context, this);
+
+    ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
+
+    object IInterceptorSubject.SyncRoot { get; } = new object();
+
+    IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties
+        => GetInstanceProperties() ?? DefaultProperties;
+
+    void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        => _properties = ((IInterceptorSubject)this).Properties
+            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+            .ToFrozenDictionary();
+
+    public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
+        = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+
+    protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
+
+    protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
+        => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+
+    protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue,
+        Action<IInterceptorSubject, TProperty> setValue)
+    {
+        if (_context is null)
+        {
+            setValue(this, newValue);
+            return true;
+        }
+
+        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+    }
+
+    protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod,
+        params object?[] parameters)
+        => _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+}
+
+[InterceptorSubject]
+public partial class Machine : TrackedEntityBase
+{
+    public partial string SerialNumber { get; set; }
+}
+```
+
+### Three things the compiler cannot check for you
+
+The list above is checked by looking at member signatures, which cannot see what the members do.
+Three requirements are behavioural, and a base class that gets one of them wrong passes every check
+and then misbehaves at runtime.
+
+1. **`AddProperties` must merge starting from `((IInterceptorSubject)this).Properties`**, not from its
+   own `DefaultProperties` and not from its own backing field, and it must store the result in the
+   field that `GetInstanceProperties()` returns. Merging from its own field drops the subclass's
+   `DefaultProperties` on the first call, so the subject loses its own generated properties.
+2. **The three helpers must route through the same executor that `IInterceptorSubject.Context`
+   publishes for that instance.** A base class that keeps a second executor for the helpers still
+   compiles, and reproduces the exact bug that per hierarchy plumbing was introduced to fix: writes
+   look fine and no interceptor ever sees them.
+3. **`IInterceptorSubject.Context` must return an `IInterceptorExecutor` built for that instance.**
+   `InterceptorExecutor` binds to its subject when it is constructed, and other parts of the library
+   cast `Context` to `IInterceptorExecutor` without checking, so a borrowed or shared context
+   misroutes every property reference.
+
+### Writing a subclass by hand
+
+A hand-written class can derive from a generated subject and implement intercepted properties itself
+by calling the same four protected members the generated code uses. They are generated implementation
+detail: they are documented so this scenario is usable, not as a stable API.
+
+Such a class has no generated `DefaultProperties`, so it has to register its own property metadata by
+calling `((IInterceptorSubject)this).AddProperties(...)`. **That registration has to happen before the
+first intercepted write**, not merely somewhere in the class. The base class's generated
+`Subject(IInterceptorSubjectContext context)` constructor publishes the context before the subclass
+constructor body runs, so a write in that body already reaches the interceptor chain, and the chain
+throws `InvalidOperationException` when it looks up a property name that was never registered.
+
+```csharp
+using System;
+using System.Collections.Generic;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class Device
+{
+    public partial string Name { get; set; }
+}
+
+public class CustomDevice : Device
+{
+    private string _location = string.Empty;
+
+    public CustomDevice(IInterceptorSubjectContext context) : base(context)
+    {
+        // Register before the first write: the base constructor has already published the context.
+        ((IInterceptorSubject)this).AddProperties(
+            new SubjectPropertyMetadata(
+                nameof(Location),
+                typeof(string),
+                [],
+                subject => ((CustomDevice)subject).Location,
+                (subject, value) => ((CustomDevice)subject).Location = (string)value!,
+                isIntercepted: true,
+                isDynamic: false));
+
+        Location = "unknown";
+    }
+
+    public string Location
+    {
+        get => GetPropertyValue(nameof(Location), static subject => ((CustomDevice)subject)._location);
+        set => SetPropertyValue(nameof(Location), value, _location,
+            static (subject, newValue) => ((CustomDevice)subject)._location = newValue);
+    }
+}
+```
+
+One thing to avoid anywhere below a subject: do not declare a member named `GetPropertyValue`,
+`SetPropertyValue`, `InvokeMethod` or `GetInstanceProperties` for something else, and do not implement
+`IInterceptorSubject.Context`, `Data`, `SyncRoot` or `AddProperties` yourself. Either one takes over
+what the base class provides. Where a generated subject declares such a member, or sits below a class
+that does, the generator reports NI0013 or NI0014. A hand-written class with no subject below it is
+not scanned by the generator at all, so there the same member takes over silently. See
+[Hierarchy Hazards](generator.md#hierarchy-hazards) for why it matters.
+
 ## Property Change Hooks
 
 The source generator creates optional partial method hooks for each partial property, allowing you to execute custom logic before or after property changes.

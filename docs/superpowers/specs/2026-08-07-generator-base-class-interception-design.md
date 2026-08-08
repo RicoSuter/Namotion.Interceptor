@@ -337,7 +337,7 @@ listing `IInterceptorSubject`, so CS0540 stops constraining the design, the re-i
 becomes structurally impossible, and `GetInstanceProperties()` disappears from both the emitted code and
 the base class contract.
 
-It is rejected on performance. `IInterceptorSubject.Properties` is not a cold metadata path. It is
+The concern was performance. `IInterceptorSubject.Properties` is not a cold metadata path. It is
 read on every intercepted write through `PropertyReference.Metadata`, which is deliberately uncached:
 
 ```
@@ -346,16 +346,31 @@ src/Namotion.Interceptor/PropertyReference.cs:20   "Looks up the property metada
 ```
 
 with callers at `IWriteInterceptor.cs:258` and `:280`, `LifecycleInterceptor.cs:296`, and
-`DerivedPropertyChangeHandler.cs:156`. The alternative therefore adds a virtual call inside a member
-already reached through an interface dispatch, several times per intercepted write, for every subject
-including the large majority that have no base class at all. The design keeps the hot path untouched
-and pays for it with NI0014 and the named residual risks below.
+`DerivedPropertyChangeHandler.cs:156`. The alternative adds a virtual call inside a member already
+reached through an interface dispatch, several times per intercepted write, for every subject
+including the large majority that have no base class at all.
 
-**The rejection is reasoning, not measurement, and the reasoning cuts against a correctness benefit**,
-since the alternative makes the hijack structurally impossible and `AGENTS.md` ranks correctness above
-performance. To keep the decision honest the benchmark gate below measures the alternative once,
-alongside the chosen design. If the `Properties` row comes out flat, the trade should be revisited
-before merge rather than left as an assertion.
+**That concern was then measured, and it is not a cliff.** The numbers, from
+`docs/superpowers/evidence/2026-08-07-hierarchy-benchmark.md`:
+
+- At a monomorphic call site the hook is free. Through the real `PropertyReference.Metadata` the
+  alternative measured 4.681 ns against the chosen design's 4.801 ns, inside the noise floor and with
+  no sign worth trusting. The JIT devirtualizes it when it sees one type.
+- At a polymorphic call site the hook costs 0.133 ns per `Properties` read, reproduced in both runs
+  and larger than either arm's run to run spread. The polymorphic site is the representative one,
+  since `PropertyReference.Metadata` is a single shared call site that every subject type passes
+  through.
+- Scaled to a write, at two to four reads per intercepted write, that is roughly 0.27 ns to 0.53 ns on
+  a write measured at 11.86 ns, so about 2 to 4 percent. That is arithmetic on the measured per read
+  delta rather than a measured write, and it sits at or below this machine's noise floor.
+
+So "rejected on performance" is not a claim this spec is entitled to leave standing unqualified. The
+decision to keep the current design stands, and it was taken deliberately with those numbers in hand:
+the cost is small but is paid by every subject forever, including the large majority with no
+hierarchy, while the hazard the hook would remove is caught at compile time by NI0014 for every
+consumer that recompiles. `AGENTS.md` ranks correctness above performance, so this is a close call
+rather than an obvious one, and anyone revisiting it should start from the numbers rather than from
+the phrase.
 
 ### Naming
 
@@ -649,12 +664,20 @@ aliasing hazard, but `Context` is what makes the severity.
 
 ## Accepted residual risks
 
-**Cross assembly rebuild.** NI0014 fires where the derived subject is compiled. If assembly A ships a
-subject base, assembly B compiles a subject deriving from it and builds clean, and A then ships a
-version that adds a public `object SyncRoot { get; }`, the runtime recomputes the interface map and
-B's lock silently moves to the wrong object without B ever being recompiled. This requires a base
-author to add a member with one of four exact names and signatures. The rejected virtual hook would
-make it structurally impossible; keeping the hot path clean costs this.
+**Cross assembly rebuild.** NI0014 fires where the derived subject is compiled, so a member added to
+a base assembly afterwards is not seen. The risk is narrower than "A adds a member and B breaks". All
+four of the following have to hold:
+
+1. the referenced assembly's subject hierarchy is more than one level;
+2. the new member is public, non-static and instance, and is added to a class **between** the root and
+   the consuming subject rather than to the root itself, because a class's own explicit implementation
+   beats its own public members;
+3. it matches an `IInterceptorSubject` member by name and signature exactly;
+4. the consuming assembly ships without being recompiled.
+
+Recompiling the consumer turns it into an NI0014 build error, so the exposure window is precisely
+"shipped, not rebuilt". The rejected virtual hook would make it structurally impossible; keeping the
+hot path clean costs this.
 
 **Interface evolution.** Because derived subjects keep re-listing `IInterceptorSubject`, any member
 added to that interface in future has to be evaluated for the same hijack question and added to
@@ -674,7 +697,9 @@ is intercepted, which is the fix working as intended on the shape a subclass aut
 write. `The subclass side` above depends on exactly this ordering.
 
 All three are documented in `docs/generator.md` together with the reason they are accepted, namely
-that the alternative costs a virtual call on the intercepted write path.
+that the alternative costs a virtual call on the intercepted write path, measured at 0.133 ns per
+`Properties` read at a polymorphic call site and flat at a monomorphic one, paid by every subject
+including those with no hierarchy.
 
 ## Performance
 
@@ -712,8 +737,10 @@ Add a hierarchy benchmark to `Namotion.Interceptor.Benchmark` and run it on mast
 Non-regression requires five flat rows: root only subject get, root only subject set, derived declared
 get, derived declared set, and `Properties` access. The improvement is three level construction, where allocated
 bytes must drop. One additional row measures the rejected virtual hook against the chosen design on
-`Properties` access, so that rejection rests on a number rather than on reasoning; if it is flat, raise
-it before merge. The three level shape is not synthetic: `VirtualPerson` to `VirtualEmployee` to
+`Properties` access, so that rejection rests on a number rather than on reasoning. That row was run:
+the hook is flat at a monomorphic call site and costs 0.133 ns per read at a polymorphic one, and the
+decision was re-taken on those numbers rather than left as an assertion. The three level shape is not
+synthetic: `VirtualPerson` to `VirtualEmployee` to
 `VirtualManager` (`VirtualPropertyIntegrationTests.cs:70-86`) is exactly that shape, though it is a
 test model rather than product code, and no subject in the repository is deeper than three
 levels, so that row demonstrates the mechanism rather than a representative workload.
