@@ -24,6 +24,9 @@ public sealed class TestSubjectSource : SubjectSourceBase
 
     public override IInterceptorSubject RootSubject => _subject;
 
+    /// <summary>Exposes the protected ReportConnectionLost seam for tests.</summary>
+    public void SimulateConnectionLost() => ReportConnectionLost();
+
     public int WriteBatchSizeOverride { get; init; }
 
     public override int WriteBatchSize => WriteBatchSizeOverride;
