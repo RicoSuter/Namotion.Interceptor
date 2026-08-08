@@ -383,7 +383,7 @@ All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ### Write Retry Queue During Disconnection
 
-Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -505,7 +505,7 @@ Between the SDK's `OnReconnectComplete` (step 3) and the health check's full sta
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
 
-**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). On reconnection, after loading the server's current state, queued changes are optimistically re-applied only if the server hasn't changed the property (source wins on conflict). Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
+**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). On reconnection, after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
 
 ### Resilience Configuration
 

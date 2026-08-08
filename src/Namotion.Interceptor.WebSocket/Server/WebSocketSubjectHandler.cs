@@ -367,7 +367,12 @@ public sealed class WebSocketSubjectHandler
             propertyFilter: propertyReference =>
                 propertyReference.TryGetRegisteredProperty() is { } property &&
                 (_configuration.PathProvider?.IsPropertyIncluded(property) ?? true),
-            writeHandler: BroadcastChangesAsync, BufferTime, null, logger);
+            writeHandler: BroadcastChangesAsync,
+            // Safe only because inbound updates are applied under the originating connection rather than
+            // this handler, so none of them is skipped here as our own echo and every superseding value
+            // is broadcast on. Applying them under this handler would break it.
+            ChangeSupersessionRule.SourceValuesAreSettled,
+            BufferTime, null, logger);
 
     public async ValueTask CloseAllConnectionsAsync()
     {

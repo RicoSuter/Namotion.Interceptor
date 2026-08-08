@@ -17,6 +17,12 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     // overwriting each other's BaseDataVariableState reference on shared properties.
     internal string OpcUaVariableKey { get; } = "OpcUaVariable:" + Guid.NewGuid();
 
+    // A client write reaches the node before UpdateProperty applies it, so an applied value is settled
+    // here by construction, which is what SourceValuesAreSettled requires. Named once because the write loop and the
+    // processor must agree: if only one of them ranked against the last commit, the other would still
+    // write an older one out. Do not inline either use.
+    private const ChangeSupersessionRule SupersessionRule = ChangeSupersessionRule.SourceValuesAreSettled;
+
     private readonly IInterceptorSubject _subject;
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
@@ -36,6 +42,17 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     // Thread-scoped, not an instance field: a client write on another thread must not be caught by it.
     [ThreadStatic]
     internal static bool IsWritingOwnNodeValues;
+
+    // The value the loop just wrote, so our own reflection is identified by what it carries rather than
+    // by the flag alone. The flag says only that this thread is in the loop, which stops being the same
+    // thing as soon as anything sets node.Value between our assignment and our ClearChangeMasks: the
+    // flush then reports THEIR value on our thread, and dropping it loses the value permanently, since
+    // the node keeps serving it to clients while the subject never receives it.
+    //
+    // The SDK's own write service cannot do that, because it takes the node manager lock we hold for the
+    // whole batch. This is what makes the identification exact rather than a guess about who else writes.
+    [ThreadStatic]
+    internal static object? SelfWrittenNodeValue;
 
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
@@ -113,7 +130,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                property.IsPropertyIncluded(_configuration.Mapper, _subject);
     }
 
-    private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    internal ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         var server = _server;
         var currentInstance = server?.CurrentInstance;
@@ -133,6 +150,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         }
 
         var span = changes.Span;
+        var written = 0;
         lock (nodeManagerLock)
         {
             IsWritingOwnNodeValues = true;
@@ -141,6 +159,15 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                 for (var i = 0; i < span.Length; i++)
                 {
                     var change = span[i];
+
+                    // Decided again here rather than only when the batch was assembled: a client write
+                    // takes this same lock, so one can land between the two and leave the node holding
+                    // its value while we are about to overwrite it with an older commit.
+                    if (ChangeDelivery.IsSuperseded(in change, SupersessionRule))
+                    {
+                        continue;
+                    }
+
                     if (change.Property.TryGetPropertyData(OpcUaVariableKey, out var data) &&
                         data is BaseDataVariableState node &&
                         change.Property.TryGetRegisteredProperty() is { } registeredProperty)
@@ -151,17 +178,21 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
                         node.Value = convertedValue;
                         node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+                        SelfWrittenNodeValue = convertedValue;
                         node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                        written++;
                     }
                 }
             }
             finally
             {
                 IsWritingOwnNodeValues = false;
+                SelfWrittenNodeValue = null;
             }
         }
 
-        OutgoingThroughput.Add(span.Length);
+        // What reached a node, not what the batch offered: a superseded or unmapped change is not traffic.
+        OutgoingThroughput.Add(written);
         return ValueTask.CompletedTask;
     }
 
@@ -220,6 +251,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                     using var changeQueueProcessor = new ChangeQueueProcessor(
                         source: this, _context,
                         propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
+                        SupersessionRule,
                         _configuration.BufferTime, maxQueueDepth: null, logger: _logger);
 
                     await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
@@ -369,9 +401,10 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
     {
-        if (IsWritingOwnNodeValues)
+        if (IsWritingOwnNodeValues && Equals(value, SelfWrittenNodeValue))
         {
-            // Our own node write, reflected back synchronously by ClearChangeMasks.
+            // Our own node write, reflected back synchronously by ClearChangeMasks. Compared by value
+            // rather than by the flag alone, for the reason on the field above.
             return;
         }
 

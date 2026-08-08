@@ -337,7 +337,7 @@ See [Subject Updates](connectors-subject-updates.md) for details on the update f
 
 ### Write Retry Queue
 
-Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via the client configuration:
+Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via the client configuration:
 
 ```csharp
 configuration.WriteRetryQueueSize = 1000;  // Buffer up to 1000 writes (default, 0 to disable)

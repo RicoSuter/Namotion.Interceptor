@@ -121,10 +121,12 @@ namespace Namotion.Interceptor
         public override bool Equals(object? obj) { }
         public override int GetHashCode() { }
         public object? GetOrSetPropertyData(string key, object? value) { }
+        public void MarkPublished() { }
         public void RemovePropertyData(string key) { }
         public void SetPropertyData(string key, object? value) { }
         public bool TryAddPropertyData(string key, object? value) { }
         public bool TryGetPropertyData(string key, out object? value) { }
+        public bool TryGetWriteState(out long lastNonSourceCommitRevision, out long lastCommitRevision, out bool published) { }
         public System.DateTimeOffset? TryGetWriteTimestamp() { }
         public bool TryRemovePropertyData(string key, object? expectedValue) { }
         public static bool operator !=(Namotion.Interceptor.PropertyReference left, Namotion.Interceptor.PropertyReference right) { }

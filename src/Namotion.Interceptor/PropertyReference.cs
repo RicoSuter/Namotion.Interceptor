@@ -83,16 +83,19 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
             .Remove(new KeyValuePair<(string?, string), object?>((Name, key), expectedValue));
     }
 
-    private const string WriteTimestampKey = "Namotion.Interceptor.WriteTimestamp";
+    // Short by convention, and load-bearing here: the write state is read on every delivered change,
+    // string hash codes are not cached, so key length is per-call work. Matches the "ni.*" keys the
+    // tracking and connector layers use.
+    private const string WriteStateKey = "ni.wstate";
 
     /// <summary>
     /// Gets the write timestamp, or null if no timestamp has been set.
     /// </summary>
     public DateTimeOffset? TryGetWriteTimestamp()
     {
-        if (Subject.Data.TryGetValue((Name, WriteTimestampKey), out var value) && value is long[] holder)
+        if (TryGetWriteState(out var state))
         {
-            var ticks = Interlocked.Read(ref holder[0]);
+            var ticks = Interlocked.Read(ref state.TimestampTicks);
             return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
         }
 
@@ -100,19 +103,100 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Sets the write timestamp from raw UTC ticks, avoiding DateTimeOffset conversion on the hot path.
-    /// Uses <see cref="Interlocked.Exchange(ref long, long)"/> to guarantee atomic 64-bit writes
-    /// on 32-bit runtimes (the library targets netstandard2.0, which includes x86 .NET Framework;
-    /// ECMA-335 only guarantees atomicity for writes up to <c>native int</c> size, so plain stores
-    /// of a <c>long</c> can tear on 32-bit). Paired with <see cref="Interlocked.Read(ref long)"/>
-    /// on the read side for symmetric atomicity. The exchange's return value is intentionally
-    /// unused.
+    /// Gets the revision of the last write to this property that reached a write terminal, both counting
+    /// source-originated commits and excluding them, and whether a sink has already published its value.
+    /// Returns false when the property has never been written.
+    /// </summary>
+    /// <remarks>
+    /// A revision is only comparable against a change to the same property: revisions are per subject,
+    /// and two properties of one subject draw from the same counter. The values come from one lookup
+    /// because this runs per delivered change, but they are read independently and are not a snapshot:
+    /// rank against one of them, never against a difference between them. Which one a sink may rank
+    /// against is a property of the sink, not of the change; see
+    /// <see cref="PropertyWriteState.LastSourceCommitRevision"/>.
+    /// </remarks>
+    public bool TryGetWriteState(out long lastNonSourceCommitRevision, out long lastCommitRevision, out bool published)
+    {
+        if (TryGetWriteState(out var state))
+        {
+            lastNonSourceCommitRevision = Interlocked.Read(ref state.LastNonSourceCommitRevision);
+
+            // Each commit advances exactly one of the two, so the last of any kind is their maximum.
+            // A stale read of either can only lower it, which delivers a redundant change rather than
+            // dropping a live one.
+            lastCommitRevision = Math.Max(
+                lastNonSourceCommitRevision,
+                Interlocked.Read(ref state.LastSourceCommitRevision));
+
+            published = state.Published;
+            return true;
+        }
+
+        lastNonSourceCommitRevision = 0;
+        lastCommitRevision = 0;
+        published = false;
+        return false;
+    }
+
+    /// <summary>
+    /// Records that a sink has published this property's value. Sticky; see
+    /// <see cref="PropertyWriteState.Published"/>.
+    /// </summary>
+    public void MarkPublished()
+    {
+        GetOrAddWriteState().Published = true;
+    }
+
+    /// <summary>
+    /// Records what the terminal just committed: the write timestamp as raw UTC ticks, avoiding a
+    /// DateTimeOffset conversion on the hot path, and the commit revision. The revision goes to whichever
+    /// of the two slots the origin selects, never both, so this stays at one interlocked store per commit;
+    /// see <see cref="PropertyWriteState.LastSourceCommitRevision"/>. The timestamp is recorded either
+    /// way, preserving what <see cref="TryGetWriteTimestamp"/> reports.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void SetWriteState(long timestamp, long revision, bool isFromSource)
+    {
+        var state = GetOrAddWriteState();
+        Interlocked.Exchange(ref state.TimestampTicks, timestamp);
+
+        if (isFromSource)
+        {
+            Interlocked.Exchange(ref state.LastSourceCommitRevision, revision);
+        }
+        else
+        {
+            Interlocked.Exchange(ref state.LastNonSourceCommitRevision, revision);
+        }
+    }
+
+    /// <summary>
+    /// Sets the write timestamp alone, for the paths that produce a change without committing a write
+    /// through a terminal and therefore have no revision to stamp.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void SetWriteTimestamp(long timestamp)
     {
-        var holder = (long[])Subject.Data.GetOrAdd((Name, WriteTimestampKey), static _ => new long[1])!;
-        Interlocked.Exchange(ref holder[0], timestamp);
+        Interlocked.Exchange(ref GetOrAddWriteState().TimestampTicks, timestamp);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryGetWriteState(out PropertyWriteState state)
+    {
+        if (Subject.Data.TryGetValue((Name, WriteStateKey), out var value) && value is PropertyWriteState existing)
+        {
+            state = existing;
+            return true;
+        }
+
+        state = null!;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private PropertyWriteState GetOrAddWriteState()
+    {
+        return (PropertyWriteState)Subject.Data.GetOrAdd((Name, WriteStateKey), static _ => new PropertyWriteState())!;
     }
 
     #region Equality
