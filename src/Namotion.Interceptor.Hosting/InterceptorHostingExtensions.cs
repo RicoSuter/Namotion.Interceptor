@@ -4,168 +4,174 @@ using Microsoft.Extensions.Hosting;
 namespace Namotion.Interceptor.Hosting;
 
 /// <summary>
-/// Extension methods for attaching and detaching hosted services to/from interceptor subjects.
+/// Extension methods for attaching and detaching hosted services to and from interceptor subjects.
 /// </summary>
 public static class InterceptorHostingExtensions
 {
-    // TODO: Refactor to reuse code, lots of duplication here
-    
-    private const string AttachedHostedServicesKey = "Namotion.Hosting.AttachedHostedServices";
+    private const string AttachmentsKey = "Namotion.Hosting.HostedServiceAttachments";
+    private const string SubjectTargetKey = "Namotion.Hosting.SubjectTarget";
 
     /// <summary>
-    /// Gets all hosted services currently attached to the subject.
-    /// Returns an immutable snapshot that is thread-safe and allocation-free to enumerate.
+    /// Gets an immutable snapshot of the hosted service attachments on the subject.
     /// </summary>
-    /// <param name="subject">The subject to get attached hosted services from.</param>
-    /// <returns>An immutable array of attached hosted services, or an empty array if none are attached.</returns>
-    public static ImmutableArray<IHostedService> GetAttachedHostedServices(this IInterceptorSubject subject)
+    public static ImmutableArray<IHostedServiceAttachment> GetHostedServiceAttachments(this IInterceptorSubject subject)
     {
-        var value = subject.Data.GetOrAdd((null, AttachedHostedServicesKey), _ => null);
-        if (value is ImmutableArray<IHostedService> array)
-        {
-            return array;
-        }
-        return [];
+        // TryGetValue, not GetOrAdd: this runs on every context detach, under the lifecycle lock, and
+        // GetOrAdd inserts a null entry into every subject's data bag just to read it.
+        return subject.Data.TryGetValue((null, AttachmentsKey), out var value)
+            && value is ImmutableArray<IHostedServiceAttachment> attachments
+            ? attachments
+            : [];
     }
 
     /// <summary>
-    /// Attaches a hosted service to the subject. The service will be started when the subject's
-    /// lifecycle handler processes the attachment. This method does not wait for the service to start.
+    /// Attaches a hosted service factory to the subject. The handler invokes the factory when the
+    /// subject enters the graph and disposes the instance when it leaves, so a re-attach yields a
+    /// fresh instance. The factory must construct: returning an existing instance breaks the design,
+    /// because a re-attach would start an instance the handler has already disposed.
     /// </summary>
-    /// <param name="subject">The subject to attach the hosted service to.</param>
-    /// <param name="hostedService">The hosted service to attach.</param>
-    public static bool AttachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
+    public static IHostedServiceAttachment<T> AttachHostedService<T>(
+        this IInterceptorSubject subject, Func<T> factory)
+        where T : class, IHostedService
     {
-        bool wasAdded = false;
-        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
-            _ =>
-            {
-                wasAdded = true;
-                return ImmutableArray.Create(hostedService);
-            },
-            (_, value) =>
-            {
-                var array = value is ImmutableArray<IHostedService> arr ? arr : [];
-                if (!array.Contains(hostedService))
-                {
-                    wasAdded = true;
-                    return array.Add(hostedService);
-                }
-                return array;
-            });
+        var attachment = AddAttachment(subject, factory);
 
-        if (wasAdded)
+        var handler = subject.Context.TryGetService<HostedServiceHandler>();
+        if (handler is not null && handler.IsLive(subject) && attachment.Target.TryTakeOwnership(handler))
         {
-            // Context passed so the start is held open until it has actually run: this overload
-            // queues the start and returns without waiting for it, so anything treating "the graph
-            // has finished starting" as a completion point would otherwise pass it too early.
-            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            hostedServiceHandler?.AttachHostedService(hostedService, subject.Context);
+            handler.AppendStart(subject, attachment.Target);
         }
 
-        return wasAdded;
+        return attachment;
     }
 
     /// <summary>
-    /// Detaches a hosted service from the subject. The service will be stopped when the subject's
-    /// lifecycle handler processes the detachment. This method does not wait for the service to stop.
+    /// Attaches a hosted service factory and waits for the instance to start. Transactional: when the
+    /// start faults, the attachment is removed before the exception propagates.
     /// </summary>
-    /// <param name="subject">The subject to detach the hosted service from.</param>
-    /// <param name="hostedService">The hosted service to detach.</param>
-    public static bool DetachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
+    public static async Task<IHostedServiceAttachment<T>> AttachHostedServiceAsync<T>(
+        this IInterceptorSubject subject, Func<T> factory, CancellationToken cancellationToken)
+        where T : class, IHostedService
     {
-        bool wasRemoved = false;
-        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
-            _ => null,
-            (_, value) =>
-            {
-                if (value is ImmutableArray<IHostedService> array && array.Contains(hostedService))
-                {
-                    wasRemoved = true;
-                    var newArray = array.Remove(hostedService);
-                    return newArray.Length > 0 ? newArray : null;
-                }
-                return value;
-            });
+        var attachment = AddAttachment(subject, factory);
 
-        if (wasRemoved)
+        var handler = subject.Context.TryGetService<HostedServiceHandler>();
+        if (handler is null)
         {
-            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            hostedServiceHandler?.DetachHostedService(hostedService);
+            // No handler means no context to bound the lifetime, so the factory is stored and nothing runs.
+            return attachment;
         }
 
-        return wasRemoved;
+        await handler.EnsureStartedAsync().ConfigureAwait(false);
+
+        if (handler.IsLive(subject) && attachment.Target.TryTakeOwnership(handler))
+        {
+            // The token bounds this wait only. The transition itself runs to completion, so a caller
+            // that gives up waiting still ends with a started instance rather than a half started one.
+            await handler
+                .AppendStart(subject, attachment.Target)
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (attachment.Fault is { } fault)
+        {
+            RemoveAttachment(subject, attachment);
+            throw fault;
+        }
+
+        return attachment;
     }
 
     /// <summary>
-    /// Attaches a hosted service to the subject and waits for it to start.
+    /// Detaches a hosted service attachment. The instance is stopped, disposed and forgotten, and the
+    /// factory is removed, so a later context attach starts nothing.
     /// </summary>
-    public static async Task<bool> AttachHostedServiceAsync(
-        this IInterceptorSubject subject,
-        IHostedService hostedService,
-        CancellationToken cancellationToken)
+    public static bool DetachHostedService(this IInterceptorSubject subject, IHostedServiceAttachment attachment)
     {
-        bool wasAdded = false;
-        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
-            _ =>
-            {
-                wasAdded = true;
-                return ImmutableArray.Create(hostedService);
-            },
-            (_, value) =>
-            {
-                var array = value is ImmutableArray<IHostedService> arr ? arr : [];
-                if (!array.Contains(hostedService))
-                {
-                    wasAdded = true;
-                    return array.Add(hostedService);
-                }
-                return array;
-            });
-
-        if (wasAdded)
+        if (!RemoveAttachment(subject, attachment))
         {
-            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            if (hostedServiceHandler != null)
-            {
-                await hostedServiceHandler.AttachHostedServiceAsync(hostedService, subject.Context, cancellationToken);
-            }
+            return false;
         }
 
-        return wasAdded;
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        var handler = subject.Context.TryGetService<HostedServiceHandler>();
+        handler?.AppendStop(subject, target, signal: null, waitFor: null, CancellationToken.None);
+        return true;
     }
 
     /// <summary>
-    /// Detaches a hosted service from the subject and waits for it to stop.
+    /// Detaches a hosted service attachment and waits for the instance to stop and be disposed.
     /// </summary>
     public static async Task<bool> DetachHostedServiceAsync(
-        this IInterceptorSubject subject,
-        IHostedService hostedService,
-        CancellationToken cancellationToken)
+        this IInterceptorSubject subject, IHostedServiceAttachment attachment, CancellationToken cancellationToken)
     {
-        var wasRemoved = false;
-        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
+        if (!RemoveAttachment(subject, attachment))
+        {
+            return false;
+        }
+
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        var handler = subject.Context.TryGetService<HostedServiceHandler>();
+        if (handler is null)
+        {
+            return true;
+        }
+
+        await handler.EnsureStartedAsync().ConfigureAwait(false);
+        await handler
+            .AppendStop(subject, target, signal: null, waitFor: null, cancellationToken)
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return true;
+    }
+
+    private static HostedServiceAttachment<T> AddAttachment<T>(IInterceptorSubject subject, Func<T> factory)
+        where T : class, IHostedService
+    {
+        // Built outside the update delegate: ConcurrentDictionary may invoke that delegate more than
+        // once and does not roll back its side effects, so constructing the record inside it could
+        // register a target that loses the compare-and-swap and is never seen again.
+        var attachment = new HostedServiceAttachment<T>(new HostedServiceTarget(factory, subject: null));
+
+        subject.Data.AddOrUpdate((null, AttachmentsKey),
+            _ => ImmutableArray.Create<IHostedServiceAttachment>(attachment),
+            (_, value) => value is ImmutableArray<IHostedServiceAttachment> attachments
+                ? attachments.Add(attachment)
+                : ImmutableArray.Create<IHostedServiceAttachment>(attachment));
+
+        return attachment;
+    }
+
+    private static bool RemoveAttachment(IInterceptorSubject subject, IHostedServiceAttachment attachment)
+    {
+        var removed = false;
+
+        subject.Data.AddOrUpdate((null, AttachmentsKey),
             _ => null,
             (_, value) =>
             {
-                if (value is ImmutableArray<IHostedService> array && array.Contains(hostedService))
+                if (value is not ImmutableArray<IHostedServiceAttachment> attachments || !attachments.Contains(attachment))
                 {
-                    wasRemoved = true;
-                    var newArray = array.Remove(hostedService);
-                    return newArray.Length > 0 ? newArray : null;
+                    return value;
                 }
-                return value;
+
+                removed = true;
+                var updated = attachments.Remove(attachment);
+                return updated.Length > 0 ? updated : null;
             });
 
-        if (wasRemoved)
-        {
-            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            if (hostedServiceHandler != null)
-            {
-                await hostedServiceHandler.DetachHostedServiceAsync(hostedService, cancellationToken);
-            }
-        }
-
-        return wasRemoved;
+        return removed;
     }
+
+    internal static HostedServiceTarget GetOrAddSubjectTarget(this IInterceptorSubject subject, IHostedService hostedService)
+    {
+        var target = new HostedServiceTarget(factory: null, subject: hostedService);
+        var stored = subject.Data.GetOrAdd((null, SubjectTargetKey), _ => target);
+        return stored as HostedServiceTarget ?? target;
+    }
+
+    internal static HostedServiceTarget? TryGetSubjectTarget(this IInterceptorSubject subject)
+        => subject.Data.TryGetValue((null, SubjectTargetKey), out var value) ? value as HostedServiceTarget : null;
 }

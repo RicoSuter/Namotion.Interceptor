@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
 
@@ -13,11 +14,16 @@ public static class InterceptorSubjectContextExtensions
             {
                 ILogger? logger = null;
                 var handler = new HostedServiceHandler(() => logger);
-                serviceCollection.AddHostedService(sp =>
+
+                // A plain Add, not AddHostedService: AddHostedService routes through TryAddEnumerable,
+                // which dedupes on the implementation type, so a second context on the same collection
+                // would silently lose its handler and never start any of its subjects.
+                serviceCollection.AddSingleton<IHostedService>(sp =>
                 {
                     logger = sp.GetRequiredService<ILogger<HostedServiceHandler>>();
                     return handler;
                 });
+
                 return handler;
             }, _ => true);
 

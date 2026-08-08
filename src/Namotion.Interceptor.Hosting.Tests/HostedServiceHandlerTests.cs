@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Hosting;
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
@@ -21,168 +22,650 @@ public class HostedServiceHandlerTests
 
             // Assert
             Assert.Equal("John", person.FirstName);
-            Assert.Equal("Doe", person.LastName);
         });
 
         await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "Disposed");
-        Assert.Equal("Disposed", person.FirstName);
-    }
-    
-    [Fact]
-    public async Task WhenHostedServiceIsAttachedToSubject_ThenHostedServiceIsStarted()
-    {
-        // Arrange
-        Person person = null!;
-        await RunWithAppLifecycleAsync(async context =>
-        {
-            person = new Person(context);
-            
-            // Act
-            var hostedService = new PersonBackgroundService(person);
-            person.AttachHostedService(hostedService);
-
-            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
-
-            // Assert
-            Assert.Equal("John", person.FirstName);
-            Assert.Equal("Doe", person.LastName);
-        });
-
-        await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "Disposed");
-        Assert.Equal("Disposed", person.FirstName);
-    }
-    
-    [Fact]
-    public async Task WhenHostedServiceIsDetachedFromSubject_ThenHostedServiceIsStopped()
-    {
-        // Arrange
-        Person person;
-        await RunWithAppLifecycleAsync(async context =>
-        {
-            person = new Person(context);
-         
-            var hostedService = new PersonBackgroundService(person);
-            person.AttachHostedService(hostedService);
-            var attachedHostedServices = person.GetAttachedHostedServices();
-
-            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
-
-            Assert.Equal("John", person.FirstName);
-            Assert.Equal("Doe", person.LastName);
-            Assert.Single(attachedHostedServices);
-
-            // Act
-            person.DetachHostedService(hostedService);
-            attachedHostedServices = person.GetAttachedHostedServices();
-
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "Disposed");
-            Assert.Equal("Disposed", person.FirstName);
-            Assert.Empty(attachedHostedServices);
-        });
     }
 
     [Fact]
-    public async Task WhenSubjectServiceIsDetached_ThenHostedServiceIsStopped()
-    {
-        // Arrange
-        Person person;
-        await RunWithAppLifecycleAsync(async context =>
-        {
-            person = new Person(context);
-
-            var hostedService = new PersonBackgroundService(person);
-            person.AttachHostedService(hostedService);
-            var attachedHostedServices = person.GetAttachedHostedServices();
-
-            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
-            Assert.Single(attachedHostedServices);
-
-            // Act
-            ((IInterceptorSubject)person).Context.RemoveFallbackContext(context);
-            attachedHostedServices = person.GetAttachedHostedServices();
-
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "Disposed");
-            Assert.Equal("Disposed", person.FirstName);
-            Assert.Empty(attachedHostedServices); // the service has been stopped and
-                                                   // removed from list (not allowed to restart again anyway)
-        });
-    }
-
-    [Fact]
-    public async Task WhenHostedServiceIsAttachedAsync_ThenServiceIsStartedAndAwaited()
-    {
-        // Arrange
-        Person person = null!;
-        await RunWithAppLifecycleAsync(async context =>
-        {
-            person = new Person(context);
-            var hostedService = new PersonBackgroundService(person);
-
-            // Act - AttachHostedServiceAsync should wait for StartAsync to complete
-            await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
-
-            // Assert - Service should be running immediately after await returns
-            Assert.Equal("John", person.FirstName);
-            Assert.Equal("Doe", person.LastName);
-            Assert.Single(person.GetAttachedHostedServices());
-        });
-
-        await AsyncTestHelpers.WaitUntilAsync(() => person!.FirstName == "Disposed");
-        Assert.Equal("Disposed", person!.FirstName);
-    }
-
-    [Fact]
-    public async Task WhenHostedServiceIsDetachedAsync_ThenServiceIsStoppedAndAwaited()
-    {
-        // Arrange
-        Person person = null!;
-        await RunWithAppLifecycleAsync(async context =>
-        {
-            person = new Person(context);
-            var hostedService = new PersonBackgroundService(person);
-
-            // Start the service
-            await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
-            Assert.Equal("John", person.FirstName);
-
-            // Act - DetachHostedServiceAsync should wait for StopAsync to complete
-            await person.DetachHostedServiceAsync(hostedService, CancellationToken.None);
-
-            // Assert - Service should be stopped immediately after await returns
-            Assert.Equal("Disposed", person.FirstName);
-            Assert.Empty(person.GetAttachedHostedServices());
-        });
-    }
-
-    [Fact]
-    public async Task WhenAttachHostedServiceAsyncCalledTwice_ThenOnlyStartsOnce()
+    public async Task WhenAttachmentIsCreated_ThenTheFactoryProducesTheRunningInstance()
     {
         // Arrange
         await RunWithAppLifecycleAsync(async context =>
         {
             var person = new Person(context);
-            var hostedService = new PersonBackgroundService(person);
 
-            // Act - Attach same service twice
-            await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
-            await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
+            // Act
+            var attachment = await person.AttachHostedServiceAsync(
+                () => new PersonBackgroundService(person), CancellationToken.None);
 
-            // Assert - Should only be in the collection once
-            Assert.Single(person.GetAttachedHostedServices());
+            // Assert
+            Assert.NotNull(attachment.Current);
             Assert.Equal("John", person.FirstName);
         });
     }
 
+    [Fact]
+    public async Task WhenSubjectIsDetachedAndReattached_ThenAFreshInstanceRuns()
+    {
+        // Arrange - this is the whole point of the factory API. The pre-detach instance must be
+        // disposed and a NEW one created; restarting the old one is impossible because a disposed
+        // connector cannot restart.
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            var created = new List<TrackedBackgroundService>();
 
-    private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
+            child.AttachHostedService(() =>
+            {
+                var instance = new TrackedBackgroundService();
+                created.Add(instance);
+                return instance;
+            });
+
+            parent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => created.Count == 1 && created[0].IsStarted);
+
+            // Act - detach and reattach with no quiescing in between
+            parent.Child = null;
+            parent.Child = child;
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => created.Count == 2 && created[1].IsStarted,
+                message: "The re-attach did not create a second instance.");
+            await AsyncTestHelpers.WaitUntilAsync(() => created[0].IsDisposed,
+                message: "The pre-detach instance was never disposed.");
+            Assert.False(created[1].IsDisposed);
+        });
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsDetached_ThenTheInstanceIsDisposedExactlyOnce()
+    {
+        // Arrange
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            var instance = new TrackedBackgroundService();
+            child.AttachHostedService(() => instance);
+            parent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => instance.IsStarted);
+
+            // Act
+            parent.Child = null;
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => instance.IsDisposed);
+            Assert.Equal(1, instance.DisposeCount);
+        });
+    }
+
+    [Fact]
+    public async Task WhenAttachmentIsDetachedExplicitly_ThenALaterContextAttachStartsNothing()
+    {
+        // Arrange
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            var created = 0;
+            var attachment = child.AttachHostedService(() =>
+            {
+                created++;
+                return new TrackedBackgroundService();
+            });
+
+            parent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => created == 1);
+
+            // Act
+            await child.DetachHostedServiceAsync(attachment, CancellationToken.None);
+            parent.Child = null;
+            parent.Child = child;
+
+            // Assert - the attachment being gone is the deterministic invariant. Counting creations
+            // after a yield would assert an absence on a timer and could pass vacuously.
+            Assert.Empty(child.GetHostedServiceAttachments());
+        });
+    }
+
+    [Fact]
+    public async Task WhenTheFactoryThrows_ThenTheFaultIsRecordedAndCurrentStaysNull()
+    {
+        // Arrange
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+
+            // Act & Assert
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                person.AttachHostedServiceAsync<TrackedBackgroundService>(
+                    () => throw new InvalidOperationException("factory failed"), CancellationToken.None));
+
+            Assert.Equal("factory failed", exception.Message);
+
+            // The transactional guarantee: a caller's catch is never left owning an invisible attachment
+            Assert.Empty(person.GetHostedServiceAttachments());
+        });
+    }
+
+    [Fact]
+    public async Task WhenAStartFaults_ThenTheInstanceIsDisposed()
+    {
+        // Arrange - leaving a half started connector undisposed is the leak this design exists to fix
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService { ThrowOnStart = true };
+
+            // Act
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                person.AttachHostedServiceAsync(() => instance, CancellationToken.None));
+
+            // Assert
+            Assert.True(instance.IsDisposed);
+        });
+    }
+
+    [Fact]
+    public async Task WhenATransitionFaultedEarlier_ThenTheNextSuccessfulOneClearsTheFault()
+    {
+        // Arrange - a stale Fault would make a later successful attach throw, and the OPC UA wrappers
+        // would turn that into Status = Error with a stale message.
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            var shouldThrow = true;
+
+            var attachment = child.AttachHostedService(() =>
+            {
+                if (shouldThrow)
+                {
+                    shouldThrow = false;
+                    throw new InvalidOperationException("first attempt fails");
+                }
+
+                return new TrackedBackgroundService();
+            });
+
+            parent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => attachment.Fault is not null);
+
+            // Act
+            parent.Child = null;
+            parent.Child = child;
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => attachment.Current is not null);
+            Assert.Null(attachment.Fault);
+        });
+    }
+
+    [Fact]
+    public async Task WhenHostStops_ThenHandlerCreatedInstancesAreDisposedAndSubjectsAreNot()
+    {
+        // Arrange
+        var instance = new TrackedBackgroundService();
+        PersonWithBackgroundService person = null!;
+
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            person = new PersonWithBackgroundService(context);
+            await person.AttachHostedServiceAsync(() => instance, CancellationToken.None);
+        });
+
+        // Assert - the container disposes AddSubject singletons, so the claim under test is
+        // specifically that the HANDLER did not dispose the subject.
+        Assert.True(instance.IsDisposed);
+        Assert.False(person.WasDisposedByHandler);
+    }
+
+    [Fact]
+    public async Task WhenReparentedWithoutReachingZeroReferences_ThenNothingRestarts()
+    {
+        // Arrange - add-then-remove keeps the reference count above zero, so isLastDetach never fires
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
+
+            parent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => attachment.Current is not null);
+            var original = attachment.Current;
+
+            // Act - add then remove keeps the reference count above zero, so isLastDetach never fires
+            parent.SecondChild = child;
+            parent.Child = null;
+
+            // Assert - instance identity is deterministic; a creation count after a yield is not
+            Assert.Same(original, attachment.Current);
+            Assert.False(original!.IsDisposed);
+        });
+    }
+
+    [Fact]
+    public async Task WhenAServiceIsAttachedAfterItsHandlerDrained_ThenTheNextHandlerStartsIt()
+    {
+        // Arrange - two hosts, the second still running when the first has drained. The subject stays
+        // attached to the drained handler's context, so the attach below really does resolve it and
+        // the claim under test is reachable.
+        var firstBuilder = Host.CreateApplicationBuilder();
+
+        var firstContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(firstBuilder.Services);
+
+        var firstHost = firstBuilder.Build();
+        await firstHost.StartAsync();
+
+        var secondBuilder = Host.CreateApplicationBuilder();
+
+        var secondContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(secondBuilder.Services);
+
+        var secondHost = secondBuilder.Build();
+        await secondHost.StartAsync();
+
+        try
+        {
+            var subject = new Person();
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+            await firstHost.StopAsync();
+
+            // Act
+            var attachment = subject.AttachHostedService(() => new TrackedBackgroundService());
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => attachment.Current is { IsStarted: true },
+                message: "The drained handler claimed the target and never released it, so the live handler could not take it.");
+        }
+        finally
+        {
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenADrainedHandlerIsAskedToWaitForAStart_ThenItClaimsNothingAndReportsNothingStarted()
+    {
+        // Arrange - WaitForStartAsync is what an activation calls after resolving a subject, and it
+        // needs the same guards as the attach paths. The attach happens before the drain, so the
+        // handler really did create, own and start the target: attaching afterwards would leave no
+        // target at all and the call would short circuit before reaching anything under test. A
+        // drained handler releases only what its own drain snapshotted, so a claim taken here is
+        // never released and the live handler below would lose the compare and exchange forever.
+        var (firstHost, firstContext) = await StartHostAsync();
+        var (secondHost, secondContext) = await StartHostAsync();
+
+        var subject = new CountingHostedSubject();
+        var drainedHandler = firstContext.TryGetService<HostedServiceHandler>()!;
+
+        ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.StartCount == 1);
+
+        var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+        Assert.Same(drainedHandler, target.Owner);
+
+        await firstHost.StopAsync();
+
+        try
+        {
+            // Act
+            var started = await drainedHandler.WaitForStartAsync(subject, CancellationToken.None);
+
+            // Assert
+            Assert.False(started);
+            Assert.Equal(1, subject.StartCount);
+            Assert.Null(target.Owner);
+
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => subject.StartCount == 2,
+                message: "The drained handler claimed the target and never released it, so the live handler could not take it.");
+        }
+        finally
+        {
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenANonOwningHandlerIsAskedToWaitForAStart_ThenItReportsNothingStarted()
+    {
+        // Arrange - both handlers are live for the subject and both saw the attach, but only the
+        // first owns the target and appended a start. This is the case only the ownership check
+        // rejects: the second handler's activation would otherwise read the owner's running instance
+        // as its own start.
+        var (firstHost, firstContext) = await StartHostAsync();
+        var (secondHost, secondContext) = await StartHostAsync();
+
+        try
+        {
+            var subject = new CountingHostedSubject();
+            var firstHandler = firstContext.TryGetService<HostedServiceHandler>()!;
+            var secondHandler = secondContext.TryGetService<HostedServiceHandler>()!;
+
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.StartCount == 1);
+
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
+            Assert.True(secondHandler.IsLive(subject));
+
+            // Act
+            var started = await secondHandler.WaitForStartAsync(subject, CancellationToken.None);
+
+            // Assert
+            Assert.False(started);
+            Assert.Same(firstHandler, ((IInterceptorSubject)subject).TryGetSubjectTarget()!.Owner);
+            Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await firstHost.StopAsync();
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAHandlerIsAskedToWaitWhileItsOwnDrainIsStopping_ThenItAnswersWithoutQueueingBehindTheStop()
+    {
+        // Arrange - the drain clears liveness before it releases ownership, so a subject held inside
+        // its own stop is the one window where the handler still owns the target and only the
+        // liveness check can reject. Without it the call queues an empty transition behind that stop
+        // and an activation would block host startup on another host's shutdown.
+        var (host, context) = await StartHostAsync();
+
+        var subject = new CountingHostedSubject();
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+
+        var stopEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        subject.StopHold = () =>
+        {
+            stopEntered.TrySetResult();
+            return releaseStop.Task;
+        };
+
+        ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.StartCount == 1);
+
+        var drain = host.StopAsync();
+        await stopEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        try
+        {
+            var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+            Assert.Same(handler, target.Owner);
+            Assert.False(handler.IsLive(subject));
+
+            // Act
+            var wait = handler.WaitForStartAsync(subject, CancellationToken.None);
+
+            // Assert - the guard answers before the first await, so the task is already complete. An
+            // empty transition could not be: the stop ahead of it on the chain is still held.
+            Assert.True(wait.IsCompleted, "The call queued behind the in flight stop instead of answering that it has no start.");
+            Assert.False(await wait);
+        }
+        finally
+        {
+            releaseStop.TrySetResult();
+            await drain;
+        }
+    }
+
+    [Fact]
+    public async Task WhenAStartFaultedForAWaitingCaller_ThenTheFaultIsRethrown()
+    {
+        // Arrange - the AddHostedService guarantee the activation preserves: a subject that fails to
+        // start aborts host startup rather than leaving ApplicationStarted claiming it is running.
+        var (host, context) = await StartHostAsync();
+
+        try
+        {
+            var subject = new ThrowingHostedSubject(context);
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+
+            // Act & Assert
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => handler.WaitForStartAsync(subject, CancellationToken.None));
+
+            Assert.Equal("start failed", exception.Message);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheAttachAwaitIsCancelled_ThenTheStartStillRunsToCompletion()
+    {
+        // Arrange - the token bounds the caller's wait, not the transition. Aborting the work instead
+        // would leave a half started service behind and record the cancellation as a start failure,
+        // which the OPC UA wrappers surface as a user visible error status.
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService();
+            using var cancellation = new CancellationTokenSource();
+            await cancellation.CancelAsync();
+
+            // Act
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => person.AttachHostedServiceAsync(() => instance, cancellation.Token));
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => instance.IsStarted,
+                message: "The cancelled await aborted the start transition instead of only the wait.");
+
+            var attachment = Assert.Single(person.GetHostedServiceAttachments());
+            Assert.Same(instance, attachment.Current);
+            Assert.Null(attachment.Fault);
+        });
+    }
+
+    [Fact]
+    public void WhenASubjectWithoutHostedServicesIsRead_ThenNoDataEntryIsInserted()
+    {
+        // Arrange - both reads run on every context detach, under the lifecycle lock, for every
+        // subject in the graph.
+        var subject = (IInterceptorSubject)new Person();
+        var entriesBefore = subject.Data.Count;
+
+        // Act
+        var target = subject.TryGetSubjectTarget();
+        var attachments = subject.GetHostedServiceAttachments();
+
+        // Assert
+        Assert.Null(target);
+        Assert.Empty(attachments);
+        Assert.Equal(entriesBefore, subject.Data.Count);
+    }
+
+    [Fact]
+    public async Task WhenADrainedHandlerSeesAContextDetach_ThenTheLiveHandlersInstancesKeepRunning()
+    {
+        // Arrange - the drained handler is still wired into the graph it was started over, so a
+        // later graph move still reaches it. It created none of the instances now running, so it
+        // must stop and dispose none of them: whatever creates an instance disposes it, and only it.
+        var (firstHost, firstContext) = await StartHostAsync();
+        var (secondHost, secondContext) = await StartHostAsync();
+
+        try
+        {
+            var firstParent = new HostedParent(firstContext);
+            var child = new CountingHostedSubject();
+            var created = new ConcurrentQueue<TrackedBackgroundService>();
+
+            var attachment = child.AttachHostedService(() =>
+            {
+                var instance = new TrackedBackgroundService();
+                created.Enqueue(instance);
+                return instance;
+            });
+
+            firstParent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => child.StartCount == 1 && created.ToArray() is [{ IsStarted: true }]);
+
+            await firstHost.StopAsync();
+
+            var secondParent = new HostedParent(secondContext);
+            secondParent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => child.StartCount == 2 && created.ToArray() is [_, { IsStarted: true }]);
+
+            // Act
+            firstParent.Child = null;
+
+            // Assert - an empty transition on each chain drains whatever the detach appended, so the
+            // state is read after any stop would have run rather than after a delay.
+            var subjectTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
+            var attachmentTarget = ((IHostedServiceAttachmentTarget)attachment).Target;
+            await subjectTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await attachmentTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(1, child.StopCount);
+            Assert.NotNull(subjectTarget.Current);
+            Assert.NotNull(attachment.Current);
+
+            var instances = created.ToArray();
+            Assert.False(instances[1].IsStopped);
+            Assert.False(instances[1].IsDisposed);
+        }
+        finally
+        {
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenANonOwningHandlerSeesAContextDetach_ThenTheOwnersInstanceKeepsRunning()
+    {
+        // Arrange - the same rule with both handlers live. The second handler loses the compare and
+        // exchange on every target, so it started nothing and has nothing to stop.
+        var (firstHost, firstContext) = await StartHostAsync();
+        var (secondHost, secondContext) = await StartHostAsync();
+
+        try
+        {
+            var firstParent = new HostedParent(firstContext);
+            var secondParent = new HostedParent(secondContext);
+            var child = new CountingHostedSubject();
+            var instance = new TrackedBackgroundService();
+            var attachment = child.AttachHostedService(() => instance);
+
+            firstParent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => child.StartCount == 1 && instance.IsStarted);
+
+            secondParent.Child = child;
+
+            // Act
+            secondParent.Child = null;
+
+            // Assert
+            var subjectTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
+            var attachmentTarget = ((IHostedServiceAttachmentTarget)attachment).Target;
+            await subjectTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await attachmentTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(0, child.StopCount);
+            Assert.NotNull(subjectTarget.Current);
+            Assert.NotNull(attachment.Current);
+            Assert.False(instance.IsStopped);
+            Assert.False(instance.IsDisposed);
+        }
+        finally
+        {
+            await firstHost.StopAsync();
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAStopIsCancelled_ThenTheInstanceIsStillDisposed()
+    {
+        // Arrange - the stop clears Current before it runs the instance, so an instance whose
+        // StopAsync is cut short by the token is unreachable afterwards. The handler created it, so
+        // it owes the dispose whatever the stop itself managed to do.
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService();
+            var attachment = await person.AttachHostedServiceAsync(() => instance, CancellationToken.None);
+
+            using var cancellation = new CancellationTokenSource();
+            await cancellation.CancelAsync();
+
+            // Act
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => person.DetachHostedServiceAsync(attachment, cancellation.Token));
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => instance.IsDisposed,
+                message: "The cancelled stop escaped the transition body and skipped the dispose.");
+
+            Assert.False(instance.IsStopped);
+            Assert.Null(attachment.Fault);
+        });
+    }
+
+    [Fact]
+    public async Task WhenTheShutdownTokenIsAlreadyCancelled_ThenTheInstanceIsStillDisposed()
+    {
+        // Arrange - the ordinary HostOptions.ShutdownTimeout path: the drain hands the stopping
+        // token straight to every instance, so an expired timeout cancels each StopAsync it runs.
+        var (host, context) = await StartHostAsync();
+
+        var person = new Person(context);
+        var instance = new TrackedBackgroundService();
+        await person.AttachHostedServiceAsync(() => instance, CancellationToken.None);
+
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act
+        await host.StopAsync(cancellation.Token);
+
+        // Assert
+        Assert.False(instance.IsStopped);
+        Assert.True(instance.IsDisposed);
+    }
+
+    private static async Task<(IHost Host, IInterceptorSubjectContext Context)> StartHostAsync()
     {
         var builder = Host.CreateApplicationBuilder();
 
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+        return (host, context);
+    }
+
+    private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
+    {
+        var builder = Host.CreateApplicationBuilder();
+
+        // WithContextInheritance, not just WithLifecycle: without it a child subject's Context never
+        // resolves the handler and every child scenario below is silently unreachable.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
             .WithHostedServices(builder.Services);
 
         var host = builder.Build();
