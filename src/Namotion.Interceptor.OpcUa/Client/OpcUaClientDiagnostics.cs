@@ -4,6 +4,14 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// Provides diagnostic information about the OPC UA client connection state.
 /// Thread-safe for reading current values.
 /// </summary>
+/// <remarks>
+/// This reports transport health, protocol-specific and OPC UA only. Whether the model can be
+/// trusted is a separate question answered by <c>ISubjectSource.State</c>, which is the same for
+/// every connector: <c>Synchronized</c> once the initial load has completed, <c>Connecting</c>
+/// otherwise. Read them together to tell "the network is down" from "connected, still loading":
+/// the first is <see cref="IsConnected"/> false, the second is <see cref="IsConnected"/> true with
+/// a state of <c>Connecting</c>. See docs/connectors-monitoring.md.
+/// </remarks>
 public class OpcUaClientDiagnostics
 {
     private readonly OpcUaSubjectClientSource _source;
@@ -14,7 +22,8 @@ public class OpcUaClientDiagnostics
     }
 
     /// <summary>
-    /// Gets a value indicating whether the client is currently connected to the server.
+    /// Gets a value indicating whether the transport is up and no reconnection is in progress.
+    /// True does not mean the model is in sync yet; see the remarks on this type.
     /// </summary>
     public bool IsConnected => _source.SessionManager?.IsConnected ?? false;
 

@@ -48,7 +48,7 @@ var source = serviceProvider.GetRequiredService<IOpcUaSubjectClientSource>();
 Console.WriteLine(source.Diagnostics.IsConnected);
 ```
 
-See [OPC UA Client](connectors-opcua-client.md) for configuration, authentication, monitoring, resilience, and extensibility.
+See [OPC UA Client](connectors-opcua-client.md) for configuration, authentication, monitoring, resilience, and extensibility, and [Source Monitoring](connectors-monitoring.md) for waiting until the model is in sync rather than merely connected.
 
 ### Server
 
