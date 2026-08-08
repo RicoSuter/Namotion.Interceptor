@@ -1,12 +1,15 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting;
 
 // No longer IDisposable: the old implementation existed only to cancel the action loop's token
 // source, and there is no such token under per target chains.
+[RunsAfter(typeof(ContextInheritanceHandler))]
 internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 {
     private const int StartDelayMilliseconds = 50;
