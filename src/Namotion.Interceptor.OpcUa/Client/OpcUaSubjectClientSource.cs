@@ -536,7 +536,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
     }
 
-    private async Task<ReferenceDescription?> TryGetRootNodeAsync(Session session, CancellationToken cancellationToken)
+    internal async Task<ReferenceDescription?> TryGetRootNodeAsync(ISession session, CancellationToken cancellationToken)
     {
         if (_configuration.RootPath is { Length: > 0 } rootPath)
         {
@@ -545,7 +545,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             for (var i = 0; i < rootPath.Length; i++)
             {
                 var references = await BrowseNodeAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
-                var match = references.FirstOrDefault(reference => reference.BrowseName.Name == rootPath[i]);
+                var match = FindChildByBrowseName(references, rootPath[i]);
                 if (match is null)
                 {
                     return null;
@@ -556,7 +556,21 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                     return match;
                 }
 
-                currentNodeId = ExpandedNodeId.ToNodeId(match.NodeId, session.NamespaceUris);
+                // ToNodeId returns null when the matched reference carries a namespace URI that
+                // is not registered in the session's NamespaceTable. Return null so the caller
+                // logs "could not find root node" and retries, instead of browsing a null NodeId
+                // on the next iteration (which throws ArgumentNullException deep in the browse
+                // primitive). Symmetric with the null-BrowseName tolerance in FindChildByBrowseName.
+                var resolvedNodeId = ExpandedNodeId.ToNodeId(match.NodeId, session.NamespaceUris);
+                if (resolvedNodeId is null)
+                {
+                    _logger.LogWarning(
+                        "Root path segment '{Segment}' resolved to ExpandedNodeId '{NodeId}' whose namespace URI is not registered in the session's NamespaceTable; cannot continue resolving the root node.",
+                        rootPath[i], match.NodeId);
+                    return null;
+                }
+
+                currentNodeId = resolvedNodeId;
             }
         }
 
@@ -670,24 +684,34 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     }
 
     private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
-        Session session,
+        ISession session,
         NodeId nodeId,
         CancellationToken cancellationToken)
     {
-        const uint nodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
-
-        var (_, _, nodeProperties, _) = await session.BrowseAsync(
-            requestHeader: null,
-            view: null,
+        var results = await session.BrowseNodesAsync(
             [nodeId],
-            maxResultsToReturn: 0u,
-            BrowseDirection.Forward,
-            ReferenceTypeIds.HierarchicalReferences,
-            includeSubtypes: true,
-            nodeClassMask,
+            _configuration.MaxReferencesPerNode,
+            _configuration.MaxBrowseContinuations,
+            _logger,
             cancellationToken).ConfigureAwait(false);
 
-        return nodeProperties[0];
+        // Absent means the browse did not complete for this node, which the caller treats the same
+        // as "no match found" and retries on the next load.
+        return results.TryGetValue(nodeId, out var references) ? references : new ReferenceDescriptionCollection();
+    }
+
+    internal static ReferenceDescription? FindChildByBrowseName(ReferenceDescriptionCollection references, string browseName)
+    {
+        foreach (var reference in references)
+        {
+            // These raw references bypass DistinctByResolvedNodeId, so BrowseName may be null.
+            if (reference.BrowseName?.Name == browseName)
+            {
+                return reference;
+            }
+        }
+
+        return null;
     }
 
     private void Reset()
@@ -698,16 +722,22 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
-        _structureLock.Wait();
-        try
-        {
-            _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
-            _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
-        }
-        finally
-        {
-            _structureLock.Release();
-        }
+        // Lock-free by design. This runs from the synchronous subject-detach callback, which the
+        // lifecycle interceptor raises while holding its attached-subject lock. Taking
+        // _structureLock here deadlocks two different ways. Same-thread: the initial load holds it
+        // across the whole load and a failed load's rollback detaches its staged subjects inline,
+        // re-entering a non-reentrant SemaphoreSlim. Cross-thread: an external detach holds the
+        // lifecycle lock while waiting on _structureLock, inverting against the load thread, which
+        // holds _structureLock and needs the lifecycle lock to write properties. Either way the
+        // block happens while holding the lifecycle lock, so it stalls every attach and detach in
+        // the process, not just this connector.
+        //
+        // The removals themselves are safe unsynchronised: both dictionaries are concurrent,
+        // TryRemove is idempotent, and nothing requires the two removals to be atomic together.
+        // Ordering against a concurrent subscription setup is not this method's job either: it is
+        // covered by the sweep in CompleteSetup and by reconnect rebuilding from owned properties.
+        _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
+        _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
     }
 
     public async ValueTask DisposeAsync()
