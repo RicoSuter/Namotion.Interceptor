@@ -250,9 +250,9 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// </summary>
     public IDisposable DeferWaitCompletion()
     {
-        // Deliberately does not re-evaluate. The increment happens first, so IsSatisfied returns
-        // false on its registration check for every wait before it walks anything: a pass here
-        // could only ever be a no-op. Release is where re-evaluation belongs (see ReleaseHold).
+        // Deliberately does not re-evaluate. The increment happens first, so IsBranchSynchronized
+        // returns false on its registration check for every wait before it walks anything: a pass
+        // here could only ever be a no-op. Release is where re-evaluation belongs (see ReleaseHold).
         Interlocked.Increment(ref _registrationHolds);
         return new RegistrationHold(this);
     }
@@ -274,18 +274,19 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     // use for lock-free reads.
     private ImmutableArray<PendingWait> _waits = ImmutableArray<PendingWait>.Empty;
 
-    // Reused across every scope walk in IsSatisfied, which runs per wait on every property-reference
-    // add/remove tree-wide. Callers hold _lock and SearchGraph clears both on every return path.
+    // Reused across every scope walk in IsBranchSynchronized, which runs per wait on every
+    // property-reference add/remove tree-wide. Callers hold _lock and SearchGraph clears both on
+    // every return path.
     private readonly HashSet<IInterceptorSubject> _scopeVisitedScratch = new(ReferenceEqualityComparer.Instance);
     private readonly Stack<IInterceptorSubject> _scopePendingScratch = new();
 
 
     /// <summary>
     /// Completes when the branch containing <paramref name="subject"/> is synchronized: registration
-    /// is complete, and every registered non-Stopped in-scope source is Synchronized. An empty
-    /// in-scope set is vacuously satisfied once registration is complete (see IsSatisfied); before
-    /// that, it blocks, since an empty scope is still ambiguous between "no source yet" and "no
-    /// source ever" at that point.
+    /// is complete, and no in-scope source is Synchronizing. An empty in-scope set is vacuously
+    /// satisfied once registration is complete (see IsBranchSynchronized); before that, it blocks,
+    /// since an empty scope is still ambiguous between "no source yet" and "no source ever" at that
+    /// point.
     /// </summary>
     public Task WaitForSynchronizationAsync(
         IInterceptorSubject subject, CancellationToken cancellationToken = default)
@@ -298,7 +299,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
             // Checked first with no PendingWait allocated: the common case for an application
             // re-awaiting per operation is already satisfied. Only the unsatisfied path below
             // allocates a PendingWait and its TaskCompletionSource.
-            if (IsSatisfied(subject))
+            if (IsBranchSynchronized(subject))
             {
                 return Task.CompletedTask;
             }
@@ -316,7 +317,11 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
         });
     }
 
-    private bool IsSatisfied(IInterceptorSubject anchor)
+    /// <summary>
+    /// Whether a wait anchored on <paramref name="anchor"/> may complete: registration is complete,
+    /// and no source in scope of the anchor is still Synchronizing.
+    /// </summary>
+    private bool IsBranchSynchronized(IInterceptorSubject anchor)
     {
         if (!IsRegistrationComplete)
         {
@@ -331,6 +336,8 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
             }
 
             var state = source.State;
+            // Reads as "this source has not settled yet". Only Synchronized and Stopped let a wait
+            // through, so the pair of inequalities is exactly "the source is still Synchronizing".
             if (state != SourceState.Stopped && state != SourceState.Synchronized)
             {
                 return false;
@@ -353,8 +360,9 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// <remarks>
     /// Holds _lock across the whole pass, rather than re-acquiring it once per wait. A lock-free
     /// emptiness check used to gate this method as a performance optimization, but it caused a lost
-    /// wakeup: a signal could observe "no waits yet" in the window between a waiter's IsSatisfied
-    /// check and its add to _waits, with no later signal to re-evaluate it, hanging the wait forever.
+    /// wakeup: a signal could observe "no waits yet" in the window between a waiter's
+    /// IsBranchSynchronized check and its add to _waits, with no later signal to re-evaluate it,
+    /// hanging the wait forever.
     /// Holding _lock for the full pass serializes it with WaitForSynchronizationAsync's own
     /// check-and-add at least as strictly as before (a signal now runs fully before or fully after
     /// the whole pass, not just before or after each individual wait), so do not narrow this back to
@@ -372,8 +380,8 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
                 return;
             }
 
-            // A throw from one wait's IsSatisfied must not skip re-evaluating the rest - that would
-            // be a lost wakeup for every wait after it. Written out rather than delegated to
+            // A throw from one wait's IsBranchSynchronized must not skip re-evaluating the rest -
+            // that would be a lost wakeup for every wait after it. Written out rather than delegated to
             // ExceptionAggregation.ForEach, unlike the two cold call sites: this runs on every
             // property-reference add/remove tree-wide while any wait is pending, and the helper's
             // IEnumerable<T> parameter would box the ImmutableArray, heap-allocate its enumerator,
@@ -382,7 +390,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
             {
                 try
                 {
-                    if (IsSatisfied(wait.Anchor))
+                    if (IsBranchSynchronized(wait.Anchor))
                     {
                         wait.Complete();
                     }

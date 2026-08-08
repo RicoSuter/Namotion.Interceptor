@@ -28,7 +28,7 @@ public class OutageStateTests
     }
 
     [Fact]
-    public async Task WhenTheConnectionIsLost_ThenTheSourceReportsConnectingUntilItRecovers()
+    public async Task WhenTheConnectionIsLost_ThenTheSourceReportsSynchronizingUntilItRecovers()
     {
         // Arrange
         var logger = new TestLogger(_output);
@@ -112,17 +112,17 @@ public class OutageStateTests
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
 
             // Assert - Diagnostics.IsReconnecting flips true inside OnKeepAlive's lock, right after
-            // ReportConnectionLost() (see SessionManager.OnKeepAlive). Asserting State==Connecting the
+            // ReportConnectionLost() (see SessionManager.OnKeepAlive). Asserting State==Synchronizing the
             // moment IsReconnecting is observed true catches the state at the start of the SDK's own
-            // reconnect window. A weaker "wait for Connecting, then wait for Synchronized" pair would
+            // reconnect window. A weaker "wait for Synchronizing, then wait for Synchronized" pair would
             // pass vacuously even without the fix: PerformFullStateSyncIfNeededAsync still buffers
-            // briefly once the SDK finishes reconnecting on its own, so Connecting would still flash by
+            // briefly once the SDK finishes reconnecting on its own, so Synchronizing would still flash by
             // right before Synchronized regardless of whether OnKeepAlive reports the loss up front.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.Diagnostics.IsReconnecting,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "SDK should begin auto-reconnecting after the transport is disconnected");
-            Assert.Equal(SourceState.Connecting, source.State);
+            Assert.Equal(SourceState.Synchronizing, source.State);
 
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.State == SourceState.Synchronized,

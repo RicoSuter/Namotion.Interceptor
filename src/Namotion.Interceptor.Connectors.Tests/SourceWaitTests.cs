@@ -313,7 +313,7 @@ public class SourceWaitTests
     }
 
     [Fact]
-    public async Task WhenAnInScopeSourceIsConnecting_ThenTheWaitBlocksUntilItSynchronizes()
+    public async Task WhenAnInScopeSourceIsSynchronizing_ThenTheWaitBlocksUntilItSynchronizes()
     {
         // Arrange
         var context = CreateContext();
@@ -354,7 +354,7 @@ public class SourceWaitTests
         await left.WaitForSynchronizationAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
         // Assert
-        Assert.Equal(SourceState.Connecting, broken.State);
+        Assert.Equal(SourceState.Synchronizing, broken.State);
     }
 
     [Fact]
@@ -410,7 +410,7 @@ public class SourceWaitTests
         monitor.Register(healthySource);
 
         // A hold keeps registration incomplete while both waits below are created, so their
-        // fast-path IsSatisfied check short-circuits on IsRegistrationComplete before walking any
+        // fast-path IsBranchSynchronized check short-circuits on IsRegistrationComplete before walking any
         // scope, so the poison wait cannot throw until both waits are in the list.
         var hold = monitor.DeferWaitCompletion();
         monitor.CompleteSourceRegistration();
@@ -553,7 +553,7 @@ public class SourceWaitTests
         var monitor = context.GetSourceMonitor();
         var root = new Person(context);
         // An in-scope, unsynchronized source keeps the wait genuinely pending: an empty scope would
-        // instead complete vacuously once registration is complete (see IsSatisfied), leaving
+        // instead complete vacuously once registration is complete (see IsBranchSynchronized), leaving
         // nothing for cancellation to interrupt.
         monitor.Register(new TestStateSource(root));
         monitor.CompleteSourceRegistration();
@@ -579,7 +579,7 @@ public class SourceWaitTests
 
         // moving hangs under BOTH parents, so the single write in Act removes one parent link
         // without ever emptying the anchor's scope. That matters: an empty scope completes a wait
-        // vacuously (see IsSatisfied), which would mask exactly the staleness this test exists to
+        // vacuously (see IsBranchSynchronized), which would mask exactly the staleness this test exists to
         // catch - an earlier version of this test let the scope go empty and therefore passed with
         // the handler ordering inverted, and passed with the Act removed entirely.
         left.Mother = moving;
@@ -685,8 +685,8 @@ public class SourceWaitTests
         // Arrange
         // neverStarted is rooted at the SAME subject as started, so it would be squarely in scope if
         // registration were what put a source there. It never registers, so it must not count - and
-        // because it stays Connecting forever, a wait that did count it could never complete. An
-        // earlier version of this test let neverStarted stay Connecting but asserted only that it
+        // because it stays Synchronizing forever, a wait that did count it could never complete. An
+        // earlier version of this test let neverStarted stay Synchronizing but asserted only that it
         // was absent from Sources, which holds trivially whether or not the wait consults it.
         var context = CreateContext();
         var monitor = context.GetSourceMonitor();
@@ -705,7 +705,7 @@ public class SourceWaitTests
         // Assert - completes despite neverStarted being in scope and never synchronizing.
         await wait.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.DoesNotContain(neverStarted, monitor.Sources);
-        Assert.Equal(SourceState.Connecting, neverStarted.State);
+        Assert.Equal(SourceState.Synchronizing, neverStarted.State);
     }
 
     [Fact]
@@ -768,11 +768,11 @@ public class SourceWaitTests
             // A bounded timeout so a regression fails this test instead of wedging the run.
             await wait.WaitAsync(TimeSpan.FromSeconds(5));
 
-            // Reset for the next iteration. TransitionTo allows Synchronized -> Connecting, and
+            // Reset for the next iteration. TransitionTo allows Synchronized -> Synchronizing, and
             // wait's removal from the monitor's pending-wait list happens before the awaited task
             // above completes (see PendingWait.AwaitAsync), so the monitor has no leftover wait
             // state carried into the next iteration.
-            source.ReportConnecting();
+            source.ReportSynchronizing();
         }
 
         transitionThread.Join(TimeSpan.FromSeconds(30));
@@ -878,8 +878,8 @@ internal sealed class RecordingLoggerFactory(RecordingLogger logger) : ILoggerFa
 /// <remarks>
 /// Used as a wait anchor to make one wait's re-evaluation throw on every pass while leaving every
 /// other wait unaffected. GetParents() reads Data, and SourceScope's walk starts from the anchor, so
-/// the throw lands inside that wait's own IsSatisfied and nowhere else. A throwing source would not
-/// work here: IsSatisfied iterates the shared source list for every wait, so one poison source makes
+/// the throw lands inside that wait's own IsBranchSynchronized and nowhere else. A throwing source would not
+/// work here: IsBranchSynchronized iterates the shared source list for every wait, so one poison source makes
 /// every wait's evaluation throw.
 /// </remarks>
 internal sealed class PoisonAnchor(IInterceptorSubjectContext context) : IInterceptorSubject

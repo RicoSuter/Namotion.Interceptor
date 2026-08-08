@@ -9,8 +9,8 @@ public enum SourceState
     /// <summary>No source has claimed the property. Only returned by the property-level API; a source is never Unclaimed.</summary>
     Unclaimed,
 
-    /// <summary>Registered or claimed, but subscribe-read-replay is not complete. Also the state after a detected connection loss, because the connect-and-load phase runs again.</summary>
-    Connecting,
+    /// <summary>Claimed and working toward sync: connecting, reconnecting, or connected with the initial load still in flight. Also the state after a detected connection loss, because the connect-and-load phase runs again.</summary>
+    Synchronizing,
 
     /// <summary>The source completed its initial load procedure. What that guarantees differs per protocol; see the source monitoring documentation.</summary>
     Synchronized,

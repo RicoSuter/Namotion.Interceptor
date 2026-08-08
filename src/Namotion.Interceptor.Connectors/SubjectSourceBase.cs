@@ -23,7 +23,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private readonly SubjectPropertyWriter _propertyWriter;
 
     private readonly Lock _stateLock = new();
-    private int _state = (int)SourceState.Connecting;
+    private int _state = (int)SourceState.Synchronizing;
     private long _lastSynchronizedTicks;
     private int _started;
 
@@ -185,7 +185,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 }
                 catch (Exception ex)
                 {
-                    TransitionStateTo(SourceState.Connecting);
+                    TransitionStateTo(SourceState.Synchronizing);
                     _logger.LogError(ex, "Failed to listen for changes in source.");
                     try
                     {
@@ -341,7 +341,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// at detection time would replace the buffer with a fresh list, and the later StartBuffering
     /// on the reconnect path would then discard everything buffered in between. Protected rather
     /// than public: application code holding an ISubjectSource reference must not be able to flip a
-    /// synchronized source back to Connecting. A concrete source in another assembly that needs to
+    /// synchronized source back to Synchronizing. A concrete source in another assembly that needs to
     /// call this from a helper object outside its own inheritance hierarchy (SessionManager for
     /// OpcUaSubjectClientSource) needs an internal forwarder on that source; see
     /// OpcUaSubjectClientSource for the pattern.
@@ -356,7 +356,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     protected void ReportConnectionLost()
     {
         _propertyWriter.InvalidateGeneration();
-        TransitionStateTo(SourceState.Connecting);
+        TransitionStateTo(SourceState.Synchronizing);
     }
 
     /// <summary>

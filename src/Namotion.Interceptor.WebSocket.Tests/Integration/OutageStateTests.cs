@@ -31,7 +31,7 @@ public class OutageStateTests
     }
 
     [Fact]
-    public async Task WhenTheConnectionIsLost_ThenTheSourceReportsConnectingUntilItRecovers()
+    public async Task WhenTheConnectionIsLost_ThenTheSourceReportsSynchronizingUntilItRecovers()
     {
         // Arrange - server fixture copied from WebSocketServerClientTests.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
@@ -78,9 +78,9 @@ public class OutageStateTests
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.State == SourceState.Connecting,
+                () => source.State == SourceState.Synchronizing,
                 timeout: TimeSpan.FromSeconds(15),
-                message: "Source should report Connecting during the outage");
+                message: "Source should report Synchronizing during the outage");
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.State == SourceState.Synchronized,
                 timeout: TimeSpan.FromSeconds(30),

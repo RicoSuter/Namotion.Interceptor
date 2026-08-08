@@ -645,7 +645,7 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 `IOpcUaSubjectClientSource.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Client Source](#resolving-the-client-source)).
 
-These are transport health, and OPC UA specific. Whether the model can be trusted is a separate question, answered the same way for every connector by [Source Monitoring](connectors-monitoring.md): `ISubjectSource.State` is `Synchronized` once the initial load has completed. Read the two together to tell a dropped network from a connected client that is still loading — the first is `IsConnected == false`, the second is `IsConnected == true` with a state of `Connecting`.
+These are transport health, and OPC UA specific. Whether the model can be trusted is a separate question, answered the same way for every connector by [Source Monitoring](connectors-monitoring.md): `ISubjectSource.State` is `Synchronized` once the initial load has completed. Read the two together to tell a dropped network from a connected client that is still loading: the first is `IsConnected == false`, the second is `IsConnected == true` with a state of `Synchronizing`.
 
 Categories: connection (`IsConnected`, `IsReconnecting`, `SessionId`, `LastConnectedAt`), subscriptions (`SubscriptionCount`, `MonitoredItemCount`), throughput (`IncomingChangesPerSecond`, `OutgoingChangesPerSecond`), reconnection history (`TotalReconnectionAttempts`, `SuccessfulReconnections`, `FailedReconnections`, `AbandonedReconnections`, `LastError`), [polling fallback](#polling-fallback-for-unsupported-nodes) (`PollingItemCount`), [read-after-write](#read-after-write-fallback) (`PendingReadAfterWrites`). All properties are thread-safe for reading.
 

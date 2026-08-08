@@ -495,7 +495,7 @@ public class SubjectSourceExtensionsTests
     /// <summary>
     /// Shared ISubjectSource member implementation for the two hand-rolled test doubles below,
     /// which differ only in RootSubject and WriteChangesAsync. Neither exercises state transitions,
-    /// so State is fixed at Connecting for the lifetime of the double.
+    /// so State is fixed at Synchronizing for the lifetime of the double.
     /// </summary>
     private abstract class StateTrackingTestSource : ISubjectSource
     {
@@ -504,7 +504,7 @@ public class SubjectSourceExtensionsTests
         public abstract ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
         public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => Task.FromResult<Action?>(null);
 
-        public SourceState State => SourceState.Connecting;
+        public SourceState State => SourceState.Synchronizing;
 
         public DateTimeOffset? LastSynchronizedAt => null;
 

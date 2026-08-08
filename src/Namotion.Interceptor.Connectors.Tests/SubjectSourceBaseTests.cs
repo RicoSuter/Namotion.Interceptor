@@ -68,11 +68,11 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
-    public async Task WhenThePumpFailsAfterReachingSynchronized_ThenTheCatchTransitionsBackToConnecting()
+    public async Task WhenThePumpFailsAfterReachingSynchronized_ThenTheCatchTransitionsBackToSynchronizing()
     {
         // Arrange
         // A first-iteration failure can never distinguish ExecuteAsync's catch-block transition
-        // from the entry-line transition that always runs first (both land on Connecting, which is
+        // from the entry-line transition that always runs first (both land on Synchronizing, which is
         // already the source's default state, so neither publishes an event). To observe the
         // catch's OWN transition, the pump must first genuinely reach Synchronized and then fail.
         // The mock context deliberately does not configure GetService<PropertyChangeInterceptor>(),
@@ -92,7 +92,7 @@ public class SubjectSourceBaseTests
             .Returns(subjectContextMock.Object);
 
         var observedStates = new ConcurrentQueue<SourceState>();
-        var sawConnectingAfterSynchronized = new ManualResetEventSlim(false);
+        var sawSynchronizingAfterSynchronized = new ManualResetEventSlim(false);
 
         var source = new TestSubjectSource(subjectMock.Object, subjectContextMock.Object, NullLogger.Instance,
             retryTime: TimeSpan.FromSeconds(30))
@@ -103,9 +103,9 @@ public class SubjectSourceBaseTests
         source.StateChanged += (_, sourceEvent) =>
         {
             observedStates.Enqueue(sourceEvent.NewState);
-            if (sourceEvent.NewState == SourceState.Connecting && observedStates.Contains(SourceState.Synchronized))
+            if (sourceEvent.NewState == SourceState.Synchronizing && observedStates.Contains(SourceState.Synchronized))
             {
-                sawConnectingAfterSynchronized.Set();
+                sawSynchronizingAfterSynchronized.Set();
             }
         };
 
@@ -113,13 +113,13 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(cancellationTokenSource.Token);
-        var caughtBackToConnecting = sawConnectingAfterSynchronized.Wait(TimeSpan.FromSeconds(10));
+        var caughtBackToSynchronizing = sawSynchronizingAfterSynchronized.Wait(TimeSpan.FromSeconds(10));
         await source.StopAsync(cancellationTokenSource.Token);
         await cancellationTokenSource.CancelAsync();
 
         // Assert
-        Assert.True(caughtBackToConnecting,
-            "Expected the pump to reach Synchronized and then be caught back to Connecting after the failure.");
+        Assert.True(caughtBackToSynchronizing,
+            "Expected the pump to reach Synchronized and then be caught back to Synchronizing after the failure.");
     }
 
     [Fact]

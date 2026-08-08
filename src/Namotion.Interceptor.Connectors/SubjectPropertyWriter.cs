@@ -57,7 +57,7 @@ public sealed class SubjectPropertyWriter
 
             // Under _lock, paired with the generation change that governs it, so the transition
             // cannot be observed out of sync with the buffer it belongs to.
-            _source.TransitionStateTo(SourceState.Connecting);
+            _source.TransitionStateTo(SourceState.Synchronizing);
         }
     }
 

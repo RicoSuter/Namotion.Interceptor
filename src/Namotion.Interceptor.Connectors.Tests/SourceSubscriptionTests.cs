@@ -189,7 +189,7 @@ public class SourceSubscriptionTests
     {
         var source = new TestStateSource(new Person());
         return new SourceEvent(
-            SourceEventKind.SourceRegistered, source, null, SourceState.Connecting, SourceState.Connecting, DateTimeOffset.UtcNow);
+            SourceEventKind.SourceRegistered, source, null, SourceState.Synchronizing, SourceState.Synchronizing, DateTimeOffset.UtcNow);
     }
 }
 
@@ -240,13 +240,13 @@ public class SourceSubscriptionHandoffTests
 
     private static SourceEvent CreateEvent() => new(
         SourceEventKind.SourceRegistered, new HandoffTestSource(), null,
-        SourceState.Connecting, SourceState.Connecting, DateTimeOffset.UtcNow);
+        SourceState.Synchronizing, SourceState.Synchronizing, DateTimeOffset.UtcNow);
 
     private sealed class HandoffTestSource : ISubjectSource
     {
         public IInterceptorSubject RootSubject => throw new NotSupportedException();
         public int WriteBatchSize => 0;
-        public SourceState State => SourceState.Connecting;
+        public SourceState State => SourceState.Synchronizing;
         public DateTimeOffset? LastSynchronizedAt => null;
         public int PendingWriteCount => 0;
 

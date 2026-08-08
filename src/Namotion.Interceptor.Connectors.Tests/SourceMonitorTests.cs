@@ -480,7 +480,7 @@ public class SourceMonitorTests
         var transition = Task.Run(() =>
         {
             transitionStarted.Set();
-            source.RaiseStateChanged(SourceState.Connecting, SourceState.Synchronized);
+            source.RaiseStateChanged(SourceState.Synchronizing, SourceState.Synchronized);
         });
         Assert.True(transitionStarted.Wait(TimeSpan.FromSeconds(10)));
 
@@ -524,7 +524,7 @@ public class SourceMonitorTests
         monitor.Unregister(source);
         inFlight?.Invoke(source, new SourceEvent(
             SourceEventKind.StateChanged, source, null,
-            SourceState.Connecting, SourceState.Synchronized, DateTimeOffset.UtcNow));
+            SourceState.Synchronizing, SourceState.Synchronized, DateTimeOffset.UtcNow));
 
         // Assert
         // A sentinel settles delivery: once its SourceRegistered arrives, anything the in-flight
@@ -621,7 +621,7 @@ internal sealed class GatedStateRaisingSource : ISubjectSource
         {
             _reachedStateRead.Set();
             _releaseStateRead.Wait(TimeSpan.FromSeconds(10));
-            return SourceState.Connecting;
+            return SourceState.Synchronizing;
         }
     }
 
