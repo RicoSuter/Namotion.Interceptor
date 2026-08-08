@@ -19,15 +19,25 @@ public partial class CountingHostedSubject : IHostedService
 
     public int StopCount => Volatile.Read(ref _stopCount);
 
+    /// <summary>
+    /// Awaited inside <see cref="StopAsync"/>. Lets a test hold the subject mid stop and observe what
+    /// the handler does to the subject's attachments while it is still unwinding.
+    /// </summary>
+    public Func<Task>? StopHold { get; set; }
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _startCount);
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _stopCount);
-        return Task.CompletedTask;
+
+        if (StopHold is { } hold)
+        {
+            await hold();
+        }
     }
 }

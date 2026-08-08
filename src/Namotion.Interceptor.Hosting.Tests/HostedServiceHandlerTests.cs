@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Testing;
@@ -337,6 +338,171 @@ public class HostedServiceHandlerTests
         Assert.Null(target);
         Assert.Empty(attachments);
         Assert.Equal(entriesBefore, subject.Data.Count);
+    }
+
+    [Fact]
+    public async Task WhenADrainedHandlerSeesAContextDetach_ThenTheLiveHandlersInstancesKeepRunning()
+    {
+        // Arrange - the drained handler is still wired into the graph it was started over, so a
+        // later graph move still reaches it. It created none of the instances now running, so it
+        // must stop and dispose none of them: whatever creates an instance disposes it, and only it.
+        var (firstHost, firstContext) = await StartHostAsync();
+        var (secondHost, secondContext) = await StartHostAsync();
+
+        try
+        {
+            var firstParent = new HostedParent(firstContext);
+            var child = new CountingHostedSubject();
+            var created = new ConcurrentQueue<TrackedBackgroundService>();
+
+            var attachment = child.AttachHostedService(() =>
+            {
+                var instance = new TrackedBackgroundService();
+                created.Enqueue(instance);
+                return instance;
+            });
+
+            firstParent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => child.StartCount == 1 && created.ToArray() is [{ IsStarted: true }]);
+
+            await firstHost.StopAsync();
+
+            var secondParent = new HostedParent(secondContext);
+            secondParent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => child.StartCount == 2 && created.ToArray() is [_, { IsStarted: true }]);
+
+            // Act
+            firstParent.Child = null;
+
+            // Assert - an empty transition on each chain drains whatever the detach appended, so the
+            // state is read after any stop would have run rather than after a delay.
+            var subjectTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
+            var attachmentTarget = ((IHostedServiceAttachmentTarget)attachment).Target;
+            await subjectTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await attachmentTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(1, child.StopCount);
+            Assert.NotNull(subjectTarget.Current);
+            Assert.NotNull(attachment.Current);
+
+            var instances = created.ToArray();
+            Assert.False(instances[1].IsStopped);
+            Assert.False(instances[1].IsDisposed);
+        }
+        finally
+        {
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenANonOwningHandlerSeesAContextDetach_ThenTheOwnersInstanceKeepsRunning()
+    {
+        // Arrange - the same rule with both handlers live. The second handler loses the compare and
+        // exchange on every target, so it started nothing and has nothing to stop.
+        var (firstHost, firstContext) = await StartHostAsync();
+        var (secondHost, secondContext) = await StartHostAsync();
+
+        try
+        {
+            var firstParent = new HostedParent(firstContext);
+            var secondParent = new HostedParent(secondContext);
+            var child = new CountingHostedSubject();
+            var instance = new TrackedBackgroundService();
+            var attachment = child.AttachHostedService(() => instance);
+
+            firstParent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => child.StartCount == 1 && instance.IsStarted);
+
+            secondParent.Child = child;
+
+            // Act
+            secondParent.Child = null;
+
+            // Assert
+            var subjectTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
+            var attachmentTarget = ((IHostedServiceAttachmentTarget)attachment).Target;
+            await subjectTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await attachmentTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(0, child.StopCount);
+            Assert.NotNull(subjectTarget.Current);
+            Assert.NotNull(attachment.Current);
+            Assert.False(instance.IsStopped);
+            Assert.False(instance.IsDisposed);
+        }
+        finally
+        {
+            await firstHost.StopAsync();
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAStopIsCancelled_ThenTheInstanceIsStillDisposed()
+    {
+        // Arrange - the stop clears Current before it runs the instance, so an instance whose
+        // StopAsync is cut short by the token is unreachable afterwards. The handler created it, so
+        // it owes the dispose whatever the stop itself managed to do.
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService();
+            var attachment = await person.AttachHostedServiceAsync(() => instance, CancellationToken.None);
+
+            using var cancellation = new CancellationTokenSource();
+            await cancellation.CancelAsync();
+
+            // Act
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => person.DetachHostedServiceAsync(attachment, cancellation.Token));
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => instance.IsDisposed,
+                message: "The cancelled stop escaped the transition body and skipped the dispose.");
+
+            Assert.False(instance.IsStopped);
+            Assert.Null(attachment.Fault);
+        });
+    }
+
+    [Fact]
+    public async Task WhenTheShutdownTokenIsAlreadyCancelled_ThenTheInstanceIsStillDisposed()
+    {
+        // Arrange - the ordinary HostOptions.ShutdownTimeout path: the drain hands the stopping
+        // token straight to every instance, so an expired timeout cancels each StopAsync it runs.
+        var (host, context) = await StartHostAsync();
+
+        var person = new Person(context);
+        var instance = new TrackedBackgroundService();
+        await person.AttachHostedServiceAsync(() => instance, CancellationToken.None);
+
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act
+        await host.StopAsync(cancellation.Token);
+
+        // Assert
+        Assert.False(instance.IsStopped);
+        Assert.True(instance.IsDisposed);
+    }
+
+    private static async Task<(IHost Host, IInterceptorSubjectContext Context)> StartHostAsync()
+    {
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+        return (host, context);
     }
 
     private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)

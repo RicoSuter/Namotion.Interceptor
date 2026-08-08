@@ -110,8 +110,10 @@ public class HostedServiceHandlerRaceTests
     [Fact]
     public async Task WhenAnAttachmentIsAddedDuringTheDrain_ThenNothingIsStarted()
     {
-        // Arrange - the drain is held between BeginDraining and the running set snapshot, so the
-        // attach provably lands inside the drain window rather than near it.
+        // Arrange - the drain is held between BeginDraining and the liveness clear, so the attach
+        // provably lands inside the drain window rather than near it, and its start body provably
+        // runs there too: the gate is already draining while the subject is still live, which is the
+        // one interleaving only the start body's gate re-read closes.
         var builder = Host.CreateApplicationBuilder();
 
         var context = InterceptorSubjectContext
@@ -145,6 +147,11 @@ public class HostedServiceHandlerRaceTests
             Interlocked.Increment(ref created);
             return new TrackedBackgroundService();
         });
+
+        // An empty transition behind the start on the same chain, awaited before the drain is let
+        // go: this is what pins the start body inside the window rather than merely near it.
+        await ((IHostedServiceAttachmentTarget)attachment).Target
+            .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
 
         releaseDrain.SetResult();
 
@@ -304,11 +311,12 @@ public class HostedServiceHandlerRaceTests
     }
 
     [Fact]
-    public async Task WhenAQueuedStartIsGatedOutByTheDrain_ThenAnEarlierFaultSurvives()
+    public async Task WhenAQueuedStartIsSkippedByTheDrain_ThenAnEarlierFaultSurvives()
     {
         // Arrange - a start that never creates anything must not clear the fault a caller has not
-        // read yet. Two seams: the transition seam queues the start, and the drain seam proves the
-        // gate is already draining when it runs.
+        // read yet. The drain skips it through whichever guard it reaches first, the gate re-read or
+        // the cleared liveness, and the fault has to survive either way. Two seams: the transition
+        // seam queues the start, and the drain seam proves the drain has begun when it runs.
         var builder = Host.CreateApplicationBuilder();
 
         var context = InterceptorSubjectContext
@@ -366,11 +374,120 @@ public class HostedServiceHandlerRaceTests
         Assert.NotNull(attachment.Fault);
     }
 
+    [Fact]
+    public async Task WhenTheHostDrains_ThenASubjectStopsBeforeItsAttachmentIsDisposed()
+    {
+        // Arrange - shutdown shares the ordering hazard of a context detach: a hosted subject's stop
+        // is slow, and the attachments it uses must not be disposed underneath it while it unwinds.
+        // The hold makes the window the subject is inside observable rather than timed.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var parent = new HostedParent(context);
+        var child = new CountingHostedSubject();
+        var instance = new TrackedBackgroundService();
+        var attachment = child.AttachHostedService(() => instance);
+
+        parent.Child = child;
+        await AsyncTestHelpers.WaitUntilAsync(() => child.StartCount == 1 && instance.IsStarted);
+
+        var subjectStopEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        child.StopHold = () =>
+        {
+            subjectStopEntered.TrySetResult();
+            return release.Task;
+        };
+
+        // Act
+        var stopping = host.StopAsync();
+        await subjectStopEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert - an unordered drain clears Current at the top of the attachment's stop body, which
+        // runs the moment that stop is appended, a whole transition delay before the subject's own
+        // StopAsync is entered.
+        Assert.NotNull(attachment.Current);
+        Assert.False(instance.IsStopped);
+        Assert.False(instance.IsDisposed);
+
+        release.SetResult();
+        await stopping;
+
+        Assert.True(instance.IsStopped);
+        Assert.True(instance.IsDisposed);
+    }
+
+    [Fact]
+    public async Task WhenAStopIsInFlightWhenTheHostDrains_ThenTheDrainWaitsForIt()
+    {
+        // Arrange - a stop queued before the drain left the running set when it was appended, so the
+        // drain's own snapshot cannot see it, and the host disposes the service provider as soon as
+        // the drain returns. The second subject is what makes the ordering observable: the drain
+        // releases the ownership of the targets it snapshotted only once it has waited for
+        // everything, so that owner is still set when the queued stop finally runs.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var detachingParent = new HostedParent(context);
+        var detaching = new CountingHostedSubject();
+        detachingParent.Child = detaching;
+        await AsyncTestHelpers.WaitUntilAsync(() => detaching.StartCount == 1);
+
+        var remainingParent = new Parent(context);
+        var remaining = new Person();
+        var remainingInstance = new TrackedBackgroundService();
+        var remainingAttachment = remaining.AttachHostedService(() => remainingInstance);
+        remainingParent.Child = remaining;
+        await AsyncTestHelpers.WaitUntilAsync(() => remainingInstance.IsStarted);
+
+        var remainingTarget = ((IHostedServiceAttachmentTarget)remainingAttachment).Target;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ownerWhenTheQueuedStopRan =
+            new TaskCompletionSource<HostedServiceHandler?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        ((IInterceptorSubject)detaching).TryGetSubjectTarget()!.TransitionGate = async () =>
+        {
+            await release.Task;
+            ownerWhenTheQueuedStopRan.TrySetResult(remainingTarget.Owner);
+        };
+
+        detachingParent.Child = null;
+
+        // Act
+        var stopping = host.StopAsync();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => remainingInstance.IsDisposed,
+            message: "The drain never ran the stops it snapshotted itself.");
+
+        release.SetResult();
+        await stopping;
+
+        // Assert
+        var owner = await ownerWhenTheQueuedStopRan.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.NotNull(owner);
+        Assert.Equal(1, detaching.StopCount);
+    }
+
     /// <summary>
-    /// Starts a host over a hosted subject that carries a factory attachment, detaches the subject
-    /// with its own stop held on the transition seam, and drains the host. Both targets leave the
-    /// running set when their stops are appended, so the drain snapshots nothing and reaches Drained
-    /// while both stops are still queued. Returns before the hold is released.
+    /// Starts a host over a hosted subject that carries a factory attachment, then detaches the
+    /// subject from inside the drain window with its own stop held on the transition seam. The
+    /// detach lands after the drain has snapshotted the stops it will wait for and both targets have
+    /// left the running set, so the drain waits for neither and reaches Drained with both stops still
+    /// queued. Returns before the hold is released.
     /// </summary>
     private static async Task<(CountingHostedSubject Child, ConcurrentQueue<TrackedBackgroundService> Created, TaskCompletionSource Release)>
         ArrangeDetachedSubjectWithTheDrainCompletedAsync()
@@ -404,8 +521,21 @@ public class HostedServiceHandlerRaceTests
         var subjectTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
         subjectTarget.TransitionGate = () => release.Task;
 
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+        var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.DrainGate = () =>
+        {
+            drainEntered.TrySetResult();
+            return releaseDrain.Task;
+        };
+
+        var stopping = host.StopAsync();
+        await drainEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
         parent.Child = null;
-        await host.StopAsync();
+        releaseDrain.SetResult();
+        await stopping;
 
         subjectTarget.TransitionGate = null;
         return (child, created, release);
