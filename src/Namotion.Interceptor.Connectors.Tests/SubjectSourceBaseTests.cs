@@ -1237,9 +1237,11 @@ public class SubjectSourceBaseTests
         IInterceptorSubject subject, string propertyName, TValue oldValue, TValue newValue)
     {
         var property = new PropertyReference(subject, propertyName);
+        property.TryGetWriteState(out var revisionBefore, out _);
+
         property.Metadata.SetValue?.Invoke(subject, newValue);
 
-        Assert.True(property.TryGetWriteState(out var revision, out _),
+        Assert.True(property.TryGetWriteState(out var revision, out _) && revision > revisionBefore,
             "the write did not reach a terminal, so the parked change would carry no revision");
 
         EnqueueRetryChange(source, subject, propertyName, oldValue, newValue, revision);

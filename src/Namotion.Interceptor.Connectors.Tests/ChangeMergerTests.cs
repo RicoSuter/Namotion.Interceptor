@@ -324,11 +324,15 @@ public class ChangeMergerTests
         // Sizing it by the batch retained ~11 MB for the merger's lifetime.
         using var merger = new ChangeMerger();
 
-        // Act
+        // Act: asserted before Reset, because the trim there would mask a pre-size that is still
+        // sized by the batch.
         merger.Merge(CreateWideBatch(changeCount: 50_000, distinctProperties: 4));
+        var capacityDuringBatch = GetPropertyIndexCapacity(merger);
         merger.Reset();
 
         // Assert
+        Assert.True(capacityDuringBatch <= 293,
+            $"index capacity was {capacityDuringBatch} during the batch, so it is still sized by change count");
         Assert.True(GetPropertyIndexCapacity(merger) <= 293,
             $"index capacity was {GetPropertyIndexCapacity(merger)}, so it is still sized by change count");
     }

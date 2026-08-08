@@ -23,6 +23,11 @@ internal sealed class PropertyWriteState
     /// commit carries the settled value in its place, and a source-originated commit is skipped as an
     /// echo when that source's queue is drained, so counting it would drop a write that nothing then
     /// delivers. See issue #373.
+    /// <para>
+    /// Confirmed commits do advance it even though they are echo-skipped too. They are safe for a
+    /// different reason: the transaction writer stamps Confirmed only after the source write succeeded,
+    /// so the source already holds that value. Do not "fix" the asymmetry in either direction.
+    /// </para>
     /// </remarks>
     internal long LastNonSourceCommitRevision;
 

@@ -7,7 +7,9 @@ namespace Namotion.Interceptor.Connectors;
 ///
 /// A change is enqueued after its commit and outside the subject lock, so a writer preempted between the
 /// two can present an older commit after a newer one has gone out. Nothing bounds that preemption, so no
-/// amount of buffering closes it; comparing against the property's own commit marker does.
+/// amount of buffering closes it; comparing against the property's own commit marker does, for local
+/// successors. A newer commit that came from the source deliberately does not move the marker, so an
+/// older local commit is still delivered after it.
 ///
 /// The marker excludes source-originated commits, which is what makes dropping safe rather than merely
 /// plausible: see the last-non-source-commit revision on the property write state.
