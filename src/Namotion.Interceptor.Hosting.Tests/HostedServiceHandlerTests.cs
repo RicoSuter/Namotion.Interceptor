@@ -298,19 +298,24 @@ public class HostedServiceHandlerTests
     public async Task WhenADrainedHandlerIsAskedToWaitForAStart_ThenItClaimsNothingAndReportsNothingStarted()
     {
         // Arrange - WaitForStartAsync is what an activation calls after resolving a subject, and it
-        // needs the same guards as the attach paths. A drained handler releases only what its own
-        // drain snapshotted, so a claim taken here is never released and the live handler below would
-        // lose the compare and exchange forever. Reporting a start it never appended is the other
-        // half: the caller would treat the subject as running.
+        // needs the same guards as the attach paths. The attach happens before the drain, so the
+        // handler really did create, own and start the target: attaching afterwards would leave no
+        // target at all and the call would short circuit before reaching anything under test. A
+        // drained handler releases only what its own drain snapshotted, so a claim taken here is
+        // never released and the live handler below would lose the compare and exchange forever.
         var (firstHost, firstContext) = await StartHostAsync();
         var (secondHost, secondContext) = await StartHostAsync();
 
         var subject = new CountingHostedSubject();
         var drainedHandler = firstContext.TryGetService<HostedServiceHandler>()!;
-        await firstHost.StopAsync();
 
-        // The drained handler still sees this attach and must take nothing on.
         ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.StartCount == 1);
+
+        var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+        Assert.Same(drainedHandler, target.Owner);
+
+        await firstHost.StopAsync();
 
         try
         {
@@ -319,17 +324,101 @@ public class HostedServiceHandlerTests
 
             // Assert
             Assert.False(started);
-            Assert.Equal(0, subject.StartCount);
-            Assert.Null(((IInterceptorSubject)subject).TryGetSubjectTarget()?.Owner);
+            Assert.Equal(1, subject.StartCount);
+            Assert.Null(target.Owner);
 
             ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
             await AsyncTestHelpers.WaitUntilAsync(
-                () => subject.StartCount == 1,
+                () => subject.StartCount == 2,
                 message: "The drained handler claimed the target and never released it, so the live handler could not take it.");
         }
         finally
         {
             await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenANonOwningHandlerIsAskedToWaitForAStart_ThenItReportsNothingStarted()
+    {
+        // Arrange - both handlers are live for the subject and both saw the attach, but only the
+        // first owns the target and appended a start. This is the case only the ownership check
+        // rejects: the second handler's activation would otherwise read the owner's running instance
+        // as its own start.
+        var (firstHost, firstContext) = await StartHostAsync();
+        var (secondHost, secondContext) = await StartHostAsync();
+
+        try
+        {
+            var subject = new CountingHostedSubject();
+            var firstHandler = firstContext.TryGetService<HostedServiceHandler>()!;
+            var secondHandler = secondContext.TryGetService<HostedServiceHandler>()!;
+
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.StartCount == 1);
+
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
+            Assert.True(secondHandler.IsLive(subject));
+
+            // Act
+            var started = await secondHandler.WaitForStartAsync(subject, CancellationToken.None);
+
+            // Assert
+            Assert.False(started);
+            Assert.Same(firstHandler, ((IInterceptorSubject)subject).TryGetSubjectTarget()!.Owner);
+            Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await firstHost.StopAsync();
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAHandlerIsAskedToWaitWhileItsOwnDrainIsStopping_ThenItAnswersWithoutQueueingBehindTheStop()
+    {
+        // Arrange - the drain clears liveness before it releases ownership, so a subject held inside
+        // its own stop is the one window where the handler still owns the target and only the
+        // liveness check can reject. Without it the call queues an empty transition behind that stop
+        // and an activation would block host startup on another host's shutdown.
+        var (host, context) = await StartHostAsync();
+
+        var subject = new CountingHostedSubject();
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+
+        var stopEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        subject.StopHold = () =>
+        {
+            stopEntered.TrySetResult();
+            return releaseStop.Task;
+        };
+
+        ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.StartCount == 1);
+
+        var drain = host.StopAsync();
+        await stopEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        try
+        {
+            var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+            Assert.Same(handler, target.Owner);
+            Assert.False(handler.IsLive(subject));
+
+            // Act
+            var wait = handler.WaitForStartAsync(subject, CancellationToken.None);
+
+            // Assert - the guard answers before the first await, so the task is already complete. An
+            // empty transition could not be: the stop ahead of it on the chain is still held.
+            Assert.True(wait.IsCompleted, "The call queued behind the in flight stop instead of answering that it has no start.");
+            Assert.False(await wait);
+        }
+        finally
+        {
+            releaseStop.TrySetResult();
+            await drain;
         }
     }
 

@@ -15,10 +15,28 @@ public static class SubjectServiceCollectionExtensions
     /// the context has hosting enabled, the context starts it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Registration is idempotent, which has a sharp edge worth knowing: a second call for the same
     /// type silently drops its <paramref name="configure"/> and <paramref name="contextResolver"/>,
     /// and if the caller already registered <typeparamref name="T"/> themselves, neither the context
     /// nor <paramref name="configure"/> is applied.
+    /// </para>
+    /// <para>
+    /// Where <paramref name="configure"/> runs relative to the context attach depends on the
+    /// constructor shape of <typeparamref name="T"/>, and the attach is what makes a hosting enabled
+    /// context start the subject. When <typeparamref name="T"/> has no constructor taking an
+    /// <see cref="IInterceptorSubjectContext"/>, this method performs the attach itself and runs
+    /// <paramref name="configure"/> before it, so the subject is fully configured before anything can
+    /// start it. Its assignments are then not intercepted and not tracked, because the subject has no
+    /// context yet.
+    /// </para>
+    /// <para>
+    /// When <typeparamref name="T"/> does take a context, the attach can already have happened inside
+    /// the constructor and cannot be reordered from here, so <paramref name="configure"/> necessarily
+    /// runs against an attached subject. Its assignments are intercepted and tracked, and they race
+    /// the start the attach appended exactly as they do for a hand written
+    /// <c>new MySubject(context) { Name = "x" }</c>.
+    /// </para>
     /// </remarks>
     /// <typeparam name="T">The subject type.</typeparam>
     /// <param name="services">The service collection.</param>
@@ -44,19 +62,33 @@ public static class SubjectServiceCollectionExtensions
             // can consume the extra argument. It confers no attachment advantage: the generated
             // constructor is "C(IInterceptorSubjectContext context) : this()", so the attach happens
             // after the parameterless constructor body either way.
-            var instance = context is not null && HasContextConstructor<T>()
-                ? ActivatorUtilities.CreateInstance<T>(serviceProvider, context)
-                : ActivatorUtilities.CreateInstance<T>(serviceProvider);
-
-            if (context is not null)
+            if (context is not null && HasContextConstructor<T>())
             {
+                var attachedInstance = ActivatorUtilities.CreateInstance<T>(serviceProvider, context);
+
                 // Unconditional and idempotent. Applying it only when there is no context constructor
                 // would leave the documented "MySubject(IInterceptorSubjectContext? context = null)"
                 // shape unattached, because that constructor takes the context and never uses it.
+                attachedInstance.Context.AddFallbackContext(context);
+
+                // The generated constructor attached the subject before this factory ever saw it, so
+                // the start that attach appended cannot be ordered behind configure from here.
+                configure?.Invoke(attachedInstance);
+                return attachedInstance;
+            }
+
+            var instance = ActivatorUtilities.CreateInstance<T>(serviceProvider);
+
+            // Ordered ahead of the attach, which is the only ordering the factory controls: nothing
+            // has seen this subject yet, so running configure first is what keeps a handler from
+            // starting it half configured. The handler's start delay is not a synchronisation.
+            configure?.Invoke(instance);
+
+            if (context is not null)
+            {
                 instance.Context.AddFallbackContext(context);
             }
 
-            configure?.Invoke(instance);
             return instance;
         });
 

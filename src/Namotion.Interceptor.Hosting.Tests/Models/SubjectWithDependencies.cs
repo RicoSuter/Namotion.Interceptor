@@ -17,6 +17,12 @@ public partial class SubjectWithDependencies : BackgroundService
 
     public int StartCount;
 
+    /// <summary>
+    /// The value the start observed, which is how a configure callback that lost the race with the
+    /// start is measurable rather than inferred.
+    /// </summary>
+    public string? NameAtStart { get; private set; }
+
     public SubjectWithDependencies(ILogger<SubjectWithDependencies> logger)
     {
         _logger = logger;
@@ -24,6 +30,7 @@ public partial class SubjectWithDependencies : BackgroundService
 
     public override Task StartAsync(CancellationToken cancellationToken)
     {
+        NameAtStart = Name;
         Interlocked.Increment(ref StartCount);
         return base.StartAsync(cancellationToken);
     }

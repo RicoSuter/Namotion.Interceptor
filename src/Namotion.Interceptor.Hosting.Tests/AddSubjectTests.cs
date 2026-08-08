@@ -9,6 +9,8 @@ namespace Namotion.Interceptor.Hosting.Tests;
 
 public class AddSubjectTests
 {
+    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
+
     [Fact]
     public async Task WhenSubjectHasGeneratedContextConstructor_ThenItStartsExactlyOnce()
     {
@@ -145,6 +147,113 @@ public class AddSubjectTests
             // Assert
             var subject = host.Services.GetRequiredService<SubjectWithDependencies>();
             Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheSubjectHasNoContextConstructor_ThenConfigureCompletesBeforeTheSubjectCanStart()
+    {
+        // Arrange - the attach is what makes the handler append a start, so a configure that ran
+        // after it would race that start with nothing between them but the handler's start delay.
+        // Holding configure open makes the ordering observable instead of timing dependent.
+        var builder = Host.CreateApplicationBuilder();
+        var context = CreateContext(builder);
+        builder.Services.AddSingleton(context);
+
+        using var configureEntered = new ManualResetEventSlim();
+        using var releaseConfigure = new ManualResetEventSlim();
+        SubjectWithDependencies? configuredSubject = null;
+
+        builder.Services.AddSubject<SubjectWithDependencies>(subject =>
+        {
+            configuredSubject = subject;
+            configureEntered.Set();
+            releaseConfigure.Wait(WaitTimeout);
+            subject.Name = "configured";
+        });
+
+        var host = builder.Build();
+
+        // Act - the factory runs on the host's own start path, so configure has to be released from
+        // another thread.
+        var startup = Task.Run(() => host.StartAsync());
+        Assert.True(configureEntered.Wait(WaitTimeout), "The configure callback was never invoked.");
+
+        var attachedDuringConfigure = ((IInterceptorSubject)configuredSubject!).TryGetSubjectTarget() is not null;
+        releaseConfigure.Set();
+        await startup.WaitAsync(WaitTimeout);
+
+        try
+        {
+            // Assert - a subject target exists only once a handler has seen the attach, so its
+            // absence is what proves no start could have been appended while configure still ran.
+            Assert.False(attachedDuringConfigure, "The subject was attached to the context before configure ran.");
+            Assert.Equal("configured", configuredSubject!.NameAtStart);
+            Assert.Equal(1, configuredSubject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheConstructorTakesTheContextAndIgnoresIt_ThenItIsAttachedAndStartsOnce()
+    {
+        // Arrange - the constructor consumes the context argument and drops it, so the attach the
+        // generated constructor would have done never happens and only the unconditional one does.
+        var builder = Host.CreateApplicationBuilder();
+        var context = CreateContext(builder);
+        builder.Services.AddSingleton(context);
+        builder.Services.AddSubject<SubjectIgnoringContextParameter>();
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            // Act
+            var subject = host.Services.GetRequiredService<SubjectIgnoringContextParameter>();
+
+            // Assert
+            var registry = context.GetService<ISubjectRegistry>();
+            Assert.Contains(registry.KnownSubjects, known => ReferenceEquals(known.Key, subject));
+            Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheSubjectIsNotAHostedService_ThenItIsStillConstructedAndAttachedAtHostStart()
+    {
+        // Arrange - nothing resolves the singleton, so the activation is the only thing that can
+        // construct it, and construction is what attaches it.
+        var builder = Host.CreateApplicationBuilder();
+        var context = CreateContext(builder);
+        builder.Services.AddSingleton(context);
+
+        Person? constructedSubject = null;
+        builder.Services.AddSubject<Person>(subject => constructedSubject = subject);
+
+        var host = builder.Build();
+
+        // Act
+        await host.StartAsync();
+
+        try
+        {
+            // Assert - read before anything resolves the singleton
+            Assert.NotNull(constructedSubject);
+
+            var registry = context.GetService<ISubjectRegistry>();
+            Assert.Contains(registry.KnownSubjects, known => ReferenceEquals(known.Key, constructedSubject));
         }
         finally
         {
