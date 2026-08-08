@@ -84,33 +84,22 @@ internal static class SubjectMetadataExtractor
         // defaults to internal, a nested one to private.
         var accessModifier = GetAccessModifierFromAccessibility(typeSymbol.DeclaredAccessibility);
 
+        // From the symbol, because 'sealed' may sit on any partial declaration, not necessarily
+        // the attributed one. DetectConstructorState already scans every declaration for the same
+        // reason.
+        var isSealed = typeSymbol.IsSealed;
+
         var containingTypes = GetContainingTypes(typeDeclaration);
         var namespaceName = GetNamespace(typeDeclaration);
         var fullTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-        // Resolved from the symbol, not from this declaration's base list: properties, methods and
-        // interfaces are all collected across every partial declaration, so the base list may sit
-        // on a declaration other than the attributed one. Reading it from syntax then lost the base
-        // class entirely, which re-declared the INotifyPropertyChanged plumbing the base already
-        // provides and shadowed the base's DefaultProperties without concatenating them, leaving the
-        // subject reporting only its own properties. BaseType is also strictly the base class, so an
-        // interface in the base list can no longer be mistaken for one.
-        var baseType = typeSymbol.BaseType;
-        var baseClass = baseType is { SpecialType: not SpecialType.System_Object } &&
-                        (HasInterceptorSubjectAttribute(baseType) ||
-                         ImplementsInterface(baseType, KnownTypes.IInterceptorSubject))
-            ? baseType
-            : null;
+        var baseClass = SubjectBaseContract.Resolve(
+            typeSymbol, semanticModel.Compilation, location, diagnostics, cancellationToken);
 
-        var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-        var baseClassHasInterceptorSubject = HasInterceptorSubjectAttribute(baseClass);
-
-        // Asked of the subject rather than of the base class alone, which keeps the previous
-        // base-list scan's reach: a subject that lists IRaisePropertyChanged itself and implements
-        // it by hand still suppresses the generated plumbing, and now does so no matter which
-        // partial declaration carries the base list.
-        var baseClassHasInpc = baseClassHasInterceptorSubject ||
-                               ImplementsInterface(typeSymbol, KnownTypes.IRaisePropertyChanged);
+        if (baseClass is null)
+        {
+            return new ExtractionResult(null, diagnostics);
+        }
 
         // Collect all partial type declarations
         var allTypeDeclarations = typeSymbol.DeclaringSyntaxReferences
@@ -145,14 +134,13 @@ internal static class SubjectMetadataExtractor
             new SubjectMetadata(
                 className,
                 accessModifier,
+                isSealed,
                 namespaceName,
                 fullTypeName,
                 containingTypes,
                 needsGeneratedParameterlessConstructor,
                 hasOrWillHaveParameterlessConstructor,
-                baseClassTypeName,
-                baseClassHasInterceptorSubject,
-                baseClassHasInpc,
+                baseClass,
                 properties,
                 methods),
             diagnostics);
@@ -872,39 +860,6 @@ internal static class SubjectMetadataExtractor
     {
         return property.GetAttributes()
             .Any(a => SymbolExtensions.IsTypeOrInheritsFrom(a.AttributeClass, KnownTypes.DerivedAttribute));
-    }
-
-    private static bool HasInterceptorSubjectAttribute(INamedTypeSymbol? type)
-    {
-        if (type is null)
-        {
-            return false;
-        }
-
-        return type
-            .GetAttributes()
-            .Any(a => SymbolExtensions.IsTypeOrInheritsFrom(a.AttributeClass, KnownTypes.InterceptorSubjectAttribute));
-    }
-
-    private static bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)
-    {
-        if (type is null)
-        {
-            return false;
-        }
-
-        if (type.TypeKind == TypeKind.Interface &&
-            type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName)
-        {
-            return true;
-        }
-
-        if (type.AllInterfaces.Any(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName))
-        {
-            return true;
-        }
-
-        return type.BaseType is { } baseType && ImplementsInterface(baseType, interfaceTypeName);
     }
 
     /// <summary>

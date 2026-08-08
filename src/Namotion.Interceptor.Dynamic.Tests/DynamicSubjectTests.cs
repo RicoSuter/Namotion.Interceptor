@@ -118,6 +118,24 @@ public class DynamicSubjectTests
         Assert.Equal(5, sensor.Temperature);
     }
 
+    [Fact]
+    public void WhenProxyingAGeneratedSubject_ThenNoGeneratedPlumbingMemberBecomesAProperty()
+    {
+        // Arrange & Act: Motor is [InterceptorSubject], so the proxy's base is generated code.
+        var motor = DynamicSubjectFactory.CreateSubject<Motor>(typeof(IMotor), typeof(ISensor));
+
+        // Assert: DynamicSubjectFactory turns every reflected instance property that is not already
+        // known into an intercepted subject property, and GetProperties(Instance | Public |
+        // NonPublic) returns inherited protected properties. A generated subject has no protected
+        // instance property today, which is exactly why nothing catches a new one. Only these two
+        // names can actually leak: the other plumbing members are static, or explicit interface
+        // implementations that reflect under an interface-qualified name and are not inherited by
+        // the proxy at all.
+        var propertyNames = ((IInterceptorSubject)motor).Properties.Keys;
+        Assert.DoesNotContain("GetInstanceProperties", propertyNames);
+        Assert.DoesNotContain("InstanceProperties", propertyNames);
+    }
+
     public class TestInterceptor : IReadInterceptor, IWriteInterceptor, ILifecycleInterceptor
     {
         private readonly string _name;

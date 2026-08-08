@@ -330,19 +330,32 @@ Child classes can also be `[InterceptorSubject]`:
 
 ```csharp
 [InterceptorSubject]
-public partial class Person
+public partial class PersonBase
 {
     public partial string Name { get; set; }
 }
 
 [InterceptorSubject]
-public partial class Employee : Person
+public partial class Employee : PersonBase
 {
     public partial string Department { get; set; }
 }
 ```
 
-The `DefaultProperties` of `Employee` includes properties from both classes. Change notifications from the base class work correctly.
+The `DefaultProperties` of `Employee` includes properties from both classes, and properties declared
+on `PersonBase` are intercepted like any other: reads and writes go through the interceptor chain, so
+change tracking records them and connectors see them. The per instance plumbing is emitted once, in
+the class at the root of the hierarchy, and every subject below it inherits that plumbing.
+
+Note that `PropertyChanged` firing is not evidence that a property is intercepted. A subject with no
+context still raises it, because the setter calls `RaisePropertyChanged` directly rather than through
+the chain. If you are testing whether interception reaches a property, assert on an interceptor.
+
+The hierarchy does not have to be made only of subjects. A plain class with no attribute can sit
+between two subjects, a subject can be `sealed` at any level, and a base class written by hand can
+host generated subclasses as long as it provides the members the generated code calls. See
+[Subject base classes](subject-guidelines.md#base-classes-and-subclasses) for that contract, and
+[Hierarchy Hazards](#hierarchy-hazards) for what a derived class must avoid declaring.
 
 ### Partial Class Spanning
 
@@ -408,8 +421,92 @@ The generator reports the following diagnostics, all in the `Namotion.Intercepto
 | NI0008 | Warning | More than one member provides the same simple property name. A class-declared property always takes the name; between colliding interface members, the first one the generator reaches takes it. One warning is reported per member that ends up unreachable, naming both the member that took the name and the member that was dropped | Rename one of the colliding members, or suppress the warning to accept the resolution rule |
 | NI0009 | Error | The subject itself is generic, or the subject is nested inside a generic containing type | Remove the type parameters from the subject or its containing type |
 | NI0010 | Error | The subject is declared `file`-local | Remove the `file` modifier |
+| NI0011 | Error | The nearest base class that is a subject has no usable static `DefaultProperties` of type `IReadOnlyDictionary<string, SubjectPropertyMetadata>`, which leaves nothing for the subject's own property set to concatenate with. The message also lists whatever else is missing, such as `IInterceptorSubject` or the helper members, but a base missing only those still generates and gets NI0012 instead | Put `[InterceptorSubject]` on the base class, or make it satisfy the [subject base class contract](subject-guidelines.md#base-classes-and-subclasses). If the base class only exists to add properties at runtime, drop it and call `AddProperties` on the subject instead |
+| NI0012 | Warning | The base class is recognized as a subject but does not expose the shared plumbing, either because it was built by an older version of the generator or because it is a hand-written class that provides only `DefaultProperties`. The subject falls back to emitting its own plumbing, so it compiles and behaves exactly as it did before the plumbing became shared, which means properties declared on that base class stay unintercepted | Rebuild the base assembly against the current package version, or make the base class satisfy the contract. Suppressing the rule keeps the previous behaviour and the unintercepted base properties with it. Note that under `TreatWarningsAsErrors` this warning fails the build |
+| NI0013 | Error | The subject, or a class between the subject and its base subject, declares a member named `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` or `GetInstanceProperties`. The generated bodies call those by simple name, so the declared member can capture the call. The rule matches on the name alone, for any member kind and any signature, because a `new` annotated member of the same shape captures the call with no compiler warning at all | Rename the member. On a class between the two subjects, a `private` member of that name is not reported, because it neither hides nor binds |
+| NI0014 | Error | The subject, or a class between the subject and its base subject, declares a public member that implements `IInterceptorSubject.Context`, `Data`, `SyncRoot` or `AddProperties`, or implements one of those explicitly. Every subject re-lists `IInterceptorSubject`, which recomputes the interface map, so that member takes the slot from the base class implementation. A same-named member that does not match the interface member's type and signature is not reported | Rename the member, or remove the explicit implementation and let the inherited one stand. See [Hierarchy Hazards](#hierarchy-hazards) |
 
-Suppress a rule at the point of use with `#pragma warning disable NI0005`, or project-wide through `<NoWarn>` in the project file. This is a real fix for the four warning rules (NI0005 through NI0008): generation still succeeds, so suppressing only silences advice about a shape the author has chosen to accept. It does not help for the six rules that stop generation (NI0001 through NI0004, NI0009, NI0010): suppressing one of those silences the message, but the class still never becomes an interceptor subject, leaving an inert type with none of the generated members and no further compiler feedback pointing at why. Fix the underlying shape instead.
+Suppress a rule at the point of use with `#pragma warning disable NI0005`, or project-wide through `<NoWarn>` in the project file. This is a real fix for the four warning rules (NI0005 through NI0008): generation still succeeds, so suppressing only silences advice about a shape the author has chosen to accept. It does not help for the seven rules that stop generation (NI0001 through NI0004, NI0009, NI0010, NI0011): suppressing one of those silences the message, but the class still never becomes an interceptor subject, leaving an inert type with none of the generated members and no further compiler feedback pointing at why. Fix the underlying shape instead.
+
+The two remaining rules sit between those groups. NI0012 is a warning and generation succeeds, but suppressing it accepts a hierarchy in which base-declared properties are not intercepted, so it is worth fixing rather than silencing. NI0013 and NI0014 are errors that do not stop generation: the generated code is still emitted, and suppressing the rule leaves a member in place that captures a generated call or an interface slot, which fails silently at runtime instead of loudly at build time.
+
+## Hierarchy Hazards
+
+Emitting the plumbing once per hierarchy means a derived subject inherits members it does not declare
+itself. Three consequences follow, and a fourth item is listed with them because the hierarchy case
+changed even though the rule itself is older. None of the first three applies to a subject with no
+subject base class, which is the large majority of them, and none of them needs any action for an
+ordinary hierarchy of `[InterceptorSubject]` classes.
+
+### A member in a derived class can take an interface slot
+
+C# only allows an explicit interface implementation in a class that lists the interface itself
+(CS0540), and each subject has to keep its own `IInterceptorSubject.Properties`, so every subject
+re-lists `IInterceptorSubject`. Re-listing recomputes the interface map for that class. A public
+member in a derived class, or in a plain class between two subjects, that matches `Context`, `Data`,
+`SyncRoot` or `AddProperties` therefore takes the slot away from the base class implementation.
+
+Taking `Context` is the severe case: the inherited helpers keep reading the root's field, which
+nothing populates any more, so interception stops without an error and the property values still look
+correct. NI0014 turns the whole shape into a build error, so this is caught at compile time.
+
+This is a behaviour change. A derived subject declaring `public object SyncRoot { get; }` compiled
+cleanly before, because that class emitted its own explicit implementation which won over its own
+public member. It is now NI0014.
+
+### A base class can hijack a slot later, without the consuming assembly being rebuilt
+
+NI0014 runs where the derived subject is compiled, so a member added to the base class afterwards is
+not seen. For that to matter, all four of the following have to hold:
+
+1. the referenced assembly's subject hierarchy is more than one level deep;
+2. a public non-static instance member is added to a class *between* the root and the consuming
+   subject, not to the root itself, because a class's own explicit implementation beats its own
+   public members;
+3. that member matches an `IInterceptorSubject` member by name and signature exactly;
+4. the consuming assembly ships without being recompiled.
+
+Recompiling the consuming assembly against the new base turns it into an NI0014 build error, so the
+window is exactly "shipped, not rebuilt". This is accepted rather than fixed, for the reason under
+[Why not a virtual hook](#why-not-a-virtual-hook).
+
+### Members added to IInterceptorSubject in future need the same review
+
+Because derived subjects keep re-listing `IInterceptorSubject`, any member added to that interface can
+be hijacked the same way and has to be added to NI0014's list at the same time. This is a note for
+whoever evolves the interface, not something a consumer can act on.
+
+### Writes before the context is published are not intercepted
+
+The context is published inside the generated `Subject(IInterceptorSubjectContext context)`
+constructor, which chains to the parameterless constructor first and adds the context afterwards.
+Anything that runs before that point writes straight to the backing field:
+
+- the subject's own parameterless constructor body, which the generated context constructor runs
+  before it publishes anything;
+- field initializers of a derived class, which the language runs before the base constructor;
+- statements in a constructor body that run before the base constructor publishes the context.
+
+The rule is not new, but one case changed. A write in a hand-written subclass constructor body after
+`: base(context)` has run is now intercepted, including a write to a property declared on the base
+class, where before it silently was not.
+
+### Why not a virtual hook
+
+The first two hazards would both disappear if `IInterceptorSubject.Properties` were implemented once
+in the root behind a `protected virtual GetDefaultProperties()` hook, since derived subjects would
+then stop re-listing the interface and there would be no slot to take.
+
+That alternative was measured rather than assumed. `IInterceptorSubject.Properties` is read on every
+intercepted write through `PropertyReference.Metadata`, which is deliberately uncached, so the hook
+adds a virtual call to a hot path. At a monomorphic call site the cost is flat, because the JIT
+devirtualizes it. At a polymorphic call site, which is the representative one since
+`PropertyReference.Metadata` is a single shared call site that every subject type passes through, the
+hook costs 0.133 ns per `Properties` read, or roughly 2 to 4 percent of an intercepted write.
+
+The current design was kept with those numbers in hand. The cost would be paid by every subject
+forever, including the large majority that have no base class at all, while the hazard it removes is
+caught at compile time by NI0014 for every consumer that recompiles.
 
 ## Requirements
 
