@@ -88,9 +88,9 @@ The source is authoritative for a property it owns, and normally it does win: an
 - **An echo.** The source reporting back a value we just wrote is an acknowledgement, not newer truth. Letting it win discards the write that followed it.
 - **The initial-state load.** It carries the source's state as of the connect, which says nothing about whether it precedes or follows a write made moments earlier.
 
-In both, "source wins" resolves an ambiguity by discarding a write that already committed locally, with no error and no way for the caller to know. So a committed local write wins instead, and the source converges to it.
+In both, "source wins" would resolve an ambiguity by discarding a write that already committed locally, with no error and no way for the caller to know. So a committed local write wins instead, and the source converges to it.
 
-**What keeps the two ends in sync** is not the conflict rule but two properties of the delivery path: the newest local commit is never dropped, so the source always receives the model's settled value; and the source's notifications carry its own value back, so the model converges to whatever the source actually holds. A source that neither reports values back nor answers reads is outside that guarantee, which is what the last limitation below covers.
+**What keeps the two ends in sync** is not the conflict rule but the delivery path: the newest local commit is never dropped, so the source always receives the model's settled value, and the source's notifications carry its own value back, so the model converges to what the source holds. A source that neither reports values back nor answers reads is outside that guarantee; see the last limitation below.
 
 **Servers are the opposite case.** A client's write to a server is not a value produced before it saw ours, it is the newer write, so the ordering ambiguity above does not exist and it does win over an older local commit. Delivering the older one instead would leave every client on a value the model has moved past. The three servers select this with `ChangeSupersessionRule.SourceValuesAreSettled`, whose documentation gives the precondition to check before adding a fourth.
 
@@ -150,21 +150,34 @@ A write's origin moves through a lifecycle: it starts as a pending stamp set by 
 
 A source with a `bufferTime` above zero batches outbound changes and collapses each flush to one change per property, so `WriteChangesAsync` sees at most one entry per property per flush.
 
-Per property, the surviving old value comes from the change with the *lowest* `SubjectPropertyChange.Revision` in that batch and the new value from the one with the *highest*, so the survivor spans the batch even when changes were enqueued in the opposite order they committed. Enqueuing happens after the commit and outside the subject lock, so under concurrent writers that inversion is real rather than theoretical. The survivor's `Revision`, `Origin`, `ChangedTimestamp` and `ReceivedTimestamp` all come from that same highest-revision change, so a handler that keys off `Origin.Source`, for example to suppress echoes, sees the origin of the newest commit. Emit order is the arrival order of each property's last occurrence.
+**What a connector can rely on:**
 
-Revisions are monotonic per subject and are not comparable across subjects; see [Delivery Guarantees](tracking.md#delivery-guarantees) for the full contract, including what the old value does and does not promise. A change carrying revision 0 orders against nothing, so a property with one in its batch collapses by arrival position instead, which is what a source saw before revisions existed. The write path always stamps a revision, so this only arises for changes built through the public factory.
+- At most one change per property per flush, spanning the batch: the survivor's old value is the oldest in it and the new value the newest, whatever order they arrived in.
+- The survivor's `Revision`, `Origin` and timestamps all come from the newest commit in the batch, so keying off `Origin.Source` sees the newest commit's origin.
+- Emit order is the arrival order of each property's last occurrence.
+- Only a property's settled state is delivered. A change the model has already moved past is dropped rather than sent, decided by commit order rather than by comparing values, so it holds for derived and runtime-registered properties too.
+- Values a source itself sent are not echoed back to it. The one exception is a transaction confirmation on a property a connector has also written, which is sent to repair the source.
 
-Only a property's settled state is ever delivered: a flush drops any survivor that a later commit has superseded. Every committed write stamps its revision on the property it wrote, so this is decided by commit order rather than by comparing values, which means it also holds for derived and runtime-registered properties, whose getters need not return what a write stored.
+**The coalescing contract:** buffered delivery coalesces every change; immediate delivery (`bufferTime` at zero) coalesces only what was queued before processing started. **A source that needs every intermediate value must run without buffering.** The asymmetry is deliberate: a change queued before processing started was captured while the source was connecting, so a superseded one is stale state, whereas a change arriving afterwards is stream data, where an intermediate value is data rather than staleness.
 
-Dropping is safe only because a later commit carries the settled value in the dropped one's place, and one case fails that: a commit that came **from the source** is skipped as an echo when that source's queue is drained, so nothing would be left to deliver. Source-originated commits therefore never count as superseding. Without that exclusion a source echoing back a value we had just written would suppress the next write to the same property, losing it permanently and settling both ends on the old value. Issue #373 covers why an echo cannot be ranked against local writes at all: its revision is stamped when it is applied here, not when the source produced it.
+What a flush does with each change:
 
-This is the delivery contract: **buffered delivery coalesces every change, and immediate delivery (`bufferTime` at zero) coalesces only what was queued before processing started.** A source that needs every intermediate value must run without buffering. The asymmetry is deliberate: a change queued before processing starts was captured while the source was connecting and a superseded one is stale state, whereas a change arriving afterwards is stream data, where an intermediate is a value rather than staleness.
+```mermaid
+flowchart TD
+    A[Change dequeued] --> B{From this source?}
+    B -->|yes| C{Transaction confirmation<br/>on a published property?}
+    B -->|no| D{A later commit<br/>supersedes it?}
+    C -->|no| E[Skip: the source already has it]
+    C -->|yes| F[Send: repairs the source]
+    D -->|yes| G[Drop: the later commit<br/>carries the settled value]
+    D -->|no| H[Send]
+```
 
-[Source transactions](tracking-transactions.md) write to the source themselves and then apply locally, and that local apply arrives here as a confirmation. Normally it is not sent on, because the source already has it. The exception is when a connector has also written that property itself: such a write can reach the source after the transaction's and leave it holding an older commit than the subject, so the confirmation is sent out to restore it.
+Which commits count as superseding is not the same for every connector, and choosing wrongly loses data in both directions. Connectors talking to a remote source may not rank against a value that source sent; servers must. See `ChangeSupersessionRule` and [connector delivery](design/connector-delivery.md) for the condition that decides it.
 
-That "has been written out" mark is sticky and lives in the subject's property data. Nothing observable on this side can prove that an earlier write of ours did not land on the source after a transaction's direct write, so clearing it on any inbound event would be a bet against an ordering the client cannot see, and losing it silently strands a committed transaction value. It is deliberately not kept per source: the mark only decides whether a confirmation is written back, and a confirmation carries the current value, so the worst a foreign connector's mark can cost is one redundant write of the value the source is owed anyway. A property written only through transactions never sets it.
+Revisions are monotonic per subject and are not comparable across subjects; see [Delivery Guarantees](tracking.md#delivery-guarantees) for the full contract, including what the old value does and does not promise.
 
-If that repair write fails, the source keeps the older value and the subject keeps the confirmed one, so local and remote stay out of sync. Sources are built with a [write retry queue](#write-retry-queue) by default, which queues the change and retries it, but that queue is a ring buffer that drops its oldest entries when full, so a pending repair can be evicted before it is retried when writes fail across many properties at once. With the queue disabled the change is logged and dropped immediately. There is no active reconciliation in either case: the divergence lasts until the property is written again or the source reloads its initial state on reconnect.
+If a transaction repair write fails, the source keeps the older value and the subject the confirmed one, so the two stay out of sync. Sources are built with a [write retry queue](#write-retry-queue) by default, which retries it, but that queue is a ring buffer and drops its oldest entries when full, so a pending repair can be evicted when writes fail across many properties at once. With the queue disabled the change is logged and dropped. There is no active reconciliation in either case: the divergence lasts until the property is written again or the source reloads its initial state on reconnect.
 
 ### Write Retry Queue
 

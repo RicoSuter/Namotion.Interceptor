@@ -74,6 +74,26 @@ store at all.
 The OPC UA case was invisible until #425. Before it, the server applied its own node writes back to the
 subject, which converged the two stores by accident while corrupting them in other ways.
 
+## Why the batch survivor spans the batch
+
+The survivor's old value comes from the lowest revision in the batch and its new value from the highest, rather than from whichever change happened to arrive first and last. Enqueuing happens after the commit and outside the subject lock, so a writer preempted between the two can present an older commit after a newer one. Under concurrent writers that inversion is real rather than theoretical, and taking the first and last arrivals would produce a survivor whose old value postdates its new one.
+
+Everything else on the survivor, its `Revision`, `Origin` and both timestamps, comes from the highest-revision change, so a handler keying off `Origin.Source` sees the newest commit's origin rather than a mixture.
+
+## Why revision 0 is delivered rather than dropped
+
+A change carrying revision 0 orders against nothing, so staleness is unprovable and it is delivered; a property with one in its batch collapses by arrival position instead, which is what a source saw before revisions existed. A redundant write costs one message, a wrong drop is permanent, so the guard errs toward delivering.
+
+This is a guard rather than a path the pipeline takes. Every published change comes from a write terminal and carries a revision, including derived recomputations, so revision 0 only reaches here for changes built through the public factory.
+
+## Why the written-out mark is sticky and not per source
+
+The mark that says a connector has written a property out never clears, and lives in the subject's property data rather than per source.
+
+It cannot clear on an inbound event: nothing observable on this side proves that an earlier write of ours did not land on the source after a transaction's direct write, so clearing would be a bet against an ordering the client cannot see, and losing it silently strands a committed transaction value.
+
+It is not per source because it decides only whether a confirmation is written back, and a confirmation carries the current value. The worst a foreign connector's mark can cost is one redundant write of the value the source is owed anyway. That is what lets it be a bare flag with no source reference to release. A property written only through transactions never sets it.
+
 ## Why the marker is read before FinalizeOrigin
 
 `FinalizeOrigin` demotes a stamped origin to `Local` when the stored value differs from the sent value,
