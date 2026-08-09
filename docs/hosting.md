@@ -30,7 +30,7 @@ var host = builder.Build();
 await host.StartAsync();
 ```
 
-`WithHostedServices()` creates the `HostedServiceHandler` for this context and registers it with the host, so the handler opens for business when the host starts and drains when the host stops. It also enables `WithLifecycle()`, which raises the context attach and detach events the handler listens to. Each context gets its own handler, so two contexts sharing one `IServiceCollection` both work.
+`WithHostedServices()` creates the `HostedServiceHandler` for this context and registers it with the host, so the handler opens for business when the host starts and drains when the host stops. It also enables `WithLifecycle()`, which raises the context attach and detach events the handler listens to. Each context gets its own handler, so two contexts sharing one `IServiceCollection` both work, and a subject reachable from two hosting enabled contexts is still started once.
 
 Child subjects reach the handler through their own `Context`, so hosting for anything below the root needs context inheritance. `WithFullPropertyTracking()` includes `WithContextInheritance()`. If you compose the context by hand, add `WithContextInheritance()` yourself, or only root subjects will ever start anything.
 
@@ -183,7 +183,7 @@ else if (attachment.Current is { } service)
 }
 ```
 
-`AttachHostedService` and `DetachHostedService` return as soon as the transition has been queued, so their result means "accepted", not "started" or "stopped". `Current` and `Fault` are how the outcome is observed. The awaitable overloads wait for it instead:
+`AttachHostedService` and `DetachHostedService` return as soon as the transition has been queued, so neither result means "started" or "stopped". `Current` and `Fault` are how the outcome is observed. `DetachHostedService` returns false when the attachment was not on the subject, which is what a second detach of the same handle gets. The awaitable overloads wait for the transition instead:
 
 ```csharp
 var attachment = await person.AttachHostedServiceAsync(
@@ -206,6 +206,8 @@ Two different things are called detaching, and they differ in exactly one respec
 
 - **The subject leaves the graph.** The handler stops the instance, disposes it and clears `Current`, and **keeps the attachment on the subject**. The factory survives, so the next time the subject enters a hosting enabled graph the handler invokes it again and a fresh instance runs. This is what makes moving a subject through the graph work.
 - **`DetachHostedService` or `DetachHostedServiceAsync`.** The same stop and dispose, and the attachment is removed from the subject as well, so a later context attach starts nothing.
+
+Disposal prefers `IAsyncDisposable` and falls back to `IDisposable`, and a service that implements neither is simply dropped after its stop. A dispose that throws is logged and never propagated, because the disposal can run from inside a property write that has nothing to do with the service.
 
 ```csharp
 var parent = new Parent(context);
