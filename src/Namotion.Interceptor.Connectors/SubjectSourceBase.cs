@@ -20,6 +20,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
+
+    // A source we talk to over a wire: what it hands us was produced before it saw our write, so it
+    // cannot rank against our commits (issue #373). Named once because the processor and the reconcile
+    // must agree; if only one ranked against the last commit, the other would still deliver an older one.
+    private const ChangeSupersessionRule SupersessionRule = ChangeSupersessionRule.SourceValuesMayBeStale;
     private readonly TimeSpan _retryTime;
     private readonly SubjectPropertyWriter _propertyWriter;
 
@@ -225,9 +230,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                         subscription,
                         propertyReference => propertyReference.TryGetSource(out var source) && source == this,
                         WriteChangesViaRetryQueueAsync,
-                        // A source we talk to over a wire: what it hands us was produced before it saw
-                        // our write, so it cannot rank against our commits. See issue #373.
-                        ChangeSupersessionRule.SourceValuesMayBeStale,
+                        SupersessionRule,
                         _bufferTime,
                         maxQueueDepth: null,
                         logger: _logger);
@@ -433,7 +436,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
             {
                 var property = change.Property;
 
-                if (!ChangeDeliveryFilter.IsCurrent(in change, ChangeSupersessionRule.SourceValuesMayBeStale))
+                if (!ChangeDeliveryFilter.IsCurrent(in change, SupersessionRule))
                 {
                     // A later local commit supersedes it, and that commit's change is delivered in its
                     // place.

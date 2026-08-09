@@ -395,12 +395,6 @@ public class ChangeQueueProcessorTests
         Assert.Equal(2, change.Revision);
     }
 
-    /// <summary>
-    /// The immediate path (no buffer time) has no batch to merge, so it consults the delivered-revision
-    /// filter directly. Without that call it would write a commit the source has already moved past,
-    /// and nothing else in the suite covers it.
-    /// </summary>
-
     [Fact]
     public async Task WhenAnEchoIsDequeued_ThenAnOlderLocalWriteIsStillWritten()
     {
@@ -697,7 +691,7 @@ public class ChangeQueueProcessorTests
         try { await processing; } catch (OperationCanceledException) { /* expected */ }
     }
 
-    private static (IInterceptorSubjectContext Context, Person Subject, List<string?> Written, object Source, ChangeQueueProcessor Processor)
+    private static (IInterceptorSubjectContext Context, Person Subject, ConcurrentQueue<string?> Written, object Source, ChangeQueueProcessor Processor)
         CreateImmediateProcessor()
     {
         var context = InterceptorSubjectContext
@@ -706,7 +700,7 @@ public class ChangeQueueProcessorTests
             .WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
-        var written = new List<string?>();
+        var written = new ConcurrentQueue<string?>();
         var source = new object();
 
         var processor = new ChangeQueueProcessor(
@@ -717,7 +711,7 @@ public class ChangeQueueProcessorTests
             {
                 foreach (var change in changes.ToArray())
                 {
-                    written.Add(change.GetNewValue<string>());
+                    written.Enqueue(change.GetNewValue<string>());
                 }
 
                 return ValueTask.CompletedTask;

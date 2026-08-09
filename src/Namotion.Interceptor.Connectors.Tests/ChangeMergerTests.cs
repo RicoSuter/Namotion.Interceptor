@@ -419,9 +419,20 @@ public class ChangeMergerTests
         merger.Merge(CreateWideBatch(changeCount: 6000, distinctProperties: 6000));
         merger.Reset();
 
-        // Act & Assert
-        merger.Merge(CreateWideBatch(changeCount: 300, distinctProperties: 300));
-        merger.Reset();
+        var wideCapacity = GetPropertyIndexCapacity(merger);
+
+        // Act: repeated because the trim only fires after enough consecutive narrow batches. One round
+        // leaves the capacity untouched, so a single pass would never reach the code this pins.
+        for (var round = 0; round < NarrowBatchesBeforeTrim; round++)
+        {
+            merger.Merge(CreateWideBatch(changeCount: 300, distinctProperties: 300));
+            merger.Reset();
+        }
+
+        // Assert: the trim ran, which is what proves the clear happened first. Without that ordering
+        // the Reset above throws, and asserting only "does not throw" would pass while never trimming.
+        Assert.True(GetPropertyIndexCapacity(merger) < wideCapacity,
+            "the trim should have fired, otherwise this test never reaches the ordering it pins");
     }
 
     [Fact]
@@ -449,6 +460,10 @@ public class ChangeMergerTests
     }
 
     private const int PropertyIndexMaximum = 1024;
+
+    // Mirrors ChangeMerger's hysteresis count. A shrink test that runs fewer rounds than this never
+    // reaches the trim, so it pins nothing.
+    private const int NarrowBatchesBeforeTrim = 4;
 
     private static SubjectPropertyChange[] CreateWideBatch(int changeCount, int distinctProperties)
     {

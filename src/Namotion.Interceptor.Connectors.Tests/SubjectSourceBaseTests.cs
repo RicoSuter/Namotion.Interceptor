@@ -88,11 +88,22 @@ public class SubjectSourceBaseTests
         // static-scan technique: pin that the catch still performs the transition, even though the
         // sequence that reaches it is not independently exercised here.
         var source = File.ReadAllText(GetSubjectSourceBaseFilePath());
-        var executeAsync = source[source.IndexOf("protected sealed override async Task ExecuteAsync", StringComparison.Ordinal)..];
-        var catchBlock = executeAsync[executeAsync.IndexOf("catch (Exception ex)", StringComparison.Ordinal)..];
+
+        // Located rather than sliced blind: without these the slices below throw a bare range exception
+        // on the refactor this test exists to survive, which reads as a broken test rather than a moved one.
+        var executeAsyncIndex = source.IndexOf("protected sealed override async Task ExecuteAsync", StringComparison.Ordinal);
+        Assert.True(executeAsyncIndex >= 0, "ExecuteAsync not found; this scan needs updating");
+
+        var executeAsync = source[executeAsyncIndex..];
+        var catchIndex = executeAsync.IndexOf("catch (Exception ex)", StringComparison.Ordinal);
+        Assert.True(catchIndex >= 0, "the catch block was not found; this scan needs updating");
+
+        var catchBlock = executeAsync[catchIndex..];
+        var finallyIndex = catchBlock.IndexOf("finally", StringComparison.Ordinal);
+        Assert.True(finallyIndex >= 0, "no finally after the catch; this scan needs updating");
 
         // Act & Assert
-        Assert.Contains("TransitionStateTo(SourceState.Synchronizing)", catchBlock[..catchBlock.IndexOf("finally", StringComparison.Ordinal)]);
+        Assert.Contains("TransitionStateTo(SourceState.Synchronizing)", catchBlock[..finallyIndex]);
     }
 
     [Fact]
