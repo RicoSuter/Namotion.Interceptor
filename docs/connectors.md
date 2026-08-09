@@ -174,6 +174,8 @@ ExecuteAsync (retry loop)
  └── ProcessAsync()                ← runs ChangeQueueProcessor, calls your WriteChangesAsync
 ```
 
+Stopping runs through `BackgroundService.StopAsync`, which waits for the pump task with no bound of its own, so pass it a bounded cancellation token (hosts supply one via `HostOptions.ShutdownTimeout`) because a hook blocked in a protocol call that ignores cancellation would otherwise hang the caller forever.
+
 #### ISubjectSource Interface
 
 `SubjectSourceBase` implements `ISubjectSource`; its abstract `WriteChangesAsync` and `LoadInitialStateAsync` satisfy the interface members directly.

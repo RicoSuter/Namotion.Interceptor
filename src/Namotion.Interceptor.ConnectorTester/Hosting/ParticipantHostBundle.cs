@@ -21,6 +21,15 @@ internal sealed class ParticipantHostBundle : IHostedService, IAsyncDisposable
     private readonly IReadOnlyList<IHostedService> _hostedServices;
     private readonly ILogger _logger;
 
+    /// <summary>
+    /// Budget for a single service's stop during the startup unwind. Long enough for a socket close
+    /// and a pump task to unwind, short enough that a connector stuck in a protocol call that ignores
+    /// cancellation does not turn a reported startup failure into a hang. Applied per service rather
+    /// than shared across the unwind, so one slow stop cannot starve the services after it of the
+    /// chance to release their sockets.
+    /// </summary>
+    private static readonly TimeSpan RollbackStopTimeout = TimeSpan.FromSeconds(5);
+
     public ParticipantHostBundle(string participantName, IServiceProvider participantServiceProvider)
     {
         _participantName = participantName;
@@ -55,7 +64,11 @@ internal sealed class ParticipantHostBundle : IHostedService, IAsyncDisposable
             {
                 try
                 {
-                    await _hostedServices[i].StopAsync(CancellationToken.None).ConfigureAwait(false);
+                    // Bounded rather than CancellationToken.None: BackgroundService.StopAsync waits
+                    // for the pump task with no bound of its own, so an unbounded token here would
+                    // trade the startup failure we are about to rethrow for an unrecoverable hang.
+                    using var stopTimeout = new CancellationTokenSource(RollbackStopTimeout);
+                    await _hostedServices[i].StopAsync(stopTimeout.Token).ConfigureAwait(false);
                 }
                 catch (Exception stopException)
                 {

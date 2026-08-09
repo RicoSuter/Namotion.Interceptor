@@ -14,6 +14,14 @@ namespace Namotion.Interceptor.Connectors;
 /// <see cref="StartListeningAsync"/> (protected), <see cref="LoadInitialStateAsync"/> (public),
 /// and <see cref="WriteChangesAsync"/> (public).
 /// </summary>
+/// <remarks>
+/// <see cref="BackgroundService.StopAsync"/> must be called with a bounded cancellation token.
+/// <see cref="StartListeningAsync"/> and <see cref="LoadInitialStateAsync"/> are protocol calls that
+/// can block without observing cancellation, and <see cref="BackgroundService.StopAsync"/> waits for
+/// the pump task with no bound of its own, so an unbounded token waits forever. Hosts already supply
+/// that bound through <c>HostOptions.ShutdownTimeout</c>; code that stops a source directly, outside
+/// the host lifecycle, has to supply its own.
+/// </remarks>
 public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 {
     private readonly IInterceptorSubjectContext _context;
