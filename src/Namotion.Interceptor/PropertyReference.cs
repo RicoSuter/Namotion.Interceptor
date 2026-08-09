@@ -107,33 +107,36 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// source-originated commits and excluding them, and whether a sink has already published its value.
     /// Returns false when the property has never been written.
     /// </summary>
+    /// <param name="includeSourceCommits">Whether commits applied from a source count. Only a sink that
+    /// can prove such a value already reached its destination may say true; for anything talking over a
+    /// wire the value was produced before the source saw our write, so it cannot rank against our
+    /// commits. See <see cref="PropertyWriteState.LastSourceCommitRevision"/> and issue #373.</param>
+    /// <param name="commitRevision">The revision of the last qualifying commit, or 0 if there is none.</param>
+    /// <param name="published">Whether a sink has published this property's value.</param>
     /// <remarks>
     /// A revision is only comparable against a change to the same property: revisions are per subject,
-    /// and two properties of one subject draw from the same counter. The values come from one lookup
-    /// because this runs per delivered change, but they are read independently and are not a snapshot:
-    /// rank against one of them, never against a difference between them. Which one a sink may rank
-    /// against is a property of the sink, not of the change; see
-    /// <see cref="PropertyWriteState.LastSourceCommitRevision"/>.
+    /// and two properties of one subject draw from the same counter. The caller states which commits
+    /// count rather than receiving both markers, so the wrong one cannot be selected by argument
+    /// position, and only the slot that is needed is read.
     /// </remarks>
-    public bool TryGetWriteState(out long lastNonSourceCommitRevision, out long lastCommitRevision, out bool published)
+    public bool TryGetWriteState(bool includeSourceCommits, out long commitRevision, out bool published)
     {
         if (TryGetWriteState(out var state))
         {
-            lastNonSourceCommitRevision = Interlocked.Read(ref state.LastNonSourceCommitRevision);
+            var nonSourceCommitRevision = Interlocked.Read(ref state.LastNonSourceCommitRevision);
 
-            // Each commit advances exactly one of the two, so the last of any kind is their maximum.
-            // A stale read of either can only lower it, which delivers a redundant change rather than
-            // dropping a live one.
-            lastCommitRevision = Math.Max(
-                lastNonSourceCommitRevision,
-                Interlocked.Read(ref state.LastSourceCommitRevision));
+            // Each commit advances exactly one of the two, so the last of any kind is their maximum, and
+            // the source slot is read only when it can count. A stale read of either can only lower the
+            // result, which delivers a redundant change rather than dropping a live one.
+            commitRevision = includeSourceCommits
+                ? Math.Max(nonSourceCommitRevision, Interlocked.Read(ref state.LastSourceCommitRevision))
+                : nonSourceCommitRevision;
 
             published = state.Published;
             return true;
         }
 
-        lastNonSourceCommitRevision = 0;
-        lastCommitRevision = 0;
+        commitRevision = 0;
         published = false;
         return false;
     }

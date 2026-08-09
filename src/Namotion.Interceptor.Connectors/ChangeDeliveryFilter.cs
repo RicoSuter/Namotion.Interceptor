@@ -13,6 +13,12 @@ namespace Namotion.Interceptor.Connectors;
 public enum ChangeSupersessionRule
 {
     /// <summary>
+    /// Not a rule. Occupies zero so that <c>default</c> and a literal <c>0</c>, both of which compile in
+    /// a required parameter, cannot quietly select one. Rejected at construction.
+    /// </summary>
+    Unspecified = 0,
+
+    /// <summary>
     /// The source produced what it hands us before it saw our write, so an applied value cannot be ranked
     /// against our commits and a commit of ours that predates it is still the newer one.
     /// </summary>
@@ -59,14 +65,14 @@ internal static class ChangeDeliveryFilter
     public static bool TryAcceptForDelivery(in SubjectPropertyChange change, ChangeSupersessionRule rule)
     {
         var property = change.Property;
-        if (!property.TryGetWriteState(out var lastNonSourceCommitRevision, out var lastCommitRevision, out var published))
+        if (!property.TryGetWriteState(CountsSourceCommits(rule), out var commitRevision, out var published))
         {
             // Nothing has ever been written to this property, so nothing can have superseded the change.
             property.MarkPublished();
             return true;
         }
 
-        if (IsSuperseded(in change, rule, lastNonSourceCommitRevision, lastCommitRevision))
+        if (IsSuperseded(in change, commitRevision))
         {
             return false;
         }
@@ -86,8 +92,8 @@ internal static class ChangeDeliveryFilter
     /// </summary>
     public static bool IsCurrent(in SubjectPropertyChange change, ChangeSupersessionRule rule)
     {
-        return !change.Property.TryGetWriteState(out var lastNonSourceCommitRevision, out var lastCommitRevision, out _)
-               || !IsSuperseded(in change, rule, lastNonSourceCommitRevision, lastCommitRevision);
+        return !change.Property.TryGetWriteState(CountsSourceCommits(rule), out var commitRevision, out _)
+               || !IsSuperseded(in change, commitRevision);
     }
 
     /// <summary>
@@ -102,7 +108,7 @@ internal static class ChangeDeliveryFilter
 
         // Read before write: the flag never clears, so after a property's first delivery every later
         // one avoids the dictionary write.
-        if (!property.TryGetWriteState(out _, out _, out var published) || !published)
+        if (!property.TryGetWriteState(includeSourceCommits: false, out _, out var published) || !published)
         {
             property.MarkPublished();
         }
@@ -126,14 +132,13 @@ internal static class ChangeDeliveryFilter
     /// </summary>
     public static bool WasWrittenOut(PropertyReference property)
     {
-        return property.TryGetWriteState(out _, out _, out var published) && published;
+        return property.TryGetWriteState(includeSourceCommits: false, out _, out var published) && published;
     }
 
-    private static bool IsSuperseded(
-        in SubjectPropertyChange change,
-        ChangeSupersessionRule rule,
-        long lastNonSourceCommitRevision,
-        long lastCommitRevision)
+    private static bool CountsSourceCommits(ChangeSupersessionRule rule) =>
+        rule == ChangeSupersessionRule.SourceValuesAreSettled;
+
+    private static bool IsSuperseded(in SubjectPropertyChange change, long marker)
     {
         // Revision 0 orders against nothing, so staleness is unprovable and the change is delivered: a
         // redundant write costs one message, a wrong drop is permanent. This is a guard rather than a
@@ -142,7 +147,6 @@ internal static class ChangeDeliveryFilter
         //
         // Inequality rather than equality, so that a path which stamps a change without advancing the
         // property delivers instead of dropping.
-        var marker = rule == ChangeSupersessionRule.SourceValuesAreSettled ? lastCommitRevision : lastNonSourceCommitRevision;
         return change.Revision != 0 && change.Revision < marker;
     }
 }

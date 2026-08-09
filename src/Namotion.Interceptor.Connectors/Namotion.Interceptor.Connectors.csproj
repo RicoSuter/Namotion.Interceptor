@@ -8,6 +8,8 @@
 
 	<ItemGroup>
 		<InternalsVisibleTo Include="Namotion.Interceptor.Connectors.Tests" />
+		<!-- Test-only: lets each connector pin which supersession rule it wired up. -->
+		<InternalsVisibleTo Include="Namotion.Interceptor.WebSocket.Tests" />
 	</ItemGroup>
 
 	<ItemGroup>

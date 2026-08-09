@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -148,6 +150,44 @@ public class ChangeMergerTests
     }
 
     [Fact]
+    public void WhenTheArrivalOrderFallbackApplies_ThenTheSurvivorIsNotDroppedAsSuperseded()
+    {
+        // Arrange: once a revision 0 change forces the fallback, the survivor carries the last
+        // arrival's revision rather than the batch's highest. If that revision is below the property's
+        // marker, the supersession pass drops the survivor, and the higher-revision change whose value
+        // it carries was merged away in this same batch, so nothing re-delivers it.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+
+        subject.FirstName = "First";
+        subject.FirstName = "Settled";
+        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var marker, out _));
+        Assert.True(marker > 1, "the marker needs room below it");
+
+        using var merger = new ChangeMerger();
+
+        SubjectPropertyChange[] changes =
+        [
+            CreateChange(property, "SettledOld", "Settled", marker),
+            CreateChange(property, "ZeroOld", "ZeroNew", revision: 0),
+            CreateChange(property, "LastOld", "LastNew", revision: marker - 1)
+        ];
+
+        // Act
+        var merged = merger.Merge(changes, ChangeSupersessionRule.SourceValuesMayBeStale).ToArray();
+
+        // Assert: a survivor built by arrival position orders against nothing, exactly as a lone
+        // revision 0 change would, so it must be delivered rather than ranked against the marker.
+        var change = Assert.Single(merged);
+        Assert.Equal("LastNew", change.GetNewValue<string>());
+    }
+
+    [Fact]
     public void WhenTheRevisionZeroChangeArrivesLast_ThenTheBatchCollapsesByArrivalPosition()
     {
         // Arrange - the fallback also holds when the unordered change closes the batch
@@ -291,7 +331,7 @@ public class ChangeMergerTests
             var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = index };
             var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
 
-            Assert.True(property.TryGetWriteState(out var revision, out _, out _),
+            Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var revision, out _),
                 "The write did not reach a terminal, so this measures the wrong path.");
             Assert.NotEqual(0, revision);
 
@@ -560,10 +600,10 @@ public class ChangeMergerTests
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
         subject.FirstName = "Stale";
-        Assert.True(firstName.TryGetWriteState(out var stragglerRevision, out _, out _));
+        Assert.True(firstName.TryGetWriteState(includeSourceCommits: false, out var stragglerRevision, out _));
 
         subject.LastName = "Newer";
-        Assert.True(lastName.TryGetWriteState(out var lastNameRevision, out _, out _));
+        Assert.True(lastName.TryGetWriteState(includeSourceCommits: false, out var lastNameRevision, out _));
 
         subject.FirstName = "Newest";
 
@@ -598,10 +638,10 @@ public class ChangeMergerTests
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
         subject.FirstName = "Stale";
-        Assert.True(firstName.TryGetWriteState(out var stragglerRevision, out _, out _));
+        Assert.True(firstName.TryGetWriteState(includeSourceCommits: false, out var stragglerRevision, out _));
 
         subject.LastName = "Newer";
-        Assert.True(lastName.TryGetWriteState(out var lastNameRevision, out _, out _));
+        Assert.True(lastName.TryGetWriteState(includeSourceCommits: false, out var lastNameRevision, out _));
 
         subject.FirstName = "Newest";
 

@@ -158,7 +158,10 @@ internal sealed class ChangeMerger : IDisposable
                 // whole property falls back to arrival position from here on. Anything a revision
                 // promoted earlier in this pass has to be discarded, which is what the seed index is
                 // for: it restarts the survivor from the last arrival, still live in the input span.
-                _buffer[entry.Index] = change.MergeWithNewer(changes[entry.SeedIndex]);
+                // Revision dropped with it: the survivor is now assembled by arrival position, so
+                // carrying the seed's revision would let a later commit supersede a value that nothing
+                // else in this batch still holds.
+                _buffer[entry.Index] = change.MergeWithNewer(changes[entry.SeedIndex]).WithoutRevision();
                 entry.LowestRevision = 0;
             }
             else if (change.Revision < entry.LowestRevision)

@@ -610,7 +610,7 @@ public class ChangeQueueProcessorTests
 
         subject.FirstName = "Settled";
         await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Settled"));
-        Assert.True(firstName.TryGetWriteState(out _, out var settledRevision, out _));
+        Assert.True(firstName.TryGetWriteState(includeSourceCommits: true, out var settledRevision, out _));
 
         // Act: a commit that predates the settled one, arriving late.
         subscription.Enqueue(SubjectPropertyChange.Create(
@@ -689,6 +689,32 @@ public class ChangeQueueProcessorTests
 
         await cancellation.CancelAsync();
         try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    /// <summary>
+    /// The rule has no default so that omitting it is a compile error, but `default` and a literal 0
+    /// still compile in a required parameter and would quietly select a rule. Both wrong choices lose
+    /// data with no diagnostic, so the zero value is rejected rather than treated as a rule.
+    /// </summary>
+    [Fact]
+    public void WhenTheSupersessionRuleIsUnspecified_ThenTheProcessorIsRejected()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            supersessionRule: default));
     }
 
     private static (IInterceptorSubjectContext Context, Person Subject, ConcurrentQueue<string?> Written, object Source, ChangeQueueProcessor Processor)

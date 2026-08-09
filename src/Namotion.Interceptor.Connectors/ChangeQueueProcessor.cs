@@ -28,6 +28,12 @@ public class ChangeQueueProcessor : IDisposable
     private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
 
     /// <summary>
+    /// The rule this processor decides supersession with. Exposed so a connector can pin which rule it
+    /// wired up: choosing wrongly is silent, so "it compiles" is not evidence that it chose correctly.
+    /// </summary>
+    internal ChangeSupersessionRule SupersessionRule => _supersessionRule;
+
+    /// <summary>
     /// Number of buffered changes dropped due to bounded-queue overflow.
     /// Always zero when <c>maxQueueDepth</c> is null (unbounded).
     /// </summary>
@@ -82,7 +88,7 @@ public class ChangeQueueProcessor : IDisposable
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _maxQueueDepth = maxQueueDepth;
-        _supersessionRule = supersessionRule;
+        _supersessionRule = ValidateRule(supersessionRule);
 
         try
         {
@@ -119,7 +125,21 @@ public class ChangeQueueProcessor : IDisposable
         _maxQueueDepth = maxQueueDepth;
         _subscription = subscription;
         _ownsSubscription = false;
-        _supersessionRule = supersessionRule;
+        _supersessionRule = ValidateRule(supersessionRule);
+    }
+
+    // The required parameter makes omitting the rule a compile error, but `default` and `0` still
+    // compile in that slot and would silently pick a rule. Both wrong choices lose data without a
+    // diagnostic, so the last silent path is closed here rather than left to the caller.
+    private static ChangeSupersessionRule ValidateRule(ChangeSupersessionRule rule)
+    {
+        if (rule == ChangeSupersessionRule.Unspecified)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rule), rule,
+                "A supersession rule must be chosen explicitly; see ChangeSupersessionRule for the condition that decides it.");
+        }
+
+        return rule;
     }
 
     /// <summary>
