@@ -496,3 +496,119 @@ combined with an explicit interface implementation is illegal (CS0754); `[Interc
 (CS0592); and a non-attributed class declaring partial properties without `[InterceptorSubject]` is not
 a generator input at all, it is the contrast case proving the generator ignores types it was not asked
 to process (CS9248).
+
+## Language semantics this design depends on
+
+Each of these was established by compiling the shape rather than by reading the specification, and
+each one pins a decision above. They are recorded so that a future change does not have to rediscover
+them, and so that a change which contradicts one is recognised as contradicting it.
+
+**An explicit interface implementation is only legal in a class that lists the interface itself.**
+Inheriting the interface does not count.
+
+```
+error CS0540: 'DerivedNoRelist.ISubject.Properties': containing type does not implement interface 'ISubject'
+```
+
+This is why a derived subject keeps re-listing `IInterceptorSubject` even though its base already
+implements it, and therefore why interface re-implementation is part of the emitted shape at all.
+
+**Interface mapping under re-implementation prefers a class's own explicit implementation over its own
+public members, but a matching public member in a strictly more derived class wins.**
+
+```
+RootWithPublic : SyncRoot=EXPLICIT       public member beside the explicit implementation loses
+DerivedRelist  : SyncRoot=Object         the base's explicit implementation wins when nothing matches
+DerivedHijack  : SyncRoot=USER-OWNED     a public member in a derived class takes the slot
+LeafOverPlain  : SyncRoot=MIDDLE-OWNED   and so does one on a plain class in between
+```
+
+The first line is why the root is never hijacked by its own member, and the last is why NI0014 walks
+the chain instead of inspecting only the subject.
+
+**A public member whose signature does not match does not take the slot, and produces no diagnostic.**
+`public object Data { get; }` on a derived subject leaves `((IInterceptorSubject)x).Data` resolving to
+the base's explicit implementation, with no CS0738. This is why NI0014 matches against the real
+interface member instead of by name: an ordinary property called `Data` or `Context` is harmless.
+
+**`[MethodImpl]` is not valid on a property declaration**, only on constructors and methods
+(`error CS0592`). Relevant if `GetInstanceProperties()` is ever turned back into a property.
+
+**A protected member in a sealed class is CS0628, and an unnecessary `new` is CS0109.** Both are
+warnings, and `src/Directory.Build.props` turns both into build errors, including inside generated
+files. Any modifier decision in the emitter has to be right in both directions.
+
+**Hiding is by signature for methods and by name for every other member kind, and it is not
+staticness sensitive.** A `new static` method hides an inherited instance method of the same name, and
+generated code calling that name by simple name binds to it. That is why NI0013 does not skip statics.
+
+**`Type.GetProperties(Instance | Public | NonPublic)` returns inherited protected properties but never
+methods.** This is the entire reason `GetInstanceProperties()` is a method rather than a property:
+`DynamicSubjectFactory` reflects with exactly that filter and converts anything it does not recognise
+into an intercepted subject property, so a protected property here would give every Castle proxied
+subject a phantom property.
+
+## Known limitations of the diagnostics
+
+None of these can produce silent wrong behaviour. Every one surfaces as a compile error.
+
+**The `new` modifier lookup matches on name and parameter count, not parameter types.** A base exposing
+a same-name, same-arity overload with different parameter types draws a `new` that hides nothing, which
+is CS0109 and therefore a build error. Narrow, since it needs one of four unusual names, and loud when
+it happens. Making it exact means comparing parameter types in `HidableMembers`.
+
+**NI0013 is deliberately name-only, any member kind, no signature test.** It therefore reports members
+that could not actually capture the generated call. A precise rule is both harder and unsound: the
+dangerous case is a `new` annotated member of the same shape, which captures the call and produces no
+compiler diagnostic at all, and an applicable overload with a different signature can win overload
+resolution without hiding anything. The false positives are on four names nobody chooses by accident.
+
+**NI0013 and NI0014 fire only in derived mode.** A root mode subject that declares its own
+`GetInstanceProperties` gets a raw CS0111 inside the generated file rather than a diagnostic. Accepted
+because the name is new, so no existing source can carry it, and the error is loud.
+
+**NI0011 verifies shape, not behaviour.** A base can satisfy every symbol check and still be wrong in
+three ways, listed under the base class contract in `docs/subject-guidelines.md`. The most damaging is
+a base whose helpers route through a different executor from the one its `Context` publishes, which
+reproduces the original bug exactly while passing every check.
+
+## How to verify a change to this generator
+
+**Regenerate everything and diff it.** The test suite proves the shapes someone wrote a test for; this
+proves the rest. Build both trees with `-p:EmitCompilerGeneratedFiles=true` and a
+`-p:CompilerGeneratedFilesOutputPath`, then `diff -r`. For a refactor the diff must be empty.
+
+Use `--no-incremental` on both builds. Without it the Razor generator does not re-emit and about 21
+files show as present in one tree and absent in the other. That is distinguishable from a real
+difference, since `diff -r` reports absence separately, but it makes the comparison useless.
+
+**Compare resolved `DefaultProperties` blocks, not key lists.** `.Concat(Base.DefaultProperties)` puts
+the base last and `ToFrozenDictionary` is last wins, so a changed entry does not show up as a key
+difference.
+
+**Benchmarks need a control group.** Use benchmarks that contain no subjects, currently
+`ServiceOrderResolverBenchmark`, `SourcePathProviderBenchmark` and `SubjectUpdateBenchmark`, as the
+noise floor. A comparison without one looked clean at a median of +1.4% while carrying two rows at
++28% and +33% that belonged to an unrelated pull request. Three further cautions, all learned the hard
+way: point local `master` at `origin/master` first, or the comparison credits other people's commits to
+the branch; run both arms back to back under `caffeinate -is`, or a sleep between them shifts every row
+by roughly ten percent; and `-Short` leaves some rows unmeasurable, with error bars from 16 to 62
+percent, so a row outside the noise floor must be re-measured at full iteration counts before it is
+called a regression.
+
+**Assert on an interceptor, never on the value or on `PropertyChanged`.** Both of those behave
+correctly while interception is broken, which is why issue #437 survived so long. Two tests in this
+repository asserted around the bug while appearing to cover it.
+
+## Defects that predate this work
+
+All six reproduce on the commit before the explicit interface implementation work, so none of them came
+from that change. They are listed because each one had no test, and a future change in this area should
+expect the same: shapes that nobody has written down are where the bugs are.
+
+1. Properties declared on a base subject were never intercepted, the subject of issue #437.
+2. A plain class between two subjects did not build, three CS0108.
+3. A sealed root subject did not build, CS0628.
+4. A hand written base implementing `IRaisePropertyChanged` explicitly gave CS0103 in generated code.
+5. A hand written base without a static `DefaultProperties` gave CS0117 in generated code.
+6. A subject over an ordinary non-subject base gave CS0108, hitting seven of ten probed base shapes.
