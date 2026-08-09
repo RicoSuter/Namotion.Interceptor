@@ -162,22 +162,27 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // A missing PropertyChangeInterceptor means the source can capture no writes: a configuration error,
-        // so fail fast with an actionable message instead of running silently inert. Detect it precisely
-        // (null-check, not catch-all) so unrelated subscription failures surface with their own diagnosis.
-        if (_context.TryGetService<PropertyChangeInterceptor>() is null)
-        {
-            throw new InvalidOperationException(
-                "Cannot start source: no PropertyChangeInterceptor is registered in the interceptor context. " +
-                "Add WithPropertyChangeSubscriptions() or WithFullPropertyTracking() to the context configuration.");
-        }
-
-        // Source-lifetime capture: one subscription for the whole source, so writes are captured
-        // continuously (including during the retry delay) and never fall into a no-subscription gap.
-        using var subscription = _context.CreatePropertyChangeQueueSubscription();
-
+        // Inside the try, so the finally below still publishes Stopped when startup fails. Outside it, a
+        // configuration error leaves the source registered as Synchronizing for the process lifetime:
+        // the DI path tears the host down, but on the graph-attach path the faulted task is swallowed and
+        // every WaitForSynchronizationAsync on that branch blocks until its caller's token fires. A silent
+        // hang in place of the loud failure the guard exists to give.
         try
         {
+            // A missing PropertyChangeInterceptor means the source can capture no writes: a configuration
+            // error, so fail fast with an actionable message instead of running silently inert. Detect it
+            // precisely (null-check, not catch-all) so unrelated failures surface with their own diagnosis.
+            if (_context.TryGetService<PropertyChangeInterceptor>() is null)
+            {
+                throw new InvalidOperationException(
+                    "Cannot start source: no PropertyChangeInterceptor is registered in the interceptor context. " +
+                    "Add WithPropertyChangeSubscriptions() or WithFullPropertyTracking() to the context configuration.");
+            }
+
+            // Source-lifetime capture: one subscription for the whole source, so writes are captured
+            // continuously (including during the retry delay) and never fall into a no-subscription gap.
+            using var subscription = _context.CreatePropertyChangeQueueSubscription();
+
             var firstAttempt = true;
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -390,7 +395,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// concurrent writers arrival order is a race order. Both changes are writes to the same
     /// property and therefore to the same subject, so their revisions are comparable. A change
     /// carrying revision 0 was built outside a terminal write and orders against nothing, so
-    /// capture order decides between those.
+    /// capture order decides between those and the survivor carries no revision either, matching
+    /// the flush-path collapse in <c>ChangeMerger</c>.
     /// </para>
     /// </remarks>
     private static List<SubjectPropertyChange> CollapsePerProperty(SubjectPropertyChange[] changes)
@@ -408,9 +414,15 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
             }
 
             var kept = collapsed[index];
-            collapsed[index] = change.Revision < kept.Revision
-                ? change.MergeWithNewer(kept)
-                : kept.MergeWithNewer(change);
+            collapsed[index] = change.Revision == 0 || kept.Revision == 0
+                // One of them orders against nothing, so capture order decides and the survivor carries
+                // no revision either. Same rule as the flush-path collapse: keeping a revision here would
+                // let the survivor be ranked against the property marker and dropped, on a comparison
+                // against a value it was not ordered by.
+                ? kept.MergeWithNewer(change).WithoutRevision()
+                : change.Revision < kept.Revision
+                    ? change.MergeWithNewer(kept)
+                    : kept.MergeWithNewer(change);
         }
 
         return collapsed;

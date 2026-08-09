@@ -376,6 +376,39 @@ public class SubjectSourceBaseTests
         Assert.DoesNotContain(writtenChanges, c => c.GetNewValue<string?>() == "B");
     }
 
+    /// <summary>
+    /// A change built outside a write terminal carries no revision and orders against nothing, so the
+    /// property must collapse by capture order, which is what <c>ChangeMerger</c> does for the flush path.
+    /// The two collapses have to agree: ranking an unordered change by revision makes the earlier arrival
+    /// win, so the later one is discarded on a comparison that means nothing.
+    /// </summary>
+    [Fact]
+    public async Task WhenAParkedWriteCarriesNoRevision_ThenCaptureOrderDecidesLikeTheFlushPath()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "A" };
+
+        var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.FirstName))
+                .SetValueFromSource(s, null, null, "A"));
+
+        // A committed write, then one captured later that orders against nothing.
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "A", "Committed", revision: 10);
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "A", "Unordered", revision: 0);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert: the later capture wins, and it is delivered rather than ranked against the marker.
+        Assert.Contains(writtenChanges, c => c.GetNewValue<string?>() == "Unordered");
+        Assert.DoesNotContain(writtenChanges, c => c.GetNewValue<string?>() == "Committed");
+    }
+
     [Fact]
     public async Task WhenAQueuedWriteIsOverwrittenByInitialState_ThenTheLocalWriteStillWins()
     {
@@ -578,6 +611,12 @@ public class SubjectSourceBaseTests
             () => source.StartAsync(CancellationToken.None));
         Assert.Contains("PropertyChangeInterceptor", exception.Message);
         Assert.Contains("WithFullPropertyTracking", exception.Message);
+
+        // And the source must not be left claiming it is still coming up. On the graph-attach path the
+        // faulted task is swallowed, so a source stuck in Synchronizing is registered with every monitor
+        // for the process lifetime and blocks WaitForSynchronizationAsync on that branch until the
+        // caller's own token fires: a silent hang in place of the loud failure this guard exists to give.
+        Assert.Equal(SourceState.Stopped, source.State);
     }
 
     [Fact]
