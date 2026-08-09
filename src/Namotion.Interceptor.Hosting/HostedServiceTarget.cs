@@ -49,12 +49,15 @@ internal sealed class HostedServiceTarget
 
     /// <summary>
     /// Takes ownership for the given handler. Finding this handler already installed counts as
-    /// success; only losing to a different handler returns false.
+    /// success; only losing to a different handler returns false. <paramref name="ownershipTaken"/>
+    /// tells the two successes apart, which matters to a caller that may have to undo its own take
+    /// but must leave an earlier one alone.
     /// </summary>
-    public bool TryTakeOwnership(HostedServiceHandler handler)
+    public bool TryTakeOwnership(HostedServiceHandler handler, out bool ownershipTaken)
     {
         var previous = Interlocked.CompareExchange(ref _owner, handler, null);
-        return previous is null || ReferenceEquals(previous, handler);
+        ownershipTaken = previous is null;
+        return ownershipTaken || ReferenceEquals(previous, handler);
     }
 
     public void ReleaseOwnership(HostedServiceHandler handler)
@@ -68,20 +71,67 @@ internal sealed class HostedServiceTarget
     {
         lock (_sync)
         {
-            // The lock is required: "_tail = _tail.ContinueWith(...)" is a read-modify-write, and two
-            // racing appenders lose an assignment and run both transitions concurrently.
-            // TaskScheduler.Default is required: ContinueWith otherwise captures TaskScheduler.Current,
-            // which can be a scheduler the appending task is itself occupying.
-            _tail = _tail
-                .ContinueWith(
-                    _ => RunAsync(body, cancellationToken),
-                    CancellationToken.None,
-                    TaskContinuationOptions.None,
-                    TaskScheduler.Default)
-                .Unwrap();
-
-            return _tail;
+            return AppendCore(body, cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Confirms the subject is still live for <paramref name="handler"/>, takes ownership and appends
+    /// the transition, all under one acquisition of the chain lock. Returns null when the subject is
+    /// no longer live or another handler owns the target, in which case nothing was appended and no
+    /// ownership was taken. <paramref name="ownershipTaken"/> distinguishes an owner this call
+    /// installed from one it found already installed for the same handler, which the caller must not
+    /// undo: that one belongs to an earlier attach whose instance may still be running.
+    /// </summary>
+    /// <remarks>
+    /// The three steps have to be one critical section, and the liveness read has to be the one inside
+    /// it. A context detach clears liveness before it appends its stops, and it appends each stop under
+    /// this same lock, so the two orders are the only ones left: this call first, and the detach's stop
+    /// lands behind a start that then finds the subject dead and no-ops; or the detach's stop first, and
+    /// this call reads the cleared liveness and appends nothing. Splitting them lets a start land behind
+    /// an attachment stop that is waiting for the subject's own stop, which is waiting for the caller
+    /// that is awaiting this start, and that cycle never resolves.
+    /// </remarks>
+    public Task? TryTakeOwnershipAndAppendAsync(
+        HostedServiceHandler handler,
+        IInterceptorSubject subject,
+        Func<CancellationToken, Task> body,
+        CancellationToken cancellationToken,
+        out bool ownershipTaken)
+    {
+        ownershipTaken = false;
+
+        lock (_sync)
+        {
+            if (!handler.IsLive(subject))
+            {
+                return null;
+            }
+
+            if (!TryTakeOwnership(handler, out ownershipTaken))
+            {
+                return null;
+            }
+
+            return AppendCore(body, cancellationToken);
+        }
+    }
+
+    private Task AppendCore(Func<CancellationToken, Task> body, CancellationToken cancellationToken)
+    {
+        // The lock the callers hold is required: "_tail = _tail.ContinueWith(...)" is a
+        // read-modify-write, and two racing appenders lose an assignment and run both transitions
+        // concurrently. TaskScheduler.Default is required: ContinueWith otherwise captures
+        // TaskScheduler.Current, which can be a scheduler the appending task is itself occupying.
+        _tail = _tail
+            .ContinueWith(
+                _ => RunAsync(body, cancellationToken),
+                CancellationToken.None,
+                TaskContinuationOptions.None,
+                TaskScheduler.Default)
+            .Unwrap();
+
+        return _tail;
     }
 
     private async Task RunAsync(Func<CancellationToken, Task> body, CancellationToken cancellationToken)

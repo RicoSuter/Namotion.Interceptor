@@ -111,9 +111,10 @@ public class HostedServiceHandlerRaceTests
     public async Task WhenAnAttachmentIsAddedDuringTheDrain_ThenNothingIsStarted()
     {
         // Arrange - the drain is held between BeginDraining and the liveness clear, so the attach
-        // provably lands inside the drain window rather than near it, and its start body provably
-        // runs there too: the gate is already draining while the subject is still live, which is the
-        // one interleaving only the start body's gate re-read closes.
+        // provably lands inside the drain window rather than near it: the gate is already draining
+        // while the subject is still live, which is the interleaving the liveness check alone cannot
+        // reject. A start that reaches the chain anyway is caught a second time by the gate re-read in
+        // the start body, which is what a start queued before the drain depends on.
         var builder = Host.CreateApplicationBuilder();
 
         var context = InterceptorSubjectContext
@@ -159,6 +160,55 @@ public class HostedServiceHandlerRaceTests
         // behind the new target's start, so awaiting the drain is a full quiesce of that chain.
         await stopping;
         Assert.Equal(0, Volatile.Read(ref created));
+        Assert.Null(attachment.Current);
+    }
+
+    [Fact]
+    public async Task WhenAnAttachmentIsAddedDuringTheDrain_ThenTheDrainingHandlerTakesNoOwnership()
+    {
+        // Arrange - the same drain window, read for the other half of the damage. Nothing a draining
+        // handler owns can ever start, and its release loop covers only the targets its own snapshot
+        // held, so a target taken past that point stays owned by a dead handler and no later handler
+        // can ever win the compare and exchange for it. The public attach paths have to reject the
+        // window themselves; the liveness flag they used to check is still set here.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var parent = new Parent(context);
+        var child = new Person();
+        parent.Child = child;
+
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+        var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.DrainGate = () =>
+        {
+            drainEntered.TrySetResult();
+            return releaseDrain.Task;
+        };
+
+        var stopping = host.StopAsync();
+        await drainEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(handler.IsLive(child), "The drain cleared liveness early, so the window under test is unreachable.");
+
+        // Act
+        var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
+
+        // Assert - read while the drain is still held. Once it is let go it happens to release this
+        // target too, because a take this early is still inside the snapshot it takes next, so the
+        // ownership is only observable here.
+        Assert.Null(((IHostedServiceAttachmentTarget)attachment).Target.Owner);
+
+        releaseDrain.SetResult();
+        await stopping;
+
         Assert.Null(attachment.Current);
     }
 

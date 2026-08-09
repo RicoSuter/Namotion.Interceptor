@@ -57,9 +57,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     {
         if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
         {
-            // A draining or drained handler must not take ownership again. Nothing it owns can ever
-            // start, and the target would stay owned by a dead handler, so the next handler over the
-            // same subject loses the compare and exchange and never starts anything.
             return;
         }
 
@@ -67,20 +64,20 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         if (subject is IHostedService hostedService)
         {
-            var target = subject.GetOrAddSubjectTarget(hostedService);
-            if (target.TryTakeOwnership(this))
-            {
-                AppendStart(subject, target);
-            }
+            TryTakeOwnershipAndStart(subject, subject.GetOrAddSubjectTarget(hostedService));
         }
 
         foreach (var attachment in subject.GetHostedServiceAttachments())
         {
-            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
-            if (target.TryTakeOwnership(this))
-            {
-                AppendStart(subject, target);
-            }
+            TryTakeOwnershipAndStart(subject, ((IHostedServiceAttachmentTarget)attachment).Target);
+        }
+
+        if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        {
+            // Re-read after the write, for the same reason the target guard re-reads after its own:
+            // a liveness entry that lands after the drain cleared the set roots the subject on a dead
+            // handler for the rest of that handler's life.
+            _liveSubjects.TryRemove(subject, out _);
         }
     }
 
@@ -132,14 +129,26 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     }
 
     /// <summary>
-    /// Appends a start transition. Deliberately takes no cancellation token: a caller's token bounds
-    /// its wait for the transition, never the transition itself, or cancelling an
+    /// Takes ownership of the target for this handler and appends its start, returning the appended
+    /// transition. Returns null when the handler took nothing, because the subject is no longer live
+    /// for it, because another handler owns the target, or because this handler is draining.
+    /// </summary>
+    /// <remarks>
+    /// The appended transition deliberately carries no cancellation token: a caller's token bounds its
+    /// wait for the transition, never the transition itself, or cancelling an
     /// <c>AttachHostedServiceAsync</c> await would abort a start that is already under way and record
     /// the cancellation as a start failure.
-    /// </summary>
-    internal Task AppendStart(IInterceptorSubject subject, HostedServiceTarget target)
+    /// </remarks>
+    internal Task? TryTakeOwnershipAndStart(IInterceptorSubject subject, HostedServiceTarget target)
     {
-        _running[target] = subject;
+        if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        {
+            // A draining or drained handler must not take ownership. Nothing it owns can ever start,
+            // and a target left owned by a dead handler makes every future handler over that subject
+            // lose the compare and exchange. Read here as well as after the append so the ordinary
+            // drained case never installs an owner that a live handler could race against at all.
+            return null;
+        }
 
         // Taken here, synchronously, and not inside the body: appending never runs the body, so the
         // service is not running when the attach returns. Anything that treats "the graph has
@@ -152,73 +161,108 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // its own StartAsync takes their holds before its own is released below.
         var startupHolds = TakeStartupHolds(subject.Context);
 
-        return target.AppendAsync(async _ =>
+        var start = target.TryTakeOwnershipAndAppendAsync(
+            this,
+            subject,
+            _ => RunStartAsync(subject, target, startupHolds),
+            CancellationToken.None,
+            out var ownershipTaken);
+
+        if (start is null)
         {
+            ReleaseStartupHolds(startupHolds);
+            return null;
+        }
+
+        // Joined after the take rather than before it: a running set entry for a target this handler
+        // failed to take would make the drain stop and dispose an instance another handler created
+        // and is running.
+        _running[target] = subject;
+
+        if (ownershipTaken && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        {
+            // Re-read after both writes, which is what turns the check at the top from a narrowing
+            // into a guard. Reading Running here proves the drain had not begun when the two writes
+            // landed, so its own snapshot covers this target and its release loop reaches it. Reading
+            // anything later means the drain may already have swept past, so the take is undone here
+            // rather than left to a release loop that will never see it.
+            //
+            // Only an ownership this call installed is undone. Finding this handler already installed
+            // means an earlier attach owns a target that may be running, and undoing that one would
+            // pull it out of the running set the drain is about to stop.
+            _running.TryRemove(target, out _);
+            target.ReleaseOwnership(this);
+        }
+
+        return start;
+    }
+
+    private async Task RunStartAsync(IInterceptorSubject subject, HostedServiceTarget target, IDisposable[] startupHolds)
+    {
+        try
+        {
+            await _gate.WaitForOpenAsync().ConfigureAwait(false);
+            if (_gate.State != HostedServiceGateState.Running)
+            {
+                // Read inside the body, never at append time: a start already queued when shutdown
+                // begins must re-read the state, and a body skipped at append time would never run
+                // its signalling.
+                return;
+            }
+
+            if (!_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
+            {
+                return;
+            }
+
+            if (target.Current is not null)
+            {
+                // One instance per target, checked in the body where the chain serializes it. Ownership
+                // stops a second handler, but a subject reachable from two hosting enabled contexts
+                // raises one context attach per context, and the owning handler sees both: measured as
+                // StartCount 2 without this guard.
+                return;
+            }
+
+            // Cleared after every guard, never before: a start that is gated out or skipped must not
+            // drop a fault that a caller has not read yet.
+            target.SetFault(null);
+
             try
             {
-                await _gate.WaitForOpenAsync().ConfigureAwait(false);
-                if (_gate.State != HostedServiceGateState.Running)
-                {
-                    // Read inside the body, never at append time: a start already queued when shutdown
-                    // begins must re-read the state, and a body skipped at append time would never run
-                    // its signalling.
-                    return;
-                }
+                await Task.Delay(StartDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
 
-                if (!_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
-                {
-                    return;
-                }
-
-                if (target.Current is not null)
-                {
-                    // One instance per target, checked in the body where the chain serializes it. Ownership
-                    // stops a second handler, but a subject reachable from two hosting enabled contexts
-                    // raises one context attach per context, and the owning handler sees both: measured as
-                    // StartCount 2 without this guard.
-                    return;
-                }
-
-                // Cleared after every guard, never before: a start that is gated out or skipped must not
-                // drop a fault that a caller has not read yet.
-                target.SetFault(null);
-
+                var instance = target.Subject ?? target.Factory!();
                 try
                 {
-                    await Task.Delay(StartDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
-
-                    var instance = target.Subject ?? target.Factory!();
-                    try
-                    {
-                        await instance.StartAsync(CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        if (target.IsHandlerOwnedInstance)
-                        {
-                            await DisposeInstanceAsync(instance).ConfigureAwait(false);
-                        }
-
-                        throw;
-                    }
-
-                    target.SetCurrent(instance);
+                    await instance.StartAsync(CancellationToken.None).ConfigureAwait(false);
                 }
-                catch (Exception exception)
+                catch
                 {
-                    target.SetFault(exception);
-                    Logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
+                    if (target.IsHandlerOwnedInstance)
+                    {
+                        await DisposeInstanceAsync(instance).ConfigureAwait(false);
+                    }
+
+                    throw;
                 }
+
+                target.SetCurrent(instance);
             }
-            finally
+            catch (Exception exception)
             {
-                // In a finally, so every way out releases: gated out by a drain, not live, skipped by
-                // the one instance guard, or a start that threw. A leaked hold blocks every
-                // synchronization wait on the tree forever, which is a hang rather than a wrong
-                // answer, and worse than never having taken the hold.
-                ReleaseStartupHolds(startupHolds);
+                target.SetFault(exception);
+                Logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
             }
-        }, CancellationToken.None);
+        }
+        finally
+        {
+            // In a finally, so every way out releases: gated out by a drain, not live, skipped by
+            // the one instance guard, or a start that threw. A leaked hold blocks every
+            // synchronization wait on the tree forever, which is a hang rather than a wrong
+            // answer, and worse than never having taken the hold.
+            ReleaseStartupHolds(startupHolds);
+        }
     }
 
     /// <summary>
@@ -384,11 +428,11 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
     }
 
-    internal Task EnsureStartedAsync()
-    {
-        _gate.EnsureStarted();
-        return Task.CompletedTask;
-    }
+    /// <summary>
+    /// Opens the startup gate if it has never been opened. A one way ratchet: it does nothing once the
+    /// handler is draining or drained.
+    /// </summary>
+    internal void EnsureStarted() => _gate.EnsureStarted();
 
     /// <summary>
     /// Waits for the start this handler appended for the subject and rethrows the fault it recorded,
@@ -432,7 +476,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger ??= _loggerResolver();
-        return EnsureStartedAsync();
+        EnsureStarted();
+        return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -489,7 +534,26 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         stops.AddRange(queuedStops);
 
-        await Task.WhenAll(stops).ConfigureAwait(false);
+        try
+        {
+            // Bounded by the token, which for a host is the shutdown deadline. Nothing further down
+            // observes it: the chain waits inside a stop body are untokened by design, and a stop that
+            // is wedged behind one of them would otherwise hold the process open forever. A service
+            // that ignores its own stop token, or a chain wedged by the forbidden self detach shape,
+            // is exactly what this barrier has to give up on.
+            await Task.WhenAll(stops).WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Swallowed rather than propagated, and the drain still finishes below. Rethrowing would
+            // abandon the ownership release, so every target this handler owns would stay owned by a
+            // dead handler and a second host over the same subjects would start nothing. The host
+            // treats an exception here as a failed shutdown and disposes the provider anyway, so
+            // there is nothing to gain and the whole cleanup to lose.
+            Logger?.LogWarning(
+                "Shutdown gave up waiting for {Count} hosted service transitions; they keep running unobserved.",
+                stops.Count);
+        }
 
         foreach (var (target, _) in snapshot)
         {

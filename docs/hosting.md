@@ -150,7 +150,9 @@ The factory runs inside the handler's transition, outside every lock, so it can 
 
 **A hosted service must not detach an attachment from inside its own stop path.** That includes anything reached through its `StopAsync`, and for a `BackgroundService` it includes the tail of `ExecuteAsync` as it unwinds.
 
-When a subject leaves the graph, the handler stops the subject first and holds each of its attachments' stops behind that, so an attachment is never disposed underneath a subject that is still unwinding. A stop that waits for a detach of one of those attachments therefore waits for itself. The result is a deadlock that only resolves when the host's shutdown timeout expires.
+When a subject leaves the graph, the handler stops the subject first and holds each of its attachments' stops behind that, so an attachment is never disposed underneath a subject that is still unwinding. A stop that waits for a detach of one of those attachments therefore waits for itself.
+
+Nothing resolves that. The wedged queue never drains, the instance is never stopped and never disposed, and every later start or stop for the same service queues behind it for the rest of the process. Shutdown is the one thing the wedge cannot hold: the handler stops waiting for its outstanding stops when the host's `ShutdownTimeout` expires, so `StopAsync` returns even though the wedged service is still sitting there. That bounds the process, not the damage.
 
 Detaching from an operation, from a configuration change, or from any path not reached through the service's own stop is fine. Nothing detects the bad shape, so it is a rule rather than a guard. `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard for it in this repository; both OPC UA wrappers in HomeBlaze had this shape and were changed.
 
@@ -215,7 +217,7 @@ parent.Child = null;    // that instance is stopped and disposed, the attachment
 parent.Child = child;   // the factory runs again, a different instance is now running
 ```
 
-Host shutdown does the same thing as a context detach for everything the handler owns, with the host's stopping token so a wedged service cannot hold the process past `ShutdownTimeout`.
+Host shutdown does the same thing as a context detach for everything the handler owns, with the host's stopping token. The token bounds two things: each instance's own `StopAsync` receives it, and the handler stops waiting for its outstanding stops once it expires. So shutdown returns at `ShutdownTimeout` whatever the services do. It does not bound the services themselves. One that ignores its token keeps running after the host has stopped, is never disposed, and, if it was created by a factory attachment, is unreachable by then.
 
 ## Subject as Hosted Service
 

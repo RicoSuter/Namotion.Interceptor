@@ -18,9 +18,9 @@ public static class InterceptorSubjectContextExtensions
                 // A plain Add, not AddHostedService: AddHostedService routes through TryAddEnumerable,
                 // which dedupes on the implementation type, so a second context on the same collection
                 // would silently lose its handler and never start any of its subjects.
-                serviceCollection.AddSingleton<IHostedService>(sp =>
+                serviceCollection.AddSingleton<IHostedService>(serviceProvider =>
                 {
-                    logger = sp.GetRequiredService<ILogger<HostedServiceHandler>>();
+                    logger = serviceProvider.GetRequiredService<ILogger<HostedServiceHandler>>();
                     return handler;
                 });
 

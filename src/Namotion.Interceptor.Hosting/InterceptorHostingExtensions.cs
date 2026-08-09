@@ -36,11 +36,12 @@ public static class InterceptorHostingExtensions
     {
         var attachment = AddAttachment(subject, factory);
 
-        var handler = subject.Context.TryGetService<HostedServiceHandler>();
-        if (handler is not null && handler.IsLive(subject) && attachment.Target.TryTakeOwnership(handler))
-        {
-            handler.AppendStart(subject, attachment.Target);
-        }
+        // The handler decides whether it may take the target: the liveness read, the ownership take
+        // and the append have to be one step, and a caller cannot compose them without reopening the
+        // window a concurrent context detach slips through.
+        subject.Context
+            .TryGetService<HostedServiceHandler>()
+            ?.TryTakeOwnershipAndStart(subject, attachment.Target);
 
         return attachment;
     }
@@ -62,16 +63,13 @@ public static class InterceptorHostingExtensions
             return attachment;
         }
 
-        await handler.EnsureStartedAsync().ConfigureAwait(false);
+        handler.EnsureStarted();
 
-        if (handler.IsLive(subject) && attachment.Target.TryTakeOwnership(handler))
+        if (handler.TryTakeOwnershipAndStart(subject, attachment.Target) is { } start)
         {
             // The token bounds this wait only. The transition itself runs to completion, so a caller
             // that gives up waiting still ends with a started instance rather than a half started one.
-            await handler
-                .AppendStart(subject, attachment.Target)
-                .WaitAsync(cancellationToken)
-                .ConfigureAwait(false);
+            await start.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
         if (attachment.Fault is { } fault)
@@ -118,7 +116,7 @@ public static class InterceptorHostingExtensions
             return true;
         }
 
-        await handler.EnsureStartedAsync().ConfigureAwait(false);
+        handler.EnsureStarted();
         await handler
             .AppendStop(subject, target, signal: null, waitFor: null, cancellationToken)
             .WaitAsync(cancellationToken)

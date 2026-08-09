@@ -16,6 +16,12 @@ public class HostedServiceHandlerTests
     /// </summary>
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(6);
 
+    /// <summary>
+    /// The deadline the wedged shutdown test spends in full, so it is as short as the handler's two
+    /// transition delays allow rather than as long as <see cref="ShutdownTimeout"/>.
+    /// </summary>
+    private static readonly TimeSpan WedgedShutdownTimeout = TimeSpan.FromSeconds(2);
+
     [Fact]
     public async Task WhenSubjectImplementsIHostedService_ThenItIsStartedAndStopped()
     {
@@ -121,20 +127,25 @@ public class HostedServiceHandlerTests
             var created = 0;
             var attachment = child.AttachHostedService(() =>
             {
-                created++;
+                Interlocked.Increment(ref created);
                 return new TrackedBackgroundService();
             });
 
             parent.Child = child;
-            await AsyncTestHelpers.WaitUntilAsync(() => created == 1);
+            await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref created) == 1);
 
             // Act
             await child.DetachHostedServiceAsync(attachment, CancellationToken.None);
             parent.Child = null;
             parent.Child = child;
 
-            // Assert - the attachment being gone is the deterministic invariant. Counting creations
-            // after a yield would assert an absence on a timer and could pass vacuously.
+            // Assert - an empty transition on the target's chain drains whatever the two graph moves
+            // appended, so the count is read after any create would have run rather than after a
+            // delay. Counting is the claim in the name; the attachment being gone is the mechanism.
+            await ((IHostedServiceAttachmentTarget)attachment).Target
+                .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(1, Volatile.Read(ref created));
             Assert.Empty(child.GetHostedServiceAttachments());
         });
     }
@@ -249,7 +260,12 @@ public class HostedServiceHandlerTests
             parent.SecondChild = child;
             parent.Child = null;
 
-            // Assert - instance identity is deterministic; a creation count after a yield is not
+            // Assert - an empty transition on the target's chain drains whatever the two graph moves
+            // appended. Without it a stop is still waiting out its transition delay when Current is
+            // read, so the assertion cannot observe a restart even when one happens.
+            await ((IHostedServiceAttachmentTarget)attachment).Target
+                .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
             Assert.Same(original, attachment.Current);
             Assert.False(original!.IsDisposed);
         });
@@ -646,9 +662,16 @@ public class HostedServiceHandlerTests
         // Act
         await host.StopAsync(cancellation.Token);
 
-        // Assert
+        // Assert - the drain's barrier is bounded by the same token, so a deadline that has already
+        // passed buys the stops no waiting at all and the drain returns while this one is still
+        // running. The dispose is still owed, and is observed rather than read synchronously: the
+        // stop clears Current before it runs the instance, so an instance that escaped here would be
+        // unreachable and never disposed.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => instance.IsDisposed,
+            message: "The stop the drain stopped waiting for never disposed the instance it had already unpublished.");
+
         Assert.False(instance.IsStopped);
-        Assert.True(instance.IsDisposed);
     }
 
     [Fact]
@@ -687,6 +710,51 @@ public class HostedServiceHandlerTests
 
         Assert.True(subject.Instance!.IsStopped);
         Assert.True(subject.Instance!.IsDisposed);
+    }
+
+    [Fact]
+    public async Task WhenAServiceStopNeverReturns_ThenShutdownDoesNotOutlastTheTimeout()
+    {
+        // Arrange - the stopping token reaches the instance, but a service that ignores it is what
+        // the drain's own barrier has to bound. Untokened, the barrier waits for a stop that never
+        // returns and the process never leaves StopAsync, whatever ShutdownTimeout says.
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = WedgedShutdownTimeout);
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var wedged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var subject = new CountingHostedSubject { StopHold = () => wedged.Task };
+
+        ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => subject.StartCount == 1,
+            message: "The subject never started, so the shutdown below would prove nothing.");
+
+        try
+        {
+            // Act - the outer wait is what turns an unbounded drain into a failure rather than a hang
+            var stopwatch = Stopwatch.StartNew();
+            await host.StopAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            stopwatch.Stop();
+
+            // Assert
+            Assert.True(
+                stopwatch.Elapsed < WedgedShutdownTimeout * 3,
+                $"Shutdown took {stopwatch.Elapsed.TotalSeconds:F1} seconds of a " +
+                $"{WedgedShutdownTimeout.TotalSeconds:F1} second timeout.");
+        }
+        finally
+        {
+            // Lets the transition the drain gave up on finish, so it does not outlive the test.
+            wedged.TrySetResult();
+        }
     }
 
     private static async Task<(IHost Host, IInterceptorSubjectContext Context)> StartHostAsync()

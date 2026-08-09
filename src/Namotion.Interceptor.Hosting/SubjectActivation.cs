@@ -45,7 +45,7 @@ internal sealed class SubjectActivation<T> : IHostedService
         // Opens the gate before awaiting, so a handler registered after this activation cannot
         // deadlock host startup on registration order, and awaits the start so a failing subject
         // still aborts host startup the way AddHostedService does.
-        await handler.EnsureStartedAsync().ConfigureAwait(false);
+        handler.EnsureStarted();
 
         // A false result is deliberately not a fallback into starting the subject here: it means the
         // handler has no start for it, either because another handler owns it, in which case a start
