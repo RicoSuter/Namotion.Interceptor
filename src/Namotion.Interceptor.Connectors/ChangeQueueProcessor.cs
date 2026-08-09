@@ -18,7 +18,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly object? _source;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
-    private readonly ChangeSupersessionRule _supersessionRule;
+    private readonly ChangeDeliveryRule _supersessionRule;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -31,7 +31,7 @@ public class ChangeQueueProcessor : IDisposable
     /// The rule this processor decides supersession with. Exposed so a connector can pin which rule it
     /// wired up: choosing wrongly is silent, so "it compiles" is not evidence that it chose correctly.
     /// </summary>
-    internal ChangeSupersessionRule SupersessionRule => _supersessionRule;
+    internal ChangeDeliveryRule SupersessionRule => _supersessionRule;
 
     /// <summary>
     /// Number of buffered changes dropped due to bounded-queue overflow.
@@ -64,7 +64,7 @@ public class ChangeQueueProcessor : IDisposable
     /// returning <c>false</c> when null.</param>
     /// <param name="writeHandler">Handler to write batched changes.</param>
     /// <param name="supersessionRule">Which commits may supersede a change this processor is about to
-    /// write; see <see cref="ChangeSupersessionRule"/> for the condition that decides it. Deliberately
+    /// write; see <see cref="ChangeDeliveryRule"/> for the condition that decides it. Deliberately
     /// has no default: picking the wrong one is silent and its damage is permanent, so every connector
     /// states which it is.</param>
     /// <param name="bufferTime">Time to buffer changes before flushing.</param>
@@ -77,7 +77,7 @@ public class ChangeQueueProcessor : IDisposable
         IInterceptorSubjectContext context,
         Func<PropertyReference, bool> propertyFilter,
         Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
-        ChangeSupersessionRule supersessionRule,
+        ChangeDeliveryRule supersessionRule,
         TimeSpan? bufferTime,
         int? maxQueueDepth,
         ILogger logger)
@@ -112,7 +112,7 @@ public class ChangeQueueProcessor : IDisposable
         PropertyChangeQueueSubscription subscription,
         Func<PropertyReference, bool> propertyFilter,
         Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
-        ChangeSupersessionRule supersessionRule,
+        ChangeDeliveryRule supersessionRule,
         TimeSpan? bufferTime,
         int? maxQueueDepth,
         ILogger logger)
@@ -131,12 +131,12 @@ public class ChangeQueueProcessor : IDisposable
     // The required parameter makes omitting the rule a compile error, but `default` and `0` still
     // compile in that slot and would silently pick a rule. Both wrong choices lose data without a
     // diagnostic, so the last silent path is closed here rather than left to the caller.
-    private static ChangeSupersessionRule ValidateRule(ChangeSupersessionRule rule)
+    private static ChangeDeliveryRule ValidateRule(ChangeDeliveryRule rule)
     {
-        if (rule == ChangeSupersessionRule.Unspecified)
+        if (rule == ChangeDeliveryRule.Unspecified)
         {
             throw new ArgumentOutOfRangeException(nameof(rule), rule,
-                "A supersession rule must be chosen explicitly; see ChangeSupersessionRule for the condition that decides it.");
+                "A supersession rule must be chosen explicitly; see ChangeDeliveryRule for the condition that decides it.");
         }
 
         return rule;
@@ -229,7 +229,7 @@ public class ChangeQueueProcessor : IDisposable
                     // would break that, since a busy property has committed again by the time the
                     // previous write returns. A server has no such contract and must not serve a value
                     // it has moved past, so there the same rule applies as on the flush path.
-                    if (_supersessionRule == ChangeSupersessionRule.SourceValuesAreSettled)
+                    if (_supersessionRule == ChangeDeliveryRule.SourceValuesAreSettled)
                     {
                         if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, _supersessionRule))
                         {

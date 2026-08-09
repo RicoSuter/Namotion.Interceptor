@@ -371,7 +371,7 @@ public sealed class WebSocketSubjectHandler
             // Safe only because inbound updates are applied under the originating connection rather than
             // this handler, so none of them is skipped here as our own echo and every superseding value
             // is broadcast on. Applying them under this handler would break it.
-            ChangeSupersessionRule.SourceValuesAreSettled,
+            ChangeDeliveryRule.SourceValuesAreSettled,
             BufferTime, null, logger);
 
     public async ValueTask CloseAllConnectionsAsync()

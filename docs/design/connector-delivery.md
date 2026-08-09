@@ -49,7 +49,7 @@ Ranking against the non-source marker there fails the same invariant from the ot
 that predates the client's write and reaches the write loop late is not superseded, so it is written out
 after the client's value, leaving the clients on our older value while the subject holds theirs.
 
-So which commits may supersede is a property of the sink, not of the change: `ChangeSupersessionRule`,
+So which commits may supersede is a property of the sink, not of the change: `ChangeDeliveryRule`,
 chosen at the three server construction sites. The OPC UA server repeats the decision inside the node
 manager lock, because a client write takes that same lock and can land between the batch being accepted
 and written.
@@ -78,11 +78,13 @@ subject, which converged the two stores by accident while corrupting them in oth
 
 The survivor's old value comes from the lowest revision in the batch and its new value from the highest, rather than from whichever change happened to arrive first and last. Enqueuing happens after the commit and outside the subject lock, so a writer preempted between the two can present an older commit after a newer one. Under concurrent writers that inversion is real rather than theoretical, and taking the first and last arrivals would produce a survivor whose old value postdates its new one.
 
-Everything else on the survivor, its `Revision`, `Origin` and both timestamps, comes from the highest-revision change, so a handler keying off `Origin.Source` sees the newest commit's origin rather than a mixture.
+Everything else on the survivor, its `Revision`, `Origin` and both timestamps, comes from the highest-revision change, so a handler keying off `Origin.Source` sees the newest commit's origin rather than a mixture. Under the arrival-position fallback below they come from the last arrival instead.
 
 ## Why revision 0 is delivered rather than dropped
 
 A change carrying revision 0 orders against nothing, so staleness is unprovable and it is delivered; a property with one in its batch collapses by arrival position instead, which is what a source saw before revisions existed. A redundant write costs one message, a wrong drop is permanent, so the guard errs toward delivering.
+
+The survivor of such a batch is emitted carrying no revision too. It was chosen by arrival rather than by revision, so ranking it against the property marker could drop it while the higher-revision change whose value it carries has already been merged away in the same batch, leaving nothing to re-deliver.
 
 This is a guard rather than a path the pipeline takes. Every published change comes from a write terminal and carries a revision, including derived recomputations, so revision 0 only reaches here for changes built through the public factory.
 

@@ -24,7 +24,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     // A source we talk to over a wire: what it hands us was produced before it saw our write, so it
     // cannot rank against our commits (issue #373). Named once because the processor and the reconcile
     // must agree; if only one ranked against the last commit, the other would still deliver an older one.
-    private const ChangeSupersessionRule SupersessionRule = ChangeSupersessionRule.SourceValuesMayBeStale;
+    private const ChangeDeliveryRule SupersessionRule = ChangeDeliveryRule.SourceValuesMayBeStale;
     private readonly TimeSpan _retryTime;
     private readonly SubjectPropertyWriter _propertyWriter;
 

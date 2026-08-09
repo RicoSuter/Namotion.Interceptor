@@ -146,7 +146,7 @@ public class ChangeDeliveryFilterTests
             bufferTime: TimeSpan.FromMilliseconds(8),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
+            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Both commit before processing starts, so the loop meets the local write with the model
         // already holding source B's value.
@@ -196,8 +196,8 @@ public class ChangeDeliveryFilterTests
         var settled = CreateChange(property.Reference, 1, 2, settledRevision);
 
         // Act & Assert
-        Assert.False(ChangeDeliveryFilter.IsCurrent(in earlier, ChangeSupersessionRule.SourceValuesMayBeStale));
-        Assert.True(ChangeDeliveryFilter.IsCurrent(in settled, ChangeSupersessionRule.SourceValuesMayBeStale));
+        Assert.False(ChangeDeliveryFilter.IsCurrent(in earlier, ChangeDeliveryRule.SourceValuesMayBeStale));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in settled, ChangeDeliveryRule.SourceValuesMayBeStale));
     }
 
     [Fact]
@@ -216,8 +216,8 @@ public class ChangeDeliveryFilterTests
         var settled = CreateChange(property, 1, 2, settledRevision);
 
         // Act & Assert
-        Assert.False(ChangeDeliveryFilter.IsCurrent(in earlier, ChangeSupersessionRule.SourceValuesMayBeStale));
-        Assert.True(ChangeDeliveryFilter.IsCurrent(in settled, ChangeSupersessionRule.SourceValuesMayBeStale));
+        Assert.False(ChangeDeliveryFilter.IsCurrent(in earlier, ChangeDeliveryRule.SourceValuesMayBeStale));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in settled, ChangeDeliveryRule.SourceValuesMayBeStale));
     }
 
     [Fact]
@@ -233,7 +233,7 @@ public class ChangeDeliveryFilterTests
         var change = CreateChange(property, 0, 1, revision: 0);
 
         // Act & Assert
-        Assert.True(ChangeDeliveryFilter.IsCurrent(in change, ChangeSupersessionRule.SourceValuesMayBeStale));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in change, ChangeDeliveryRule.SourceValuesMayBeStale));
     }
 
     [Fact]
@@ -248,7 +248,7 @@ public class ChangeDeliveryFilterTests
         var change = CreateChange(property, 0, 1, revision: 7);
 
         // Act & Assert
-        Assert.True(ChangeDeliveryFilter.IsCurrent(in change, ChangeSupersessionRule.SourceValuesMayBeStale));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in change, ChangeDeliveryRule.SourceValuesMayBeStale));
     }
 
     private static SubjectPropertyChange CreateChange(
@@ -291,8 +291,8 @@ public class ChangeDeliveryFilterTests
         var local = CreateChange(property, 0, 1, localRevision);
 
         // Act & Assert: identical change, opposite outcomes.
-        Assert.True(ChangeDeliveryFilter.IsCurrent(in local, ChangeSupersessionRule.SourceValuesMayBeStale));
-        Assert.False(ChangeDeliveryFilter.IsCurrent(in local, ChangeSupersessionRule.SourceValuesAreSettled));
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in local, ChangeDeliveryRule.SourceValuesMayBeStale));
+        Assert.False(ChangeDeliveryFilter.IsCurrent(in local, ChangeDeliveryRule.SourceValuesAreSettled));
     }
 
     /// <summary>
@@ -334,7 +334,7 @@ public class ChangeDeliveryFilterTests
             bufferTime: TimeSpan.FromMilliseconds(8),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeSupersessionRule.SourceValuesMayBeStale);
+            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
     }
 
     private static async Task StopAsync(CancellationTokenSource cancellation, Task processing)

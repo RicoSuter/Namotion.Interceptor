@@ -92,7 +92,7 @@ In both, "source wins" would resolve an ambiguity by discarding a write that alr
 
 **What keeps the two ends in sync** is not the conflict rule but the delivery path: the newest local commit is never dropped, so the source always receives the model's settled value, and the source's notifications carry its own value back, so the model converges to what the source holds. A source that neither reports values back nor answers reads is outside that guarantee; see the last limitation below.
 
-**Servers are the opposite case.** A client's write to a server is not a value produced before it saw ours, it is the newer write, so the ordering ambiguity above does not exist and it does win over an older local commit. Delivering the older one instead would leave every client on a value the model has moved past. The three servers select this with `ChangeSupersessionRule.SourceValuesAreSettled`, whose documentation gives the precondition to check before adding a fourth.
+**Servers are the opposite case.** A client's write to a server is not a value produced before it saw ours, it is the newer write, so the ordering ambiguity above does not exist and it does win over an older local commit. Delivering the older one instead would leave every client on a value the model has moved past. The three servers select this with `ChangeDeliveryRule.SourceValuesAreSettled`, whose documentation gives the precondition to check before adding a fourth.
 
 ### Write Consistency Guarantees
 
@@ -131,7 +131,7 @@ await tx.CommitAsync(ct);   // Writes to source first, then applies locally
 
 | Approach                 | Local update          | Source guarantee             | On disconnect                    |
 |--------------------------|-----------------------|------------------------------|----------------------------------|
-| Without transactions     | Immediate             | Eventual (async + retry)     | Optimistic re-apply or snap-back |
+| Without transactions     | Immediate             | Eventual (async + retry)     | Reconciled by commit order, local write wins |
 | With source transactions | After source confirms | Confirmed before local apply | Commit fails, local unchanged    |
 
 Choose based on your consistency requirements: local-first for responsiveness, transactions for confirmed delivery.
@@ -153,7 +153,7 @@ A source with a `bufferTime` above zero batches outbound changes and collapses e
 **What a connector can rely on:**
 
 - At most one change per property per flush, spanning the batch: the survivor's old value is the oldest in it and the new value the newest, whatever order they arrived in.
-- The survivor's `Revision`, `Origin` and timestamps all come from the newest commit in the batch, so keying off `Origin.Source` sees the newest commit's origin.
+- The survivor's `Revision`, `Origin` and timestamps all come from the newest commit in the batch, so keying off `Origin.Source` sees the newest commit's origin. The exception is a batch containing a change built outside a write terminal, which carries no revision: the property then collapses by arrival position and the survivor carries no revision either, so it is always delivered.
 - Emit order is the arrival order of each property's last occurrence.
 - Only a property's settled state is delivered. A change the model has already moved past is dropped rather than sent, decided by commit order rather than by comparing values, so it holds for derived and runtime-registered properties too.
 - Values a source itself sent are not echoed back to it. The one exception is a transaction confirmation on a property a connector has also written, which is sent to repair the source.
@@ -177,9 +177,9 @@ flowchart TD
     J -->|no| L[Send]
 ```
 
-The echo and property-filter checks happen as each change is dequeued; the collapse and the supersession check happen at the flush. A transaction confirmation being written back still passes both, so it can still be dropped if a later commit superseded it.
+The echo and property-filter checks happen as each change is dequeued, and so does a supersession check for anything queued before processing started. The collapse and the flush-time supersession check happen at the flush, which a zero buffer time skips: there each change is written as it is dequeued, and a server still drops superseded ones while a wire connector does not. A transaction confirmation being written back passes the same checks, so it can still be dropped if a later commit superseded it.
 
-Which commits count as superseding is not the same for every connector, and choosing wrongly loses data in both directions. Connectors talking to a remote source may not rank against a value that source sent; servers must. See `ChangeSupersessionRule` and [connector delivery](design/connector-delivery.md) for the condition that decides it.
+Which commits count as superseding is not the same for every connector, and choosing wrongly loses data in both directions. Connectors talking to a remote source may not rank against a value that source sent; servers must. See `ChangeDeliveryRule` and [connector delivery](design/connector-delivery.md) for the condition that decides it.
 
 Revisions are monotonic per subject and are not comparable across subjects; see [Delivery Guarantees](tracking.md#delivery-guarantees) for the full contract, including what the old value does and does not promise.
 

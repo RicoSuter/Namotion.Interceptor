@@ -21,7 +21,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     // here by construction, which is what SourceValuesAreSettled requires. Named once because the write loop and the
     // processor must agree: if only one of them ranked against the last commit, the other would still
     // write an older one out. Do not inline either use.
-    private const ChangeSupersessionRule SupersessionRule = ChangeSupersessionRule.SourceValuesAreSettled;
+    private const ChangeDeliveryRule SupersessionRule = ChangeDeliveryRule.SourceValuesAreSettled;
 
     private readonly IInterceptorSubject _subject;
     private readonly IInterceptorSubjectContext _context;

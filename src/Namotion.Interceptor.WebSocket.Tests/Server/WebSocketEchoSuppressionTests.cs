@@ -57,7 +57,7 @@ public class WebSocketEchoSuppressionTests
             bufferTime: TimeSpan.FromMilliseconds(20),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeSupersessionRule.SourceValuesAreSettled);
+            supersessionRule: ChangeDeliveryRule.SourceValuesAreSettled);
 
         using var otherProcessor = new ChangeQueueProcessor(
             source: otherConnection,
@@ -72,7 +72,7 @@ public class WebSocketEchoSuppressionTests
             bufferTime: TimeSpan.FromMilliseconds(20),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeSupersessionRule.SourceValuesAreSettled);
+            supersessionRule: ChangeDeliveryRule.SourceValuesAreSettled);
 
         using var cancellation = new CancellationTokenSource();
         var ownProcessing = ownProcessor.ProcessAsync(cancellation.Token);
@@ -142,6 +142,6 @@ public class WebSocketEchoSuppressionTests
         using var processor = handler.CreateChangeQueueProcessor(NullLogger.Instance);
 
         // Assert
-        Assert.Equal(ChangeSupersessionRule.SourceValuesAreSettled, processor.SupersessionRule);
+        Assert.Equal(ChangeDeliveryRule.SourceValuesAreSettled, processor.SupersessionRule);
     }
 }

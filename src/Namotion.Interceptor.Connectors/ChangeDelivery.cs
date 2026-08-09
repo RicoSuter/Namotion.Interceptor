@@ -24,7 +24,7 @@ public static class ChangeDelivery
     /// <param name="change">The change about to be written.</param>
     /// <param name="rule">The same rule the processor was constructed with. Answering under a different
     /// rule than the processor uses would apply two different definitions of stale to one stream.</param>
-    public static bool IsSuperseded(in SubjectPropertyChange change, ChangeSupersessionRule rule)
+    public static bool IsSuperseded(in SubjectPropertyChange change, ChangeDeliveryRule rule)
     {
         return !ChangeDeliveryFilter.IsCurrent(in change, rule);
     }

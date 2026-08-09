@@ -176,7 +176,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
                         // Safe only because inbound client messages are applied under _mqttClientSource
                         // rather than this, so none of them is skipped here as our own echo and every
                         // superseding value is relayed on. Applying them under this would break it.
-                        ChangeSupersessionRule.SourceValuesAreSettled,
+                        ChangeDeliveryRule.SourceValuesAreSettled,
                         _configuration.BufferTime,
                         maxQueueDepth: null,
                         logger: _logger);

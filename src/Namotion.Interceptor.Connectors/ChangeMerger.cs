@@ -77,7 +77,7 @@ internal sealed class ChangeMerger : IDisposable
     /// by default so the batch collapse can be exercised on its own.</param>
     public ReadOnlyMemory<SubjectPropertyChange> Merge(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        ChangeSupersessionRule? supersessionRule = null)
+        ChangeDeliveryRule? supersessionRule = null)
     {
         if (_buffer is null)
         {
@@ -199,7 +199,7 @@ internal sealed class ChangeMerger : IDisposable
     /// <summary>
     /// Drops survivors the model has already moved past, compacting what remains.
     /// </summary>
-    private void SuppressSupersededChanges(ChangeSupersessionRule rule)
+    private void SuppressSupersededChanges(ChangeDeliveryRule rule)
     {
         var kept = 0;
         for (var i = 0; i < _count; i++)

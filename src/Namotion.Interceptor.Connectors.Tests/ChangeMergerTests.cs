@@ -179,7 +179,7 @@ public class ChangeMergerTests
         ];
 
         // Act
-        var merged = merger.Merge(changes, ChangeSupersessionRule.SourceValuesMayBeStale).ToArray();
+        var merged = merger.Merge(changes, ChangeDeliveryRule.SourceValuesMayBeStale).ToArray();
 
         // Assert: a survivor built by arrival position orders against nothing, exactly as a lone
         // revision 0 change would, so it must be delivered rather than ranked against the marker.
@@ -343,13 +343,13 @@ public class ChangeMergerTests
         // mark are all one-time costs that would otherwise land inside the measurement.
         for (var warmup = 0; warmup < 5; warmup++)
         {
-            merger.Merge(changes, ChangeSupersessionRule.SourceValuesMayBeStale);
+            merger.Merge(changes, ChangeDeliveryRule.SourceValuesMayBeStale);
             merger.Reset();
         }
 
         // Act
         var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        var merged = merger.Merge(changes, ChangeSupersessionRule.SourceValuesMayBeStale);
+        var merged = merger.Merge(changes, ChangeDeliveryRule.SourceValuesMayBeStale);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
         // Assert
@@ -614,7 +614,7 @@ public class ChangeMergerTests
         ];
 
         // Act
-        var merged = merger.Merge(straggler, ChangeSupersessionRule.SourceValuesMayBeStale).ToArray();
+        var merged = merger.Merge(straggler, ChangeDeliveryRule.SourceValuesMayBeStale).ToArray();
 
         // Assert: the superseded commit is dropped, the one carrying the current value still flows.
         var survivor = Assert.Single(merged);
@@ -648,7 +648,7 @@ public class ChangeMergerTests
         // Act: the first is superseded and dropped, the second survives.
         var merged = merger.Merge(
             [CreateChange(firstName, "Old", "Stale", stragglerRevision), CreateChange(lastName, "Newest", "Newer", lastNameRevision)],
-            ChangeSupersessionRule.SourceValuesMayBeStale);
+            ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Assert
         Assert.Equal(1, merged.Length);

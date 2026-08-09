@@ -3,58 +3,13 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
-/// Whether a value applied from a source may supersede a change waiting to be delivered, which is the one
-/// question a connector has to answer before it can decide what to drop.
-/// </summary>
-/// <remarks>
-/// Both settings lose data when chosen wrongly, silently and permanently, so decide it by the condition
-/// rather than by whether the connector is called a client or a server.
-/// </remarks>
-public enum ChangeSupersessionRule
-{
-    /// <summary>
-    /// Not a rule. Occupies zero so that <c>default</c> and a literal <c>0</c>, both of which compile in
-    /// a required parameter, cannot quietly select one. Rejected at construction.
-    /// </summary>
-    Unspecified = 0,
-
-    /// <summary>
-    /// The source produced what it hands us before it saw our write, so an applied value cannot be ranked
-    /// against our commits and a commit of ours that predates it is still the newer one.
-    /// </summary>
-    /// <remarks>
-    /// Any connector talking to something over a wire. Its notifications reflect a state the far end had
-    /// at some earlier moment, and our write may still be in flight toward it, so a local commit has to be
-    /// delivered even though it looks older. Choosing
-    /// <see cref="SourceValuesAreSettled"/> here drops that write and both ends settle on the stale value,
-    /// which is issue #373.
-    /// </remarks>
-    SourceValuesMayBeStale,
-
-    /// <summary>
-    /// An applied value has already reached the destination by the time we apply it, so it is the newer
-    /// write and anything older must not be delivered over it.
-    /// </summary>
-    /// <remarks>
-    /// A server, where the applied value is a client's own write. Check the condition rather than assuming
-    /// it, because the three servers satisfy it differently: the OPC UA server because the SDK has written
-    /// the node before the change reaches the subject, the MQTT and WebSocket servers because they apply
-    /// inbound writes under a source that is not their own, so nothing is skipped as an echo and the
-    /// superseding value is relayed onward. Changing either convention invalidates this for that server.
-    /// Choosing <see cref="SourceValuesMayBeStale"/> here delivers a commit the clients have already moved
-    /// past, leaving them behind the model with nothing to correct them.
-    /// </remarks>
-    SourceValuesAreSettled
-}
-
-/// <summary>
 /// Delivers a property's settled state and nothing else.
 ///
 /// A change is enqueued after its commit and outside the subject lock, so a writer preempted between the
 /// two can present an older commit after a newer one has gone out. Nothing bounds that preemption, so no
 /// amount of buffering closes it; comparing against the property's own commit marker does.
 ///
-/// Which marker is the sink's to use is not a property of the change: see <see cref="ChangeSupersessionRule"/>.
+/// Which marker is the sink's to use is not a property of the change: see <see cref="ChangeDeliveryRule"/>.
 /// </summary>
 internal static class ChangeDeliveryFilter
 {
@@ -62,7 +17,7 @@ internal static class ChangeDeliveryFilter
     /// Decides a survivor on the flush path and marks it published, in one property data lookup because
     /// this runs per delivered change.
     /// </summary>
-    public static bool TryAcceptForDelivery(in SubjectPropertyChange change, ChangeSupersessionRule rule)
+    public static bool TryAcceptForDelivery(in SubjectPropertyChange change, ChangeDeliveryRule rule)
     {
         var property = change.Property;
         if (!property.TryGetWriteState(CountsSourceCommits(rule), out var commitRevision, out var published))
@@ -90,7 +45,7 @@ internal static class ChangeDeliveryFilter
     /// Whether the property has not committed anything newer than this change. For paths that decide one
     /// change at a time and so have no lookup to share.
     /// </summary>
-    public static bool IsCurrent(in SubjectPropertyChange change, ChangeSupersessionRule rule)
+    public static bool IsCurrent(in SubjectPropertyChange change, ChangeDeliveryRule rule)
     {
         return !change.Property.TryGetWriteState(CountsSourceCommits(rule), out var commitRevision, out _)
                || !IsSuperseded(in change, commitRevision);
@@ -99,8 +54,8 @@ internal static class ChangeDeliveryFilter
     /// <summary>
     /// Records that a connector has written this property out. Deliberately not per source: it only
     /// decides whether a transaction confirmation is written back, and a confirmation carries the current
-    /// value, so a foreign processor's mark costs at most one redundant write. That is what lets it be a
-    /// bare flag with no source reference to release.
+    /// value, so a foreign processor's mark costs one redundant write per confirmation on that property rather
+    /// than a wrong value. That is what lets it be a bare flag with no source reference to release.
     /// </summary>
     public static void MarkWrittenOut(in SubjectPropertyChange change)
     {
@@ -137,12 +92,12 @@ internal static class ChangeDeliveryFilter
 
     // Explicit arms rather than a comparison, so the zero value cannot fall through to the client rule.
     // The construction guard does not cover ChangeDelivery.IsSuperseded, which a connector calls directly.
-    private static bool CountsSourceCommits(ChangeSupersessionRule rule) => rule switch
+    private static bool CountsSourceCommits(ChangeDeliveryRule rule) => rule switch
     {
-        ChangeSupersessionRule.SourceValuesAreSettled => true,
-        ChangeSupersessionRule.SourceValuesMayBeStale => false,
+        ChangeDeliveryRule.SourceValuesAreSettled => true,
+        ChangeDeliveryRule.SourceValuesMayBeStale => false,
         _ => throw new ArgumentOutOfRangeException(nameof(rule), rule,
-            "A supersession rule must be chosen explicitly; see ChangeSupersessionRule for the condition that decides it.")
+            "A supersession rule must be chosen explicitly; see ChangeDeliveryRule for the condition that decides it.")
     };
 
     private static bool IsSuperseded(in SubjectPropertyChange change, long marker)
