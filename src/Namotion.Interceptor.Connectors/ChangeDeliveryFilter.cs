@@ -135,8 +135,15 @@ internal static class ChangeDeliveryFilter
         return property.TryGetWriteState(includeSourceCommits: false, out _, out var published) && published;
     }
 
-    private static bool CountsSourceCommits(ChangeSupersessionRule rule) =>
-        rule == ChangeSupersessionRule.SourceValuesAreSettled;
+    // Explicit arms rather than a comparison, so the zero value cannot fall through to the client rule.
+    // The construction guard does not cover ChangeDelivery.IsSuperseded, which a connector calls directly.
+    private static bool CountsSourceCommits(ChangeSupersessionRule rule) => rule switch
+    {
+        ChangeSupersessionRule.SourceValuesAreSettled => true,
+        ChangeSupersessionRule.SourceValuesMayBeStale => false,
+        _ => throw new ArgumentOutOfRangeException(nameof(rule), rule,
+            "A supersession rule must be chosen explicitly; see ChangeSupersessionRule for the condition that decides it.")
+    };
 
     private static bool IsSuperseded(in SubjectPropertyChange change, long marker)
     {

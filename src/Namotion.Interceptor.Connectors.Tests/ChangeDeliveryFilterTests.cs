@@ -295,6 +295,24 @@ public class ChangeDeliveryFilterTests
         Assert.False(ChangeDeliveryFilter.IsCurrent(in local, ChangeSupersessionRule.SourceValuesAreSettled));
     }
 
+    /// <summary>
+    /// The construction guard does not protect this entry point, which is the one a connector uses to
+    /// repeat the decision under its own write lock. Mapping the zero value to a rule here would hand a
+    /// third-party server client semantics with no diagnostic, which is the silent path the guard exists
+    /// to close.
+    /// </summary>
+    [Fact]
+    public void WhenTheSupersessionRuleIsUnspecified_ThenTheDeliveryDecisionIsRejected()
+    {
+        // Arrange
+        var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = 1 };
+        var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
+        var change = CreateChange(property, 0, 1, revision: 7);
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => ChangeDelivery.IsSuperseded(in change, default));
+    }
+
     private static ChangeQueueProcessor CreateProcessor(
         IInterceptorSubjectContext context, Action<SubjectPropertyChange> onWritten)
     {

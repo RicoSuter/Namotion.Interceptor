@@ -252,9 +252,9 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
 
     /// <summary>
     /// Copies this change carrying no revision, without re-boxing the values. A batch collapse uses this
-    /// when it falls back to arrival position: the survivor is then assembled from changes that do not
-    /// order against each other, so its revision would be an arbitrary one of them, and ranking a later
-    /// commit against it could drop the very value the fallback selected.
+    /// when it falls back to arrival position: the survivor is then chosen by arrival rather than by
+    /// revision, so ranking a later commit against the revision it happens to carry could drop the very
+    /// value the fallback selected, with nothing left in the batch still holding it.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal SubjectPropertyChange WithoutRevision() =>
