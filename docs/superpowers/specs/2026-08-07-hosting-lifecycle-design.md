@@ -261,10 +261,17 @@ completion signalling and its bookkeeping, and skips only the user visible work.
 
 | | start | stop |
 |---|---|---|
-| `NotStarted` | waits for `Running` or `Drained` | waits for `Running` or `Drained` |
+| `NotStarted` | waits for the gate to open, then re-reads | waits for the gate to open |
 | `Running` | runs | runs |
-| `Draining` | no-op, signals | runs |
-| `Drained` | no-op, signals | no-op, signals |
+| `Draining` | no-op, signals | runs, signals |
+| `Drained` | no-op, signals | runs, signals |
+
+A stop runs at every state, `Drained` included, and the row is not a rounding error. `StopAsync` awaits
+the stops queued before the drain and the stops it appends itself, but a stop appended *after* both
+snapshots, by a graph move racing the drain, is in neither and reaches `Drained` still holding a running
+instance. A stop that no-oped there would leave that attachment never stopped and never disposed. Nothing
+is lost by letting it run: a target the drain already stopped has a null `Current`, so the late stop
+returns immediately, which is why the null check rather than the gate state is what makes a stop idempotent.
 
 `EnsureStartedAsync` is a one way ratchet that advances `NotStarted` to `Running` and does nothing in any
 other state. Written as a plain assignment it would let a `DetachHostedServiceAsync` arriving during
@@ -311,8 +318,16 @@ completion signal, not a global executor.
 `AddOrUpdate`'s update delegate can run more than once with no rollback, so the record is constructed
 outside the delegate and the delegate only appends it. Handler ownership is taken with
 `Interlocked.CompareExchange`, where an exchange that finds *this* handler already installed counts as
-success; only losing to a different handler means do nothing, which makes the two context case benign
-instead of a double start.
+success; only losing to a different handler means do nothing.
+
+Ownership is not what makes the two context case benign, and reading it that way was measured wrong
+during implementation: the probe reported `StartCount` 2 with ownership working exactly as designed. A
+subject reachable from two hosting enabled contexts raises one context attach per context, and the
+**owning** handler sees both, so it appends two starts to the same chain and loses no exchange at any
+point. The second handler losing the exchange was never the source of the duplicate. What closes it is a
+one instance guard inside the start transition body: a start that finds the target already holding a
+`Current` returns without creating or starting anything. The guard has to sit in the body, where the
+chain serialises the two starts against each other; at append time both would still see an empty target.
 
 **Ownership is released on context detach and on drain, always after the stops are appended, and never
 from inside a transition body.** Both halves matter. Releasing from the end of the stop transition instead
@@ -324,10 +339,32 @@ chain. Detach release is what allows a subject moved between contexts to be pick
 and drain release is what allows a second host over the same subjects, which the HomeBlaze end to end tests
 do; without the latter every record stays owned by a dead handler and nothing ever starts again.
 
+**Ownership is read on context detach, and captured at append time.** A handler appends a stop only for
+the targets it owns, so a detach reaching a drained handler, or a sibling handler that lost the exchange,
+cannot stop and dispose an instance the owning handler created and is still running. The read cannot move
+into the transition body, because ownership is released a few statements after the appends: by the time a
+body ran it would always see a stranger and skip its own stop. Reading it at append time, under the
+lifecycle lock, is what pairs the read with the release.
+
 **The running set** a target joins at append time of its start and leaves at append time of its stop, both
 under whatever lock the caller already holds. Joining at start completion instead would let the drain
 snapshot miss a queued start, which is the same race the `Draining` state closes and should not depend on
 two mechanisms agreeing.
+
+**Shutdown tracks queued stops separately from the running set.** Leaving the running set at append time
+has a corollary: a stop appended just before the drain is in no running set snapshot, so the drain would
+return while that stop was still running, and the host disposes the service provider the moment
+`StopAsync` returns. The handler therefore also holds the set of stop tasks in flight, snapshots it as the
+first thing `StopAsync` does after beginning the drain, and awaits those tasks alongside the stops it
+appends itself. Each entry removes itself through a continuation, so the set does not grow with the
+process.
+
+**Shutdown repeats the per subject ordering shape rather than approximating it.** The drain snapshots the
+running set, appends a stop carrying a `subjectStopped` signal for every target that is a subject, and
+then appends a stop for every attachment target that first awaits its own subject's signal when that
+subject was in the snapshot and awaits nothing otherwise. That is the shape a context detach uses, for
+the same reason: `BackgroundService.StopAsync` awaits its execute task, so an attachment must not be
+stopped and disposed underneath a subject that is still unwinding into it.
 
 **Publication.** `Current` and `Fault` are written with `Volatile.Write` and read with `Volatile.Read`.
 Awaiting a transition gives `WaitForStartAsync` a happens before edge, but the wrappers' diagnostics polls
@@ -392,17 +429,35 @@ public static IServiceCollection AddSubject<T>(
 unconditionally after construction:
 
 ```csharp
-var instance = HasContextConstructor<T>() && context is not null
-    ? ActivatorUtilities.CreateInstance<T>(serviceProvider, context)
-    : ActivatorUtilities.CreateInstance<T>(serviceProvider);
+if (context is not null && HasContextConstructor<T>())
+{
+    var attachedInstance = ActivatorUtilities.CreateInstance<T>(serviceProvider, context);
+    attachedInstance.Context.AddFallbackContext(context);
+
+    // The constructor already attached it, so this ordering is not a choice.
+    configure?.Invoke(attachedInstance);
+    return attachedInstance;
+}
+
+var instance = ActivatorUtilities.CreateInstance<T>(serviceProvider);
+
+// Ordered ahead of the attach, which is the only ordering this factory controls.
+configure?.Invoke(instance);
 
 if (context is not null)
 {
     instance.Context.AddFallbackContext(context);
 }
 
-configure?.Invoke(instance);
+return instance;
 ```
+
+The split is where the implementation departed from the first draft, which ran `configure` after the
+attach on both paths. Nothing has seen a subject built through the second branch yet, so running
+`configure` first is what keeps a handler from starting it half configured; running it after the attach
+would race the start the attach appends, and the 50 ms start delay is not a synchronisation. On the first
+branch the generated constructor has already attached the subject before the factory sees it, so the
+ordering cannot be recovered there and `configure` necessarily runs against an attached subject.
 
 The constructor branch survives only because `ActivatorUtilities.CreateInstance<T>(sp, context)` throws
 when no constructor can consume the extra argument, so the guard is load bearing there. It confers no
@@ -467,11 +522,16 @@ subjects that only need to exist and be attached at startup.
 an unchanged signature. A rename turns that into a build failure. This is only partly reachable: the six
 `Add*Device` extensions keep their signatures and forward to the new method, so their consumers get
 changed behaviour with no compile error. The change is corrective, since those subjects go from having no
-context to having one, but three consequences must be in the release notes: those subjects now participate
-in tracking and the registry, `configure` now runs against an attached subject so its assignments are
-intercepted and tracked, and the constraint change from `IHostedService` to `IInterceptorSubject` means
-`AddSubject` can no longer register a plain hosted service that is not a subject, which
+context to having one, but two consequences must be in the release notes: those subjects now participate
+in tracking and the registry, and the constraint change from `IHostedService` to `IInterceptorSubject`
+means `AddSubject` can no longer register a plain hosted service that is not a subject, which
 `AddHostedSubject<T> where T : class, IHostedService` allowed.
+
+A third consequence was drafted and is false. `configure` does **not** now run against an attached subject
+for any of the six: none of them declares a constructor taking an `IInterceptorSubjectContext`, so all six
+take the second branch above, where `configure` runs before the attach and its assignments are therefore
+still not intercepted and not tracked. That is deliberate, not a leftover, because the alternative races
+the start.
 
 ### Part 2: attachment becomes factory only
 

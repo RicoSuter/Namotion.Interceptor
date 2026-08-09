@@ -1,31 +1,225 @@
 # Hosting
 
-The `Namotion.Interceptor.Hosting` package integrates interceptor subjects with the .NET Generic Host lifecycle (`Microsoft.Extensions.Hosting`). This works with any host-based application: ASP.NET Core, worker services, console apps, etc. Subjects can either be hosted services themselves (extending `BackgroundService`) or have hosted services attached to them that start and stop dynamically.
+The `Namotion.Interceptor.Hosting` package binds `IHostedService` implementations to interceptor subjects and drives them from the .NET Generic Host (`Microsoft.Extensions.Hosting`). It works with any host based application: ASP.NET Core, worker services, console apps.
+
+## The Rule
+
+**A hosted service runs exactly while its subject is in the graph. The `HostedServiceHandler` on the subject's context is the only thing that starts or stops it, and it disposes exactly what it created.**
+
+Everything else on this page follows from that one sentence:
+
+- A subject entering the graph starts its services, and a subject leaving the graph stops them. A subject that re-enters gets them back.
+- The handler creates every factory attachment instance, so it disposes every factory attachment instance.
+- The handler never creates a subject, so it never disposes one. It starts and stops a subject that implements `IHostedService` and leaves disposal to whoever constructed it: the dependency injection container for a subject registered through `AddSubject<T>()`, you for a subject you constructed yourself. That is what makes moving a subject through the graph non destructive.
+
+Nothing else may start these services. In particular, do not also register a subject the handler manages with `AddHostedService<T>()`, because that is a second owner and a second start.
 
 ## Setup
 
-Configure hosting support in your interceptor context and register it with the host:
+Configure hosting support on the context and register it with the host:
 
 ```csharp
 var builder = Host.CreateApplicationBuilder();
 
 var context = InterceptorSubjectContext
     .Create()
-    .WithLifecycle()
+    .WithFullPropertyTracking()
     .WithHostedServices(builder.Services);
 
 var host = builder.Build();
 await host.StartAsync();
 ```
 
-The `WithHostedServices()` method:
-- Registers a `HostedServiceHandler` that manages service lifecycles
-- Automatically enables `WithLifecycle()` for subject attach/detach tracking
-- Integrates with the .NET hosting pipeline
+`WithHostedServices()` creates the `HostedServiceHandler` for this context and registers it with the host, so the handler opens for business when the host starts and drains when the host stops. It also enables `WithLifecycle()`, which raises the context attach and detach events the handler listens to. Each context gets its own handler, so two contexts sharing one `IServiceCollection` both work.
+
+Child subjects reach the handler through their own `Context`, so hosting for anything below the root needs context inheritance. `WithFullPropertyTracking()` includes `WithContextInheritance()`. If you compose the context by hand, add `WithContextInheritance()` yourself, or only root subjects will ever start anything.
+
+Starts and stops queued before the host starts run once it does. Each managed service has its own queue, so its own starts and stops never overlap, while unrelated services run concurrently. The one ordering guarantee across services is the one that matters for cleanup: when a subject leaves the graph, its own stop runs before the stops of the services attached to it.
+
+## Which Pattern When
+
+| You have | Use |
+|---|---|
+| A subject with no constructor dependencies, and you want the instance during configuration | Construct it and register the instance |
+| A subject whose constructor dependencies only exist after `builder.Build()` | `services.AddSubject<T>()` |
+| A service that should run for as long as a subject is in the graph | Factory attachment |
+| A subject whose own purpose is a background loop | Let the subject implement `BackgroundService` |
+
+### Construct and register directly
+
+When a subject needs nothing from the container beyond its context, construct it during configuration. This is what the connector samples do, because they need the instance itself before the host is built:
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithRegistry()
+    .WithHostedServices(builder.Services);
+
+var root = Root.CreateWithPersons(context);
+context.AddService(root);
+
+builder.Services.AddSingleton(root);
+```
+
+Constructing with the context attaches the subject there and then, so the handler already owns whatever that subject brings with it and starts it when the host starts.
+
+The container does not dispose an instance registered with `AddSingleton(instance)`. Disposal stays with you.
+
+### `AddSubject<T>()`
+
+Use `AddSubject<T>()` when the subject's constructor needs services that only exist after `builder.Build()`, such as `IHttpClientFactory` or `ILogger<T>`:
+
+```csharp
+using Namotion.Interceptor.Hosting;
+
+builder.Services.AddSubject<WeatherStation>(station =>
+{
+    station.PollingInterval = TimeSpan.FromSeconds(5);
+});
+```
+
+It registers `T` as a singleton, forces its construction at host start, and attaches it to the context resolved from the container (or from the optional `contextResolver`). Constructor shape decides nothing: the context is applied after construction whether or not `T` declares a constructor taking an `IInterceptorSubjectContext`.
+
+If `T` also implements `IHostedService`, the handler starts it as usual, and host startup waits for that start and fails if it throws, the way `AddHostedService<T>` does. `AddSubject<T>()` also serves plain subjects that only need to exist and be attached at startup.
+
+Two sharp edges:
+
+- Registration is idempotent. A second `AddSubject<T>()` for the same `T` silently drops its `configure` and `contextResolver`.
+- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure`.
+
+Where `configure` runs relative to the attach depends on the constructor, and the difference is observable:
+
+- **`T` has no constructor taking a context.** `AddSubject` performs the attach itself and runs `configure` before it, so the subject is fully configured before anything can start it. Those assignments are not intercepted and not tracked, because the subject has no context yet. This is the deliberate trade: running `configure` after the attach would race the start the attach appends.
+- **`T` takes a context.** The generated constructor has already attached the subject by the time the factory sees it, so `configure` necessarily runs against an attached subject. Its assignments are intercepted and tracked, and they race the queued start exactly as they do for a hand written `new MySubject(context) { Name = "x" }`.
+
+### A service bound to a subject
+
+When a service is not the subject itself but should run for as long as a subject is in the graph, attach a factory to that subject. See [Factory Attachment](#factory-attachment) below.
+
+### A subject that is its own background loop
+
+When the subject's whole purpose is a background loop over its own properties, let it extend `BackgroundService`. See [Subject as Hosted Service](#subject-as-hosted-service) below.
+
+## Factory Attachment
+
+Attach a factory to a subject and the handler runs an instance of it for exactly as long as the subject is in the graph:
+
+```csharp
+public class PersonBackgroundService : BackgroundService
+{
+    private readonly Person _person;
+
+    public PersonBackgroundService(Person person)
+    {
+        _person = person;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _person.FirstName = "John";
+        _person.LastName = "Doe";
+
+        await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+    }
+}
+
+// Usage
+var person = new Person(context);
+var attachment = person.AttachHostedService(() => new PersonBackgroundService(person));
+```
+
+`AttachHostedService` stores the factory on the subject and returns a handle. When the subject is already inside a hosting enabled graph, the handler takes ownership and queues a create and start. When it is not, the factory is stored and nothing runs until the subject enters one. Each call yields its own attachment, so attaching the same factory twice gives two independently managed instances.
+
+### The factory must construct
+
+`() => existingInstance` is the one shape that defeats the design. The handler disposes the instance when the subject leaves the graph and invokes the factory again when it comes back, so a factory that hands out a captured instance restarts something that has already been stopped and disposed.
+
+```csharp
+// Correct: a fresh instance every time the handler needs one.
+subject.AttachHostedService(() => new DataSyncService(subject));
+
+// Wrong: the handler disposes this instance on detach, then starts the same one again on re-attach.
+var service = new DataSyncService(subject);
+subject.AttachHostedService(() => service);
+```
+
+The factory runs inside the handler's transition, outside every lock, so it can read live state rather than a snapshot taken at attach time. It is deliberately narrow: `Func<T>`, no cancellation token, no service provider, not async.
+
+### Do not detach from your own stop path
+
+**A hosted service must not detach an attachment from inside its own stop path.** That includes anything reached through its `StopAsync`, and for a `BackgroundService` it includes the tail of `ExecuteAsync` as it unwinds.
+
+When a subject leaves the graph, the handler stops the subject first and holds each of its attachments' stops behind that, so an attachment is never disposed underneath a subject that is still unwinding. A stop that waits for a detach of one of those attachments therefore waits for itself. The result is a deadlock that only resolves when the host's shutdown timeout expires.
+
+Detaching from an operation, from a configuration change, or from any path not reached through the service's own stop is fine. Nothing detects the bad shape, so it is a rule rather than a guard. `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard for it in this repository; both OPC UA wrappers in HomeBlaze had this shape and were changed.
+
+### Keep the dispose path out of the lifecycle lock
+
+Because the handler now disposes what the factory built, disposal runs from a handler transition that can run while a detach cascade still holds the lifecycle lock. Previously the wrapper disposed and the two never interleaved. A connector that is disposed this way must therefore obey two rules:
+
+- its dispose path must not enter the lifecycle lock, directly or transitively
+- it must not block on a lock that its own `SubjectDetaching` handler acquires
+
+Writing a scalar property from a dispose path is safe. Writing a property whose type can contain subjects takes the lifecycle lock and is not safe, and attaching or detaching a subject enters the same lock without being a property write at all. Nothing enforces this and no test covers it, which is exactly why it is written down here.
+
+### Reading the outcome
+
+The handle carries the state of the attachment:
+
+- `Current` is the running instance, or null when nothing is running: before the first start, after a stop, and after a start that failed.
+- `Fault` is the exception from the last failed transition, or null. The next successful transition clears it.
+
+```csharp
+if (attachment.Fault is { } fault)
+{
+    logger.LogError(fault, "The attached service is not running.");
+}
+else if (attachment.Current is { } service)
+{
+    // Running.
+}
+```
+
+`AttachHostedService` and `DetachHostedService` return as soon as the transition has been queued, so their result means "accepted", not "started" or "stopped". `Current` and `Fault` are how the outcome is observed. The awaitable overloads wait for it instead:
+
+```csharp
+var attachment = await person.AttachHostedServiceAsync(
+    () => new PersonBackgroundService(person), cancellationToken);
+// The instance is running, or this call threw.
+
+await person.DetachHostedServiceAsync(attachment, cancellationToken);
+// The instance has stopped and has been disposed.
+```
+
+`AttachHostedServiceAsync` is transactional for its own transition: when that start faults, the attachment is removed before the exception propagates, so a `catch` block is never left owning an invisible attachment. When a context attach had already queued a create for the same attachment, the caller awaits the second transition rather than the first. A graph driven start that faults keeps the attachment with `Current` null and `Fault` set, so the next context attach retries it.
+
+The cancellation token bounds the wait, not the work. A cancelled await leaves the transition running to completion, so a caller that gives up waiting still ends with a started instance rather than a half started one.
+
+`GetHostedServiceAttachments()` returns an immutable snapshot of a subject's attachments.
+
+### Detach stops and disposes, and keeps the attachment
+
+Two different things are called detaching, and they differ in exactly one respect:
+
+- **The subject leaves the graph.** The handler stops the instance, disposes it and clears `Current`, and **keeps the attachment on the subject**. The factory survives, so the next time the subject enters a hosting enabled graph the handler invokes it again and a fresh instance runs. This is what makes moving a subject through the graph work.
+- **`DetachHostedService` or `DetachHostedServiceAsync`.** The same stop and dispose, and the attachment is removed from the subject as well, so a later context attach starts nothing.
+
+```csharp
+var parent = new Parent(context);
+var child = new Child();
+child.AttachHostedService(() => new ChildMonitorService(child));
+
+parent.Child = child;   // child enters the graph, an instance is created and started
+parent.Child = null;    // that instance is stopped and disposed, the attachment stays
+parent.Child = child;   // the factory runs again, a different instance is now running
+```
+
+Host shutdown does the same thing as a context detach for everything the handler owns, with the host's stopping token so a wedged service cannot hold the process past `ShutdownTimeout`.
 
 ## Subject as Hosted Service
 
-A subject can directly extend `BackgroundService` to become a hosted service. When the subject is attached to a context with hosting support, the service automatically starts. When the subject is detached from the context (or the host stops), the service stops.
+A subject can implement `IHostedService` itself, usually by extending `BackgroundService`. The handler starts it on the first context attach, stops it on the last context detach, and never disposes it.
 
 ```csharp
 [InterceptorSubject]
@@ -48,103 +242,20 @@ public partial class SensorMonitor : BackgroundService
 
 // Usage
 var monitor = new SensorMonitor(context);
-// Service starts automatically when attached to context
-// Service stops when detached from context or host stops
+// Starts when the subject is in the graph, stops when it leaves or the host stops.
 ```
 
-This pattern is useful when the subject's entire purpose is to run a background task that updates its properties.
+This pattern fits when the subject's entire purpose is to run a background task that updates its own properties. Two contract requirements come with it:
 
-## Attaching Hosted Services
+**`ExecuteAsync` must tolerate being run more than once.** A subject that leaves the graph and re-enters it is restarted in place, on the same instance, because the handler does not dispose subjects. A plain `BackgroundService` handles this. Anything that latches a "done" or "disposed" flag does not, so reset per run state at the top of `ExecuteAsync` rather than in the constructor.
 
-For more flexibility, you can attach and detach hosted services from subjects at runtime. This allows dynamic background tasks that can be started and stopped independently of the subject's lifecycle.
-
-### Fire-and-Forget Attachment
-
-```csharp
-var person = new Person(context);
-var backgroundService = new DataSyncService(person);
-
-// Attach - service starts asynchronously
-person.AttachHostedService(backgroundService);
-
-// Check attached services
-var services = person.GetAttachedHostedServices();
-
-// Detach - service stops asynchronously
-person.DetachHostedService(backgroundService);
-```
-
-### Awaitable Attachment
-
-When you need to ensure the service has started or stopped before continuing:
-
-```csharp
-// Wait for service to start
-await person.AttachHostedServiceAsync(backgroundService, cancellationToken);
-// Service is now running
-
-// Wait for service to stop
-await person.DetachHostedServiceAsync(backgroundService, cancellationToken);
-// Service has stopped
-```
-
-### Automatic Cleanup
-
-When a subject is detached from its context (e.g., removed from the object graph), all attached hosted services are automatically stopped and removed:
-
-```csharp
-var parent = new Parent(context);
-var child = new Child();
-child.AttachHostedService(new ChildMonitorService(child));
-
-parent.Child = child;  // child attached to context, service running
-parent.Child = null;   // child detached, service automatically stopped
-```
-
-## Example: Background Service for a Subject
-
-A common pattern is creating a dedicated background service that operates on a subject:
-
-```csharp
-public class PersonBackgroundService : BackgroundService
-{
-    private readonly Person _person;
-
-    public PersonBackgroundService(Person person)
-    {
-        _person = person;
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // Initialize
-        _person.FirstName = "John";
-        _person.LastName = "Doe";
-
-        // Run until cancelled
-        await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
-    }
-
-    public override Task StopAsync(CancellationToken cancellationToken)
-    {
-        // Cleanup
-        _person.FirstName = "Stopped";
-        return base.StopAsync(cancellationToken);
-    }
-}
-
-// Usage
-var person = new Person(context);
-await person.AttachHostedServiceAsync(
-    new PersonBackgroundService(person),
-    cancellationToken);
-```
+**A hand written `IHostedService` must honour `StopAsync`.** The handler passes `CancellationToken.None` to `StartAsync`, so a service that captured the `StartAsync` token as its only stop signal will never be cancelled. `BackgroundService` is unaffected, because it cancels its own execution token in `StopAsync`.
 
 ## Deferred Starts and Startup Completion
 
 Attaching a hosted service queues its `StartAsync` rather than running it inline, so the service is not running when the attach returns. Any subsystem that treats "the graph has finished starting" as a completion point would otherwise pass that point while a queued start is still on its way in.
 
-A subsystem says so by implementing `IStartupCompletionDeferrer` and registering it on the context. Before queueing a start, the hosting layer takes a hold on every reachable deferrer and releases it once the start has actually run, including when the start throws. Both attach paths do this, awaiting and fire-and-forget alike: awaiting the start blocks the caller, but it does not block whatever else is deciding that startup is finished, so the gap still needs holding open.
+A subsystem says so by implementing `IStartupCompletionDeferrer` and registering it on the context. Before queueing a start, the hosting layer takes a hold on every deferrer reachable from the subject's context and releases it once the start has run, including when the start is skipped because the host is shutting down and when it throws. This applies to every start the handler queues, whether it came from an explicit attach or from a subject entering the graph, and to the awaiting and fire and forget attach paths alike: awaiting the start blocks the caller, but it does not block whatever else is deciding that startup is finished, so the gap still needs holding open.
 
 Holds are counted, so nested attaches compose: a service that attaches children during its own `StartAsync` takes their holds before its own is released.
 
@@ -152,4 +263,4 @@ Holds are counted, so nested attaches compose: a service that attaches children 
 
 ## For Library Authors
 
-If you're building a library that provides hosted subjects, see [Subject Guidelines - Implementing Hosted Subjects for DI](subject-guidelines.md#implementing-hosted-subjects-for-di) for the recommended pattern using `AddHostedSubject<T>()`.
+If you're building a library that provides hosted subjects, see [Subject Guidelines - Implementing Hosted Subjects for DI](subject-guidelines.md#implementing-hosted-subjects-for-di) for the recommended pattern using `AddSubject<T>()`.
