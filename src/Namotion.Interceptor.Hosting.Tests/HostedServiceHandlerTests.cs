@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Testing;
@@ -8,6 +10,12 @@ namespace Namotion.Interceptor.Hosting.Tests;
 
 public class HostedServiceHandlerTests
 {
+    /// <summary>
+    /// Shortened so a deadlocked shutdown ends the test rather than the run, and long enough that a
+    /// healthy shutdown (two transitions, each with the handler's start delay) is nowhere near half.
+    /// </summary>
+    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(6);
+
     [Fact]
     public async Task WhenSubjectImplementsIHostedService_ThenItIsStartedAndStopped()
     {
@@ -641,6 +649,44 @@ public class HostedServiceHandlerTests
         // Assert
         Assert.False(instance.IsStopped);
         Assert.True(instance.IsDisposed);
+    }
+
+    [Fact]
+    public async Task WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout()
+    {
+        // Arrange - the wrapper shape, and the regression guard for the deadlock the wrappers were
+        // migrated away from: a subject that detaches its own attachment from its own unwind waits on
+        // a chain that is waiting on that unwind, and the host recovers only when ShutdownTimeout
+        // expires, so the elapsed time is what tells the two apart.
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = ShutdownTimeout);
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var subject = new SubjectOwningAnAttachment(context);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => subject.Instance?.IsStarted == true,
+            message: "The attachment never started, so the shutdown below would prove nothing.");
+
+        // Act
+        var stopwatch = Stopwatch.StartNew();
+        await host.StopAsync();
+        stopwatch.Stop();
+
+        // Assert
+        Assert.True(
+            stopwatch.Elapsed < ShutdownTimeout / 2,
+            $"Shutdown took {stopwatch.Elapsed.TotalSeconds:F1} seconds of a " +
+            $"{ShutdownTimeout.TotalSeconds:F1} second timeout, which is the deadlock signature.");
+
+        Assert.True(subject.Instance!.IsStopped);
+        Assert.True(subject.Instance!.IsDisposed);
     }
 
     private static async Task<(IHost Host, IInterceptorSubjectContext Context)> StartHostAsync()
