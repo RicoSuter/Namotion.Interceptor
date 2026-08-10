@@ -31,7 +31,10 @@ Only run integration tests when changing connector implementations (OPC UA, MQTT
 - `dotnet run --project src/Extensions/Namotion.Interceptor.SampleBlazor` - Run Blazor sample
 
 ### Performance Testing
-- `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release` - Run performance benchmarks
+- `pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*","*ServiceOrderResolver*" -LaunchCount 3` - Compare against a base branch
+- `pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*" -LocalOnly` - Absolute numbers for the current tree
+
+Work out which benchmarks can reach the change and filter to those, plus `ServiceOrderResolverBenchmark` as a noise control. A whole-suite run takes hours, so propose it and get agreement first rather than launching one. Do not report a timing delta as a regression without establishing that run's noise floor from the control: the interception paths are short enough that noise is the same size as the deltas people care about, and BenchmarkDotNet's Error column does not bound it. See [Benchmarking](docs/benchmarking.md).
 
 ## Architecture
 
@@ -117,7 +120,7 @@ The library has specialized support for:
 ## Performance Considerations
 
 - All interception logic generated at compile-time (no runtime reflection)
-- Dedicated benchmarking with BenchmarkDotNet
+- Dedicated benchmarking with BenchmarkDotNet, see [Benchmarking](docs/benchmarking.md) for how to run a comparison and how to read one
 - Recent performance optimizations focused on allocation reduction
 - Observable streams for efficient change propagation
 
