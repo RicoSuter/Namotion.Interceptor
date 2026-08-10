@@ -445,7 +445,9 @@ they turn out to matter in practice.
   emits a duplicate member and fails with CS0111. For example, declaring both `void Probe()` and `void
   ProbeWithoutInterceptor()` on the same subject: the generator strips the suffix and emits a second
   `void Probe()` wrapper, which the compiler rejects as a duplicate. The generator does not currently
-  check for this collision before emitting the wrapper.
+  check for this collision before emitting the wrapper. The one case it does check is a collision with
+  the plumbing member names, which is reported as NI0006 and the wrapper is not emitted, because there
+  the wrapper captured the generated call instead of colliding with it.
 - **An interface property whose only accessible accessor is `init`, such as `{ protected get; init;
   }`, explicitly implemented by a class, yields a metadata entry with both accessor lambdas null.**
   This is not the "both accessors inaccessible" case, which is skipped entirely and never reaches the
@@ -457,6 +459,49 @@ they turn out to matter in practice.
   partial property's own accessor, a code path an explicit implementation never reaches. The result is a
   degenerate but valid entry (the property key exists, reading or writing it via the metadata does
   nothing observable), and is a strict improvement over the previous behaviour, which was CS1540.
+
+### Hierarchy gaps found while reviewing the per hierarchy plumbing
+
+All of these reproduce identically on the commit before that work, so none is a regression. They are
+recorded here rather than fixed because each needs a decision of its own, and two of them would change
+metadata for every existing subject and so want their own regeneration evidence.
+
+- **For an `override` or `new` property, the base's metadata entry wins the merge.**
+  `EmitDefaultProperties` emits `{own entries}.Concat(base.DefaultProperties).ToFrozenDictionary()`,
+  and `ToFrozenDictionary` keeps the last entry for a duplicate key, so the base overwrites the
+  subject's own. With `Root { virtual partial string Name }` and
+  `Leaf : Root { [MaxLength(5)] override partial string Name }`, `Properties["Name"]` reports
+  `DeclaringType == Root` and no attributes, so data annotation validation never sees the
+  `[MaxLength(5)]`. For an `override` the value is still correct, because the base's getter lambda
+  dispatches virtually; for a `new` property it is not, because the lambda reads the base's declaration.
+  Reversing the concatenation order fixes both, and changes the resolved entry for every override in
+  the repository, which is why it is not folded in here.
+- **A `new` partial property whose type differs from the one it shadows throws at type init.**
+  `EmitDefaultProperties` calls `typeof(Leaf).GetProperty(name, Public | NonPublic | Instance)`, which
+  throws `AmbiguousMatchException` when both declarations are visible, so the first `Properties` access
+  throws `TypeInitializationException`. The overload taking a return type, or a `GetProperties` filter
+  on `DeclaringType`, would fix it.
+- **A base subject with only a parameterized constructor breaks its subclass.** `DetectConstructorState`
+  never inspects the base, so the generated parameterless constructor on the derived subject fails with
+  CS7036.
+- **A plain intermediate class that lists an interface deriving from `IInterceptorSubject`** stops the
+  ancestor walk, because `DeclaresInterceptorSubject` is satisfied by the declaration alone. The
+  contract then fails and, when the real root is in the same compilation, `HasUsableDefaultProperties`
+  cannot see the root's not yet generated `DefaultProperties` either, so the shape falls through to
+  NI0011 rather than to the NI0012 fallback the mode selection ladder implies. Cross assembly the same
+  shape works, because the symbols exist. A domain interface on an abstract intermediate is an ordinary
+  modelling shape, and NI0011's remedy text does not fit it.
+- **`DefaultProperties` is emitted by every subject but is not in the hiding table.** A plain base that
+  declares a member of that name gets CS0108 in the generated file, because `EmitDefaultProperties`
+  decides `new` from "there is a subject ancestor" rather than from the hiding rule the four plumbing
+  members now use.
+- **Hiding `RaisePropertyChanged` silently swallows change notifications.** A derived subject declaring
+  `protected new void RaisePropertyChanged(string)` captures the generated setter's call, so its own
+  property changes raise nothing, with no diagnostic, no error and no warning. NI0013 deliberately
+  excludes that name because redirecting it can be intentional and a `new` member that calls `base` is
+  legitimate, which cannot be distinguished without dataflow. Two independent reviews found this, so if
+  it is ever reconsidered, a `Warning` gated on the single string parameter overload is the shape to
+  reach for.
 
 ## Why the test strategy has three layers
 
@@ -574,6 +619,55 @@ because the name is new, so no existing source can carry it, and the error is lo
 three ways, listed under the base class contract in `docs/subject-guidelines.md`. The most damaging is
 a base whose helpers route through a different executor from the one its `Context` publishes, which
 reproduces the original bug exactly while passing every check.
+
+**The contract check compares return types and the leading `string` parameter, not the delegate
+parameters.** A base whose `readValue` parameter is `Func<IInterceptorSubject, int>` rather than
+`Func<IInterceptorSubject, TProperty>` still satisfies the check and then fails at the call site. The
+cheap checks catch every realistic typo in a hand copied signature; constructing the expected
+`Func<>` and `Action<>` types to compare exactly is the remaining work.
+
+**`WillBeGeneratedInThisCompilation` tests only that every declaration is a partial class.** An
+ancestor carrying the attribute whose own generation is suppressed for another reason, NI0002, NI0009,
+NI0010 or NI0011, therefore still puts its subclass into derived mode, which turns one actionable
+diagnostic on the ancestor into a handful of raw CS0103 and CS0117 errors on the subclass. Accepted
+because the build is already failing on the ancestor's own diagnostic, but it is noise, and modelling
+the remaining guards is a few cheap symbol and syntax checks on a symbol already in hand.
+
+**NI0013 and NI0014 report at the subject's location, not the offending member's.** When the member
+lives on a plain class between the subject and the contract provider, the error points at the subject,
+the file actually containing the member is never named, and the diagnostic repeats once per subclass
+rather than once per member. Reporting at `member.Locations.FirstOrDefault(l => l.IsInSource)` with the
+current location as the fallback would fix both.
+
+## Compile time cost of the base class resolution
+
+Measured with an interleaved A/B harness over synthetic projects, comparing this design against the
+one it replaced. A realistic 360 subject project costs about ten percent more generator time, which is
+roughly one percent of that project's build, with allocations flat. Subjects with no subject base,
+which is the overwhelming majority, cost two percent more.
+
+Two shapes cost considerably more, and both have the same cause: the same question is asked of the
+same ancestor once per descendant rather than once per ancestor.
+
+| shape, 300 subjects | before | after |
+|---|---|---|
+| in source chain, depth 10 | 47.4 ms | 60.7 ms |
+| in source chain, depth 50 | 48.9 ms | 96.5 ms |
+| base in a referenced assembly | 69.0 ms | 109.5 ms |
+
+The contract check costs about 93 microseconds per subject and its answer depends on the ancestor, not
+on the subject, apart from two accessibility clauses. Memoizing it per compilation, keyed by the
+ancestor symbol, was measured to recover 35 percent of the cross assembly cost, and memoizing the two
+mutually recursive notify predicates recovers 26 percent at depth 50 along with 15 percent of the
+allocations. Both produce byte identical generated output, so the regeneration gate above can prove
+they change nothing.
+
+Nothing in this repository is affected: the deepest subject chain is three and there is no cross
+assembly subject inheritance anywhere. The cross assembly shape is what a consumer deriving from a
+subject shipped in a package hits, which is the case NI0011 and NI0012 exist for.
+
+Partly offsetting all of this, derived mode emits 14 to 19 percent less source for a hierarchy, which
+the compiler recovers in every phase after the generator returns.
 
 ## How to verify a change to this generator
 
