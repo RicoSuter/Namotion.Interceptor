@@ -5,6 +5,7 @@ using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -576,6 +577,76 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         // Assert - metrics remain stable after disposal
         Assert.Equal(1, _metrics.Scheduled);
+    }
+
+    [Fact]
+    public async Task WhenOneReadBackValueCannotBeApplied_ThenTheRestOfTheBatchIsAppliedAndNoReadFailureIsRecorded()
+    {
+        // Arrange - two read-backs falling due in one batch, the first carrying a value its property
+        // cannot hold. The read itself succeeds, so only the local apply fails.
+        var registeredSubject = new RegisteredSubject(_testSubject);
+        var failingProperty = registeredSubject.TryGetProperty(nameof(TestPerson.FirstName))!;
+        var survivingProperty = registeredSubject.TryGetProperty(nameof(TestPerson.LastName))!;
+
+        var failingNodeId = new NodeId("Failing", 2);
+        var survivingNodeId = new NodeId("Surviving", 2);
+
+        var session = new Mock<ISession>();
+        session.SetupGet(s => s.Connected).Returns(true);
+        session
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
+            {
+                var results = new DataValueCollection(nodesToRead.Count);
+                foreach (var node in nodesToRead)
+                {
+                    results.Add(new DataValue
+                    {
+                        // An int cannot be stored in a string property, so applying it throws.
+                        Value = node.NodeId == failingNodeId ? 42 : "from-server",
+                        StatusCode = StatusCodes.Good,
+                        SourceTimestamp = DateTime.UtcNow
+                    });
+                }
+
+                return Task.FromResult(new ReadResponse
+                {
+                    ResponseHeader = new ResponseHeader(),
+                    Results = results,
+                    DiagnosticInfos = []
+                });
+            });
+
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(200)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+
+        manager.RegisterProperty(failingNodeId, failingProperty, requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(1));
+        manager.RegisterProperty(survivingNodeId, survivingProperty, requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(1));
+
+        // Act - the failing read-back is scheduled first, so an uncontained throw takes the other with it
+        manager.OnPropertyWritten(failingNodeId, sentRevision: 0);
+        manager.OnPropertyWritten(survivingNodeId, sentRevision: 0);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => _testSubject.LastName == "from-server",
+            message: "the second read-back of the batch should have been applied");
+
+        Assert.Equal(1, metrics.Executed);
+
+        // The circuit breaker tracks how the server answers reads, and this read was answered
+        Assert.Equal(0, metrics.Failed);
     }
 
     [Fact]

@@ -356,7 +356,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                         continue;
                     }
 
-                    var (_, property, sentRevision) = _dueReadsList[i];
+                    var (nodeId, property, sentRevision) = _dueReadsList[i];
                     var reference = property.Reference;
 
                     // Ranked in two domains, because the two candidates are not always produced by the same
@@ -382,9 +382,20 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                         continue;
                     }
 
-                    var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
-                    property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
-                    successCount++;
+                    try
+                    {
+                        var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
+                        property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
+                        successCount++;
+                    }
+                    catch (Exception e)
+                    {
+                        // Contained per item: applying is local, so its failure says nothing about how the
+                        // server answers reads and must neither discard the values read back alongside it nor
+                        // count against the circuit breaker that tracks that.
+                        _logger.LogError(e, "Failed to apply a read-after-write value for '{PropertyName}' ({NodeId}).",
+                            property.Name, nodeId);
+                    }
                 }
             }
             catch (Exception ex)

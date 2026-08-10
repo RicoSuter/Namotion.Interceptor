@@ -28,6 +28,14 @@ public partial class ReadAfterWriteChild
     /// </summary>
     [OpcUaNode("Trigger", SamplingInterval = 0, DataChangeTrigger = DataChangeTrigger.Status)]
     public partial string? Trigger { get; set; }
+
+    /// <summary>
+    /// Armed for read-after-writes exactly like <see cref="Trigger"/>, but its node refuses every write.
+    /// Written together with <see cref="Trigger"/> it makes the batch a partial failure, which is the
+    /// only shape in which a refused change reaches the scheduling step at all.
+    /// </summary>
+    [OpcUaNode("Refused", SamplingInterval = 0, DataChangeTrigger = DataChangeTrigger.Status)]
+    public partial string? Refused { get; set; }
 }
 
 /// <summary>
@@ -146,12 +154,16 @@ internal sealed class ReadAfterWriteFixture : IAsyncDisposable
                 certificateStoreBasePath: port.CertificateStoreBasePath);
 
             var serverProperty = new PropertyReference(server.Root!.Child!, nameof(ReadAfterWriteChild.Trigger));
+            var refusedProperty = new PropertyReference(server.Root!.Child!, nameof(ReadAfterWriteChild.Refused));
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Server!.TryGetVariableNode(serverProperty, out _),
-                message: "the Trigger variable node should exist");
+                () => server.Server!.TryGetVariableNode(serverProperty, out _) &&
+                      server.Server!.TryGetVariableNode(refusedProperty, out _),
+                message: "the Trigger and Refused variable nodes should exist");
 
             server.Server!.TryGetVariableNode(serverProperty, out var triggerNode);
+            server.Server!.TryGetVariableNode(refusedProperty, out var refusedNode);
             ConfigureTriggerNode(server.Server!, triggerNode!);
+            ConfigureRefusedNode(server.Server!, refusedNode!);
 
             client = new OpcUaTestClient<ReadAfterWriteRoot>(logger, configuration =>
             {
@@ -206,6 +218,23 @@ internal sealed class ReadAfterWriteFixture : IAsyncDisposable
     }
 
     /// <summary>
+    /// Arms the node for read-after-writes the same way, but makes it refuse every write, so a batch
+    /// carrying it and <see cref="ReadAfterWriteChild.Trigger"/> comes back a partial failure.
+    /// </summary>
+    private static void ConfigureRefusedNode(IOpcUaSubjectServer server, BaseDataVariableState node)
+    {
+        var standardServer = (OpcUaStandardServer)server.CurrentServer!;
+        lock (standardServer.NodeManagerLock!)
+        {
+            node.MinimumSamplingInterval = RevisedSamplingIntervalMilliseconds;
+            node.OnWriteValue = (ISystemContext _, NodeState _, NumericRange _, QualifiedName _,
+                ref object _, ref StatusCode _, ref DateTime _) => StatusCodes.BadUserAccessDenied;
+
+            node.ClearChangeMasks(standardServer.CurrentInstance.DefaultSystemContext, false);
+        }
+    }
+
+    /// <summary>
     /// Drives the node directly, so a test can produce an inbound value with a chosen status and source
     /// timestamp. Only a status change reaches the client: the Status trigger discards value-only ones.
     /// </summary>
@@ -227,6 +256,9 @@ internal sealed class ReadAfterWriteFixture : IAsyncDisposable
     public void WaitUntilOutboundWriteIsGated() => _converter.WaitUntilGated();
 
     public void ReleaseOutboundWrite() => _converter.Release();
+
+    /// <summary>How many read-backs have been scheduled, which only successful writes may add to.</summary>
+    public long ScheduledReadBackCount => Metrics.Scheduled;
 
     public Task WaitForScheduledReadBackAsync() =>
         AsyncTestHelpers.WaitUntilAsync(

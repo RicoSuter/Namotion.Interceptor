@@ -53,7 +53,7 @@ internal sealed class OutboundWriter
             if (result.IsFullySuccessful || result.IsPartialFailure)
             {
                 _outgoingThroughput.Add(writeValues.Count - (result.FailedChanges.IsDefault ? 0 : result.FailedChanges.Length));
-                NotifyPropertiesWritten(changes);
+                NotifyPropertiesWritten(changes, result);
             }
 
             return result;
@@ -171,7 +171,12 @@ internal sealed class OutboundWriter
         return writeValues;
     }
 
-    private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes)
+    /// <summary>
+    /// Schedules a read-back for each change the server accepted. A read-back for a refused write would
+    /// apply the server's pre-write value over the local one the retry queue still holds and will re-send,
+    /// so the model would flip to the stale value and back.
+    /// </summary>
+    private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes, in WriteResult result)
     {
         var manager = _sessionManager.ReadAfterWriteManager;
         if (manager is null)
@@ -179,16 +184,35 @@ internal sealed class OutboundWriter
             return;
         }
 
+        var failedChanges = result.FailedChanges;
+        var failedCount = failedChanges.IsDefaultOrEmpty ? 0 : failedChanges.Length;
+        if (failedCount == 0 && result.Error is not null)
+        {
+            // A batch that failed without enumerating its failures failed whole.
+            return;
+        }
+
+        // ProcessWriteResults appends the refusals as it walks the batch, so they arrive as a subsequence
+        // of changes in the same order and one cursor separates them out without a lookup set.
         var span = changes.Span;
+        var nextFailed = 0;
         for (var i = 0; i < span.Length; i++)
         {
-            if (span[i].Property.TryGetPropertyData(_opcUaNodeIdKey, out var nodeIdObj) &&
+            var change = span[i];
+            if (nextFailed < failedCount &&
+                PropertyReference.Comparer.Equals(change.Property, failedChanges[nextFailed].Property))
+            {
+                nextFailed++;
+                continue;
+            }
+
+            if (change.Property.TryGetPropertyData(_opcUaNodeIdKey, out var nodeIdObj) &&
                 nodeIdObj is NodeId nodeId)
             {
                 // The change's own revision, not the property's current one: this runs after the write
                 // returned, so a fresh read would fold in a local write that committed while it was in
                 // flight, and the read-back would then be free to revert it.
-                manager.OnPropertyWritten(nodeId, span[i].Revision);
+                manager.OnPropertyWritten(nodeId, change.Revision);
             }
         }
     }

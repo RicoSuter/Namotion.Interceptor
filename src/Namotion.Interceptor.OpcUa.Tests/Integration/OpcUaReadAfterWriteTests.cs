@@ -84,6 +84,26 @@ public class OpcUaReadAfterWriteTests
     }
 
     [Fact]
+    public async Task WhenAWriteInTheBatchIsRefused_ThenNoReadBackIsScheduledForIt()
+    {
+        // Arrange
+        await using var fixture = await ReadAfterWriteFixture.StartAsync(_output);
+
+        // Act: both leave in one flush, so the batch comes back a partial failure carrying the refusal
+        fixture.ClientChild.Trigger = "command";
+        fixture.ClientChild.Refused = "command";
+
+        // Assert: the accepted write's read-back running settles the batch, since both would have been
+        // scheduled in the same synchronous step well before either could run.
+        await fixture.WaitForAppliedReadBackAsync();
+        Assert.Equal(1L, fixture.ScheduledReadBackCount);
+
+        // The refused write is still queued for retry, so a read-back for it would have reverted the
+        // model to the server's pre-write value only for the retry to push it back again.
+        Assert.Equal("command", fixture.ClientChild.Refused);
+    }
+
+    [Fact]
     public async Task WhenALocalWriteCommitsWhileTheWriteRequestIsUnacknowledged_ThenItSurvives()
     {
         // Arrange
