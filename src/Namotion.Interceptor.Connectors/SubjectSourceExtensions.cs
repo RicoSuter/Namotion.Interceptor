@@ -12,10 +12,21 @@ public static class SubjectSourceExtensions
     private static readonly ConditionalWeakTable<ISubjectSource, SourceWriteLock> WriteLocks = new();
 
     /// <summary>
+    /// Key under which a throw that arrived after an earlier batch had already failed is attached to the
+    /// reported error, which stays the first one observed.
+    /// </summary>
+    internal const string ThrownAfterEarlierFailureDataKey = "Namotion.Interceptor.ThrownAfterEarlierBatchFailure";
+
+    /// <summary>
     /// Writes changes to the source in batches, respecting the source's maximum batch size.
     /// Returns a <see cref="WriteResult"/> containing which changes failed. A failing batch does not
     /// stop the ones behind it: every batch is attempted and their failures are reported together,
     /// with the first error. Never throws for write failures, errors are reported in the result.
+    /// <para>
+    /// Batches are only independent of each other because <paramref name="changes"/> carries at most one
+    /// change per property. With two, a failure of the batch holding the older one while the batch holding
+    /// the newer one succeeds leaves only the older to be retried, and the source settles on it for good.
+    /// </para>
     /// </summary>
     /// <remarks>
     /// This method automatically synchronizes write operations unless the source implements
@@ -136,8 +147,11 @@ public static class SubjectSourceExtensions
                     : WriteResult.PartialFailure(unconfirmed, ex);
             }
 
+            // The result reports the first error and consumers log only that, so the throw would otherwise
+            // be dropped with its stack. firstError is set together with failedChanges, so it is non-null.
             failedChanges.AddRange(unconfirmed.Span);
-            return CreatePartialFailure(failedChanges, firstError ?? ex);
+            firstError!.Data[ThrownAfterEarlierFailureDataKey] = ex;
+            return CreatePartialFailure(failedChanges, firstError);
         }
     }
 

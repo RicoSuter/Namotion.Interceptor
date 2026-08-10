@@ -250,11 +250,43 @@ public class SubjectSourceExtensionsTests
         // Act
         var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None);
 
-        // Assert - a batch that fails without enumerating its failures is condemned whole, and the two
+        // Assert - a batch that enumerates its whole content as failed is condemned whole, and the two
         // batches behind it, including the uneven tail one, are attempted and written
         Assert.NotNull(result.Error);
         Assert.Equal(3, callCount);
         Assert.Equal(2, result.FailedChanges.Length);
+    }
+
+    [Fact]
+    public async Task WhenAMiddleBatchFailsWithoutEnumeratedFailedChanges_ThenOnlyThatBatchIsReportedFailed()
+    {
+        // Arrange: 5 changes, batch size 2. The second batch fails with an error but no failed changes,
+        // which is the shorthand for "everything I was handed failed".
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(2);
+
+        var callCount = 0;
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            {
+                callCount++;
+                return new ValueTask<WriteResult>(callCount == 2
+                    ? WriteResult.Failure(
+                        ReadOnlyMemory<SubjectPropertyChange>.Empty, new InvalidOperationException("Wholesale boom"))
+                    : WriteResult.Success);
+            });
+
+        var changes = CreateChanges(5);
+
+        // Act
+        var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None);
+
+        // Assert: the shorthand expands to the failing batch's own changes, not to the whole write, and
+        // the tail batch behind it is still attempted
+        Assert.Equal(3, callCount);
+        Assert.NotNull(result.Error);
+        Assert.Equal(new[] { "Property2", "Property3" }, result.FailedChanges.Select(change => change.Property.Name));
     }
 
     [Fact]
@@ -571,6 +603,12 @@ public class SubjectSourceExtensionsTests
         Assert.Equal(2, callCount);
         Assert.NotNull(result.Error);
         Assert.Equal("Item 0 refused", result.Error!.Message);
+
+        // The reported error stays the first one, so the throw is carried along with it to stay diagnosable
+        var thrown = Assert.IsType<InvalidOperationException>(
+            result.Error.Data[SubjectSourceExtensions.ThrownAfterEarlierFailureDataKey]);
+        Assert.Equal("Batch 2 boom", thrown.Message);
+
         Assert.Equal(5, result.FailedChanges.Length);
         var failedNames = result.FailedChanges.Select(change => change.Property.Name).ToArray();
         Assert.Contains("Property0", failedNames);

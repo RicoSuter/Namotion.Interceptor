@@ -158,9 +158,10 @@ internal sealed class WriteRetryQueue : IDisposable
                         _scratchBuffer[i] = _pendingWrites[i];
                     }
                     _pendingWrites.RemoveRange(0, dequeuedCount);
-                    Volatile.Write(ref _count, _pendingWrites.Count);
 
+                    // The collapse can push a tail back onto the queue, so the count is published after it.
                     count = CollapsePerProperty(dequeuedCount);
+                    Volatile.Write(ref _count, _pendingWrites.Count);
                 }
 
                 var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
@@ -224,7 +225,10 @@ internal sealed class WriteRetryQueue : IDisposable
 
     /// <summary>
     /// Compacts the dequeued batch in <see cref="_scratchBuffer"/> to one change per property, in place,
-    /// and returns the compacted length. Each survivor stays at its first occurrence's position.
+    /// and returns the compacted length. Each survivor stays at its first occurrence's position. A batch
+    /// never carries a property twice: where two changes for one property cannot be merged, the batch is
+    /// cut before the second one and everything from there is pushed back to the head of the queue, so
+    /// the flush loop ships the pair in separate rounds.
     /// </summary>
     /// <remarks>
     /// Collapsing at dequeue rather than on the requeued span is what bounds the queue: a failed flush
@@ -236,7 +240,7 @@ internal sealed class WriteRetryQueue : IDisposable
     /// none, orders against nothing, and passes the delivery filter's supersession check unconditionally,
     /// so merging one away could let a later reconcile restore an older parked write over a newer local
     /// one. Nothing in this queue may lose its revision, which is also why the survivor is assembled by
-    /// revision rather than by position.
+    /// revision rather than by position, and why an unmergeable pair is separated in time instead.
     /// </para>
     /// </remarks>
     private int CollapsePerProperty(int count)
@@ -260,28 +264,46 @@ internal sealed class WriteRetryQueue : IDisposable
             if (propertyAlreadySeen)
             {
                 ref var survivor = ref _scratchBuffer[survivorIndex];
-                if (survivor.Revision != 0 && change.Revision != 0)
+                if (survivor.Revision == 0 || change.Revision == 0)
                 {
-                    // Queue order is chronological, but changes are enqueued after their commit and
-                    // outside the subject lock, so the revision decides which new value is the current
-                    // state. Both changes are writes to one property and therefore comparable.
-                    survivor = change.Revision > survivor.Revision
-                        ? survivor.MergeWithNewer(change)
-                        : change.MergeWithNewer(survivor);
-                    continue;
+                    // Unmergeable, and one write must never carry a property twice: split across two of
+                    // the source's batches, a failure of the batch holding the older change requeues it
+                    // alone and settles the source on it for good. The rest goes back to the queue, whose
+                    // lock the caller already holds, and the flush loop ships it in the next round. That
+                    // round still ships something: seeing this property again means an earlier change was
+                    // kept, so kept is at least 1 here.
+                    _pendingWrites.InsertRange(0, _scratchBuffer.AsSpan(i, count - i));
+                    break;
                 }
+
+                // Queue order is chronological, but changes are enqueued after their commit and
+                // outside the subject lock, so the revision decides which new value is the current
+                // state. Both changes are writes to one property and therefore comparable.
+                survivor = change.Revision > survivor.Revision
+                    ? survivor.MergeWithNewer(change)
+                    : change.MergeWithNewer(survivor);
+                continue;
             }
 
-            // Kept, so later changes to this property rank against it rather than against the entry it
-            // could not be merged with.
             survivorIndex = kept;
-            _scratchBuffer[kept++] = change;
+            if (kept != i)
+            {
+                // Guarded because nothing collapsing is the common case, and a self-assignment here is
+                // still the full block move with its write barriers.
+                _scratchBuffer[kept] = change;
+            }
+
+            kept++;
         }
+
+        // Cleared on the way out as well: every key holds its subject alive, and a source that goes quiet
+        // after a wide collapse would otherwise pin them until the next batch of two or more.
+        _collapseIndices.Clear();
 
         if (kept < count)
         {
-            // The slots past the compacted prefix still reference the merged changes' subjects and boxed
-            // values, and the flush only clears the prefix it hands to the source.
+            // The slots past the compacted prefix still reference the merged and pushed-back changes'
+            // subjects and boxed values, and the flush only clears the prefix it hands to the source.
             Array.Clear(_scratchBuffer, kept, count - kept);
         }
 
