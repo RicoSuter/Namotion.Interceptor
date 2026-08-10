@@ -33,7 +33,7 @@ Three more in the same code:
 - one `IsNotBad` guard is added in the subscription loop (`SubscriptionManager.cs:200-207`)
 - polling converts, after the equality check so the change-detection cache stays raw, and the status check stays ahead of `ProcessValueChange` so a rejected value never poisons `LastValue`
 - polling gets an Uncertain arm for its metrics; today `RecordRead` fires only on Good and `RecordFailedRead` only on Bad
-- a per-item `try` goes inside the initial-load closure, **and** `SubjectPropertyWriter.cs:111` is wrapped so the shared landmine is disarmed for MQTT and WebSocket too. The wrapper must still fall through to `:136` and `:143`, and a partially failed snapshot still reports `Synchronized`, which is worth stating
+- a per-item `try` goes inside the initial-load closure. **Not** a wrapper at `SubjectPropertyWriter.cs:111`, which was an earlier idea and is actively harmful: the WebSocket load closure calls `ClaimPropertyOwnership()` *after* its apply (`WebSocketSubjectClientSource.cs:296-299`), and that is its only call site. Swallowing a throw there and falling through to `Synchronized` leaves the source owning no properties, so every outbound filter (`TryGetSource(out var s) && s == this`) fails and the connector sends nothing, forever, with a green status and no retry. Strictly worse than the wedge. The per-item `try` in the OPC UA closure is the correct instrument; MQTT is unaffected because its load returns null
 - both load logs report the applied count
 
 **No shared apply helper.** An earlier revision proposed one. The four sites differ in dispatch, pooling, cache updates, deferral and metrics, so the consolidation is break-even at best, and any helper taking a closure or a state object would add allocations to `OnFastDataChange`, which is allocation-free today by design (pooled list, value-tuple state, static lambda).
@@ -52,17 +52,27 @@ The ring eviction is **not** the harm. Requeued failures are inserted at index 0
 
 ### The change
 
-Two parts, both small:
+Two parts, and the order between them is load bearing.
 
-- **Continue past a failing batch** instead of condemning the remainder. The cost is that a later batch may apply while an earlier one retries, which is already true across ticks.
-- **Collapse per property on requeue**, so the queue holds at most one entry per pending property and the flush stops growing toward the batch limit. This also cuts the wire cost: today a poison property has the client serialising up to a thousand `WriteValue`s for one node every 8ms.
+**Collapse per property at dequeue time**, inside `FlushAsync`, not on the requeued span. This has to come first because it is what makes the second part safe.
 
-Two constraints on the collapse:
+Collapsing only the requeued span is insufficient, and it is what an earlier revision proposed. The buffer holds **two** entries for a continuously-written poison property, not one: the requeued failures go in at index 0 (`WriteRetryQueue.cs:170, 214`) and the same tick then appends its own merged changes at `SubjectSourceBase.cs:294`, because a failed flush enqueues rather than writes. `ChangeMerger` dedupes within a tick and never against the queue. Collapsing at dequeue covers both, and makes "the buffer holds at most one entry per property" provable rather than asserted.
 
-- **Do not reuse `SubjectSourceBase.CollapsePerProperty`.** It falls back to `WithoutRevision()` (`:418-423`), whose own remarks forbid exactly this: a revision-less change makes the supersession check pass unconditionally at `ChangeDeliveryFilter.IsSupersededBy:115`, so a later reconcile would restore an older parked write over a newer local one. Merge only when both revisions are non-zero; otherwise keep both entries. Nothing entering this queue may lose its revision.
-- **Do not allocate per flush.** `CollapsePerProperty` allocates a list and a dictionary per call, and during an outage the flush fails every tick. Use a reusable index dictionary owned by the queue, cleared per use, the pattern `ChangeMerger._propertyIndices` already uses, collapsing in place into `_pendingWrites`. Collapse only the requeued span; the flush dequeues the whole queue each tick, so duplicates always arrive together.
+**Then continue past a failing batch** instead of condemning the unprocessed remainder (`SubjectSourceExtensions.cs:87-115`).
 
-Residual: if the number of distinct pending properties alone exceeds `MaxNodesPerWrite`, the first part is what keeps the rest moving.
+Without the dequeue-time collapse this would **violate a documented guarantee**. `docs/connectors.md:791` states "Ordering within a single property is preserved". With `[P@rev5 … P@rev9]` in one flush, a wholesale failure of the batch carrying `rev5` (a timeout or channel error, not a per-item refusal) while the batch carrying `rev9` succeeds leaves `rev5` requeued alone and re-sent next tick, so **the source settles on the older value permanently**. Nothing rescues it: the retry-queue flush calls `WriteChangesInBatchesAsync` directly and runs no delivery filter. The spec's earlier justification, that a later batch applying while an earlier retries is already true across ticks, holds for different properties and is false for the same one.
+
+**The exception path needs its accounting corrected too.** `SubjectSourceExtensions.cs:120-127` computes failures as `changes.Slice(confirmedCount)`, a prefix invariant that only holds while the loop stops at the first failure. Under "continue", batches that succeeded after an earlier failure would land in `FailedChanges`, and `SourceTransactionWriter` reverts only `sourceChanges \ failedSet` (`Transactions/SourceTransactionWriter.cs:173-180`), so a change that reached the source but was reported failed is never rolled back: the transaction reverts locally and the source keeps the new value. On the throw path, failures are the accumulated per-batch failures plus the throwing batch plus the unprocessed remainder, never a prefix slice.
+
+Constraints on the collapse:
+
+- **Do not reuse `SubjectSourceBase.CollapsePerProperty`.** It falls back to `WithoutRevision()` (`:418-423`), and a revision-less change makes the supersession check pass unconditionally at `ChangeDeliveryFilter.IsSupersededBy:115`, so a later reconcile could restore an older parked write over a newer local one. Merge only when both revisions are non-zero; otherwise keep both entries. Note this rule is stricter than the status quo: the queue's own other producers, the connect-window drain (`SubjectSourceBase.cs:379`) and the reconcile (`:504`), already enqueue `CollapsePerProperty` output and so can already park a revision-less change. That is a pre-existing gap this PR does not widen and does not fix.
+- **Do not allocate per flush.** `CollapsePerProperty` allocates a list and a dictionary per call, and during an outage the flush fails every tick. Use a reusable index dictionary owned by the queue and cleared per use, the pattern `ChangeMerger._propertyIndices` already uses, compacting in place. The survivor keeps the first occurrence's position so ordering is not reshuffled.
+- **Break rather than continue on cancellation**, and decide explicitly whether a source that throws rather than returning an error result also continues. OPC UA never throws out of `WriteChangesAsync` (`OutboundWriter.cs:66-69`); MQTT and WebSocket may.
+
+Residual: if the number of distinct pending properties alone exceeds `MaxNodesPerWrite`, the continue is what keeps the rest moving.
+
+Three existing tests pin the condemn-the-remainder contract and are rewritten: `SubjectSourceExtensionsTests.cs:101`, `:227`, `:326`.
 
 ## Commit 3: read-after-write ranks soundly
 
@@ -83,7 +93,7 @@ So keep both comparisons rather than replacing them with one:
 
 `includeSourceCommitsInRevision: true` alone would be wrong, and its own documentation says so (`PropertyReference.cs:113-118`): a notification sampled before our write but arriving after it commits at a higher source revision, the fresher `maxAge:0` read-back is skipped, and the model keeps the pre-write value with nothing to redeliver it.
 
-**Capture at write-build time, not on response.** `NotifyPropertiesWritten:188` runs after `session.WriteAsync` returns, so a local write committing while the request was in flight would already be in a baseline captured there. `SubjectPropertyChange.Revision` is public (`:49`) and `NotifyPropertiesWritten` iterates the changes. A revision of 0 means the change was built outside a terminal write; fall back to applying. The revision rides on the existing value tuples (`ReadAfterWriteManager.cs:30, 33`), so this allocates nothing.
+**Use the change's own revision, never a fresh `TryGetWriteState` read at notify time.** `NotifyPropertiesWritten:188` runs after `session.WriteAsync` returns, so re-reading the property there would fold in a local write that committed while the request was in flight. `SubjectPropertyChange.Revision` is public (`:49`) and `NotifyPropertiesWritten` iterates the changes. A revision of 0 means the change was built outside a terminal write; fall back to applying. The revision rides on the existing value tuples (`ReadAfterWriteManager.cs:30, 33`), so this allocates nothing.
 
 **Only schedule read-backs for writes that succeeded.** `OutboundWriter.cs:53-57` notifies for the whole batch including failures, contradicting the documentation (`docs/connectors-opcua-client.md:334`). Inert today; once the feature fires, a read-back would apply the server's pre-write value over a local write the retry queue still holds and will re-send, so the model flips.
 
@@ -110,7 +120,7 @@ Commit 1 about 20-35, commit 2 about 30-45, commit 3 about 35-50. **Total roughl
 
 ## Test plan
 
-Written red first. Our server emits only Good until the stacked PR, so the status decision is extracted to an internal static and tested directly; the outbound work uses refusals the SDK produces on its own, since writing to a setter-less property yields `BadNotWritable`.
+Written red first, and driven end to end rather than through an extracted predicate. The harness can already emit real non-Good statuses today: `OpcUaSubjectServer.TryGetVariableNode` plus the server's `NodeManagerLock` let a test set a node's `StatusCode` and `ClearChangeMasks`, exactly as `OpcUaCrossStoreConvergenceTests.cs:44-60` already does for values. Acceptance criterion 1 is about four call sites agreeing and is not provable by testing a predicate. The outbound work uses refusals the SDK produces on its own, since writing to a setter-less property yields `BadNotWritable`, and the starvation test must lower `MaxNodesPerWrite` or use a stub source, because our own server advertises 4000 (`OpcUaServerConfiguration.cs:193`).
 
 **Commit 1:** the status predicate over Good, Uncertain and Bad; a Bad subscription notification is not applied; an Uncertain polled value is applied; a polled Bad does not poison the change-detection cache; a `decimal` property updates via polling; a throwing apply during the initial load still reaches `Synchronized`; both load logs report the applied count.
 
