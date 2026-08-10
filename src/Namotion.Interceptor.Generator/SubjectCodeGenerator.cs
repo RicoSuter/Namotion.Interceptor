@@ -39,11 +39,9 @@ internal static class SubjectCodeGenerator
     private static string ProtectedUnlessSealed(SubjectMetadata metadata) => metadata.IsSealed ? "private" : "protected";
 
     /// <summary>
-    /// Emitted per member rather than across the block: a blanket 'new' is CS0109 wherever nothing
-    /// is hidden, and an NI0012 base that hides nothing is the common case. The name is taken from
-    /// <see cref="MemberNames"/>, which is also what the lookup that filled
-    /// <see cref="BaseClassInfo.HiddenPlumbingMemberNames"/> asked for: a literal here that drifted
-    /// from that lookup would drop the modifier with nothing to report it.
+    /// Emitted per member rather than across the block: a blanket 'new' is CS0109 wherever nothing is
+    /// hidden, and an NI0012 base that hides nothing is the common case. Names come from
+    /// <see cref="MemberNames"/>, never from a literal here.
     /// </summary>
     private static string HidingModifier(SubjectMetadata metadata, string memberName)
         => metadata.BaseClass.HiddenPlumbingMemberNames.Contains(memberName) ? "new " : "";
@@ -355,11 +353,8 @@ internal static class SubjectCodeGenerator
             var setterModifiers = property.SetterAccessModifier is not null ? $"{property.SetterAccessModifier} " : "";
 
             // Determine how to call RaisePropertyChanged:
-            // - [InterceptorSubject] base that really exposes the member: direct call to the
-            //   inherited protected method (fastest). The attribute alone does not prove it: such a
-            //   base can implement IRaisePropertyChanged explicitly, or emit no raise of its own
-            //   because its own base already provided the plumbing, and a simple-name call is then
-            //   CS0103 in a file the consumer cannot edit.
+            // - [InterceptorSubject] base with a callable member: direct call (fastest); the attribute
+            //   alone does not prove one exists, see SubjectAncestry.HasCallableRaisePropertyChanged
             // - Manual IRaisePropertyChanged base: interface cast (rare case)
             // - Own implementation: direct call to own method (fastest)
             var raisePropertyChangedCall =

@@ -4,11 +4,9 @@ using Microsoft.CodeAnalysis;
 namespace Namotion.Interceptor.Generator;
 
 /// <summary>
-/// The names of the members root mode emits, read both by the lookups in this assembly and by the
-/// emitter when it decides which of them needs a 'new' modifier. A name that drifts between the two
-/// fails silently: the lookups would answer for a member the emitter never writes, and the emitted
-/// member would lose the modifier that keeps CS0108 out of a file the consumer cannot edit. The
-/// emitter writes the signatures themselves, whose spelling the compiler checks.
+/// The names of the members root mode emits. A name drifting between the lookups and the emitter
+/// fails silently: the emitted member loses the 'new' modifier that keeps CS0108 out of a file the
+/// consumer cannot edit.
 /// </summary>
 internal static class MemberNames
 {
@@ -41,31 +39,22 @@ internal enum PlumbingReturnKind
 }
 
 /// <summary>
-/// The shape of one helper method root mode emits, in the single place both the contract check and
-/// the hiding check read it from. Parameter types are approximated by counts plus the two positions
-/// a typo really lands on, the return type and the leading string, which is enough to separate the
-/// emitted signature from an unrelated overload of the same name.
+/// The shape of one helper method root mode emits, read by both the contract check and the hiding
+/// check. Parameter types are approximated by count plus the two positions a typo really lands on,
+/// which is enough to separate the emitted signature from an unrelated overload of the same name.
 /// </summary>
 /// <param name="Name">The emitted member name, from <see cref="MemberNames"/>.</param>
 /// <param name="TypeParameterCount">Type parameters on the emitted signature.</param>
 /// <param name="ParameterCount">Value parameters on the emitted signature.</param>
 /// <param name="RequiresParameterArray">
-/// Consulted by the contract check only. The emitted call site uses expanded form,
-/// InvokeMethod("M", lambda, p1), so a base declaring the same parameter types without params would
-/// pass a signature match and then fail at the call. Hiding is the opposite: params is not part of
-/// the signature C# hides by, so such a base does hide the emitted method and the 'new' modifier is
-/// still required.
+/// Contract check only. The emitted call site uses expanded form, so a base declaring the same
+/// parameter types without params fails at the call; hiding ignores params, so such a base does hide
+/// the emitted method and still needs the 'new' modifier.
 /// </param>
 /// <param name="ReturnKind">
-/// Consulted by the contract check only, never by the hiding check: C# hides by signature, which
-/// excludes the return type, so a base helper returning the wrong type still hides the emitted one
-/// and still needs the 'new' modifier.
+/// Contract check only, never the hiding check: C# hides by signature, which excludes the return type.
 /// </param>
-/// <param name="RequiresLeadingString">
-/// Whether the first parameter must be a string. The remaining parameters are left to the count,
-/// because the emitted call site passes lambdas whose types the base would have to get wrong in a
-/// way that still binds.
-/// </param>
+/// <param name="RequiresLeadingString">Whether the first parameter must be a string.</param>
 /// <param name="Declaration">How the member is named in the NI0011 message.</param>
 internal sealed record PlumbingMethodShape(
     string Name,
@@ -77,10 +66,8 @@ internal sealed record PlumbingMethodShape(
     string Declaration);
 
 /// <summary>
-/// What the generator emits into a subject's generated half. Both halves of the base class work read
-/// this table rather than their own literals: <see cref="SubjectBaseContract"/> asks whether a base
-/// exposes these members, and <see cref="SubjectMemberConflicts"/> asks whether anything on the chain
-/// hides or captures them.
+/// What the generator emits into a subject's generated half, read from this table rather than from
+/// literals repeated in each caller.
 /// </summary>
 internal static class GeneratedMemberTable
 {
@@ -104,13 +91,12 @@ internal static class GeneratedMemberTable
             "protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()")
     ];
 
+    // The four fields below each read the ones above them, and a static field initializer runs in
+    // textual order, so reordering them leaves one null and takes the generator down with a
+    // TypeInitializationException on every compilation.
+
     private static readonly string[] HijackableInterfaceMembers =
         ["Context", "Data", "SyncRoot", "AddProperties"];
-
-    // The three arrays below each read the ones above them, and a static field initializer runs in
-    // textual order, so reordering them initializes one to empty or null and takes the generator down
-    // with a TypeInitializationException on every compilation. They are kept adjacent so that the
-    // constraint is visible at the point where it applies.
 
     /// <summary>
     /// Derived from <see cref="PlumbingMethods"/> rather than repeated, so a fifth helper added there
@@ -120,20 +106,17 @@ internal static class GeneratedMemberTable
         PlumbingMethods.Select(shape => shape.Name).ToArray();
 
     /// <summary>
-    /// Every member root mode emits that a generated copy further up the chain would hide. The two
-    /// INPC members are part of it because they are emitted by the same root-mode block and hide the
-    /// ancestor's copies exactly like the helpers do. This is the answer for a generated ancestor,
-    /// whose members have no symbol yet; <see cref="SubjectMemberConflicts.FindHiddenPlumbingMembers"/>
-    /// reaches the same set member by member for a base that already exists.
+    /// Every member root mode emits that a generated copy further up the chain would hide, the two
+    /// INPC members included: the same root-mode block emits them and they hide the ancestor's copies
+    /// exactly like the helpers do. This is the answer for a generated ancestor, whose members have no
+    /// symbol yet.
     /// </summary>
     public static readonly string[] RootModePlumbingMemberNames =
         GeneratedMemberNames.Concat([MemberNames.PropertyChanged, MemberNames.RaisePropertyChanged]).ToArray();
 
     /// <summary>
-    /// Every name the generated half occupies, in either mode: the root-mode plumbing, the
-    /// IInterceptorSubject members the root implements, and the DefaultProperties both modes emit. No
-    /// other emitted member may take one of these names, whatever its signature, which is the whole of
-    /// what <see cref="CollidesWithGeneratedMember"/> answers for the "WithoutInterceptor" wrappers.
+    /// Every name the generated half occupies, in either mode. No other emitted member may take one of
+    /// these names, whatever its signature.
     /// </summary>
     private static readonly string[] GeneratedHalfMemberNames = RootModePlumbingMemberNames
         .Concat(HijackableInterfaceMembers)
@@ -143,7 +126,7 @@ internal static class GeneratedMemberTable
 
     /// <summary>
     /// The IInterceptorSubject members, paired with their interface symbols, that a member on the
-    /// chain can take the slot of under interface re-implementation. Null when the interface is
+    /// chain can take the slot of under interface re-implementation. Empty when the interface is
     /// unreferenced, in which case nothing the generator emits would compile anyway.
     /// </summary>
     public static (string Name, ISymbol Member)[] GetHijackableInterfaceMembers(Compilation compilation)
@@ -177,19 +160,10 @@ internal static class GeneratedMemberTable
     /// a name the generated half already occupies.
     /// </summary>
     /// <remarks>
-    /// Deliberately name-only: any arity, no signature reasoning and no per-name exemption. Every
-    /// attempt to narrow this has let a silent capture through, and a false positive here costs a
-    /// rename while a capture costs the interception nobody notices is gone.
-    /// The arity test was wrong because InvokeMethod ends in "params object?[]", so the emitted call
-    /// sites span every arity from two upward, and an overload applicable in normal form beats the
-    /// plumbing, which needs the expanded form: a two-parameter InvokeMethod wrapper swallows every
-    /// generated method call and the real body never runs.
-    /// The Context, Data and SyncRoot exemption was wrong because those are explicit interface
-    /// properties only in a generated root. A hand-written base that satisfies the contract with
-    /// public members, the shape docs/subject-guidelines.md documents, is hidden by a wrapper of that
-    /// name, which is a CS0108 in a file the consumer cannot edit.
-    /// The cost is a legitimate wrapper such as GetPropertyValueWithoutInterceptor(string, string),
-    /// which is now reported as NI0006 and fixed by renaming.
+    /// Deliberately name-only: any arity, no signature reasoning and no per-name exemption. Two
+    /// attempts to narrow it, on parameter count and by exempting Context/Data/SyncRoot, each let a
+    /// silent capture through. The cost is a false positive on a legitimate wrapper, reported as
+    /// NI0006 and fixed by renaming. Full argument in docs/design/generator-supported-shapes.md.
     /// </remarks>
     public static bool CollidesWithGeneratedMember(string memberName)
         => GeneratedHalfMemberNames.Contains(memberName);

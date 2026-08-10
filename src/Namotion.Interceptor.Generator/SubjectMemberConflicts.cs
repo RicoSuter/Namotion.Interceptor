@@ -91,14 +91,11 @@ internal static class SubjectMemberConflicts
     }
 
     /// <summary>
-    /// Members named like an inherited generated member. Deliberately name-only, any kind, no
-    /// signature test: a 'new' annotated member of the same shape captures the generated call with no
-    /// compiler diagnostic at all, and an applicable overload with a different signature can win
-    /// overload resolution without hiding anything. Reporting the name covers both. Statics are
-    /// included, because C# hiding is not staticness-sensitive and a static called by simple name from
-    /// an instance body captures the generated call just as quietly. On intermediate classes the scan
-    /// is restricted to members accessible from the subject, because a private member neither hides nor
-    /// is found by member lookup.
+    /// Members named like an inherited generated member. Deliberately name-only, any kind, no signature
+    /// test, statics included: a 'new' member of the same shape captures the call with no diagnostic, an
+    /// applicable overload of a different signature wins overload resolution without hiding anything,
+    /// and C# hiding is not staticness-sensitive. On intermediate classes only members accessible from
+    /// the subject count, since a private one neither hides nor binds.
     /// </summary>
     public static IEnumerable<(INamedTypeSymbol Declarer, string MemberName)> FindHidingMembers(
         INamedTypeSymbol subject,
@@ -132,21 +129,11 @@ internal static class SubjectMemberConflicts
     /// RegisteredSubject throw.
     /// </summary>
     /// <remarks>
-    /// The explicit form is reported on the subject itself too. The subject's own generated half is the
-    /// only thing this generator authored, it contains nothing but IInterceptorSubject.Properties in
-    /// derived mode, and a hand-written explicit Context on the user's half is exactly the severe case:
-    /// it compiles with no diagnostic and kills interception entirely, writes landing in the backing
-    /// fields so the values still look right.
-    /// The walk runs the whole chain up to object rather than stopping at the contract provider,
-    /// because the provider is exactly where a hand-written hijacker sits and a second one further up
-    /// was never examined. From the provider upward the report is conditional on
-    /// <see cref="TakesSlotFromAbove"/>, which asks whether a class above the declarer already
-    /// implements the member; below the provider that question always answers yes, and asking it there
-    /// would go wrong for a provider generated in this very compilation, whose symbol does not
-    /// implement the interface yet.
-    /// An override is skipped along with a static: it occupies the slot it already had, so it
-    /// displaces nothing, and virtual dispatch means it is the implementation rather than a
-    /// replacement for one.
+    /// The walk runs the whole chain rather than stopping at the contract provider, because the
+    /// provider is exactly where a hand-written hijacker sits. From the provider upward the report is
+    /// conditional on <see cref="TakesSlotFromAbove"/>; below it that answer is always yes, and asking
+    /// it there would go wrong for a provider generated in this compilation, whose symbol implements
+    /// nothing yet. An override is skipped along with a static: it occupies the slot it already had.
     /// </remarks>
     public static IEnumerable<(INamedTypeSymbol Declarer, string MemberName)> FindHijackingMembers(
         INamedTypeSymbol subject,
@@ -154,6 +141,11 @@ internal static class SubjectMemberConflicts
         Compilation compilation)
     {
         var hijackableMembers = GeneratedMemberTable.GetHijackableInterfaceMembers(compilation);
+        if (hijackableMembers.Length == 0)
+        {
+            yield break;
+        }
+
         var isAtOrAboveContractProvider = false;
 
         foreach (var type in SymbolExtensions.EnumerateChain(subject))
@@ -192,16 +184,13 @@ internal static class SubjectMemberConflicts
 
     /// <summary>
     /// Whether a member declared at or above the contract provider really displaces an implementation
-    /// its own base already provides. This is what keeps the ordinary shape quiet: the hand-written
-    /// subject root derives from object, so there is nothing above it whose slot its members could
-    /// take.
+    /// its own base already provides. This is what keeps the ordinary shape quiet: a hand-written
+    /// subject root derives from object, so there is nothing above it whose slot its members could take.
     /// </summary>
     /// <remarks>
-    /// An explicit implementation is deliberately not exempt. C# only allows one in a class that lists
-    /// the interface itself (CS0540), and listing it makes that class the nearest subject ancestor and
-    /// therefore the contract provider, so an exemption keyed on the explicit form never fired at all:
-    /// it made the only form a hand-written ancestor can express invisible, which is the silent
-    /// interception loss with nothing reported.
+    /// An explicit implementation is deliberately not exempt: CS0540 forces its declaring class to list
+    /// the interface, which makes that class the contract provider, so the exemption fired on every base
+    /// there is and hid the only form a hand-written ancestor can express.
     /// </remarks>
     private static bool TakesSlotFromAbove(INamedTypeSymbol declarer, ISymbol interfaceMember)
         => declarer.BaseType?.FindImplementationForInterfaceMember(interfaceMember) is not null;

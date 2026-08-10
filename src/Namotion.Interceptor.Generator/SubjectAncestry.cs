@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
@@ -67,9 +66,7 @@ internal static class SubjectAncestry
     /// <summary>
     /// Whether an attributed ancestor declared in this compilation will actually receive generated
     /// plumbing. Carrying the attribute is not enough: NI0001 suppresses generation for a subject that
-    /// is not partial, and assuming the plumbing appears anyway puts the subclass into derived mode,
-    /// replacing one actionable diagnostic on the base with a wall of raw errors in a generated file
-    /// the user cannot edit.
+    /// is not partial.
     /// </summary>
     public static bool WillBeGeneratedInThisCompilation(INamedTypeSymbol ancestor, CancellationToken cancellationToken)
     {
@@ -95,15 +92,10 @@ internal static class SubjectAncestry
     /// the subject must not declare its own.
     /// </summary>
     /// <remarks>
-    /// The interface clause is deliberately asked of the TYPE and not of its subject ancestor: a base
-    /// that implements IRaisePropertyChanged by hand without implementing IInterceptorSubject is not a
-    /// subject ancestor at all, and dropping this would make its subclass re-declare PropertyChanged
-    /// and RaisePropertyChanged. ManualInpcPersonBase in Namotion.Interceptor.Tracking.Tests is exactly
-    /// that shape and has a live test.
-    /// The attribute on its own is not evidence, only a promise: an attributed base can be declared
-    /// without being partial, so nothing is ever generated into it, and a hand-written attributed base
-    /// can carry no notify plumbing at all. Believing the promise leaves the subject with neither call
-    /// form: the simple name is CS0103 and the interface cast throws at runtime.
+    /// The interface clause is deliberately asked of the TYPE, not of its subject ancestor: a base
+    /// implementing IRaisePropertyChanged by hand is not a subject ancestor at all, and dropping this
+    /// makes its subclass re-declare the plumbing (ManualInpcPersonBase in
+    /// Namotion.Interceptor.Tracking.Tests, live test). The attribute alone is a promise, not evidence.
     /// </remarks>
     public static bool InheritsNotifyPropertyChanged(
         INamedTypeSymbol typeSymbol,
@@ -135,10 +127,9 @@ internal static class SubjectAncestry
     /// </summary>
     /// <remarks>
     /// The whole chain is walked, not just the nearest subject ancestor: a generated ancestor emits no
-    /// raise of its own when its own base already provided the plumbing, so the member that answers
-    /// the call can sit several classes further up. That is the shipped ManualInpcPersonBase shape. An
-    /// explicit interface implementation is not found here and must not be: its name is qualified and
-    /// it is private, so no simple-name call can reach it.
+    /// raise of its own when its own base already provided the plumbing, so the member that answers the
+    /// call can sit several classes further up. An explicit interface implementation is not found here
+    /// and must not be: its name is qualified and it is private, so no simple-name call can reach it.
     /// </remarks>
     public static bool HasCallableRaisePropertyChanged(
         INamedTypeSymbol typeSymbol,

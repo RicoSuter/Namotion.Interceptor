@@ -72,9 +72,7 @@ internal static class SymbolExtensions
     /// The members of a given name that member lookup from <paramref name="accessingType"/> would find
     /// on the chain starting at <paramref name="baseType"/>. Statics are dropped because none of the
     /// call sites the generator emits can reach one, and inaccessible members because they neither
-    /// hide nor bind. Callers add the part that actually differs between them: the base class contract
-    /// tests the signature, and the notify lookup tests the emitted call's one argument. Contrast
-    /// <see cref="HidableMembers"/>, which must see statics.
+    /// hide nor bind. Contrast <see cref="HidableMembers"/>, which must see statics.
     /// </summary>
     public static IEnumerable<ISymbol> AccessibleMembers(
         INamedTypeSymbol baseType,

@@ -35,12 +35,7 @@ internal static class SubjectBaseContract
         var hasCallableRaisePropertyChanged = SubjectAncestry.HasCallableRaisePropertyChanged(typeSymbol, compilation, cancellationToken);
 
         // Root mode emits the whole IInterceptorSubject block; derived mode emits only its own
-        // Properties line and inherits the rest.
-        //
-        // Mode selection, asked of the nearest subject ancestor and never of "some ancestor": a
-        // hand-written IInterceptorSubject implementer between two generated subjects would
-        // otherwise select derived mode and silently reproduce this bug, because Context resolves
-        // to the middle's executor while the inherited helpers read the root's field.
+        // Properties line. Asked of the NEAREST subject ancestor, never of "some ancestor".
         var emitsPlumbingHere = true;
         IReadOnlyList<string> hiddenPlumbingMembers = [];
 
@@ -93,17 +88,10 @@ internal static class SubjectBaseContract
             }
         }
 
-        // Asked for every root-mode subject with a base class, not only for the NI0012 one: the
-        // base does not have to be a subject at all for a collision to happen. An MVVM base
-        // carrying PropertyChanged and RaisePropertyChanged is the common shape, and root mode
-        // re-emits both, which is a CS0108 in a file the consumer cannot edit.
-        //
-        // The walk starts at the immediate base rather than at the subject ancestor, because
-        // hiding is decided against the nearest declaration of the name anywhere above, including
-        // a plain class sitting in between.
-        //
-        // A generated ancestor's plumbing does not exist as a symbol during this pass, so the
-        // lookup cannot see it, but the generator knows it is about to emit it.
+        // Asked of every root-mode subject with a base class, not only the NI0012 one: an MVVM base
+        // carrying PropertyChanged and RaisePropertyChanged collides just as well. The walk starts at
+        // the immediate base because hiding is decided against the nearest declaration of the name
+        // anywhere above; a generated ancestor has no symbol yet, hence the table lookup.
         if (emitsPlumbingHere)
         {
             hiddenPlumbingMembers = SubjectAncestry.HasGeneratedSubjectAncestor(typeSymbol, cancellationToken)
@@ -121,18 +109,12 @@ internal static class SubjectBaseContract
     }
 
     /// <summary>
-    /// The members a class must expose to host a generated subclass. Generated root mode satisfies
-    /// this by construction. Lookup walks the ancestor chain, so a member inherited by the ancestor
-    /// from further up counts, and runs against the constructed type, so a generic base is checked
-    /// with its type arguments substituted.
+    /// The members a class must expose to host a generated subclass, tabulated in
+    /// docs/subject-guidelines.md. Generated root mode satisfies it by construction.
     /// </summary>
     /// <remarks>
-    /// Every clause but one is required for the generated code to compile. The
-    /// <see cref="KnownTypes.IRaisePropertyChanged"/> clause is deliberately stricter than that:
-    /// when it is the only clause a shape fails, derived mode would still compile, because the
-    /// subject declares its own PropertyChanged and RaisePropertyChanged whenever the base has
-    /// neither. Failing the contract there costs that shape the plumbing and allocation sharing of
-    /// derived mode, not the build.
+    /// Only the <see cref="KnownTypes.IRaisePropertyChanged"/> clause is not required for the generated
+    /// code to compile; failing it costs that shape derived mode, not the build.
     /// </remarks>
     private static bool SatisfiesContract(
         INamedTypeSymbol ancestor,
@@ -171,15 +153,9 @@ internal static class SubjectBaseContract
     }
 
     /// <summary>
-    /// A static DefaultProperties that is both accessible and of a type the emitted .Concat(...)
-    /// accepts. Checking only that some static of that name resolves lets a base declaring
-    /// "public static int DefaultProperties" through, and the generated code then fails with
-    /// CS1929, which is exactly the raw compiler error in generated code the diagnostics exist to
-    /// replace. The type test compares against the constructed
-    /// IReadOnlyDictionary&lt;string, SubjectPropertyMetadata&gt; rather than matching on the display
-    /// string, which would accept an IReadOnlyList&lt;SubjectPropertyMetadata&gt; and produce that
-    /// same CS1929. A field counts as well as a property: the emitted call site reads it the same
-    /// way, so rejecting one would turn a shape that compiles today into an NI0011 error.
+    /// A static DefaultProperties, field or property, that is accessible and of a type the emitted
+    /// .Concat(...) accepts. Compared against the constructed symbol rather than a display string,
+    /// because the wrong type produces CS1929 in a generated file. See docs/subject-guidelines.md.
     /// </summary>
     private static bool HasUsableDefaultProperties(INamedTypeSymbol ancestor, INamedTypeSymbol subject, Compilation compilation)
     {
@@ -207,9 +183,6 @@ internal static class SubjectBaseContract
                     continue;
                 }
 
-                // The declared type itself, or any type that implements it: a Dictionary or a
-                // FrozenDictionary converts to it implicitly and the emitted .Concat(...) consumes
-                // it just as happily.
                 if (SymbolEqualityComparer.Default.Equals(memberType, expectedType) ||
                     memberType.AllInterfaces.Contains(expectedType, SymbolEqualityComparer.Default))
                 {
@@ -256,19 +229,14 @@ internal static class SubjectBaseContract
                 HasExpectedReturnType(method, plumbingMethod, compilation));
 
     /// <summary>
-    /// Whether the base helper returns what the generated call sites consume. Nullability
-    /// annotations are deliberately not compared: the emitted code accepts both forms, and a base
-    /// compiled without a nullable context would otherwise fail the contract for no reason.
+    /// Whether the base helper returns what the generated call sites consume. Nullability annotations
+    /// are deliberately not compared: the emitted code accepts both forms, and a base compiled without
+    /// a nullable context would otherwise fail the contract for no reason.
     /// </summary>
     /// <remarks>
-    /// The dictionary case accepts an implementing type as well as the declared interface, exactly
-    /// like <see cref="HasUsableDefaultProperties"/>, because the two feed the same emitted
-    /// expression, GetInstanceProperties() ?? DefaultProperties. Comparing by identity here rejects
-    /// a base returning FrozenDictionary&lt;string, SubjectPropertyMetadata&gt;?, which the emitted
-    /// expression consumes just as happily, and costs that base's own properties their interception.
-    /// The reference type clause is the asymmetry with <see cref="HasUsableDefaultProperties"/>, and
-    /// it is real rather than an oversight: this side is the left operand of '??', which rejects a
-    /// value type with CS0019, while the other side feeds .Concat, where a struct is fine.
+    /// The dictionary case additionally requires a reference type, unlike
+    /// <see cref="HasUsableDefaultProperties"/>: this side is the left operand of '??', which rejects a
+    /// value type with CS0019, while the other side only feeds .Concat.
     /// </remarks>
     private static bool HasExpectedReturnType(
         IMethodSymbol method,

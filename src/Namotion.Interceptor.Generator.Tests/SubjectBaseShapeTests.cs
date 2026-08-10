@@ -1204,7 +1204,10 @@ public class SubjectBaseShapeTests
             }
         }
 
-        throw new FileNotFoundException($"Could not find '{relativePath}' in any directory above '{AppContext.BaseDirectory}'.");
+        throw new FileNotFoundException(
+            $"Could not find '{relativePath}' in any directory above '{AppContext.BaseDirectory}'. This test " +
+            "reads its fixture from docs/subject-guidelines.md so the documented base cannot drift from the " +
+            "tested one, which requires running inside the repository tree.");
     }
 
     /// <summary>
