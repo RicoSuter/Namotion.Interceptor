@@ -822,6 +822,122 @@ public class HostedServiceHandlerTests
         }
     }
 
+    [Fact]
+    public async Task WhenTheSubjectStopFindsNothingRunning_ThenTheAttachmentStopItGatesStillRuns()
+    {
+        // Arrange - the attachment's stop waits for the subject's stop, and a subject whose start
+        // never ran has nothing to stop, so the early return in that stop is an ordinary case rather
+        // than an edge one. Its signal has to be set from a finally: set after the body instead, the
+        // attachment stop parks on it forever and wedges that chain against every later append. The
+        // host is built but not started, so the startup gate holds both starts at a known point and
+        // the graph moves below provably overtake them.
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = WedgedShutdownTimeout);
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+
+        var parent = new HostedParent(context);
+        var child = new CountingHostedSubject();
+        var instance = new TrackedBackgroundService();
+        var attachment = child.AttachHostedService(() => instance);
+
+        parent.Child = child;
+        parent.Child = null;
+
+        // Act
+        await host.StartAsync();
+
+        try
+        {
+            // Assert - an empty transition behind the attachment's stop completes only once that stop
+            // has run, which it can only do once the subject's stop released it.
+            await ((IHostedServiceAttachmentTarget)attachment).Target
+                .AppendAsync(_ => Task.CompletedTask, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(0, child.StartCount);
+            Assert.False(instance.IsStarted);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnAwaitedAttachRunsOnAHostThatWasNeverStarted_ThenItStillReturns()
+    {
+        // Arrange - awaiting is an explicit request for the service to be running, so the awaiting
+        // overloads open the startup gate themselves. Without that the start body parks on a gate
+        // nothing is going to open, and the caller waits forever rather than getting an answer.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+
+        try
+        {
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService();
+
+            // Act
+            var attachment = await person
+                .AttachHostedServiceAsync(() => instance, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert
+            Assert.Same(instance, attachment.Current);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnAwaitedDetachRunsOnAHostThatWasNeverStarted_ThenItStillReturns()
+    {
+        // Arrange - the synchronous attach deliberately leaves the gate closed, which is what makes
+        // the detach's own gate opening the only thing that can ever release its stop.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+
+        try
+        {
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService();
+            var attachment = person.AttachHostedService(() => instance);
+
+            // Act
+            var detached = await person
+                .DetachHostedServiceAsync(attachment, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert - the stop is queued behind the start the attach appended, so both have run.
+            Assert.True(detached);
+            Assert.True(instance.IsDisposed);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     private static async Task<(IHost Host, IInterceptorSubjectContext Context)> StartHostAsync()
     {
         var builder = Host.CreateApplicationBuilder();
