@@ -201,16 +201,12 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     _propertyWriter.StartBuffering();
                     await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
-                    // The subscription is unbounded, so without this the window's memory is bounded by
-                    // nothing but how long the load takes. Draining into the retry queue caps it at that
-                    // queue's size instead, which is the bound this class already owns.
-                    //
-                    // Started only once StartListeningAsync has returned, because ownership is established
-                    // in there and the drain discards what it cannot attribute to a source. That leaves the
-                    // longer leg unguarded rather than the shorter one: for OPC UA the recursive browse runs
-                    // inside StartListeningAsync and can take minutes, while the load this wraps is a
-                    // batched read. Covering the browse needs an ownership-neutral accumulator, which is a
-                    // different change with its own eviction contract to decide.
+                    // Caps the window's memory at the retry queue's size; the subscription itself is
+                    // unbounded. Starts only after StartListeningAsync, because ownership is established in
+                    // there and the drain discards what it cannot attribute, which leaves the longer leg
+                    // unguarded rather than the shorter one: for OPC UA the browse runs inside that call and
+                    // takes minutes, while the load this wraps is a batched read. Covering it needs an
+                    // ownership-neutral accumulator and an eviction contract to go with it.
                     using (var windowDrain = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
                     {
                         var windowDrainTask = DrainConnectWindowPeriodicallyAsync(subscription, windowDrain.Token);
