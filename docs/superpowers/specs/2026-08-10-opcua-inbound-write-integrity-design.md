@@ -1,0 +1,178 @@
+# OPC UA server: inbound write integrity
+
+**Goal:** an OPC UA client can never leave the server's node holding a value the subject model did not accept.
+
+**Shape:** small, targeted PR. One connector, one code path, tests written red first.
+
+**Base:** master at `f561d196`, which is #420 squash-merged.
+
+## The defect
+
+The SDK commits a client's write into the node, answers `Good`, and only then raises `StateChanged`, which is where `OpcUaSubjectServer.UpdateProperty` tries to apply that value to the subject. Every way the apply can fail therefore leaves the node holding a value the model rejected, with nothing that repairs it.
+
+| How the apply fails | Reachable when | Node holds | Subject holds |
+|---|---|---|---|
+| Property not registered, silent `return` | Detach or structural mutation in flight | B | A |
+| `ConvertToPropertyValue` throws | Client writes a value the converter rejects | B | A |
+| `SetValueFromSource` throws | A validation interceptor rejects the value | B | A |
+| An `OnChanging` hook sets `cancel` | Generated hook vetoes the write | B | A |
+| Converter pair does not round-trip | Any scaling, unit or enum mapping converter | B | g(B) |
+
+Three aggravating facts:
+
+1. **The lie is self-confirming.** Because the node keeps the client's value, a client that reads back to verify its write gets its own value returned and the check passes. This is why the class of bug survives in production.
+2. **Subscribers see the refused value too.** Monitored items are notified from the SDK's separate `OnStateChanged` field, which fires before the `StateChanged` event the apply hangs off (`NodeState.cs:2635-2636`, both reached from `CustomNodeManager.Write:2051`). A refused write is published to every subscribed client before the model has even been asked.
+3. **One row is not just wrong data.** `ConvertToPropertyValue` sits outside the `try` (`OpcUaSubjectServer.cs:424`). Nothing on the path from `CustomNodeManager.Write:2051` through `ClearChangeMasks` into the `StateChanged` handler catches, so a throwing converter propagates into the SDK's service layer while holding `NodeManager.Lock`, the lock every read, write and subscription flush needs.
+
+Properties without a setter are already read-only nodes (`CustomNodeManager.cs:375-378`), so the SDK rejects those writes first. Only writable properties are affected.
+
+### Relationship to #420
+
+Four of the five rows predate #420. The round-trip row does not: master's outbound write loop used to push every mapped change into the node, including the subject's own apply of a client write, and that redundant write kept overwriting the node with the model's value. #420 added the supersession check at `OpcUaSubjectServer.cs:177`, correctly skipping it, and the accidental repair went with it. That row moved from self-healing to permanent.
+
+Recorded as findings 2, 3 and 9 in epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442). None has its own tracker entry, so one issue is filed for the cluster before implementation starts.
+
+## Design
+
+Nodes for subject properties are constructed at exactly one site (`OpcUaNodeFactory.cs:227`), so they are ours to subclass. Introduce `SubjectVariableState : BaseDataVariableState`, holding the `PropertyReference` and a reference to the server, and override `WriteValueAttribute` (`protected virtual` on `NodeState.cs:4119`, overridden non-sealed on `BaseVariableState.cs:1906`).
+
+**The override, in order:**
+
+1. Snapshot `Value`, `StatusCode` and `Timestamp`.
+2. Call `base.WriteValueAttribute(...)`. This runs the full SDK path: data type check, `ExtractValueFromVariant`, copy policy, index range merge, and the assignment. A bad result returns straight through, node unmodified.
+3. Ask the server to apply **`this.Value`**, not the `value` parameter, passing the `sourceTimestamp` parameter through. For an index range write the parameter is only the fragment the client sent, while `this.Value` is the merged whole. This is the entire reason index range writes keep working.
+4. The server converts, applies with `SetValueFromSource`, reads the subject back with `RegisteredSubjectProperty.GetValue()`, converts outward, and returns the value to store. Assign it to `Value` if it differs.
+5. If anything in steps 3 or 4 throws, restore the snapshot and return a bad status.
+
+Steps 3 to 5 complete before `CustomNodeManager.Write:2051` calls `ClearChangeMasks`, so no subscriber observes an intermediate value and the client's `Write` call has not returned.
+
+Step 4 always ends by storing a conversion of what the subject holds, whether the write was accepted, transformed or vetoed. That single rule is the invariant: **the node cannot hold a value the subject does not.**
+
+**Split of responsibility.** The node subclass knows SDK mechanics: snapshot, base call, restore. The server keeps model mechanics: the converter, the configuration, the throughput counters. `UpdateProperty` is reshaped into a method that applies and returns the value to store, or signals failure, replacing today's void method that swallows both failure modes.
+
+### Why not either event hook
+
+Both `OnWriteValue` and `OnSimpleWriteValue` were evaluated and rejected, and the reasons are worth keeping because they look like the obvious answer.
+
+`OnWriteValue` (`BaseVariableState.cs:1930`) returns early at :1961 and skips everything after it: the data type check (:1971-2000), `ExtractValueFromVariant` (:2002), the copy policy (:2005) and index range merging (:2031-2043). Two consequences are disqualifying. A client writing a string to an int node would go from `BadTypeMismatch` to `Good`, since nodes carry a real `DataType` and `ValueRank` (`OpcUaNodeFactory.cs:239-240`) and the stock converter passes unknown shapes through. And an index range write would apply the client's fragment as the whole property value, which is silent data corruption worse than any row in the defect table.
+
+`OnSimpleWriteValue` (:2010) runs after all of it and is safe, but costs two behaviours. It refuses index range writes outright with `BadIndexRangeInvalid` (:2016-2018), and its signature (`NodeState.cs:5011`) carries no `sourceTimestamp`, which cannot be recovered from the node either because `m_timestamp` is not assigned until :2048. The model would record server receive time. That is not hypothetical: our own client sets `SourceTimestamp` from `change.ChangedTimestamp` (`OutboundWriter.cs:166`), so timestamp fidelity across an OPC UA hop is something the library provides today and the hook would silently drop on its own primary path.
+
+Overriding `WriteValueAttribute` keeps the type check, the index range merge and the timestamp, because it calls the SDK rather than working around it.
+
+### The cost of that choice
+
+`base.WriteValueAttribute` assigns before returning, so the node is committed before we can refuse, and returning a bad status afterwards does not undo it. That is why steps 1 and 5 exist. It is compensating logic, the same category as the post-commit repair rejected earlier in design.
+
+What makes it acceptable rather than a repeat: four lines in one method, under a lock already held, no concurrency, no cross-method protocol. The machinery being removed was a distributed invariant across two files coordinated by thread-static state. This is a local rollback.
+
+It is still worse on this axis than `OnSimpleWriteValue`, where nothing is committed until the handler returns. That is the trade being made deliberately: a local rollback in exchange for no behavioural regressions.
+
+**When the read-back throws there is no fully correct answer.** Restoring leaves the node at A with the subject possibly holding B. Not restoring leaves the node at B with the subject possibly holding A. A value whose `ConvertToNodeValue` throws cannot be faithfully served by any policy. Restore plus a bad status at least informs the client and leaves the node on a value the subject did hold.
+
+### Why refusals return `Good`
+
+Ordinary refusals (validation, a cancelling hook, a converter that does not round-trip) return `Good` with the model's value stored. Preventing the bad commit is what correctness needs, and step 4 achieves it. Reporting the refusal is a separate goal that would cost a wire-visible contract and turn refusals that are invisible today into errors on upgrade day.
+
+Clients are still better off: a read-back returns the model's value rather than confirming a write that never landed, and subscribers never see the refused value.
+
+Bad statuses are returned on exactly two paths, both cases where no model value can be safely served: an unregistered property, and a failure inside steps 3 or 4.
+
+Returning real errors on ordinary refusal stays available as a separable follow-up, alongside [#231](https://github.com/RicoSuter/Namotion.Interceptor/issues/231) for WebSocket. Adding it later does not change the invariant.
+
+### What gets deleted
+
+The concept of recognising our own reflection disappears rather than being reimplemented:
+
+- `IsWritingOwnNodeValues` (`OpcUaSubjectServer.cs:44`) and `SelfWrittenNodeValue` (:55), two `[ThreadStatic]` fields with roughly eighteen lines of comment explaining the coordination
+- their seven touch points (:44, :55, :167, :192, :200, :201, :411)
+- the `try`/`finally` in the outbound write loop, which exists only to disarm the flag
+- the `StateChanged` subscription (`CustomNodeManager.cs:408-416`), which has exactly one subscriber
+
+This is the machinery `b8ecc22f` had to repair, and identifying our own echo by comparing values loses data whenever the comparison is wrong.
+
+Verified, not assumed. The two fields have one reader (:411), `UpdateProperty` has one caller (`CustomNodeManager.cs:414`), and `StateChanged` has one subscriber (:408). Node values are written in exactly three places: creation (`CustomNodeManager.cs:395`, masks cleared at :406 before the handler is attached), the outbound loop (assigns through the property setter, never reaching `WriteValueAttribute`), and the SDK write service (now covered by the override). Monitored items use the SDK's own `OnStateChanged` field, not the `StateChanged` event, so removing the subscription cannot affect subscriptions.
+
+The subclass still satisfies the outbound loop's `data is BaseDataVariableState` check, and it is not invoked by the library's own writes, so the deletion holds under the new design.
+
+Echo suppression is unaffected because it is origin-based (`ChangeQueueProcessor.cs`), not revision-based. The outbound loop's per-write supersession recheck (`OpcUaSubjectServer.cs:177`) still closes the local-write race, because the apply advances the source-commit marker under the same lock hold.
+
+### Comments that become wrong
+
+Part of the change, not follow-up, per the correction-propagation rule:
+
+- `OpcUaSubjectServer.cs:20-24` states that a client write reaches the node before `UpdateProperty` applies it. That inverts. The `SourceValuesAreSettled` conclusion survives, but its mechanism becomes "the write attribute settles the node before the lock releases".
+- `CustomNodeManager.cs:403-406` loses its "before the handler is attached" rationale.
+- The lock in `RemoveSubjectNodes` stays, but its comment needs narrowing to monitored-item consistency, since misattribution is no longer possible.
+
+## Explicitly out of scope
+
+- Late-attached subjects never getting a node (finding 1)
+- MQTT and WebSocket parity for refused writes
+- Returning error status codes on ordinary refusal
+- The memory and retention cluster ([#281](https://github.com/RicoSuter/Namotion.Interceptor/issues/281), [#441](https://github.com/RicoSuter/Namotion.Interceptor/issues/441)), a different code path
+- The outbound loop's own unwrapped `ConvertToNodeValue` (`OpcUaSubjectServer.cs:187-188`), where a throw kills the flush iteration. Pre-existing, belongs on the epic.
+
+## Acceptance criteria
+
+1. **Correctness.** For each of the five rows, the node holds a conversion of what the subject holds once the write settles.
+2. **No new problems.** Every existing OPC UA test passes unchanged. No client behaviour regresses: type checking, index range writes and client source timestamps all keep working. No client that receives `Good` today receives an error afterwards, except on an unregistered property.
+3. **No performance regression.** See below. The core library is untouched, so core benchmarks must be unmoved, and a moved one means something was changed that should not have been.
+4. **Simplification.** The two thread-static fields, their seven touch points and the `StateChanged` hookup are gone, or the reason they had to stay is written down.
+
+## Performance
+
+The two directions move opposite ways, and the one that gets faster is the one carrying the traffic.
+
+**Inbound, per client write, more work.** One `GetValue()` through the read interceptor chain, and a second conversion, since the path now runs `ConvertToPropertyValue` inbound and `ConvertToNodeValue` outbound. Against what a client write already costs (network round trip, deserialization, session lookup, taking `NodeManager.Lock`) this is well under a percent. The default `CopyPolicy` is `CopyOnRead` (`BaseVariableState.cs:64`), so the write-side clone at :2005 does not run, which means the extra outbound conversion is a genuinely new allocation for array properties rather than a second copy on top of an existing one. That is the number worth measuring.
+
+The read-back is the price of the uniform outcome. Skipping it when the apply took the value unchanged would need either a value comparison or a revision delta, both rejected.
+
+**Outbound, per change, less work.** Every outbound change today performs a `SelfWrittenNodeValue` thread-static store, a `StateChanged` dispatch into our closure, and a guard check calling `Equals` before returning. All of it exists only to recognise and discard our own reflection, and all of it goes when `StateChanged` has no subscriber. The per-batch flag arm/disarm and its `try`/`finally` go with it. At the load profile's 20k changes per second outbound against occasional inbound writes, this is the dominant term.
+
+**Verification:** connector tester on the opcua profile, comparing `IncomingThroughput` and `OutgoingThroughput` before and after, plus an allocation check on an array-heavy write. Microbenchmarks do not cover this code and are run only to confirm they have not moved.
+
+**Fix the accounting first.** `IncomingThroughput.Add(1)` currently runs before the registration check (`OpcUaSubjectServer.cs:418`). Decide what the reshaped method counts and write it down before measuring, or the comparison measures the accounting change rather than the code change.
+
+## Test plan
+
+Written red first. Each asserts that the node and the subject agree, and each fails on the current code for the reason named in the defect table.
+
+**The five defect rows:**
+
+| Test | Arranged with | Passes when |
+|---|---|---|
+| `WhenValidationRejectsAClientWrite_ThenTheNodeKeepsTheModelValue` | A validating interceptor that throws | Client read-back returns A, subject holds A |
+| `WhenAnOnChangingHookCancelsAClientWrite_ThenTheNodeKeepsTheModelValue` | A generated hook setting `cancel` | Client read-back returns A, subject holds A |
+| `WhenTheInboundConverterThrows_ThenTheServerStaysAliveAndTheNodeKeepsTheModelValue` | A converter throwing in `ConvertToPropertyValue` | No exception reaches the SDK, server still serves reads, read-back returns A |
+| `WhenTheConverterPairDoesNotRoundTrip_ThenTheNodeHoldsTheConvertedModelValue` | A scaling converter where f(g(x)) is not x | Read-back equals `ConvertToNodeValue(subject value)` and is stable across two reads |
+| `WhenThePropertyIsNotRegistered_ThenTheWriteIsRefusedAndTheNodeIsUntouched` | A property reference with no registration | Client receives a bad status, node value unchanged |
+
+**The rollback path:**
+
+| Test | Arranged with | Passes when |
+|---|---|---|
+| `WhenReadingBackTheModelValueThrows_ThenTheNodeIsRestoredAndNoExceptionReachesTheSdk` | A cancelling hook plus a throwing `ConvertToNodeValue` | Client receives a bad status, node holds A, no exception escapes |
+
+**Regression guards.** These pass today and must keep passing. They are what the design choice buys, so they belong in the same PR:
+
+| Test | Arranged with | Passes when |
+|---|---|---|
+| `WhenAClientWritesTheWrongType_ThenTheSdkStillReturnsBadTypeMismatch` | String written to an int node | `BadTypeMismatch`, neither store moves |
+| `WhenAClientWritesAnIndexRange_ThenTheMergedArrayReachesTheSubject` | Write to `myArray[2:4]` | Subject holds the merged whole array, not the fragment |
+| `WhenAClientSuppliesASourceTimestamp_ThenTheModelRecordsIt` | Write with an explicit `SourceTimestamp` | The subject's change timestamp matches what the client sent |
+| `WhenAClientWriteIsAccepted_ThenBothStoresHoldIt` | Plain writable property | Subject and read-back both hold B |
+| `WhenTheServerWritesItsOwnValue_ThenNoInboundApplyIsTriggered` | Model-side mutation flushed by the outbound loop | No inbound apply observed, no echo |
+
+Conventions: `When<Condition>_Then<ExpectedBehavior>` naming, explicit `// Arrange`, `// Act`, `// Assert`, and `AsyncTestHelpers.WaitUntilAsync` rather than delays. Most rows need a live server and client and belong with the existing integration harness (`SharedServerTestBase`). The unregistered row is reachable without one.
+
+The OPC UA suite binds a fixed port and cannot run concurrently with another instance of itself or with the connector tester.
+
+## Risks and open items
+
+- **Reliance on base behaviour.** The design assumes `base.WriteValueAttribute` assigns before returning. That is behaviour, not contract, and an SDK change would alter the rollback's meaning. The regression guards would catch it.
+- **Reading the model inside the SDK write call.** `GetValue()` runs the property getter under `NodeManager.Lock`. Cheap for a stored property, not necessarily for a derived one.
+- **The correction re-sets the change mask.** Assigning `Value` in step 4 or 5 sets it again after base already did, so the node reports a change even on a refusal. Whether subscribers see it depends on the `DataChangeFilter` trigger, since value-equal notifications are filtered for the default. Test rather than assume.
+- **Lock ordering is unchanged.** The apply already runs under `NodeManager.Lock` today by way of `StateChanged`.
+- **An SDK backstop exists.** `NodeState.WriteAttribute` catches handler exceptions and returns `BadUnexpectedError` with the node untouched (`NodeState.cs:3773-3789`). The override still catches everything itself so outcomes are uniform, but a bug degrades to a clean per-write error rather than service-layer damage. This is a gain over the current path, where the escape route through `ClearChangeMasks` has no catch anywhere.
+- **Predefined nodes are unaffected.** `LoadPredefinedNodes` may create plain `BaseDataVariableState` instances, which do not carry subject properties and do not need the override.
