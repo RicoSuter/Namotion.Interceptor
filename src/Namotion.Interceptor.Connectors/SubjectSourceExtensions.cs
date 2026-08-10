@@ -13,8 +13,9 @@ public static class SubjectSourceExtensions
 
     /// <summary>
     /// Writes changes to the source in batches, respecting the source's maximum batch size.
-    /// Returns a <see cref="WriteResult"/> containing which changes failed.
-    /// Never throws for write failures, errors are reported in the result.
+    /// Returns a <see cref="WriteResult"/> containing which changes failed. A failing batch does not
+    /// stop the ones behind it: every batch is attempted and their failures are reported together,
+    /// with the first error. Never throws for write failures, errors are reported in the result.
     /// </summary>
     /// <remarks>
     /// This method automatically synchronizes write operations unless the source implements
@@ -66,7 +67,10 @@ public static class SubjectSourceExtensions
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
-        var confirmedCount = 0;
+        // Allocated only once a batch has actually failed, so an all-success flush allocates nothing.
+        List<SubjectPropertyChange>? failedChanges = null;
+        Exception? firstError = null;
+        var batchStart = 0;
         try
         {
             var count = changes.Length;
@@ -83,48 +87,65 @@ public static class SubjectSourceExtensions
                     : result;
             }
 
-            // Multi-batch: process sequentially, stop on first failure
-            for (var i = 0; i < count; i += batchSize)
+            // Multi-batch: every batch is attempted and their failures accumulate into one result. One
+            // change the source refuses would otherwise starve everything queued behind it, since the
+            // batches after it would be condemned unattempted on every retry for as long as it fails.
+            for (; batchStart < count; batchStart += batchSize)
             {
-                var currentBatchSize = Math.Min(batchSize, count - i);
-                var batch = changes.Slice(i, currentBatchSize);
+                var currentBatchSize = Math.Min(batchSize, count - batchStart);
+                var batch = changes.Slice(batchStart, currentBatchSize);
 
                 var batchResult = await source.WriteChangesAsync(batch, cancellationToken).ConfigureAwait(false);
-                if (batchResult.Error is not null)
+                if (batchResult.Error is null)
                 {
-                    // The batch's failed changes (the whole batch when unenumerated) plus the unprocessed
-                    // remainder, matched by identity since any subset of a batch can fail.
-                    var batchFailed = batchResult.FailedChanges.IsEmpty
-                        ? batch
-                        : batchResult.FailedChanges.AsMemory();
-                    var remaining = changes.Slice(i + currentBatchSize);
-                    if (remaining.IsEmpty)
-                    {
-                        return WriteResult.PartialFailure(batchFailed, batchResult.Error);
-                    }
-
-                    // The array never escapes, so the ImmutableArray takes ownership without a second copy.
-                    var failedChanges = new SubjectPropertyChange[batchFailed.Length + remaining.Length];
-                    batchFailed.CopyTo(failedChanges);
-                    remaining.CopyTo(failedChanges.AsMemory(batchFailed.Length));
-                    return WriteResult.PartialFailure(
-                        ImmutableCollectionsMarshal.AsImmutableArray(failedChanges), batchResult.Error);
+                    continue;
                 }
 
-                confirmedCount = i + currentBatchSize;
+                firstError ??= batchResult.Error;
+                failedChanges ??= [];
+
+                // The batch's failed changes, or the whole batch when the source left them unenumerated.
+                failedChanges.AddRange(batchResult.FailedChanges.IsEmpty
+                    ? batch.Span
+                    : batchResult.FailedChanges.AsSpan());
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    // Pushing the rest at a source that is going away gains nothing, and a batch that is
+                    // never attempted is unconfirmed.
+                    failedChanges.AddRange(changes.Span[(batchStart + currentBatchSize)..]);
+                    break;
+                }
             }
 
-            // All batches succeeded (zero allocation)
-            return WriteResult.Success;
+            return firstError is null
+                ? WriteResult.Success
+                : CreatePartialFailure(failedChanges!, firstError);
         }
         catch (Exception ex)
         {
-            // Batches confirmed before the throw are written and must not be condemned; only the
-            // throwing batch (outcome unknown) and the unprocessed remainder are unconfirmed.
-            return confirmedCount == 0
-                ? WriteResult.Failure(changes, ex)
-                : WriteResult.PartialFailure(changes.Slice(confirmedCount), ex);
+            // The throwing batch's outcome is unknown and the remainder was never attempted, so both are
+            // unconfirmed. Batches attempted before it keep the verdict they already got: a slice from
+            // here would condemn those that succeeded after an earlier batch failed, and a change
+            // reported failed after reaching the source is never reverted by a source transaction.
+            var unconfirmed = changes.Slice(batchStart);
+            if (failedChanges is null)
+            {
+                return batchStart == 0
+                    ? WriteResult.Failure(changes, ex)
+                    : WriteResult.PartialFailure(unconfirmed, ex);
+            }
+
+            failedChanges.AddRange(unconfirmed.Span);
+            return CreatePartialFailure(failedChanges, firstError ?? ex);
         }
+    }
+
+    private static WriteResult CreatePartialFailure(List<SubjectPropertyChange> failedChanges, Exception error)
+    {
+        // The array never escapes, so the ImmutableArray takes ownership without a second copy.
+        return WriteResult.PartialFailure(
+            ImmutableCollectionsMarshal.AsImmutableArray(failedChanges.ToArray()), error);
     }
 
     /// <summary>
