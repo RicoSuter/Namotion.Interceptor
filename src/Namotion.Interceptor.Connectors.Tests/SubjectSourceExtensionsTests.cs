@@ -602,12 +602,13 @@ public class SubjectSourceExtensionsTests
         // was written by the failing batch, so a prefix slice from the throw point would condemn it.
         Assert.Equal(2, callCount);
         Assert.NotNull(result.Error);
-        Assert.Equal("Item 0 refused", result.Error!.Message);
 
-        // The reported error stays the first one, so the throw is carried along with it to stay diagnosable
-        var thrown = Assert.IsType<InvalidOperationException>(
-            result.Error.Data[SubjectSourceExtensions.ThrownAfterEarlierFailureDataKey]);
-        Assert.Equal("Batch 2 boom", thrown.Message);
+        // Both errors are reported, the first one first, so the throw stays diagnosable: an
+        // AggregateException renders every inner exception with its stack, Exception.Data renders nothing.
+        var aggregate = Assert.IsType<AggregateException>(result.Error);
+        Assert.Equal(
+            new[] { "Item 0 refused", "Batch 2 boom" },
+            aggregate.InnerExceptions.Select(inner => inner.Message));
 
         Assert.Equal(5, result.FailedChanges.Length);
         var failedNames = result.FailedChanges.Select(change => change.Property.Name).ToArray();
