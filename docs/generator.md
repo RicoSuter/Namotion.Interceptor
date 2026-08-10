@@ -403,7 +403,7 @@ internal partial class InternalSubject
 | Abstract properties not supported | Use `virtual` instead |
 | Init-only properties cannot be set after construction | Design constraint of C# |
 | Partial properties cannot have field initializers | Initialize in constructor |
-| A `WithoutInterceptor` method whose stripped name collides with an existing method fails with CS0111 | Rename one of the two. No `NI` diagnostic is reported for this |
+| A `WithoutInterceptor` method whose stripped name collides with an existing method fails with CS0111 | Rename one of the two. No `NI` diagnostic is reported for this, unless the stripped name is one the generated half occupies, which is reported as NI0006 |
 
 ## Diagnostics
 
@@ -428,7 +428,7 @@ The generator reports the following diagnostics, all in the `Namotion.Intercepto
 
 Suppress a rule at the point of use with `#pragma warning disable NI0005`, or project-wide through `<NoWarn>` in the project file. This is a real fix for the four warning rules (NI0005 through NI0008): generation still succeeds, so suppressing only silences advice about a shape the author has chosen to accept. It does not help for the seven rules that stop generation (NI0001 through NI0004, NI0009, NI0010, NI0011): suppressing one of those silences the message, but the class still never becomes an interceptor subject, leaving an inert type with none of the generated members and no further compiler feedback pointing at why. Fix the underlying shape instead.
 
-The two remaining rules sit between those groups. NI0012 is a warning and generation succeeds, but suppressing it accepts a hierarchy in which base-declared properties are not intercepted, so it is worth fixing rather than silencing. NI0013 and NI0014 are errors that do not stop generation: the generated code is still emitted, and suppressing the rule leaves a member in place that captures a generated call or an interface slot, which fails silently at runtime instead of loudly at build time.
+The three remaining rules sit between those groups. NI0012 is a warning and generation succeeds, but suppressing it accepts a hierarchy in which base-declared properties are not intercepted, so it is worth fixing rather than silencing. NI0013 and NI0014 are errors that do not stop generation: the generated code is still emitted, and suppressing the rule leaves a member in place that captures a generated call or an interface slot, which fails silently at runtime instead of loudly at build time.
 
 ## Hierarchy Hazards
 

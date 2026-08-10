@@ -306,7 +306,7 @@ The numbers come from BenchmarkDotNet 0.15.5 on an Apple M4 Max under .NET 9.0.1
 `WarmupCount=5 IterationCount=15 LaunchCount=1`, and every configuration was run twice in separate
 processes so that the run to run spread supplies the noise floor rather than the within process error
 bars. Re-run them with
-`dotnet run --project src/Namotion.Interceptor.Benchmark -c Release -- --filter "*SubjectHierarchyBenchmark*"`.
+`dotnet run --project src/Namotion.Interceptor.Benchmark -c Release -- --filter "*PropertiesDispatchShapeBenchmark*"`.
 
 ## Residual risks accepted with the per hierarchy plumbing
 
@@ -361,12 +361,15 @@ properties, so it adds noise to an already red build rather than hiding anything
 not in that list, because `WillBeGeneratedInThisCompilation` already excludes a non-partial declaration
 and a record declaration.
 
-## Three breaking changes
+## Four breaking changes
 
 Two of them, NI0013 and NI0014, are new errors of this generator, and both reject source that compiled
 before. The third is not a diagnostic of this generator at all: sharing the plumbing widened the
-inherited helper surface, so the compiler now reports hiding where it reported nothing. All three are
-listed here rather than presented as pure safety nets.
+inherited helper surface, so the compiler now reports hiding where it reported nothing. The fourth is
+NI0012 on the upgrade path: a leaf project that takes the new package while a referenced model library
+is still built by the old generator gets a base whose helpers are `private`, which fails the contract.
+That one is a warning, so it breaks the build only where warnings are errors, and rebuilding the base
+assembly clears it. All four are listed here rather than presented as pure safety nets.
 
 **NI0013** fires in derived mode when the subject, or any class between it and its subject ancestor,
 declares a member named `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` or
@@ -609,7 +612,10 @@ subject a phantom property.
 
 ## Known limitations of the diagnostics
 
-None of these can produce silent wrong behaviour. Every one surfaces as a compile error.
+Most of these surface as a compile error. Two do not, and both are worth knowing: a base that
+satisfies every symbol check NI0011 performs can still be behaviourally wrong, described below; and in
+root mode a differently signatured helper captures the generated call with no diagnostic at all, as the
+NI0013 breaking change above records.
 
 **The `new` modifier lookup matches on name and parameter count, not parameter types.** A base exposing
 a same-name, same-arity overload with different parameter types draws a `new` that hides nothing, which
@@ -677,8 +683,21 @@ Nothing in this repository is affected: the deepest subject chain is three and t
 assembly subject inheritance anywhere. The cross assembly shape is what a consumer deriving from a
 subject shipped in a package hits, which is the case NI0011 and NI0012 exist for.
 
-Partly offsetting all of this, derived mode emits 14 to 19 percent less source for a hierarchy, which
-the compiler recovers in every phase after the generator returns.
+This is not a net cost. Derived mode emits 13 to 19 percent less source for a hierarchy, and the
+compiler recovers that in every phase after the generator returns, which dominates. Measured end to
+end over generator plus bind plus emit, against a noise floor of 1.5 percent: a 360 subject mix is
+0.6 percent faster, depth 10 chains are 21 percent faster, depth 50 chains 20 percent faster, and the
+cross assembly shape 16 percent faster. Only a project with no hierarchy at all pays anything, and it
+pays 0.7 percent, inside the floor, because it emits 1.2 percent more source rather than less.
+
+The generator's own share of a compile is around 1.4 percent, which is why a large regression inside it
+does not move the build. The reason to take the memoizations anyway is the incremental case: the
+pipeline re-runs every subject on every edit, so the per subject cost is paid on each keystroke rather
+than once per build. A one file edit in a 300 subject depth 50 project costs 54 percent more than
+before.
+
+The numbers in this section were taken with a throwaway interleaved harness that is not in the
+repository, so they are recorded rather than reproducible. Rebuild it before acting on them.
 
 ## How to verify a change to this generator
 
@@ -695,7 +714,7 @@ the base last and `ToFrozenDictionary` is last wins, so a changed entry does not
 difference.
 
 **Benchmarks need a control group.** Use benchmarks that contain no subjects, currently
-`ServiceOrderResolverBenchmark`, `SourcePathProviderBenchmark` and `SubjectUpdateBenchmark`, as the
+`ServiceOrderResolverBenchmark` alone, as the
 noise floor. A comparison without one looked clean at a median of +1.4% while carrying two rows at
 +28% and +33% that belonged to an unrelated pull request. Three further cautions, all learned the hard
 way: point local `master` at `origin/master` first, or the comparison credits other people's commits to

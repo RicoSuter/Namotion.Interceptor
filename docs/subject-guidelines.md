@@ -352,8 +352,8 @@ Details that are easy to get wrong:
   further up counts. A generic base class is checked with its type arguments substituted.
 - `InvokeMethod`'s last parameter must really be `params`. The generated call site passes arguments in
   expanded form, and the check tests for `params` explicitly, so the same parameter types without it
-  fail the contract. The subject then falls back to emitting its own plumbing, NI0012 is reported and
-  the build succeeds.
+  fail the contract. The subject then falls back to emitting its own plumbing and NI0012 is reported,
+  which `TreatWarningsAsErrors` turns into a build error.
 - `DefaultProperties` may be a static property or a static field, but its type has to be
   `IReadOnlyDictionary<string, SubjectPropertyMetadata>` or something that implements it. A static of
   that name with any other type is reported rather than accepted.
