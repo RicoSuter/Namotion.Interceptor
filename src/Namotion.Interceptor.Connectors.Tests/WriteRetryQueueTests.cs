@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Diagnostics;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -415,6 +416,235 @@ public class WriteRetryQueueTests
         // Assert
         Assert.Empty(drained);
         Assert.True(queue.IsEmpty);
+    }
+
+    [Fact]
+    public async Task WhenFlushKeepsFailingForOneProperty_ThenQueueDoesNotGrowPerTick()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(1000, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(changes, new Exception("Connection failed"))));
+
+        var property = CreateProperty("Value");
+
+        // Act - ten ticks that all fail, each writing the same property again. Mirrors the pump, which
+        // flushes first and enqueues the tick's own changes when that flush failed.
+        for (var revision = 1; revision <= 10; revision++)
+        {
+            await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+            queue.Enqueue(new[] { CreateChange(property, revision, revision) });
+        }
+
+        // Assert - the requeued survivor plus the last tick's own write, not one entry per tick
+        Assert.Equal(2, queue.PendingWriteCount);
+    }
+
+    [Fact]
+    public async Task WhenChangeCarriesNoRevision_ThenItIsNotCollapsedAway()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+
+        SubjectPropertyChange[]? writtenChanges = null;
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writtenChanges = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        var property = CreateProperty("Value");
+
+        // Act
+        queue.Enqueue(new[]
+        {
+            CreateChange(property, 1, revision: 0),
+            CreateChange(property, 2, revision: 7)
+        });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - a change without a revision orders against nothing, so neither may be merged away
+        Assert.NotNull(writtenChanges);
+        Assert.Equal(2, writtenChanges.Length);
+        Assert.Equal(0, writtenChanges[0].Revision);
+        Assert.Equal(1, writtenChanges[0].GetNewValue<int>());
+        Assert.Equal(7, writtenChanges[1].Revision);
+        Assert.Equal(2, writtenChanges[1].GetNewValue<int>());
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsWrittenTwice_ThenSurvivorKeepsNewestValueAtFirstPosition()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+
+        SubjectPropertyChange[]? writtenChanges = null;
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writtenChanges = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        var collapsed = CreateProperty("Collapsed");
+        var other = CreateProperty("Other");
+
+        // Act
+        queue.Enqueue(new[]
+        {
+            CreateChange(collapsed, 1, revision: 1),
+            CreateChange(other, 10, revision: 2),
+            CreateChange(collapsed, 2, revision: 3)
+        });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(writtenChanges);
+        Assert.Equal(2, writtenChanges.Length);
+
+        Assert.Equal(collapsed, writtenChanges[0].Property); // survivor stays at the first occurrence
+        Assert.Equal(0, writtenChanges[0].GetOldValue<int>()); // oldest commit's old value
+        Assert.Equal(2, writtenChanges[0].GetNewValue<int>()); // newest commit's new value
+        Assert.Equal(3, writtenChanges[0].Revision);
+
+        Assert.Equal(other, writtenChanges[1].Property); // other properties keep their relative order
+        Assert.Equal(10, writtenChanges[1].GetNewValue<int>());
+    }
+
+    [Fact]
+    public void WhenFlushKeepsFailing_ThenCollapsingAllocatesNothingPerTick()
+    {
+        // Arrange - the source hands back a pre-built failure, so a tick allocates only what the flush
+        // itself does. Measured against a control that flushes the same way with a single entry and
+        // therefore nothing to collapse: a debug build allocates an async state machine per call either
+        // way, which an absolute bound could not tell apart from a per-collapse collection.
+        const int iterations = 200;
+        var property = CreateProperty("Value");
+        var source = new PrebuiltFailureSource(CreateChange(property, 0, revision: 1));
+
+        // Act
+        var withoutCollapse = MeasureFailingTicks(source, property, iterations, writePerTick: false);
+        var withCollapse = MeasureFailingTicks(source, property, iterations, writePerTick: true);
+
+        // Assert - a dictionary or list per collapse would cost hundreds of bytes per tick
+        Assert.True(withCollapse - withoutCollapse <= 16,
+            $"Collapsing allocated {withCollapse - withoutCollapse} bytes per failing tick " +
+            $"({withCollapse} with it, {withoutCollapse} without).");
+    }
+
+    /// <summary>
+    /// Runs failing flush ticks and returns the bytes allocated per tick. The queue holds the requeued
+    /// survivor alone, or that plus the tick's own write when <paramref name="writePerTick"/> is set,
+    /// which is what gives the collapse two entries for one property to merge.
+    /// </summary>
+    private static long MeasureFailingTicks(ISubjectSource source, PropertyReference property, int iterations, bool writePerTick)
+    {
+        var queue = new WriteRetryQueue(1000, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var tickBuffer = new SubjectPropertyChange[1];
+
+        tickBuffer[0] = CreateChange(property, 1, revision: 1);
+        queue.Enqueue(tickBuffer);
+
+        // Warm up: the first ticks size the pending list, the flush scratch buffer and the collapse index.
+        for (var revision = 2; revision <= 21; revision++)
+        {
+            RunFailingTick(queue, source, property, revision, tickBuffer, writePerTick);
+        }
+
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (var revision = 22; revision < 22 + iterations; revision++)
+        {
+            RunFailingTick(queue, source, property, revision, tickBuffer, writePerTick);
+        }
+
+        var allocatedPerTick = (GC.GetAllocatedBytesForCurrentThread() - allocatedBefore) / iterations;
+        Assert.Equal(writePerTick ? 2 : 1, queue.PendingWriteCount);
+        return allocatedPerTick;
+    }
+
+    private static void RunFailingTick(
+        WriteRetryQueue queue, ISubjectSource source, PropertyReference property, long revision,
+        SubjectPropertyChange[] tickBuffer, bool writePerTick)
+    {
+        var flush = queue.FlushAsync(source, CancellationToken.None);
+
+        // Everything completes synchronously here, which is what keeps the allocations on this thread.
+        Assert.True(flush.IsCompleted);
+        Assert.False(flush.GetAwaiter().GetResult());
+
+        if (writePerTick)
+        {
+            tickBuffer[0] = CreateChange(property, (int)revision, revision);
+            queue.Enqueue(tickBuffer);
+        }
+    }
+
+    private static PropertyReference CreateProperty(string name)
+    {
+        return new PropertyReference(new Mock<IInterceptorSubject>().Object, name);
+    }
+
+    private static SubjectPropertyChange CreateChange(PropertyReference property, int newValue, long revision)
+    {
+        return SubjectPropertyChange.Create(
+            property,
+            ChangeOrigin.Local,
+            DateTimeOffset.UtcNow,
+            null,
+            newValue - 1,
+            newValue,
+            revision);
+    }
+
+    /// <summary>
+    /// Fails every write with a result built once, so a failing tick allocates nothing of its own.
+    /// </summary>
+    private sealed class PrebuiltFailureSource : ISubjectSource, ISupportsConcurrentWrites
+    {
+        private readonly WriteResult _result;
+
+        public PrebuiltFailureSource(SubjectPropertyChange failedChange)
+        {
+            _result = WriteResult.Failure(new[] { failedChange }, new Exception("Connection failed"));
+        }
+
+        public int WriteBatchSize => 0;
+
+        public IInterceptorSubject RootSubject => throw new NotSupportedException();
+
+        public SourceState State => SourceState.Synchronizing;
+
+        public DateTimeOffset? LastSynchronizedAt => null;
+
+        public DateTimeOffset StateChangeTime { get; } = DateTimeOffset.UtcNow;
+
+        public SourceDiagnostics Diagnostics { get; } = new(new SourceMetrics());
+
+        ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
+
+        public int PendingWriteCount => 0;
+
+        public event EventHandler<SourceEvent>? StateChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        {
+            return new ValueTask<WriteResult>(_result);
+        }
+
+        public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 
     private static SubjectPropertyChange CreateChange(int id)
