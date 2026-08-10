@@ -313,6 +313,39 @@ public class ChangeDeliveryFilterTests
         Assert.Throws<ArgumentOutOfRangeException>(() => ChangeDelivery.IsSuperseded(in change, default));
     }
 
+    /// <summary>
+    /// The public seam negates <see cref="ChangeDeliveryFilter.IsCurrent"/>, and every other test of the
+    /// decision goes at the internal predicate, so dropping that negation changes nothing any unit test
+    /// asserts. It is what the OPC UA server write loop asks while holding the node manager lock:
+    /// inverted, it drops exactly what it has to write and writes exactly what it has to drop.
+    /// </summary>
+    [Fact]
+    public void WhenAskedAgainAtTheWriteLock_ThenOnlyTheChangeALaterCommitReplacedIsSuperseded()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+
+        subject.FirstName = "first";
+        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var replacedRevision, out _));
+
+        subject.FirstName = "second";
+        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var settledRevision, out _));
+        Assert.True(settledRevision > replacedRevision, "the second write must commit a later revision");
+
+        var replaced = CreateChange(property, 0, 1, replacedRevision);
+        var settled = CreateChange(property, 1, 2, settledRevision);
+
+        // Act & Assert: both directions, so neither the negation nor the comparison can be dropped.
+        Assert.True(ChangeDelivery.IsSuperseded(in replaced, ChangeDeliveryRule.SourceValuesMayBeStale));
+        Assert.False(ChangeDelivery.IsSuperseded(in settled, ChangeDeliveryRule.SourceValuesMayBeStale));
+    }
+
     private static ChangeQueueProcessor CreateProcessor(
         IInterceptorSubjectContext context, Action<SubjectPropertyChange> onWritten)
     {

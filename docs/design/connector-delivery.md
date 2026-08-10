@@ -50,7 +50,8 @@ that predates the client's write and reaches the write loop late is not supersed
 after the client's value, leaving the clients on our older value while the subject holds theirs.
 
 So which commits may supersede is a property of the sink, not of the change: `ChangeDeliveryRule`,
-chosen at the three server construction sites. The OPC UA server repeats the decision inside the node
+chosen at four construction sites: the three servers, and once in `SubjectSourceBase` for every client
+source. The OPC UA server repeats the decision inside the node
 manager lock, because a client write takes that same lock and can land between the batch being accepted
 and written.
 
@@ -67,9 +68,9 @@ that differently, and the difference is load-bearing:
   client's value and the straggler land in different flushes.
 
 Unifying those conventions on `SetValueFromSource(this, ...)` would look like a tidy-up and would make
-`SourceValuesAreSettled` unsound for MQTT immediately, because the broker never sees a client's message itself:
-`ProcessPublish` is set to false so the server can relay it in order. Same for WebSocket, which has no
-store at all.
+`SourceValuesAreSettled` unsound for MQTT immediately, because the broker does not distribute a client's
+message itself: it handles the message and sets `ProcessPublish` to false, so the value reaches the other
+clients only when the server relays it in order. Same for WebSocket, which has no store at all.
 
 The OPC UA case was invisible until #425. Before it, the server applied its own node writes back to the
 subject, which converged the two stores by accident while corrupting them in other ways.

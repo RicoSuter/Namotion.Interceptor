@@ -72,6 +72,9 @@ public class ChangeQueueProcessor : IDisposable
     /// connector behavior). When set, enqueuing past the bound drops the oldest unprocessed change and
     /// increments <see cref="DropCount"/>, so the newest change is retained.</param>
     /// <param name="logger">The logger.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
+    /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
+    /// the first flush, where it would end delivery for this processor's lifetime.</exception>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
@@ -337,20 +340,28 @@ public class ChangeQueueProcessor : IDisposable
         }
         finally
         {
-            // Clear buffers to allow GC of SubjectPropertyChange objects
-            _flushChanges.Clear();
-
-            if (Volatile.Read(ref _disposed) == 1)
+            try
             {
-                // Disposed while flushing - return buffer to pool now
-                _changeMerger.Dispose();
-            }
-            else
-            {
-                _changeMerger.Reset();
-            }
+                // Clear buffers to allow GC of SubjectPropertyChange objects
+                _flushChanges.Clear();
 
-            Volatile.Write(ref _flushGate, 0);
+                if (Volatile.Read(ref _disposed) == 1)
+                {
+                    // Disposed while flushing - return buffer to pool now
+                    _changeMerger.Dispose();
+                }
+                else
+                {
+                    _changeMerger.Reset();
+                }
+            }
+            finally
+            {
+                // Unconditionally, and after the cleanup rather than with it: a gate left at 1 makes every
+                // later flush return at the try-enter while the dequeue loop keeps filling the queue, so
+                // cleanup throwing would stop delivery permanently and grow the queue without bound.
+                Volatile.Write(ref _flushGate, 0);
+            }
         }
     }
 

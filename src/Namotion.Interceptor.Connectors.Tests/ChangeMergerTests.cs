@@ -411,12 +411,40 @@ public class ChangeMergerTests
         merger.Reset();
         var settledCapacity = GetPropertyIndexCapacity(merger);
 
-        // Act
+        // Act & Assert: the capacity has to hold across each narrow batch, not merely end up back where it
+        // started. Asserting only the final capacity passes even when the trim fires on every narrow batch,
+        // because the wide batch that follows regrows the index to the same prime.
         for (var round = 0; round < 5; round++)
         {
             merger.Merge(CreateWideBatch(changeCount: 2, distinctProperties: 2));
             merger.Reset();
+
+            Assert.Equal(settledCapacity, GetPropertyIndexCapacity(merger));
+
             merger.Merge(CreateWideBatch(changeCount: 4096, distinctProperties: 4096));
+            merger.Reset();
+        }
+
+        Assert.Equal(settledCapacity, GetPropertyIndexCapacity(merger));
+    }
+
+    [Fact]
+    public void WhenNarrowBatchesStopOneShortOfTheThreshold_ThenTheIndexCapacityIsKept()
+    {
+        // Arrange: one fewer consecutive narrow batch than the trim requires. Together with
+        // WhenAWideBatchIsFollowedByNarrowOnes, which trims at four, this brackets the threshold exactly:
+        // lower it and this test trims early, raise it and that one never trims.
+        using var merger = new ChangeMerger();
+
+        merger.Merge(CreateWideBatch(changeCount: 4096, distinctProperties: 4096));
+        merger.Reset();
+        var settledCapacity = GetPropertyIndexCapacity(merger);
+        Assert.True(settledCapacity > PropertyIndexMaximum);
+
+        // Act
+        for (var round = 0; round < 3; round++)
+        {
+            merger.Merge(CreateWideBatch(changeCount: 2, distinctProperties: 2));
             merger.Reset();
         }
 

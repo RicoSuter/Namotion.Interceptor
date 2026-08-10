@@ -110,7 +110,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// <param name="includeSourceCommits">Whether commits applied from a source count. Only a sink that
     /// can prove such a value already reached its destination may say true; for anything talking over a
     /// wire the value was produced before the source saw our write, so it cannot rank against our
-    /// commits. See <see cref="PropertyWriteState.LastSourceCommitRevision"/> and issue #373.</param>
+    /// commits. Excluding them is load-bearing rather than an optimization; see issue #373.</param>
     /// <param name="commitRevision">The revision of the last qualifying commit, or 0 if there is none.</param>
     /// <param name="published">Whether a sink has published this property's value.</param>
     /// <remarks>
@@ -142,8 +142,9 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Records that a sink has published this property's value. Sticky; see
-    /// <see cref="PropertyWriteState.Published"/>.
+    /// Records that a sink has published this property's value. One-way: the flag is never cleared, so
+    /// calling this again on the same property has no effect. Read it back through the <c>published</c>
+    /// output of <see cref="TryGetWriteState(bool, out long, out bool)"/>.
     /// </summary>
     public void MarkPublished()
     {
@@ -153,9 +154,9 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// <summary>
     /// Records what the terminal just committed: the write timestamp as raw UTC ticks, avoiding a
     /// DateTimeOffset conversion on the hot path, and the commit revision. The revision goes to whichever
-    /// of the two slots the origin selects, never both, so this stays at one interlocked store per commit;
-    /// see <see cref="PropertyWriteState.LastSourceCommitRevision"/>. The timestamp is recorded either
-    /// way, preserving what <see cref="TryGetWriteTimestamp"/> reports.
+    /// of the two slots the origin selects, never both, so a commit costs one revision store on top of the
+    /// timestamp store rather than two; see <see cref="PropertyWriteState.LastSourceCommitRevision"/>. The
+    /// timestamp is recorded either way, preserving what <see cref="TryGetWriteTimestamp"/> reports.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void SetWriteState(long timestamp, long revision, bool isFromSource)

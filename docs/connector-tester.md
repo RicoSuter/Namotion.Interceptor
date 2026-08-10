@@ -283,7 +283,7 @@ The snapshot comparison **reliably detects**:
 - Data loss that isn't recovered within the convergence window
 
 The snapshot comparison **does not detect** (by design):
-- Transient state changes lost to merging (ChangeQueueProcessor collapses each flush to one change per property within its buffer window, and drops a commit that a delivered one has already superseded)
+- Transient state changes lost to merging (ChangeQueueProcessor collapses each flush to one change per property within its buffer window, and drops a commit that a later commit has already superseded)
 - Timestamp accuracy for same-value updates (equality interceptor suppresses writes when value is unchanged, even if timestamp differs)
 - Temporal ordering of changes (only final converged state is checked, not causality)
 - Multi-property atomicity (no transaction support; A and B may converge independently)

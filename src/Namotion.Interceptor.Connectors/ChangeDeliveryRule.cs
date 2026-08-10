@@ -12,7 +12,8 @@ public enum ChangeDeliveryRule
 {
     /// <summary>
     /// Not a rule. Occupies zero so that <c>default</c> and a literal <c>0</c>, both of which compile in
-    /// a required parameter, cannot quietly select one. Rejected at construction.
+    /// a required parameter, cannot quietly select one. Rejected wherever a rule is consumed, both when a
+    /// processor is constructed and at <see cref="ChangeDelivery.IsSuperseded"/>.
     /// </summary>
     Unspecified = 0,
 
@@ -39,6 +40,11 @@ public enum ChangeDeliveryRule
     /// the node before the change reaches the subject, the MQTT and WebSocket servers because they apply
     /// inbound writes under a source that is not their own, so nothing is skipped as an echo and the
     /// superseding value is relayed onward. Changing either convention invalidates this for that server.
+    /// What the condition really asks is that the destination already holds the value the subject will
+    /// settle on, so where a server converts on the way in, as the OPC UA server does, it also needs that
+    /// conversion to round-trip. A converter that clamps, scales or narrows leaves the node holding
+    /// something the subject will not settle on, and the older commit that would have corrected it is
+    /// dropped under this rule.
     /// Choosing <see cref="SourceValuesMayBeStale"/> here delivers a commit the clients have already moved
     /// past, leaving them behind the model with nothing to correct them.
     /// </remarks>

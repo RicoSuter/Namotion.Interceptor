@@ -24,6 +24,10 @@ public static class ChangeDelivery
     /// <param name="change">The change about to be written.</param>
     /// <param name="rule">The same rule the processor was constructed with. Answering under a different
     /// rule than the processor uses would apply two different definitions of stale to one stream.</param>
+    /// <returns>True when a later commit already carries the settled value in this change's place, so the
+    /// change must be dropped rather than written.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The rule is <see cref="ChangeDeliveryRule.Unspecified"/>
+    /// or not a defined value. The decision has no safe default, so it throws rather than picking one.</exception>
     public static bool IsSuperseded(in SubjectPropertyChange change, ChangeDeliveryRule rule)
     {
         return !ChangeDeliveryFilter.IsCurrent(in change, rule);

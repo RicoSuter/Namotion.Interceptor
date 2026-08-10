@@ -409,6 +409,49 @@ public class SubjectSourceBaseTests
         Assert.DoesNotContain(writtenChanges, c => c.GetNewValue<string?>() == "Committed");
     }
 
+    /// <summary>
+    /// The same collapse with the arrival order reversed. Merging keeps the newer change's revision, so
+    /// here the survivor would inherit a real one from the committed change even though capture order,
+    /// not commit order, decided it. Keeping that revision lets the reconcile rank the survivor against
+    /// the property marker and drop it. Only this order reaches the clearing; in the other one the merge
+    /// already yields no revision, so the call has nothing left to do and cannot fail.
+    /// </summary>
+    [Fact]
+    public async Task WhenAnUnorderedCaptureArrivesFirst_ThenTheSurvivorIsNotRankedAgainstTheMarker()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "A" };
+
+        var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => new PropertyReference(subject, nameof(Person.FirstName))
+                .SetValueFromSource(s, null, null, "A"));
+
+        // Reverse of the case above: the change that orders against nothing is captured first.
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "A", "Unordered", revision: 0);
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "A", "Committed", revision: 1);
+
+        // A later local commit puts the property marker above the parked revision, so a survivor that kept
+        // it is superseded and dropped, and one that carries none survives.
+        subject.FirstName = "Later";
+
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var marker, out _));
+        Assert.True(marker > 1,
+            $"the later local write must commit past the parked revision, but the marker was {marker}");
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert: the later capture wins here too, and survives the reconcile's supersession check.
+        Assert.Contains(writtenChanges, c => c.GetNewValue<string?>() == "Committed");
+        Assert.DoesNotContain(writtenChanges, c => c.GetNewValue<string?>() == "Unordered");
+    }
+
     [Fact]
     public async Task WhenAQueuedWriteIsOverwrittenByInitialState_ThenTheLocalWriteStillWins()
     {
