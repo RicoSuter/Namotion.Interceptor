@@ -213,6 +213,14 @@ internal class SubscriptionManager : IAsyncDisposable
             for (var i = 0; i < monitoredItemsCount; i++)
             {
                 var item = notification.MonitoredItems[i];
+
+                // Good and Uncertain are both usable: Uncertain means the server doubts the quality, not that
+                // there is no reading. Bad means the value is not usable and may not even be present.
+                if (!StatusCode.IsNotBad(item.Value.StatusCode))
+                {
+                    continue;
+                }
+
                 if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
                 {
                     changes.Add(new PropertyUpdate
