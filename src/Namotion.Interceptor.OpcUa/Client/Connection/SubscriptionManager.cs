@@ -221,15 +221,30 @@ internal class SubscriptionManager : IAsyncDisposable
                     continue;
                 }
 
-                if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+                if (!_monitoredItems.TryGetValue(item.ClientHandle, out var property))
                 {
-                    changes.Add(new PropertyUpdate
-                    {
-                        Property = property,
-                        Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
-                        Timestamp = item.Value.SourceTimestamp
-                    });
+                    continue;
                 }
+
+                object? converted;
+                try
+                {
+                    converted = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property);
+                }
+                catch (Exception e)
+                {
+                    // Contained per item: one property whose conversion fails must not discard the other
+                    // values delivered in the same notification.
+                    _logger.LogError(e, "Failed to convert an inbound value for {PropertyName}.", property.Name);
+                    continue;
+                }
+
+                changes.Add(new PropertyUpdate
+                {
+                    Property = property,
+                    Value = converted,
+                    Timestamp = item.Value.SourceTimestamp
+                });
             }
         }
         catch (Exception error)

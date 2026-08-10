@@ -33,4 +33,23 @@ public class OpcUaInboundStatusTests
         // Assert
         Assert.Equal("initial", fixture.ClientRoot.Child!.Value);
     }
+
+    [Fact]
+    public async Task WhenOneValuesConversionThrows_ThenTheRestOfTheNotificationIsStillApplied()
+    {
+        // Arrange
+        await using var fixture = await InboundStatusFixture.StartAsync(
+            _output, valueConverter: new ThrowOnSentinelConverter("poison"));
+
+        // Act: both properties travel in one notification, so the failing conversion of the first can
+        // only be contained if it does not abort the processing of the notification as a whole.
+        fixture.PublishPair("poison", StatusCodes.Good, "survivor", StatusCodes.Good);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => fixture.ClientRoot.Child?.Other == "survivor",
+            message: "the sibling in the same notification should still be applied");
+
+        Assert.Equal("initial", fixture.ClientRoot.Child!.Value);
+    }
 }
