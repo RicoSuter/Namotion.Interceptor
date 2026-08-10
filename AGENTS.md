@@ -34,7 +34,7 @@ Only run integration tests when changing connector implementations (OPC UA, MQTT
 - `pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*" -LaunchCount 3` - Compare against a base branch (`-Filter` takes several patterns)
 - `pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*" -LocalOnly` - Absolute numbers for the current tree
 
-Work out which benchmarks can reach the change and filter to those. A whole-suite run takes hours, so propose it and get agreement first rather than launching one. Do not report a timing delta as a regression without reading that run's noise off a row the change cannot reach: the interception paths are short enough that noise is the same size as the deltas people care about, and BenchmarkDotNet's Error column does not bound it, because the two arms are separate runs it never compares. See [Benchmarking](docs/benchmarking.md). See [Benchmarking](docs/benchmarking.md).
+Filter to the benchmarks the change can reach. A whole-suite run takes hours, so propose it and get agreement first rather than launching one. Read [Benchmarking](docs/benchmarking.md) before interpreting a delta; noise here is the same size as the deltas people care about.
 
 ## Architecture
 

@@ -5,7 +5,7 @@ The benchmark suite lives in `src/Namotion.Interceptor.Benchmark` and runs on Be
 ## The usual process
 
 1. Work out which benchmarks can reach the code you changed. `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release -- --filter "*" --list flat` prints every row.
-2. Run those in one filtered comparison, and check the filter also catches at least one row the change cannot reach, to read the noise off. Often it already does. If it does not, add `*ServiceOrderResolver*`.
+2. Run those in one filtered comparison, and check the filter also catches at least one row the change cannot reach, to read the noise off. Often it already does. If it does not, add a single stable row such as `*ServiceOrderResolverBenchmark.LinearChain*`.
 3. Only reach for the whole suite when the change is broad enough that step 1 cannot bound it. That costs hours, so propose it and get agreement before starting it rather than launching it and reporting back much later.
 
 ```
@@ -30,7 +30,7 @@ Allocation columns are unaffected by any of this. They are deterministic counts,
 
 **So read the noise off a row the change cannot reach.** Most filtered runs already contain one: `RegistryBenchmark.GenerateSubjectId`, for instance, is a static method that never touches a subject. Whatever such rows do in that run is what the harness does to an unchanged code path, and that is the bar a real delta has to clear. Read it from your own run, since it moves between runs and machines, and note that shorter benchmarks are more sensitive to code placement, so a slow control understates the floor for fast rows.
 
-`ServiceOrderResolverBenchmark` is the fallback when the filter has nothing unreachable in it. It is the only class in the suite that never touches an `[InterceptorSubject]` at all. Every other class constructs subjects, including `SourcePathProviderBenchmark` and `SubjectUpdateBenchmark`, which are easy to mistake for controls.
+`ServiceOrderResolverBenchmark` is the fallback when the filter has nothing unreachable in it. It is the only class in the suite that never touches an `[InterceptorSubject]` at all. Every other class constructs subjects, including `SourcePathProviderBenchmark` and `SubjectUpdateBenchmark`, which are easy to mistake for controls. One of its four rows is enough; take the whole class only when you want a spread rather than a single number.
 
 **The Error column is not a significance test.** It is a confidence interval within one run, describing how precisely that run measured its own number, not whether the comparison would land in the same place tomorrow. A control row can move many times its own error bar with its code provably unchanged. `-LaunchCount N` does not close this: it averages over process-level variation, but each arm keeps its own binary, so a difference caused by code placement reproduces on every launch instead of averaging out.
 
