@@ -244,6 +244,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 return;
             }
 
+            // Two conditions, two different windows, so neither is redundant. DetachSubject clears
+            // liveness first and releases ownership only after it has appended its stops, and this
+            // body does not hold the lifecycle lock, so it can read between the two: there the
+            // ownership read still passes and only the liveness read refuses. A start appended after
+            // the detach finished is the mirror case, where liveness is long gone and ownership is
+            // what refuses. No test separates them, because forcing a body into the window between
+            // those two statements means holding the lifecycle lock open, which blocks every graph
+            // write the test needs. Deleting either half alone therefore keeps the suite green.
             if (!_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
             {
                 return;

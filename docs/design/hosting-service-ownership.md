@@ -350,11 +350,11 @@ inside it leaves it green.
 
 ### The read inside the start body
 
-The body re-reads liveness **and** ownership before creating anything, covering a detach that lands
-after the append and before the body runs. The pair is pinned by
-`HostedServiceHandlerRaceTests.WhenAQueuedStartRunsAfterTheSubjectDetached_ThenNothingIsStarted`, which
-fails when both reads are deleted; neither read alone is discriminated by the suite, because a graph
-driven detach clears liveness and releases ownership together.
+The body re-reads liveness **and** ownership before creating anything, covering a detach that lands after the append and before the body runs. The pair is pinned by `HostedServiceHandlerRaceTests.WhenAQueuedStartRunsAfterTheSubjectDetached_ThenNothingIsStarted`, which fails when both reads are deleted.
+
+Neither read alone is discriminated by the suite, and that is a coverage limit rather than redundancy. The two cover different windows. `DetachSubject` clears liveness first and releases ownership only after it has appended its stops, and this body does not hold the lifecycle lock, so it can read between those two statements: there the ownership read still passes and only the liveness read refuses. A start appended after the detach has finished is the mirror case, where liveness is long gone and ownership is what refuses. Forcing a body into the window between the two statements would mean holding the lifecycle lock open, which blocks every graph write a test needs to make progress, so no seam can drive it.
+
+The consequence if the liveness read were removed is bounded rather than a leak: the same detach has already appended a stop for that target, chains are first in first out, so the instance the start creates is stopped and disposed by that stop. The cost is a needless create and teardown against a subject that has left the graph, which for a connector means a session opened and closed. Removing the window instead, by releasing ownership before appending the stops, reopens a defect that was measured, so the guard stays and the limit is recorded here.
 
 The subject level flag is what makes an attach onto an already detached subject fail closed:
 `HostedServiceHandlerRaceTests.WhenAnAttachmentIsAddedAfterTheSubjectDetached_ThenNothingIsStarted`
