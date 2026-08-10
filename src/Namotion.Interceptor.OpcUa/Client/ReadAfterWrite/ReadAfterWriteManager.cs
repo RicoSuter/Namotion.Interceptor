@@ -339,7 +339,10 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 for (var i = 0; i < response.Results.Count && i < dueCount; i++)
                 {
                     var result = response.Results[i];
-                    if (!StatusCode.IsGood(result.StatusCode))
+
+                    // Good and Uncertain are both usable: Uncertain means the server doubts the quality, not that
+                    // there is no reading. Bad means the value is not usable and may not even be present.
+                    if (!StatusCode.IsNotBad(result.StatusCode))
                     {
                         failedCount++;
                         continue;
