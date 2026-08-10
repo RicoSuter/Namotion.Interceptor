@@ -39,6 +39,15 @@ internal sealed class HostedServiceTarget
     /// </summary>
     internal Func<Task>? TransitionGate { get; set; }
 
+    /// <summary>
+    /// Test seam, invoked inside the chain lock in <see cref="TryTakeOwnershipAndAppendAsync"/> after
+    /// the ownership take and before the append. Null in production, where the two statements it sits
+    /// between are adjacent. Synchronous rather than awaitable because the caller is holding the chain
+    /// lock. It holds the critical section open at the point a split would put its gap, which is the
+    /// only way an appender racing that gap becomes reachable from a test.
+    /// </summary>
+    internal Action? ChainLockGate { get; set; }
+
     public IHostedService? Current => Volatile.Read(ref _current);
 
     public Exception? Fault => Volatile.Read(ref _fault);
@@ -153,6 +162,8 @@ internal sealed class HostedServiceTarget
             {
                 return null;
             }
+
+            ChainLockGate?.Invoke();
 
             return AppendCore(body, cancellationToken);
         }

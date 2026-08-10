@@ -40,6 +40,15 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </summary>
     internal Func<Task>? DrainGate { get; set; }
 
+    /// <summary>
+    /// Test seam, invoked in <see cref="TryTakeOwnershipAndStart"/> after the ownership take and the
+    /// running set entry have landed and before the gate is re-read. Null in production, where the
+    /// statements it sits between are adjacent. It holds open the window in which a handler that
+    /// passed the gate read on entry owns a target it may never start, which is the window that read
+    /// exists to keep empty and which nothing else can observe.
+    /// </summary>
+    internal Action? OwnershipTakenGate { get; set; }
+
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         // Invoked from inside LifecycleInterceptor's lock (_attachedSubjects). Everything here only
@@ -201,6 +210,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // failed to take would make the drain stop and dispose an instance another handler created
         // and is running.
         _running[target] = subject;
+
+        OwnershipTakenGate?.Invoke();
 
         if (ownershipTaken && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
         {

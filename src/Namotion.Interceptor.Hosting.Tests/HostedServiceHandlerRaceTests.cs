@@ -13,6 +13,14 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// </summary>
 public class HostedServiceHandlerRaceTests
 {
+    /// <summary>
+    /// The chain lock round is decided by the lock rather than by timing, so one round already
+    /// discriminates. Repeated a few times because the thread state read the round uses to release its
+    /// seam can in principle observe a block that is not the chain lock, and an early release only
+    /// ever hides the defect, never invents one.
+    /// </summary>
+    private const int ChainLockRaceRounds = 4;
+
     [Fact]
     public async Task WhenAReAttachLandsWhileTheSubjectStopIsHeld_ThenAFreshInstanceRunsAndTheOldOneIsDisposed()
     {
@@ -964,6 +972,332 @@ public class HostedServiceHandlerRaceTests
         {
             await host.StopAsync();
         }
+    }
+
+    [Fact]
+    public async Task WhenASubjectLeavesTheGraphBeforeItsAttachTakesTheTarget_ThenTheNextHandlerStillClaimsIt()
+    {
+        // Arrange - the liveness read inside the chain lock, as distinct from the start body's
+        // re-read. The body's re-read makes the outcome right, but only after the take has installed
+        // this handler as the owner of a target belonging to a subject that has left the graph, and
+        // the detach released ownership before that take happened, so nothing releases it again. The
+        // next handler over the same subject then loses the compare and exchange for good. Taking a
+        // startup hold is the one piece of user code the attach path runs between the gate read and
+        // the chain lock, so the deferrer drives the detach rather than a delay.
+        var firstBuilder = Host.CreateApplicationBuilder();
+
+        var firstContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(firstBuilder.Services);
+
+        var deferrer = new CallbackStartupDeferrer();
+        firstContext.AddService<IStartupCompletionDeferrer>(deferrer);
+
+        var firstHost = firstBuilder.Build();
+        await firstHost.StartAsync();
+
+        var secondBuilder = Host.CreateApplicationBuilder();
+
+        var secondContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(secondBuilder.Services);
+
+        var secondHost = secondBuilder.Build();
+        await secondHost.StartAsync();
+
+        try
+        {
+            var firstParent = new Parent(firstContext);
+            var child = new Person();
+            firstParent.Child = child;
+
+            var detachOnDefer = false;
+            deferrer.OnDefer = () =>
+            {
+                if (detachOnDefer)
+                {
+                    detachOnDefer = false;
+                    firstParent.Child = null;
+                }
+            };
+
+            var created = 0;
+
+            // Act
+            detachOnDefer = true;
+            var attachment = child.AttachHostedService(() =>
+            {
+                Interlocked.Increment(ref created);
+                return new TrackedBackgroundService();
+            });
+
+            // Assert
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            Assert.Equal(1, deferrer.Taken);
+            Assert.Null(target.Owner);
+
+            // The consequence, and the reason an unowned target matters: the handler of the next graph
+            // the subject joins has to win the compare and exchange, or the subject sits in a live
+            // graph with nothing running and no error anywhere.
+            var secondParent = new Parent(secondContext);
+            secondParent.Child = child;
+
+            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(1, Volatile.Read(ref created));
+            Assert.NotNull(attachment.Current);
+        }
+        finally
+        {
+            await secondHost.StopAsync();
+            await firstHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnAttachLandsItsTakeAfterTheDrainBegan_ThenTheTakeIsUndone()
+    {
+        // Arrange - the gate re-read after the ownership take and the running set entry, as distinct
+        // from the read on entry. An attach that read Running just before BeginDraining still lands
+        // both writes after it, and the read on entry cannot see that. Nothing else undoes the take:
+        // the drain's release loop covers only the targets its own snapshot held, and that snapshot is
+        // taken after this attach has been swept past. Two seams, so the interleaving is driven rather
+        // than timed: the deferrer runs between the read on entry and the take, and the drain seam is
+        // what proves the drain has begun by the time it returns.
+        var (host, context, deferrer) = await StartHostWithDeferrerAsync();
+
+        var parent = new Parent(context);
+        var child = new Person();
+        parent.Child = child;
+
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+        var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.DrainGate = () =>
+        {
+            drainEntered.TrySetResult();
+            return releaseDrain.Task;
+        };
+
+        Task? stopping = null;
+        deferrer.OnDefer = () =>
+        {
+            if (stopping is not null)
+            {
+                return;
+            }
+
+            stopping = host.StopAsync();
+            drainEntered.Task.Wait(TimeSpan.FromSeconds(30));
+        };
+
+        var created = 0;
+
+        // Act
+        var attachment = child.AttachHostedService(() =>
+        {
+            Interlocked.Increment(ref created);
+            return new TrackedBackgroundService();
+        });
+
+        // Assert - read while the drain is still held. Once it is let go the drain releases every
+        // target its snapshot held, so a take that survived here would be released a moment later for
+        // an unrelated reason and the window would be unobservable.
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        Assert.True(drainEntered.Task.IsCompleted, "The attach did not land its writes inside the drain window.");
+        Assert.True(handler.IsLive(child), "The drain cleared liveness early, so the take was refused for another reason.");
+        Assert.Null(target.Owner);
+
+        releaseDrain.SetResult();
+        await stopping!;
+
+        await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+        Assert.Equal(0, Volatile.Read(ref created));
+        Assert.Null(attachment.Current);
+    }
+
+    [Fact]
+    public async Task WhenADrainingHandlerSeesAnAttach_ThenItInstallsNoOwnerForALiveHandlerToLoseTo()
+    {
+        // Arrange - the gate read on entry, as distinct from the re-read after the writes. The re-read
+        // undoes a take, but only once it has been installed, and a live handler that reaches the same
+        // target inside that window loses the compare and exchange for good, because nothing retries
+        // it. Keeping that window empty is what the read on entry is for. The seam holds the window
+        // open, and it is reached only when that read is gone, so an intact build simply runs the
+        // attach to completion and the seam never fires.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var parent = new Parent(context);
+        var child = new Person();
+        parent.Child = child;
+
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+        var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.DrainGate = () =>
+        {
+            drainEntered.TrySetResult();
+            return releaseDrain.Task;
+        };
+
+        var ownershipInstalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var liveHandlerTried = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.OwnershipTakenGate = () =>
+        {
+            ownershipInstalled.TrySetResult();
+            liveHandlerTried.Task.Wait(TimeSpan.FromSeconds(30));
+        };
+
+        var stopping = host.StopAsync();
+        await drainEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(handler.IsLive(child), "The drain cleared liveness early, so the window under test is unreachable.");
+
+        // Act - the attach runs on its own task, because it parks on the seam when the read on entry
+        // is gone and returns without touching it when it is there.
+        var attaching = Task.Run(() => child.AttachHostedService(() => new TrackedBackgroundService()));
+        await Task.WhenAny(ownershipInstalled.Task, attaching);
+
+        // A stand-in for the live handler that takes over from a draining one. It only has to win the
+        // compare and exchange, which is the one thing a target owned by a draining handler denies it.
+        var liveHandler = new HostedServiceHandler(() => null);
+        var target = ((IHostedServiceAttachmentTarget)child.GetHostedServiceAttachments().Single()).Target;
+        var claimed = target.TryTakeOwnership(liveHandler, out var ownershipTaken);
+        target.ReleaseOwnership(liveHandler);
+
+        liveHandlerTried.SetResult();
+        await attaching;
+
+        releaseDrain.SetResult();
+        await stopping;
+
+        // Assert
+        Assert.True(claimed, "The draining handler owned the target, so a live handler loses the compare and exchange for good.");
+        Assert.True(ownershipTaken);
+    }
+
+    [Fact]
+    public async Task WhenADetachRacesTheAppendInsideTheChainLock_ThenTheStartIsOrderedAheadOfTheStop()
+    {
+        // Arrange - the liveness read, the ownership take and the append are one critical section, and
+        // the seam holds it open where a split would put its gap. A detach's stop that lands in that
+        // gap runs first, finds nothing to stop, and leaves the start behind it to create an instance
+        // that is reachable from nothing: the detach has already removed the attachment, so no later
+        // context detach enumerates it and it is never stopped and never disposed. The two racing
+        // appenders are the two the chain lock exists for, a lifecycle driven attach holding the
+        // lifecycle lock and a user driven detach on another thread.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var parent = new Parent(context);
+            var leakedRounds = 0;
+
+            // Act
+            for (var round = 0; round < ChainLockRaceRounds; round++)
+            {
+                if (await RunChainLockRaceRoundAsync(parent))
+                {
+                    leakedRounds++;
+                }
+            }
+
+            // Assert
+            Assert.Equal(0, leakedRounds);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    /// <summary>
+    /// Attaches a service to a fresh subject, then lets the subject enter the graph while a detach of
+    /// that same attachment runs the gap a split would open. Returns true when the stop was appended
+    /// ahead of the start, which leaves the start creating an instance no stop can reach.
+    /// </summary>
+    /// <remarks>
+    /// The seam releases when the detaching thread has either blocked or finished, which is what makes
+    /// both builds decide the same way every time rather than by whichever thread wakes first. Under an
+    /// intact critical section that thread blocks on the chain lock, so the start is appended first.
+    /// Under a split one it never blocks, so it finishes its whole detach inside the gap and the stop
+    /// is appended first.
+    /// </remarks>
+    private static async Task<bool> RunChainLockRaceRoundAsync(Parent parent)
+    {
+        var child = new Person();
+        var created = 0;
+
+        // Attached before the subject enters the graph, so nothing resolves a handler and the target
+        // exists, unowned, with its seam settable before the take that is under test.
+        var attachment = child.AttachHostedService(() =>
+        {
+            Interlocked.Increment(ref created);
+            return new TrackedBackgroundService();
+        });
+
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        var takeReached = new ManualResetEventSlim(false);
+        var detachRunning = new ManualResetEventSlim(false);
+        var detachFinished = 0;
+
+        // A dedicated thread rather than a pool one: the seam reads this thread's state to decide when
+        // to release, and a pool thread carries work the round knows nothing about.
+        var detaching = new Thread(() =>
+        {
+            takeReached.Wait(TimeSpan.FromSeconds(30));
+            detachRunning.Set();
+            child.DetachHostedService(attachment);
+            Volatile.Write(ref detachFinished, 1);
+        });
+
+        target.ChainLockGate = () =>
+        {
+            takeReached.Set();
+            Assert.True(detachRunning.Wait(TimeSpan.FromSeconds(30)), "The detaching thread never started.");
+
+            var settled = SpinWait.SpinUntil(
+                () => Volatile.Read(ref detachFinished) == 1
+                      || (detaching.ThreadState & ThreadState.WaitSleepJoin) != 0,
+                TimeSpan.FromSeconds(30));
+
+            Assert.True(settled, "The detaching thread neither blocked on the chain lock nor finished.");
+        };
+
+        detaching.Start();
+
+        parent.Child = child;
+        detaching.Join();
+
+        // An empty transition drains everything both paths appended, so the outcome is read after the
+        // chain has run rather than after a delay.
+        await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+        var leaked = attachment.Current is not null;
+        Assert.Equal(1, Volatile.Read(ref created));
+
+        parent.Child = null;
+        takeReached.Dispose();
+        detachRunning.Dispose();
+        return leaked;
     }
 
     private static async Task<(IHost Host, IInterceptorSubjectContext Context, CallbackStartupDeferrer Deferrer)>
